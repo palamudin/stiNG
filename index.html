@@ -25,7 +25,7 @@
   html, body { height: 100%; }
   body { background: var(--ink); color: var(--fg); font-family: var(--mono); font-size: 13px; overflow: hidden; }
   #view { position: fixed; inset: 0; display: block; width: 100%; height: 100%; cursor: crosshair; }
-  .hud { position: fixed; pointer-events: none; user-select: none; }
+  .hud { position: fixed; pointer-events: none; user-select: none; z-index: 2; }
   .label { font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
   .num { font-variant-numeric: tabular-nums; }
   .shadow { text-shadow: 0 1px 6px rgba(0,0,0,.65), 0 0 2px rgba(0,0,0,.5); }
@@ -67,6 +67,8 @@
   #zone { left: 50%; top: calc(50% + 18px); transform: translateX(-50%); text-align: center; font-family: var(--display); font-weight: 800; font-size: 20px; letter-spacing: 0.08em; text-transform: uppercase; }
   #zone small { display: block; font-family: var(--mono); font-weight: 500; font-size: 11px; letter-spacing: .04em; text-transform: none; color: var(--fg); opacity: .85; }
 
+  .lbox { position: fixed; left: 0; right: 0; height: 0; background: #000; pointer-events: none; z-index: 1; }
+  #barTop { top: 0; } #barBot { bottom: 0; }
   #toast { top: 24%; left: 50%; transform: translateX(-50%); text-align: center; font-family: var(--display); font-weight: 800; font-size: 22px; letter-spacing: .05em; text-transform: uppercase; opacity: 0; transition: opacity .3s; max-width: 90vw; }
 
   #map { bottom: calc(16px + env(safe-area-inset-bottom, 0px)); left: calc(16px + env(safe-area-inset-left, 0px)); width: 168px; height: 168px; background: var(--panel); border: 1px solid var(--line); }
@@ -147,6 +149,7 @@
 
 <div class="hud" id="reticle"></div>
 <div class="hud shadow" id="zone"></div>
+<div class="lbox" id="barTop"></div><div class="lbox" id="barBot"></div>
 <div class="hud shadow" id="toast"></div>
 
 <div class="hud shadow" id="vitals">

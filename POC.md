@@ -69,6 +69,7 @@ Run the tests with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 1
 | 43 | Death screen says why: lingered after a sting, felt crawling, hovered at a face, caught in a swat meant for another wasp, bird, web, ball, trap, spray | 8.2 | 9 |
 | 44 | Rival fights across peers: the rival's owner starts the fight (or the other peer asks, when its wasp touches a rival on its own screen); each peer decides only its own wasp from the same published scores | 9.3, 11.6 | 10 |
 | 45 | Late join in the lab: "Bot joins after 1 min" builds player 2 from a snapshot mid-game | 11.10 | 10 |
+| 46 | The stare: hovering in front of a face pulls in letterbox bars, narrows the lens to a close-up and drops the soundscape to a low drone (presentation only) | 12 | 10 |
 
 ## Verified
 

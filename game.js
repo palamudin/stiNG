@@ -830,6 +830,7 @@ function initAudio() {
   audio.wings = buzz(200);
   audio.others = buzz(215);
   audio.bees = buzz(245);
+  audio.stare = buzz(55); audio.stare.f.frequency.value = 160;
   audio.wind = loopNoise('lowpass', 500, 0.5);
   audio.rain = loopNoise('highpass', 2500, 0.4);
   audio.spray = loopNoise('highpass', 4000, 0.7);
@@ -866,12 +867,13 @@ function updateAudio(dt) {
   if (w) for (const al of sim.hiveAlarms.values()) for (const b in al.phys) { const p = al.phys[b]; if (Math.hypot(p.x - w.x, p.y - w.y, p.z - w.z) < 2) bees++; }
   set(audio.bees.g, running ? Math.min(0.05, bees * 0.006) : 0);
   const md = minuteOfDay(sim.minute), day = md >= T.time.dawn && md < T.time.dusk;
-  set(audio.wind, running ? 0.05 : 0.02);
+  set(audio.wind, (running ? 0.05 : 0.02) * (1 - 0.85 * stare));
+  set(audio.stare.g, running ? 0.05 * stare : 0);
   set(audio.rain, sim.raining ? 0.09 : 0);
   let spraying = false;
   for (const spx of sim.sprays) if (sim.tick >= spx.start) { const h = sim.humanByHex(spx.hex); if (h && near(h, 4)) spraying = true; }
   set(audio.spray, spraying ? 0.08 : 0);
-  if (running && !paused && now > audio.nextChirp) {
+  if (running && !paused && now > audio.nextChirp && stare < 0.4) {
     if (day && !sim.raining) { const f = 2500 + Math.random() * 2000; for (let i = 0; i < 2 + Math.random() * 3; i++) blip(f, f * (0.7 + Math.random() * 0.5), 0.07, 0.012, 'sine', i * 0.09); }
     else if (!day) blip(4200, 4300, 0.04, 0.006, 'square');
     audio.nextChirp = now + (day ? 1.5 + Math.random() * 4 : 0.35 + Math.random() * 0.4);
@@ -1367,6 +1369,31 @@ function waspSwitched(id, yaw) {
 
 // ------------------------------------------------------------------ camera and frame
 
+// The stare (GDD 12, key-art direction): hovering in front of someone's face pulls in letterbox bars, narrows the
+// lens and thins the soundscape. Presentation only; the sim never sees it.
+let stare = 0;
+function updateStare(dt) {
+  const w = sim._driven();
+  let k = 0;
+  if (w && running && !paused && (w.state === 'fly' || w.state === 'perched')) {
+    const fwd = { x: Math.sin(input.yaw), z: Math.cos(input.yaw) };
+    for (const hm of sim.active) {
+      if (hm.state === 'away' || Math.abs(hm.x - w.x) > 1.2 || Math.abs(hm.z - w.z) > 1.2) continue;
+      const head = hm.parts[hm.posture][0], lp = toLocal(hm, w);
+      const dx = lp.x - head.a.x, dy = lp.y - head.a.y, dz = lp.z - head.a.z, d = Math.hypot(dx, dy, dz);
+      if (d > 0.7 || dz < 0.04) continue; // in front of the face only
+      const hw = toWorld(hm, head.a), hx = hw.x - w.x, hz = hw.z - w.z, hl = Math.hypot(hx, hz) || 1;
+      const facing = (fwd.x * hx + fwd.z * hz) / hl;
+      k = Math.max(k, Math.min(1, (0.7 - d) / 0.4) * (facing > 0.75 ? 1 : 0.25));
+    }
+  }
+  stare += (k - stare) * (1 - Math.exp(-dt * (k > stare ? 2.5 : 4)));
+  const h = (stare * 11).toFixed(2) + 'vh';
+  $('barTop').style.height = h; $('barBot').style.height = h;
+  const fov = 70 - stare * 22;
+  if (Math.abs(camera.fov - fov) > 0.05) { camera.fov = fov; camera.updateProjectionMatrix(); }
+}
+
 function updateCamera(p, dt) {
   const w = sim.wasp;
   const dead = !sim._driven();
@@ -1432,6 +1459,7 @@ function frame(now) {
     if (tm) { tm('humans', t0); t0 = performance.now(); }
     const p = renderWasps(alpha, t, dt);
     const focus = updateCamera(p, dt);
+    updateStare(dt);
     if (tm) { tm('wasps+cam', t0); t0 = performance.now(); }
     renderCritters(t);
     renderBirdsAndSpiders(t, dt);
@@ -1551,7 +1579,7 @@ newWorld({ seed: 1234n, dayMinutes: 2, humanDensity: 1, beeAggression: 1, season
 requestAnimationFrame(frame);
 
 // test hook for automated checks
-window.__sting = { get sim() { return sim; }, get lab() { return lab; }, input, start: () => $("bStart").click(), humanViews, toggleNest, toggleLab, saveWorld };
+window.__sting = { get sim() { return sim; }, get lab() { return lab; }, input, start: () => $("bStart").click(), humanViews, toggleNest, toggleLab, saveWorld, camera };
 window.__garment = (hm) => garmentGraph(hm.tr, hm.clothing, hm.posture, hm.parts[hm.posture]);
 window.__toWorld = toWorld;
 window.__weather = dayWeather;
