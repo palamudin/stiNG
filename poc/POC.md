@@ -16,7 +16,7 @@ The tier-0 slice of the GDD, built in the browser so it can move to Unity. Same 
 | `game.js` | three.js rendering, animation, camera, input, HUD, sound | Unity scene, Animator, UI |
 | `index.html` | Page shell, HUD markup and styles | UI Toolkit |
 | `test/sim.test.mjs` | 71 headless sim checks | `Sting.Core.Tests` |
-| `test/net.test.mjs` | 22 network checks | `Sting.Net.Tests` |
+| `test/net.test.mjs` | 23 network checks | `Sting.Net.Tests` |
 
 Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 18+, no packages). Play locally with `node serve.mjs`.
 
@@ -70,6 +70,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 44 | Rival fights across peers: the rival's owner starts the fight (or the other peer asks, when its wasp touches a rival on its own screen); each peer decides only its own wasp from the same published scores | 9.3, 11.6 | 10 |
 | 45 | Late join in the lab: "Bot joins after 1 min" builds player 2 from a snapshot mid-game | 11.10 | 10 |
 | 46 | The stare: hovering in front of a face pulls in letterbox bars, narrows the lens to a close-up and drops the soundscape to a low drone (presentation only) | 12 | 10 |
+| 47 | Rival guards across peers: they hunt any player's wasp near their nest, and a raid by another player sends them after the thief | 9.3 | 10 |
 
 ## Verified
 
@@ -91,7 +92,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 
 - The colony economy is balanced loosely: protein piles up mid-season before queen larvae eat it down.
 - Walking is on horizontal surfaces only; tree trunks and walls are obstacles, not surfaces.
-- Rival AI still runs on the first peer only: a remote player's raid on a rival nest does not send its guards after them.
+- Two players' colonies never fight each other: whether players are co-op, rivals or both is still open (Q-07).
 
 ## Controls
 

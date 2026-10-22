@@ -21,7 +21,7 @@ const byHumanId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 // Events that change shared world state. Most commit at the end of the consequence window so every
 // peer applies them on the same tick (GDD 11.5); a few cosmetic or owner-decided ones apply on receipt.
-const IMMEDIATE = new Set(['caught', 'beeAlarm', 'died', 'fight', 'fightReq', 'fightJoin', 'fightRefuse', 'fightEnd']); // wasp-level: never touch humans
+const IMMEDIATE = new Set(['caught', 'beeAlarm', 'died', 'fight', 'fightReq', 'fightJoin', 'fightRefuse', 'fightEnd', 'raid']); // wasp-level: never touch humans
 
 export class Sim {
   constructor(settings = {}, opts = {}) {
@@ -379,6 +379,9 @@ export class Sim {
         } else this._publish({ type: 'fightRefuse', a: ev.a, b: ev.b, toPeer: ev.peer });
         break;
       }
+      case 'raid': // another player robbed a rival nest whose workers live on this peer: send them after the thief
+        if (!mine) this._rivalsHunt(ev.key, ev.id, ev);
+        break;
       case 'fightReq': {
         // another peer's wasp touched one of my rivals on its own screen: start the fight if the rival is free
         if (mine || ev.toPeer !== this.peer) break;
@@ -1804,8 +1807,13 @@ export class Sim {
 
   _raid(w, r) {
     w.carry = { kind: 'protein', amount: T.rival.raidProtein, what: 'larva' };
-    for (const x of this.wasps) if (x.colony === r.key && dist2(x, w) < 64) { x.ai.mode = 'hunt'; x.ai.huntId = w.id; x.ai.timer = this.tick + T.rival.huntTicks; }
+    this._rivalsHunt(r.key, w.id, w);
+    if (this.net) this._publish({ type: 'raid', key: r.key, id: w.id, x: w.x, y: w.y, z: w.z });
     this.emit('raid', { id: w.id, key: r.key });
+  }
+
+  _rivalsHunt(key, id, at) {
+    for (const x of this.wasps) if (x.colony === key && dist2(x, at) < 64) { x.ai.mode = 'hunt'; x.ai.huntId = id; x.ai.timer = this.tick + T.rival.huntTicks; }
   }
 
   // Rival workers come and go only around their own nest, and only on the world-authority peer
@@ -1833,13 +1841,15 @@ export class Sim {
     const home = { x: rv.ex, y: rv.ey - 0.02, z: rv.ez };
     if (!isDaylight(this.minute) || this.raining) ai.mode = 'home';
     if (ai.mode === 'guard') {
-      const t = this.wasps.find((x) => x.colony === 'own' && (x.state === 'fly' || x.state === 'landed') && dist2(x, home) < T.rival.guardRadius ** 2);
+      let t = this.wasps.find((x) => x.colony === 'own' && (x.state === 'fly' || x.state === 'landed') && dist2(x, home) < T.rival.guardRadius ** 2);
+      // other players' wasps near the nest count too (rivals live on this peer only)
+      if (!t) for (const r of this.remote.values()) if (!r.rival && (r.state === 'fly' || r.state === 'landed') && dist2(r, home) < T.rival.guardRadius ** 2) { t = r; break; }
       if (t) { ai.mode = 'hunt'; ai.huntId = t.id; ai.timer = this.tick + T.rival.huntTicks; }
       else { this._steer(w, { x: home.x + 0.12 * dcos(this.tick / 40 + w.id), y: home.y + 0.05, z: home.z + 0.12 * dsin(this.tick / 40 + w.id) }, cmd); return cmd; }
     }
     if (ai.mode === 'hunt') {
-      const t = this.waspById(ai.huntId);
-      if (!t || t.colony !== 'own' || this.tick > ai.timer || (t.state !== 'fly' && t.state !== 'landed' && t.state !== 'chewing')) { ai.mode = w.role === 'guard' ? 'guard' : 'return'; return cmd; }
+      const t = this.waspById(ai.huntId) || this.remote.get(ai.huntId);
+      if (!t || (t.colony !== undefined && t.colony !== 'own') || t.rival || this.tick > ai.timer || (t.state !== 'fly' && t.state !== 'landed' && t.state !== 'chewing')) { ai.mode = w.role === 'guard' ? 'guard' : 'return'; return cmd; }
       this._steer(w, t, cmd); cmd.throttle = 1; cmd.burst = 1;
       return cmd;
     }

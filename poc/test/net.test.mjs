@@ -90,6 +90,31 @@ for (const name of ['lan', 'good', 'bad', 'awful']) {
   ok(fights.b >= 2 && total >= 2 && agree === total, `a remote player's wasp fights A's rivals and both peers agree on every winner (${agree}/${total})`);
 }
 
+// A remote raid: B steals a larva from a rival nest whose guards live on A; A's guards hunt B's wasp down
+{
+  let seed = 0, rv = null;
+  for (let sd = 1; sd < 80 && !rv; sd++) { const t = new Sim({ seed: sd }); for (const r of t.activeChunks) if (r.content.rival) { seed = sd; rv = r.content.rival; break; } }
+  const lab = new NetLab({ seed }, 'good');
+  const hold = (w, p) => Object.assign(w, { x: p.x, y: p.y, z: p.z, vx: 0, vy: 0, vz: 0 });
+  let raided = false, hunted = 0, grappled = 0;
+  for (let i = 0; i < 6000; i++) {
+    const aw = lab.a._driven(), bw = lab.b._driven();
+    if (aw && aw.state === 'fly') hold(aw, { x: rv.ex + 4, y: rv.ey + 1, z: rv.ez });
+    let act = 0;
+    if (bw && bw.state === 'fly' && !raided) {
+      // wait until A's rivals are out, then rob the nest and hover 1 m away
+      if (i > 1200) { hold(bw, { x: rv.ex, y: rv.ey - 0.02, z: rv.ez }); act = 1; }
+      else hold(bw, { x: rv.ex + 3, y: rv.ey, z: rv.ez });
+    } else if (bw && bw.state === 'fly') hold(bw, { x: rv.ex + 1, y: rv.ey, z: rv.ez });
+    lab.step(idleCmd(), idleCmd({ act }));
+    for (const e of lab.bEvents || []) { if (e.type === 'raid') raided = true; if (e.type === 'fight' && e.remote) grappled++; }
+    lab.a.drainEvents();
+    if (raided) hunted = Math.max(hunted, lab.a.wasps.filter((w) => w.colony !== 'own' && w.ai.mode === 'hunt' && w.ai.huntId > 1000000).length);
+  }
+  console.log(`  remote raid (seed ${seed}): raided ${raided}, up to ${hunted} of A's rival guards hunted B, B grappled ${grappled} times`);
+  ok(raided && hunted >= 1 && grappled >= 1, 'a raid by another player sends the rival guards after that player, and they catch it');
+}
+
 // Wire format: quantization error and bandwidth (GDD 11.12)
 {
   const m = { mk: 'state', peer: 1, tick: 123456, wasps: [
