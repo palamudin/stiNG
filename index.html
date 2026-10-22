@@ -115,6 +115,7 @@
   .stripe { height: 10px; background: repeating-linear-gradient(-45deg, var(--yellow) 0 12px, var(--ink) 12px 24px); }
 
   #pauseScreen { z-index: 5; }
+  body.hardcore #vitals .bars, body.hardcore #zone, body.hardcore #hint, body.hardcore #map, body.hardcore #mapcap, body.hardcore #reticle, body.hardcore #colony, body.hardcore #alert { display: none; }
   #dead { z-index: 4; background: rgba(13,12,10,.35); pointer-events: none; }
   #dead .title { color: var(--red); font-size: clamp(56px, 12vw, 110px); }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
@@ -245,6 +246,7 @@
       <div><kbd>M</kbd>sound on / off</div>
       <div><kbd>Arrows</kbd>look without mouse</div>
       <div><kbd>Esc</kbd>pause</div>
+      <div><kbd>Gamepad</kbd>sticks fly and look · RT sting · LT burst · A act · Y switch · X rest</div>
     </div>
     <div class="start">
       <label class="label" for="seed">World seed<input id="seed" value="1234" inputmode="numeric" autocomplete="off"></label>
@@ -252,6 +254,8 @@
       <label class="label" for="density">People<select id="density"><option value="0.7">Fewer</option><option value="1" selected>Normal</option><option value="1.15">Busy</option></select></label>
       <label class="label" for="seasonLen">Season<select id="seasonLen"><option value="20">20 days</option><option value="40" selected>40 days</option><option value="80">80 days</option><option value="200">200 days (real)</option></select></label>
       <label class="label" for="bees">Bees<select id="bees"><option value="0.7">Calm</option><option value="1" selected>Normal</option><option value="1.5">Vicious</option></select></label>
+      <label class="label" for="gfx">Graphics<select id="gfx"><option value="high" selected>High</option><option value="low">Low (no shadows)</option></select></label>
+      <label class="label" for="hudMode">HUD<select id="hudMode"><option value="full" selected>Full</option><option value="hardcore">Hardcore</option></select></label>
       <label class="label" for="netMode">Second player<select id="netMode"><option value="off" selected>Off</option><option value="lan">Bot over LAN</option><option value="good">Bot over good internet</option><option value="bad">Bot over bad internet</option><option value="awful">Bot past the window</option></select></label>
       <button id="bStart">Fly</button>
     </div>

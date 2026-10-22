@@ -1,5 +1,5 @@
 // Two peers over a simulated link must agree on every shared human (GDD 11.5). Run: node test/net.test.mjs
-import { NetLab, stingBot, idleCmd } from '../sim/index.js';
+import { NetLab, stingBot, idleCmd, encodeState, decodeState, BYTES_PER_WASP } from '../sim/index.js';
 
 let failures = 0;
 const ok = (cond, msg) => { console.log((cond ? 'PASS ' : 'FAIL ') + msg); if (!cond) failures++; };
@@ -46,6 +46,24 @@ for (const name of ['lan', 'good', 'bad', 'awful']) {
   console.log(`  apart: A at ${lab.a.activeKey}, B at ${lab.b.activeKey}; ${c.agreed}/${c.compared} agree; A simulates ${lab.a.active.length} humans, B ${lab.b.active.length}; B stings ${lab.b.stats.stings}`);
   ok(lab.a.activeKey !== lab.b.activeKey && lab.b.stats.stings > 0, 'apart: the peers work different chunks');
   ok(c.agreed === c.compared, `apart: human state identical on both peers (${c.agreed}/${c.compared})`);
+}
+
+// Wire format: quantization error and bandwidth (GDD 11.12)
+{
+  const m = { mk: 'state', peer: 1, tick: 123456, wasps: [
+    { id: 1000001, caste: 'worker', x: -3.1234, y: 2.0456, z: -1.2789, vx: 2.9, vy: -0.4, vz: 1.1, state: 'fly', carry: 'fly', under: null },
+    { id: 1000002, caste: 'queen', x: 70.5, y: 0.0071, z: -95.25, vx: 0, vy: 0, vz: 0, state: 'landed', carry: null, under: null },
+  ] };
+  const d = decodeState(encodeState(m));
+  let maxErr = 0;
+  d.wasps.forEach((w, i) => { const o = m.wasps[i]; maxErr = Math.max(maxErr, Math.abs(w.x - o.x), Math.abs(w.y - o.y), Math.abs(w.z - o.z)); });
+  ok(maxErr < 0.001 && d.wasps[1].caste === 'queen' && d.wasps[0].carry === 'fly' && d.wasps[1].state === 'landed', `state packet round-trips within 1 mm (${(maxErr * 1000).toFixed(2)} mm), ${BYTES_PER_WASP} bytes per wasp`);
+  const lab = new NetLab({ seed: 1234 }, 'good');
+  const botA = stingBot({ plan: 'jab', rest: 200 });
+  for (let i = 0; i < 7200; i++) { lab.step(botA(lab.a)); lab.a.drainEvents(); }
+  const bw = lab.bandwidth();
+  console.log(`  peer A upstream: ${(bw.total / 1024).toFixed(1)} KB/s total, ${(bw.state / 1024).toFixed(1)} KB/s state at 20 Hz for ${lab.a.wasps.length} wasps, ${(bw.events / 1024).toFixed(2)} KB/s events`);
+  ok(bw.total < 16 * 1024, `a colony's upstream stays small (${(bw.total / 1024).toFixed(1)} KB/s)`);
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');

@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, chunkKey, beePos, flyPos,
+  garmentGraph, Top, NEST_ENTRANCE, NEST, chunkKey, beePos, flyPos,
 } from '../sim/index.js';
 
 let failures = 0;
@@ -289,13 +289,19 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   const wi = ev.find((e) => e.type === 'winter'), sp = ev.find((e) => e.type === 'spring');
   ok(wi && sp, `the season ends: winter, then spring (${wi && wi.survivors} queens survived)`);
   ok(s.wasp.caste === 'queen' && s.colony.adults === 0 && s.colony.cells === 0 && s.season.n === 2, 'spring: you are the founding queen of a new colony');
-  // founding: bring pulp and prey, the queen lays
+  // founding: pick a tree (E at the trunk), then bring pulp and prey; the queen lays
   const q = s.wasp;
+  ok(!s.colony.sited, 'spring: the queen has no nest yet');
+  const tree = s.activeChunks.flatMap((r) => r.content.trees).find((t) => Math.hypot(t.x - NEST.treeX, t.z - NEST.treeZ) > 3 && t.h > 3);
+  place(q, { x: tree.x + tree.r + 0.03, y: 2, z: tree.z });
+  const fev = run(s, 2, (sim, i) => idle({ act: i === 1 ? Act.Interact : 0 }));
+  ok(count(fev, 'nestFounded') === 1 && Math.hypot(s.nest.treeX - tree.x, s.nest.treeZ - tree.z) < 1e-9, 'E at a trunk founds the nest in that tree');
+  const E = s.nest.entrance;
   q.carry = { kind: 'pulp', amount: 3, what: 'pulp' };
-  place(q, NEST_ENTRANCE); run(s, 2, () => idle());
+  place(q, E); run(s, 2, () => idle());
   q.carry = { kind: 'protein', amount: 3, what: 'fly' };
-  place(q, NEST_ENTRANCE); run(s, 2, () => idle());
-  run(s, s.dayTicks / 2, (sim) => { if (sim.wasp.state === 'fly') place(sim.wasp, { x: NEST_ENTRANCE.x + 0.3, y: NEST_ENTRANCE.y, z: NEST_ENTRANCE.z }); return idle(); });
+  place(q, E); run(s, 2, () => idle());
+  run(s, s.dayTicks / 2, (sim) => { if (sim.wasp.state === 'fly') place(sim.wasp, { x: E.x + 0.3, y: E.y, z: E.z }); return idle(); });
   ok(s.colony.cells > 10 && s.colony.eggs + s.colony.larvae > 1, `founding: pulp builds cells and the queen lays (${s.colony.cells.toFixed(0)} cells, ${(s.colony.eggs + s.colony.larvae).toFixed(1)} brood)`);
 }
 

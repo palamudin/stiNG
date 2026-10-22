@@ -10,6 +10,12 @@ export const NEST = { x: -3, y: 2.3, z: -1.55, r: 0.14, treeX: -3, treeZ: -2 };
 export const NEST_ENTRANCE = { x: NEST.x, y: NEST.y - NEST.r * 1.25, z: NEST.z };
 export const SPAWN = { x: -3, y: 2.05, z: -1.25, yaw: 0.98 };
 
+// A nest hanging from a tree (GDD 6.6). The first one is in the home tree; founding queens pick their own.
+export function makeNest(treeX, treeZ, x, y, z, r = NEST.r) {
+  const entrance = { x, y: y - r * 1.25, z };
+  return { x, y, z, r, treeX, treeZ, entrance, spawn: { x, y: entrance.y - 0.1, z: z + 0.3, yaw: 0.98 }, key: chunkKey(chunkOf(x), chunkOf(z)) };
+}
+
 // ---------------------------------------------------------------- clock and weather (GDD 5)
 
 export const ticksPerMinute = (settings) => Math.round(settings.dayMinutes * 2.5);

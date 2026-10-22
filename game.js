@@ -216,17 +216,6 @@ function buildChunk(rec) {
     hole.rotation.x = Math.PI / 2; hole.position.set(rv.ex, rv.ey + 0.005, rv.ez);
     g.add(nest, hole);
   }
-  if (c.nest) {
-    const n = c.nest;
-    const nest = new THREE.Mesh(new THREE.SphereGeometry(n.r, 20, 16), new THREE.MeshLambertMaterial({ map: paperTex }));
-    nest.scale.set(1, 1.25, 1); nest.position.set(n.x, n.y, n.z); nest.castShadow = true;
-    const hole = new THREE.Mesh(new THREE.CircleGeometry(0.03, 16), mat('#120d08', { side: THREE.DoubleSide }));
-    hole.rotation.x = Math.PI / 2; hole.position.set(n.x, n.y - n.r * 1.24, n.z);
-    const branch = new THREE.Mesh(geoTrunk, mat('#5b4330'));
-    branch.scale.set(0.035, 1.0, 0.035); branch.rotation.x = Math.PI / 2.4; branch.position.set(n.x, n.y + 0.2, n.z - 0.15);
-    g.add(nest, hole, branch);
-    dyn.nest = nest; dyn.hole = hole;
-  }
   g.userData.dyn = dyn;
   return g;
 }
@@ -250,7 +239,41 @@ function updateChunkDynamics() {
     for (const l of d.lids) l.visible = lv >= 2;
     for (const c of d.candles) c.visible = lv >= 2;
     for (const t of d.traps) t.visible = lv >= 3;
-    if (d.nest) { d.nest.material.color.set(sim.colony.nestAlive ? '#ffffff' : '#6b5d4a'); }
+
+  }
+}
+
+// ------------------------------------------------------------------ nests (the colony's current one, and abandoned ones)
+
+function buildNestMesh(n, abandoned) {
+  const g = new THREE.Group();
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(n.r, 20, 16), new THREE.MeshLambertMaterial({ map: paperTex, color: abandoned ? '#857a68' : '#ffffff' }));
+  ball.scale.set(1, 1.25, 1); ball.position.set(n.x, n.y, n.z); ball.castShadow = true;
+  const hole = new THREE.Mesh(new THREE.CircleGeometry(0.03, 16), mat('#120d08', { side: THREE.DoubleSide }));
+  hole.rotation.x = Math.PI / 2; hole.position.set(n.entrance.x, n.entrance.y + 0.002, n.entrance.z);
+  const dx = n.x - n.treeX, dz = n.z - n.treeZ, len = Math.hypot(dx, dz);
+  const branch = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.03, len, 6), mat('#5b4330'));
+  branch.position.set((n.x + n.treeX) / 2, n.y + n.r * 1.1, (n.z + n.treeZ) / 2);
+  branch.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(dx, 0, dz).normalize());
+  g.add(ball, hole, branch);
+  g.userData.ball = ball;
+  scene.add(g);
+  return g;
+}
+let nestView = null, nestSig = '';
+const oldNestViews = [];
+function syncNests() {
+  const n = sim.nest, sig = `${n.x},${n.y},${n.z},${sim.colony.sited}`;
+  if (sig !== nestSig) {
+    if (nestView) scene.remove(nestView);
+    nestView = sim.colony.sited !== false ? buildNestMesh(n, false) : null;
+    nestSig = sig;
+  }
+  if (nestView) nestView.userData.ball.material.color.set(sim.colony.nestAlive ? '#ffffff' : '#6b5d4a');
+  while (oldNestViews.length < sim.oldNests.length) {
+    const o = sim.oldNests[oldNestViews.length];
+    const same = o.x === n.x && o.y === n.y && o.z === n.z && sim.colony.sited !== false;
+    oldNestViews.push(same ? null : buildNestMesh(o, true));
   }
 }
 
@@ -836,20 +859,41 @@ function updateAudio(dt) {
 
 // ------------------------------------------------------------------ input
 
+const pad = { prev: [] };
+function readPad() {
+  const gp = navigator.getGamepads ? [...navigator.getGamepads()].find((g) => g && g.connected) : null;
+  if (!gp) return null;
+  const dz = (v) => (Math.abs(v) < 0.15 ? 0 : v);
+  const b = (i) => !!(gp.buttons[i] && (gp.buttons[i].pressed || gp.buttons[i].value > 0.5));
+  const edge = (i) => b(i) && !pad.prev[i];
+  const out = { lx: dz(gp.axes[0] || 0), ly: dz(gp.axes[1] || 0), rx: dz(gp.axes[2] || 0), ry: dz(gp.axes[3] || 0), b, edge };
+  if (edge(8)) toggleNest();
+  pad.prev = gp.buttons.map((x) => !!(x && (x.pressed || x.value > 0.5)));
+  return out;
+}
+
 function buildCmd() {
-  if (input.autopilot) return input.autopilot(sim);
+  if (input.autopilot) return input.autopilot(sim); // test hook: scripted pilots use the same input path
+  const gp = readPad();
+  if (gp) {
+    input.yaw -= gp.rx * 2.4 * DT;
+    input.pitch = Math.max(-1.45, Math.min(1.45, input.pitch - gp.ry * 1.8 * DT));
+  }
   const k = input.keys, a = (p, n) => ((k.has(p) ? 100 : 0) - (k.has(n) ? 100 : 0));
   const look = 1.6 * DT;
   if (k.has('ArrowLeft')) input.yaw += look;
   if (k.has('ArrowRight')) input.yaw -= look;
   if (k.has('ArrowUp')) input.pitch = Math.min(1.45, input.pitch + look * 0.8);
   if (k.has('ArrowDown')) input.pitch = Math.max(-1.45, input.pitch - look * 0.8);
+  const clamp100 = (v) => Math.max(-100, Math.min(100, Math.round(v)));
   return {
-    mx: a('KeyD', 'KeyA'), mz: a('KeyW', 'KeyS'), my: a('Space', 'KeyC'),
-    burst: k.has('ShiftLeft') || k.has('ShiftRight') ? 1 : 0,
-    sting: input.lmb || k.has('KeyF') ? 1 : 0,
+    mx: clamp100(a('KeyD', 'KeyA') + (gp ? gp.lx * 100 : 0)),
+    mz: clamp100(a('KeyW', 'KeyS') - (gp ? gp.ly * 100 : 0)),
+    my: clamp100(a('Space', 'KeyC') + (gp ? ((gp.b(5) ? 100 : 0) - (gp.b(4) || gp.b(1) ? 100 : 0)) : 0)),
+    burst: k.has('ShiftLeft') || k.has('ShiftRight') || (gp && gp.b(6)) ? 1 : 0,
+    sting: input.lmb || k.has('KeyF') || (gp && gp.b(7)) ? 1 : 0,
     yawQ: Math.round(input.yaw * 1e4), pitchQ: Math.round(input.pitch * 1e4),
-    act: (k.has('KeyE') ? Act.Interact : 0) | (k.has('KeyQ') ? Act.Switch : 0) | (k.has('KeyR') ? Act.Rest : 0),
+    act: (k.has('KeyE') || (gp && gp.b(0)) ? Act.Interact : 0) | (k.has('KeyQ') || (gp && gp.b(3)) ? Act.Switch : 0) | (k.has('KeyR') || (gp && gp.b(2)) ? Act.Rest : 0),
     alloc: input.alloc,
   };
 }
@@ -989,6 +1033,7 @@ function updateLab() {
       ['Events sent / received', `${sim.netStats.sent} / ${sim.netStats.recv}`], ['Late events', `${sim.netStats.late + lab.b.netStats.late}${sim.netStats.lateMax ? ` (max ${sim.netStats.lateMax} ticks)` : ''}`],
       ['Humans agree', c.compared ? `${c.agreed}/${c.compared} checks${c.agreed === c.compared ? '' : ' · diverged at tick ' + c.firstDiverge}` : '-'],
       ['Player 2 drawn off by', err === null ? '-' : `${(err * 100).toFixed(1)} cm`],
+      ['Your upstream', (() => { const b = lab.bandwidth(); return `${(b.total / 1024).toFixed(1)} KB/s · ${sim.wasps.length} wasps at 20 Hz`; })()],
       ['Player 2 stings', `${lab.b.stats.stings}`],
     ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
   }
@@ -1062,6 +1107,8 @@ function updateHud() {
   else if (h.wood) hint = `Hold ${kbd('E')} to chew pulp`;
   else if (h.nest && (md < T.time.dawn || md >= T.time.dusk)) hint = `${kbd('R')} rest until morning`;
   else if (w.carry) hint = 'Bring it to the nest';
+  else if (h.site) hint = `${kbd('E')} found the nest in this tree`;
+  else if (w.caste === 'queen' && sim.colony.sited === false) hint = 'Pick a tree for the nest: fly to a trunk and press E';
   else if (w.caste === 'queen' && sim.colony.adults < 1) hint = 'Founding: chew pulp for cells, catch prey for the brood, bring both to the nest';
   $('hint').innerHTML = hint;
 
@@ -1111,7 +1158,7 @@ function drawMap() {
   }
   ctx.fillStyle = 'rgba(246,199,0,.8)';
   for (const x of sim.wasps) { if (x.id === sim.drivenId) continue; ctx.fillStyle = x.colony === 'own' ? 'rgba(246,199,0,.8)' : css('--orange'); const [px, py] = toS(x.x, x.z); ctx.fillRect(px - 1, py - 1, 2, 2); }
-  const [nx, ny] = toS(NEST.x, NEST.z);
+  const [nx, ny] = toS(sim.nest.x, sim.nest.z);
   ctx.strokeStyle = sim.colony.nestAlive ? yellow : red; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.arc(nx, ny, 5, 0, Math.PI * 2); ctx.stroke();
   ctx.save(); ctx.translate(W / 2, W / 2); ctx.rotate(-input.yaw);
@@ -1206,6 +1253,7 @@ function handleEvents(events) {
       case 'fight': if (e.driven) toast('Grappling a rival wasp · mash LMB', 'var(--red)', 1.8); break;
       case 'fightOver': logEvent(`fight: worker ${e.winner} killed worker ${e.loser}`); break;
       case 'raid': toast('Stole a larva · their workers are coming', 'var(--orange)', 2.2); break;
+      case 'nestFounded': toast(e.auto ? 'The queen settled in last year\'s tree' : 'Nest founded', 'var(--yellow)', 2.4); logEvent('nest founded'); break;
       case 'winter':
         {
           const total = e.survivors + e.lineage;
@@ -1335,6 +1383,7 @@ function frame(now) {
       if (ui.lab) updateLab();
       if (ui.nest) updateNest();
       updateChunkDynamics();
+      syncNests();
       drawMap();
     }
     if (tm) { tm('panels', t0); t0 = performance.now(); }
@@ -1352,11 +1401,15 @@ function newWorld(s) {
   for (const v of humanViews.values()) scene.remove(v.group);
   for (const g of waspViews.values()) scene.remove(g);
   chunkViews.clear(); humanViews.clear(); waspViews.clear(); pos.clear(); anims.length = 0; ui.log.length = 0;
+  if (nestView) scene.remove(nestView);
+  for (const o of oldNestViews) if (o) scene.remove(o);
+  nestView = null; nestSig = ''; oldNestViews.length = 0;
   settings = s;
   lab = s.net && s.net !== 'off' ? new NetLab(settings, s.net) : null;
   sim = lab ? lab.a : new Sim(settings);
   sim.drainEvents();
   syncChunks();
+  syncNests();
   const w = sim.wasp;
   input.yaw = w.yaw; input.pitch = 0; input.alloc = 1;
   pos.set(w.id, { p: V(w), c: V(w) });
@@ -1371,8 +1424,20 @@ function readSettings() {
   return { seed, dayMinutes: +$('dayLen').value, humanDensity: +$('density').value, beeAggression: +$('bees').value, seasonDays: +$('seasonLen').value, net: $('netMode').value };
 }
 
-$('bStart').addEventListener('click', () => { initAudio(); newWorld(readSettings()); $('startScreen').hidden = true; running = true; lock(); });
-$('bSpring').addEventListener('click', () => { $('winterScreen').hidden = true; setPaused(false); lock(); toast('Spring. Build a nest: pulp for cells, prey for the first brood.', 'var(--yellow)', 4); });
+function applyDisplaySettings() {
+  const low = $('gfx').value === 'low';
+  renderer.shadowMap.enabled = !low;
+  sun.castShadow = !low;
+  renderer.setPixelRatio(low ? 1 : Math.min(devicePixelRatio, 2));
+  scene.fog.near = low ? 22 : 30; scene.fog.far = low ? 80 : 115;
+  resize();
+  document.body.classList.toggle('hardcore', $('hudMode').value === 'hardcore');
+  try { localStorage.setItem('sting.display', JSON.stringify({ gfx: $('gfx').value, hud: $('hudMode').value })); } catch { /* optional */ }
+}
+try { const d = JSON.parse(localStorage.getItem('sting.display') || 'null'); if (d) { $('gfx').value = d.gfx; $('hudMode').value = d.hud; } } catch { /* optional */ }
+
+$('bStart').addEventListener('click', () => { initAudio(); applyDisplaySettings(); newWorld(readSettings()); $('startScreen').hidden = true; running = true; lock(); });
+$('bSpring').addEventListener('click', () => { $('winterScreen').hidden = true; setPaused(false); lock(); toast('Spring. Pick a tree and press E at the trunk to found the nest.', 'var(--yellow)', 4); });
 $('bNewLine').addEventListener('click', () => { $('extinctScreen').hidden = true; newWorld(settings); running = true; lock(); });
 try { if (localStorage.getItem('sting.lab') === '1') toggleLab(); } catch { /* optional */ }
 if (matchMedia('(pointer: coarse)').matches) $('startNote').textContent = 'Needs a keyboard and mouse. On touch devices you can look around but not fly.';

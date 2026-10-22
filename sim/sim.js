@@ -8,7 +8,7 @@ import {
 } from './body.js';
 import {
   chunkOf, chunkKey, NEST, NEST_ENTRANCE, SPAWN, generateChunk, ticksPerMinute, clockMinutes, dayOf, minuteOfDay,
-  isRaining, tempAt, isDaylight, humanWindow, flyPos, beePos, birdPos,
+  isRaining, tempAt, isDaylight, humanWindow, flyPos, beePos, birdPos, makeNest,
 } from './world.js';
 import { newColony, colonyStep, destroyNest, colonyFinished, seasonPhase } from './colony.js';
 
@@ -55,6 +55,8 @@ export class Sim {
     this.hiveAlarms = new Map();
     this.birdState = new Map();
     this.colony = newColony();
+    this.nest = makeNest(NEST.treeX, NEST.treeZ, NEST.x, NEST.y, NEST.z);
+    this.oldNests = [];
     this.stung = new Set();
     this.stats = { stings: 0, aiStings: 0, remoteStings: 0, full: 0, deaths: 0, causes: {}, caught: 0, deposits: 0 };
     this.wasps = [];
@@ -112,7 +114,7 @@ export class Sim {
   _spawnWasp(driven, caste = 'worker') {
     const id = this.nextWaspId++;
     const w = {
-      id, caste, x: SPAWN.x, y: SPAWN.y, z: SPAWN.z, vx: 0, vy: 0, vz: 0, yaw: SPAWN.yaw, pitch: 0,
+      id, caste, x: this.nest.spawn.x, y: this.nest.spawn.y, z: this.nest.spawn.z, vx: 0, vy: 0, vz: 0, yaw: this.nest.spawn.yaw, pitch: 0,
       energy: 1, venom: 1, state: 'fly', stateTicks: 0, attach: null, under: null, ball: null,
       carry: null, groundTicks: 0, chew: 0, role: 'sugar', colony: 'own', web: null, fight: null,
       ai: { mode: 'pick', target: null, timer: 0, humanHex: null, stings: 0, stingHold: 0 },
@@ -120,7 +122,7 @@ export class Sim {
     if (!driven) {
       const a = T.alloc[this.colony.alloc], s = a.sugar + a.protein + a.pulp, r = h32(id, 77) * s;
       w.role = r < a.sugar ? 'sugar' : r < a.sugar + a.protein ? 'protein' : 'pulp';
-      w.x = NEST_ENTRANCE.x; w.y = NEST_ENTRANCE.y - 0.03; w.z = NEST_ENTRANCE.z;
+      w.x = this.nest.entrance.x; w.y = this.nest.entrance.y - 0.03; w.z = this.nest.entrance.z;
     }
     this.wasps.push(w);
     this.wasps.sort(byId);
@@ -131,7 +133,7 @@ export class Sim {
   // ---------------------------------------------------------------- chunks and humans
 
   _updateChunks(force = false) {
-    const w = this._driven() || this.ghost || { x: SPAWN.x, z: SPAWN.z };
+    const w = this._driven() || this.ghost || this.nest.spawn;
     const ccx = chunkOf(w.x), ccz = chunkOf(w.z);
     const key = chunkKey(ccx, ccz);
     if (key === this.activeKey && !force) return;
@@ -488,7 +490,7 @@ export class Sim {
   _rest() {
     if (this.net) { this.emit('cantRest', { why: 'net' }); return; }
     const d = this._driven();
-    if (!d || dist2(d, NEST_ENTRANCE) > 0.4 * 0.4) { this.emit('cantRest', { why: 'away' }); return; }
+    if (!d || dist2(d, this.nest.entrance) > 0.4 * 0.4) { this.emit('cantRest', { why: 'away' }); return; }
     const md = minuteOfDay(this.minute);
     if (md >= T.time.dawn && md < T.time.dusk) { this.emit('cantRest', { why: 'day' }); return; }
     const target = (md >= T.time.dusk ? this.day + 1 : this.day) * 1440 + T.time.dawn;
@@ -780,6 +782,7 @@ export class Sim {
   // ---------------- interactions (E): crawl under, catch prey, chew pulp
 
   _interact(w) {
+    if (w.caste === 'queen' && !this.colony.sited) { const t = this._trunkNear(w); if (t) { this._foundNest(w, t); return; } }
     const rv = this._rivalNestNear(w);
     if (rv && !w.carry) { this._raid(w, rv); return; }
     const c = w.contact;
@@ -796,7 +799,8 @@ export class Sim {
       opening: c && c.opening >= 0 ? c.openingKey : null,
       prey: !w.carry && this._preyNear(w) ? this._preyNear(w).kind : null,
       wood: !w.carry && !c && this._woodNear(w),
-      nest: dist2(w, NEST_ENTRANCE) < 0.4 * 0.4,
+      nest: dist2(w, this.nest.entrance) < 0.4 * 0.4,
+      site: w.caste === 'queen' && !this.colony.sited && this._trunkNear(w) ? true : false,
       rival: !w.carry && !!this._rivalNestNear(w),
     };
   }
@@ -902,7 +906,7 @@ export class Sim {
 
   _nestTouch(w) {
     if (!this.colony.nestAlive || w.colony !== 'own') return;
-    if (dist2(w, NEST_ENTRANCE) > 0.07 * 0.07) return;
+    if (!this.colony.sited || dist2(w, this.nest.entrance) > 0.07 * 0.07) return;
     const col = this.colony;
     let deposited = false;
     if (w.carry && w.carry.kind === 'pulp' && w.caste === 'queen') {
@@ -1117,11 +1121,11 @@ export class Sim {
     if (col.nestAlive && inside >= 1) {
       const w = this._spawnWasp(true);
       this.drivenId = w.id; this.ghost = null;
-      this.emit('respawn', { id: w.id, yaw: SPAWN.yaw });
+      this.emit('respawn', { id: w.id, yaw: this.nest.spawn.yaw });
       return;
     }
     if (this._own().length) {
-      const g = this.ghost || SPAWN;
+      const g = this.ghost || this.nest.spawn;
       let best = null, bd = Infinity;
       for (const w of this._own()) { const q = dist2(w, g); if (q < bd) { bd = q; best = w; } }
       this.drivenId = best.id; this.ghost = null;
@@ -1155,6 +1159,8 @@ export class Sim {
     const alloc = this.colony.alloc;
     this.colony = newColony(true);
     this.colony.alloc = alloc;
+    this.colony.sited = false;
+    this.oldNests.push(this.nest);
     for (const w of this.wasps.slice()) this._despawn(w);
     for (const s of this.chunkState.values()) s.esc = 0;
     this.swats = []; this.sprays = []; this.alarms = []; this.hiveAlarms.clear();
@@ -1300,11 +1306,12 @@ export class Sim {
       const hex = hex64(id);
       const tr = { ...humanTraits(this.seed, id), height: 1.8, armRatio: 1, girth: 0.4, reactionTicks: 12, style: Style.Precise, accuracy: 0.9, panicSusceptibility: 0.45, sociability: 0, escalation: 1 };
       const ang = h32(e.visit, 9) * 6.28318;
-      const ax = NEST.treeX + 30 * dcos(ang), az = NEST.treeZ + 30 * dsin(ang);
-      const goal = { x: NEST.treeX + 0.1, z: NEST.treeZ + 0.85 };
+      const n = this.nest, dxn = n.x - n.treeX, dzn = n.z - n.treeZ, dn = Math.sqrt(dxn * dxn + dzn * dzn) || 1;
+      const ax = n.treeX + 30 * dcos(ang), az = n.treeZ + 30 * dsin(ang);
+      const goal = { x: n.x + dxn / dn * 0.45, z: n.z + dzn / dn * 0.45 };
       e.hm = {
-        id, hex, short: 'EXT', tr, special: true, clothing: suitClothing(e.visit > 1), chunk: '0,0',
-        home: { x: goal.x, z: goal.z, fx: 0, fz: -1, posture: 'stand', ax, az },
+        id, hex, short: 'EXT', tr, special: true, clothing: suitClothing(e.visit > 1), chunk: this.nest.key,
+        home: { x: goal.x, z: goal.z, fx: -dxn / dn, fz: -dzn / dn, posture: 'stand', ax, az },
         x: ax, z: az, fx: 0, fz: 1, posture: 'stand', state: 'arrive', panic: 0, fleeSteps: 0, dirX: 0, dirZ: 0, stungCount: 0,
         annoyId: 0, annoy: 0, cooldown: 0, treat: 0,
         parts: { sit: bodyParts(tr, 'sit'), stand: bodyParts(tr, 'stand') },
@@ -1316,8 +1323,9 @@ export class Sim {
   }
 
   _nestAreaLevel() {
+    const [cx, cz] = this.nest.key.split(',').map(Number);
     let lv = 0;
-    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) lv = Math.max(lv, this.escLevel(chunkKey(dx, dz)));
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) lv = Math.max(lv, this.escLevel(chunkKey(cx + dx, cz + dz)));
     return lv;
   }
 
@@ -1329,9 +1337,9 @@ export class Sim {
       else if (this._walkTo(hm, hm.home.ax, hm.home.az, T.ext.speed)) this._extGone(false);
       return;
     }
-    if (hm.panic >= T.ext.minPanicAbort) { this._startFlee(hm, this.cs('0,0').lastSting || null); this.emit('extAbort', { visit: e.visit }); return; }
+    if (hm.panic >= T.ext.minPanicAbort) { this._startFlee(hm, this.cs(this.nest.key).lastSting || null); this.emit('extAbort', { visit: e.visit }); return; }
     if (hm.state === 'arrive') {
-      if (this._walkTo(hm, hm.home.x, hm.home.z, T.ext.speed)) { hm.state = 'treat'; hm.fx = 0; hm.fz = -1; hm.treat = 0; this.emit('extTreat', {}); }
+      if (this._walkTo(hm, hm.home.x, hm.home.z, T.ext.speed)) { hm.state = 'treat'; hm.fx = hm.home.fx; hm.fz = hm.home.fz; hm.treat = 0; this.emit('extTreat', {}); }
     } else if (hm.state === 'treat') {
       hm.treat += 3;
       if (hm.treat >= T.ext.treatTicks) {
@@ -1463,6 +1471,27 @@ export class Sim {
   }
 
   _alarmDecay() { if (this.alarms.length) this.alarms = this.alarms.filter((a) => a.until > this.tick); }
+
+  // ---------------- founding a nest (GDD 6.6)
+
+  _trunkNear(w) {
+    for (const rec of this.activeChunks) for (const t of rec.content.trees) {
+      const dx = w.x - t.x, dz = w.z - t.z, d = Math.sqrt(dx * dx + dz * dz) - t.r;
+      if (d <= 0.06 && w.y > 0.8 && w.y < t.h) return t;
+    }
+    return null;
+  }
+
+  _foundNest(w, t) {
+    let dx = w.x - t.x, dz = w.z - t.z;
+    const d = Math.sqrt(dx * dx + dz * dz) || 1;
+    dx /= d; dz /= d;
+    const y = clamp(w.y, 1.2, Math.max(1.2, t.h - 0.6));
+    this.nest = makeNest(t.x, t.z, t.x + dx * (t.r + 0.2), y, t.z + dz * (t.r + 0.2));
+    this.colony.sited = true;
+    w.x = this.nest.spawn.x; w.y = this.nest.spawn.y; w.z = this.nest.spawn.z; w.vx = w.vy = w.vz = 0;
+    this.emit('nestFounded', { x: this.nest.x, y: this.nest.y, z: this.nest.z, key: this.nest.key });
+  }
 
   // ---------------- predators (GDD 9.3)
 
@@ -1697,6 +1726,12 @@ export class Sim {
     const col = this.colony;
     const daylight = isDaylight(this.minute) && !this.raining && this.canFly();
     const frac = this.seasonFrac;
+    if (this.colony.sited === false && frac > 0.03) {
+      const old = this.oldNests[this.oldNests.length - 1] || this.nest;
+      this.nest = makeNest(old.treeX, old.treeZ, old.x, old.y, old.z);
+      this.colony.sited = true;
+      this.emit('nestFounded', { x: this.nest.x, y: this.nest.y, z: this.nest.z, key: this.nest.key, auto: true });
+    }
     colonyStep(col, 60 / this.dayTicks, this._own().filter((w) => w.caste !== 'queen').length, daylight, frac, this.bio);
     const ph = seasonPhase(frac);
     if (ph !== this.season.phase) { this.season.phase = ph; this.emit('season', { phase: ph }); }
@@ -1705,7 +1740,7 @@ export class Sim {
     this._extCheck();
     // launch physical AI foragers while the player is near the nest (GDD 11.12: far colonies stay abstract)
     this._rivals(daylight);
-    const nearNest = this.activeChunks.some((r) => r.cx === 0 && r.cz === 0);
+    const nearNest = this.colony.sited && this.activeChunks.some((r) => chunkKey(r.cx, r.cz) === this.nest.key);
     if (!nearNest) {
       for (const w of this._own()) if (w.id !== this.drivenId) this._despawn(w);
       return;
@@ -1764,8 +1799,8 @@ export class Sim {
       }
       case 'return':
       case 'home': {
-        this._steer(w, NEST_ENTRANCE, cmd);
-        if (dist2(w, NEST_ENTRANCE) < 0.07 * 0.07) {
+        this._steer(w, this.nest.entrance, cmd);
+        if (dist2(w, this.nest.entrance) < 0.07 * 0.07) {
           if (ai.mode === 'home' || (w.energy < 0.3 && this.colony.sugar <= 0)) { this._nestTouch(w); this._despawn(w); return cmd; }
           ai.mode = 'pick';
         }

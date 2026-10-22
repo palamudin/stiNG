@@ -8,7 +8,7 @@ import { clamp01 } from './rng.js';
 export function newColony(founding = false) {
   const s = T.colony.start;
   const c = {
-    queenAlive: true, nestAlive: true,
+    queenAlive: true, nestAlive: true, sited: true,
     adults: founding ? 0 : s.adults, eggs: founding ? 0 : s.eggs, larvae: founding ? 0 : s.larvae, pupae: founding ? 0 : s.pupae,
     cells: founding ? 0 : s.cells, protein: founding ? 0 : s.protein, sugar: founding ? 0.5 : s.sugar, pulp: founding ? 0 : s.pulp,
     rEggs: 0, rLarvae: 0, rPupae: 0, gynes: 0, males: 0, mated: 0,

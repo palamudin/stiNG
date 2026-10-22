@@ -14,8 +14,8 @@ The tier-0 slice of the GDD, built in the browser so it can move to Unity. Same 
 | `sim/bots.js` | Scripted pilots that produce ordinary input commands | test harness |
 | `game.js` | three.js rendering, animation, camera, input, HUD, sound | Unity scene, Animator, UI |
 | `index.html` | Page shell, HUD markup and styles | UI Toolkit |
-| `test/sim.test.mjs` | 56 headless sim checks | `Sting.Core.Tests` |
-| `test/net.test.mjs` | 18 two-peer agreement checks | `Sting.Net.Tests` |
+| `test/sim.test.mjs` | 58 headless sim checks | `Sting.Core.Tests` |
+| `test/net.test.mjs` | 20 network checks | `Sting.Net.Tests` |
 
 Run the tests with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 18+, no packages).
 
@@ -55,11 +55,15 @@ Run the tests with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 1
 | 30 | Landing: a still wasp rests on ground or wood at no sugar cost; people swat wasps resting by their food | 7.2 | 5 |
 | 31 | Rival colonies: their workers forage, guard and hunt raiders; touching wasps grapple and one dies; raid their nest for larvae | 9.3 | 5 |
 | 32 | Interest windows commit like events; humans are simulated over the union of all peers' windows | 11, Q-16 | 5 |
+| 33 | Founding queens pick their nest tree (E at a trunk); old nests stay as abandoned paper | 6.6 | 6 |
+| 34 | Gamepad: sticks fly and look, triggers sting and burst, face buttons act, switch, rest | 10.4 | 6 |
+| 35 | Graphics quality (shadows, resolution) and a hardcore HUD | 10.2 | 6 |
+| 36 | Binary state packets: chunk-relative 16-bit positions, 19 bytes per wasp; bandwidth shown in the lab | 11.12 | 6 |
 
 ## Verified
 
 - **Sim:** traits and hash match the compiled C# protocode; trig error 6.6e-10; no swat or press lands inside the consequence window; fed colonies grow and starved larvae die; the yearly cycle raises and mates young queens and collapses in autumn; winter and spring hand the line to a founding queen; two runs and a replay give the same hash; lingering kills, jab-and-run survives; AI workers launch and deposit; covered food, traps, preemptive slaps, compression under a shirt, crawling to the acnestis, bee balls and escape, the exterminator destroying an unguarded nest and aborting when stung under his collar, the day cycle, possession, and frozen chunks.
-- **Network:** two peers sting the same humans over four links, from LAN up to 16±6 ticks one-way with 10% loss. Human state is identical on both peers at every check (300/300 per link) and no event arrives after its commit tick. With the peers two chunks apart, all 63 shared humans still agree at every check.
+- **Network:** two peers sting the same humans over four links, from LAN up to 16±6 ticks one-way with 10% loss. Human state is identical on both peers at every check (300/300 per link) and no event arrives after its commit tick. With the peers two chunks apart, all 63 shared humans still agree at every check. State packets round-trip within 0.4 mm; a colony with 22 wasps out sends about 4.8 KB/s upstream.
 - **Rendering:** headless Chromium screenshots of every system. The software renderer runs at under 1 fps, so frame rate on real GPUs is not measured.
 
 ## Design changes found by building (fold into the GDD)
