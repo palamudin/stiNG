@@ -3,7 +3,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;800;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 <style>
-  /* Layout: full-bleed 3D view; HUD pinned to the four corners; lab panel slides in from the right.
+  /* Layout: full-bleed 3D view; HUD pinned to the corners; colony panel on the left, lab on the right.
      Single committed look: wasp-black panels, warning yellow, alarm red. */
   :root {
     --ink: #0d0c0a;
@@ -17,6 +17,7 @@
     --green: #6fbf73;
     --orange: #f08a24;
     --slate: #7d8aa0;
+    --lilac: #c9c3f0;
     --display: "Big Shoulders Display", "Arial Narrow", "Helvetica Neue Condensed", Impact, sans-serif;
     --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
     color-scheme: dark;
@@ -27,109 +28,164 @@
   .hud { position: fixed; pointer-events: none; user-select: none; }
   .label { font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
   .num { font-variant-numeric: tabular-nums; }
+  .shadow { text-shadow: 0 1px 6px rgba(0,0,0,.65), 0 0 2px rgba(0,0,0,.5); }
+  .hud .label { color: rgba(243,238,226,.85); }
 
   #counter { top: calc(14px + env(safe-area-inset-top, 0px)); left: calc(16px + env(safe-area-inset-left, 0px)); }
   #counter .big { font-family: var(--display); font-weight: 900; font-size: clamp(30px, 5vw, 54px); line-height: 0.9; letter-spacing: 0.01em; }
   #counter .big .of { color: var(--muted); font-weight: 600; }
   #counter .bump { color: var(--yellow); font-family: var(--display); font-weight: 800; font-size: 20px; height: 24px; opacity: 0; transition: opacity .25s; }
+  #alert { display: flex; gap: 4px; align-items: center; margin-top: 4px; }
+  #alert i { width: 14px; height: 6px; background: rgba(243,238,226,.18); }
+  #alert i.on { background: var(--orange); }
+  #alert i.on.hot { background: var(--red); }
+
+  #clock { top: calc(14px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); text-align: center; }
+  #clock .t { font-family: var(--display); font-weight: 800; font-size: 26px; line-height: 1; }
+  #ext { margin-top: 6px; color: var(--red); font-family: var(--display); font-weight: 800; font-size: 16px; letter-spacing: .06em; text-transform: uppercase; }
 
   #colony { top: calc(14px + env(safe-area-inset-top, 0px)); right: calc(16px + env(safe-area-inset-right, 0px)); text-align: right; display: grid; gap: 2px; }
   #colony .v { font-family: var(--display); font-weight: 800; font-size: 26px; line-height: 1; }
+  body.lab-open #colony { right: calc(min(360px, 92vw) + 16px); }
 
   #vitals { bottom: calc(18px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); display: grid; gap: 8px; justify-items: center; width: min(420px, 80vw); }
   .bars { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; width: 100%; }
   .bar { height: 7px; background: rgba(243, 238, 226, 0.12); position: relative; overflow: hidden; }
   .bar i { position: absolute; inset: 0 auto 0 0; width: 100%; background: var(--yellow); transition: width .1s linear; }
   .bar.venom i { background: var(--fg); }
-  #status { font-family: var(--display); font-weight: 800; font-size: 18px; letter-spacing: 0.06em; text-transform: uppercase; min-height: 22px; text-shadow: 0 1px 6px rgba(0,0,0,.5); }
+  .bar.heat i { background: var(--red); }
+  #status { font-family: var(--display); font-weight: 800; font-size: 18px; letter-spacing: 0.06em; text-transform: uppercase; min-height: 22px; }
+  #hint { font-size: 11.5px; color: var(--fg); min-height: 16px; text-align: center; }
+  #hint kbd { font: 600 10.5px var(--mono); border: 1px solid rgba(243,238,226,.4); padding: 0 4px; margin: 0 2px; }
+  #ball { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; width: 100%; }
 
   #reticle { left: 50%; top: 50%; width: 18px; height: 18px; margin: -9px 0 0 -9px; border: 1.5px solid rgba(243,238,226,.55); border-radius: 50%; }
   #reticle.contact { border-color: var(--yellow); box-shadow: 0 0 0 3px rgba(246,199,0,.18); }
   #reticle.blocked { border-color: var(--slate); }
-  #zone { left: 50%; top: calc(50% + 18px); transform: translateX(-50%); text-align: center; font-family: var(--display); font-weight: 800; font-size: 20px; letter-spacing: 0.08em; text-transform: uppercase; text-shadow: 0 1px 6px rgba(0,0,0,.6); }
-  #zone small { text-shadow: 0 1px 4px rgba(0,0,0,.9); display: block; font-family: var(--mono); font-weight: 500; font-size: 11px; letter-spacing: .04em; text-transform: none; color: var(--muted); }
+  #zone { left: 50%; top: calc(50% + 18px); transform: translateX(-50%); text-align: center; font-family: var(--display); font-weight: 800; font-size: 20px; letter-spacing: 0.08em; text-transform: uppercase; }
+  #zone small { display: block; font-family: var(--mono); font-weight: 500; font-size: 11px; letter-spacing: .04em; text-transform: none; color: var(--fg); opacity: .85; }
 
-  #toast { top: 22%; left: 50%; transform: translateX(-50%); text-align: center; font-family: var(--display); font-weight: 800; font-size: 22px; letter-spacing: .05em; text-transform: uppercase; opacity: 0; transition: opacity .3s; text-shadow: 0 2px 10px rgba(0,0,0,.6); max-width: 90vw; }
+  #toast { top: 24%; left: 50%; transform: translateX(-50%); text-align: center; font-family: var(--display); font-weight: 800; font-size: 22px; letter-spacing: .05em; text-transform: uppercase; opacity: 0; transition: opacity .3s; max-width: 90vw; }
 
   #map { bottom: calc(16px + env(safe-area-inset-bottom, 0px)); left: calc(16px + env(safe-area-inset-left, 0px)); width: 168px; height: 168px; background: var(--panel); border: 1px solid var(--line); }
   #mapcap { bottom: calc(188px + env(safe-area-inset-bottom, 0px)); left: calc(16px + env(safe-area-inset-left, 0px)); }
 
-  body.lab-open #colony { right: calc(min(360px, 92vw) + 16px); }
-  #lab { box-sizing: border-box; position: fixed; z-index: 6; top: 0; right: 0; bottom: 0; width: min(360px, 92vw); background: var(--panel); border-left: 1px solid var(--line); padding: calc(14px + env(safe-area-inset-top, 0px)) calc(16px + env(safe-area-inset-right, 0px)) 14px 16px; overflow-y: auto; pointer-events: auto; display: grid; align-content: start; gap: 14px; font-size: 12px; }
-  #lab h3 { margin: 0 0 6px; font-family: var(--display); font-weight: 800; font-size: 16px; letter-spacing: .08em; text-transform: uppercase; color: var(--yellow); }
-  #lab dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; }
-  #lab dt { color: var(--muted); }
-  #lab dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; min-width: 0; overflow-wrap: anywhere; }
-  #lab .swatline { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 3px 0; border-top: 1px solid rgba(243,238,226,.08); }
-  #lab .log { font-size: 11px; color: var(--muted); display: grid; gap: 1px; }
-  #lab .log b { color: var(--fg); font-weight: 500; }
-  #lab .row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .panel { box-sizing: border-box; position: fixed; z-index: 6; background: var(--panel); overflow-y: auto; pointer-events: auto; display: grid; align-content: start; gap: 14px; font-size: 12px; }
+  .panel h3 { margin: 0 0 6px; font-family: var(--display); font-weight: 800; font-size: 16px; letter-spacing: .08em; text-transform: uppercase; color: var(--yellow); }
+  .panel dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; }
+  .panel dt { color: var(--muted); }
+  .panel dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; min-width: 0; overflow-wrap: anywhere; }
+  .panel .row { display: flex; flex-wrap: wrap; gap: 6px; }
+  #lab { top: 0; right: 0; bottom: 0; width: min(360px, 92vw); border-left: 1px solid var(--line); padding: calc(14px + env(safe-area-inset-top, 0px)) calc(16px + env(safe-area-inset-right, 0px)) 14px 16px; }
+  #nest { top: calc(150px + env(safe-area-inset-top, 0px)); left: calc(16px + env(safe-area-inset-left, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); width: min(330px, calc(100vw - 32px)); border: 1px solid var(--line); padding: 14px 16px; }
+  body.nest-open #map, body.nest-open #mapcap { display: none; }
+  .swatline { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 3px 0; border-top: 1px solid rgba(243,238,226,.08); }
+  .log { font-size: 11px; color: var(--muted); display: grid; gap: 1px; }
+  .log b { color: var(--fg); font-weight: 500; }
   .legend { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11px; color: var(--muted); }
   .legend span::before { content: ""; display: inline-block; width: 9px; height: 9px; margin-right: 5px; vertical-align: -1px; background: var(--c); }
   .ok { color: var(--green); } .bad { color: var(--red); }
 
+  .brood { display: grid; grid-template-columns: 62px 1fr 48px; gap: 4px 8px; align-items: center; }
+  .brood .b { height: 9px; background: rgba(243,238,226,.1); position: relative; }
+  .brood .b i { position: absolute; inset: 0 auto 0 0; background: var(--yellow); }
+  .brood span:last-child, .brood .n { text-align: right; font-variant-numeric: tabular-nums; }
+  .gauge { height: 6px; background: rgba(243,238,226,.12); position: relative; margin-top: 4px; }
+  .gauge i { position: absolute; inset: 0 auto 0 0; background: var(--orange); }
+
   button { font: 600 12px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ink); background: var(--yellow); border: 0; padding: 8px 12px; cursor: pointer; }
   button.ghost { background: transparent; color: var(--fg); border: 1px solid rgba(243,238,226,.3); }
   button.ghost[aria-pressed="true"] { border-color: var(--yellow); color: var(--yellow); }
-  button:focus-visible, input:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
 
-  .screen { position: fixed; z-index: 7; inset: 0; display: grid; place-items: center; background: rgba(13,12,10,.72); padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); overflow-y: auto; }
-  .card { width: min(560px, 100%); display: grid; gap: 18px; }
+  .screen { position: fixed; z-index: 7; inset: 0; display: grid; place-items: center; background: rgba(13,12,10,.74); padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); overflow-y: auto; }
+  .card { width: min(600px, 100%); display: grid; gap: 18px; }
   .title { font-family: var(--display); font-weight: 900; font-size: clamp(72px, 16vw, 148px); line-height: .82; letter-spacing: -.01em; margin: 0; }
   .title span { color: var(--yellow); }
   .sub { font-family: var(--display); font-weight: 600; font-size: 22px; color: var(--muted); letter-spacing: .04em; margin: 0; }
-  .card p { margin: 0; line-height: 1.55; max-width: 62ch; color: var(--fg); }
-  .keys { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px 18px; font-size: 12px; color: var(--muted); }
+  .card p { margin: 0; line-height: 1.55; max-width: 64ch; color: var(--fg); }
+  .keys { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 6px 18px; font-size: 12px; color: var(--muted); }
   .keys kbd { font: 600 11px var(--mono); color: var(--fg); border: 1px solid rgba(243,238,226,.3); padding: 1px 5px; margin-right: 6px; }
   .start { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
   .start label { display: grid; gap: 4px; }
-  .start input { font: 500 14px var(--mono); background: var(--panel-solid); color: var(--fg); border: 1px solid rgba(243,238,226,.3); padding: 7px 9px; width: 14ch; }
+  .start input, .start select { font: 500 14px var(--mono); background: var(--panel-solid); color: var(--fg); border: 1px solid rgba(243,238,226,.3); padding: 7px 9px; }
+  .start input { width: 12ch; }
   .stripe { height: 10px; background: repeating-linear-gradient(-45deg, var(--yellow) 0 12px, var(--ink) 12px 24px); }
 
   #pauseScreen { z-index: 5; }
-  #dead { z-index: 4; }
+  #dead { z-index: 4; background: rgba(13,12,10,.35); pointer-events: none; }
   #dead .title { color: var(--red); font-size: clamp(56px, 12vw, 110px); }
-  #dead { background: rgba(13,12,10,.35); pointer-events: none; }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 
 <canvas id="view" aria-label="STING game view"></canvas>
 
-<div class="hud" id="counter">
+<div class="hud shadow" id="counter">
   <div class="label">Stung</div>
   <div class="big num"><span id="stungN">0</span> <span class="of">/ 8,200,000,000</span></div>
   <div class="bump" id="bump"></div>
+  <div class="label">Neighborhood alert</div>
+  <div id="alert"><i></i><i></i><i></i><i></i></div>
 </div>
 
-<div class="hud" id="colony">
-  <div class="label">Workers left</div><div class="v num" id="workers">30</div>
-  <div class="label" style="margin-top:8px">Driving</div><div class="v num" id="serial">Worker 1</div>
+<div class="hud shadow" id="clock">
+  <div class="t num" id="clockT">Day 1 · 11:00</div>
+  <div class="label" id="clockW">24 °C · clear</div>
+  <div id="ext"></div>
+</div>
+
+<div class="hud shadow" id="colony">
+  <div class="label">Colony adults</div><div class="v num" id="adults">30</div>
+  <div class="label" style="margin-top:6px">Brood</div><div class="v num" id="brood">105</div>
+  <div class="label" style="margin-top:6px">Driving</div><div class="v num" id="serial">Worker 1</div>
 </div>
 
 <div class="hud" id="reticle"></div>
-<div class="hud" id="zone"></div>
-<div class="hud" id="toast"></div>
+<div class="hud shadow" id="zone"></div>
+<div class="hud shadow" id="toast"></div>
 
-<div class="hud" id="vitals">
+<div class="hud shadow" id="vitals">
   <div id="status"></div>
+  <div id="hint"></div>
+  <div id="ball" hidden><span class="label">Heat</span><div class="bar heat"><i id="heatBar"></i></div></div>
   <div class="bars">
     <span class="label">Venom</span><div class="bar venom"><i id="venomBar"></i></div>
     <span class="label">Crop</span><div class="bar"><i id="cropBar"></i></div>
   </div>
 </div>
 
-<div class="hud label" id="mapcap">Discovered chunks</div>
+<div class="hud label shadow" id="mapcap">Discovered chunks</div>
 <canvas class="hud" id="map" width="336" height="336"></canvas>
 
-<aside id="lab" hidden>
+<aside class="panel" id="nest" hidden>
+  <section>
+    <h3>Nest</h3>
+    <dl id="nStores"></dl>
+    <div class="label" style="margin-top:8px">Sugar deficit</div>
+    <div class="gauge"><i id="nDeficit"></i></div>
+  </section>
+  <section>
+    <h3>Brood</h3>
+    <div class="brood" id="nBrood"></div>
+  </section>
+  <section>
+    <h3>Foraging</h3>
+    <div class="row" id="nAlloc"></div>
+    <p class="label" style="margin:8px 0 0">Shifts what idle workers bring home.</p>
+  </section>
+</aside>
+
+<aside class="panel" id="lab" hidden>
   <section>
     <h3>Lab</h3>
     <dl>
       <dt>Tick</dt><dd id="lTick">0</dd>
       <dt>State hash</dt><dd id="lHash">-</dd>
-      <dt>Seed</dt><dd id="lSeed">-</dd>
+      <dt>World</dt><dd id="lSeed">-</dd>
       <dt>Chunks frozen / active</dt><dd id="lChunks">-</dd>
       <dt>Wasp</dt><dd id="lWasp">-</dd>
+      <dt>Workers out</dt><dd id="lAI">-</dd>
+      <dt>Chunk alert points</dt><dd id="lEsc">-</dd>
     </dl>
   </section>
   <section>
@@ -140,7 +196,7 @@
     </div>
     <div id="verifyOut" class="label" style="margin-top:6px"></div>
     <div class="legend" style="margin-top:8px">
-      <span style="--c:var(--red)">slap</span><span style="--c:var(--orange)">cover</span><span style="--c:var(--yellow)">brush</span><span style="--c:var(--green)">contort</span><span style="--c:var(--slate)">blocked</span><span style="--c:#c9c3f0">freezes</span>
+      <span style="--c:var(--red)">slap</span><span style="--c:var(--orange)">cover</span><span style="--c:var(--yellow)">brush</span><span style="--c:var(--green)">contort</span><span style="--c:var(--slate)">blocked</span><span style="--c:var(--lilac)">freezes</span>
     </div>
   </section>
   <section>
@@ -162,22 +218,29 @@
     <div class="stripe"></div>
     <h1 class="title">STI<span>NG</span></h1>
     <p class="sub">stung 0 / 8,200,000,000</p>
-    <p>You drive one worker of a wasp colony. Every human reacts to a sting the same way every time: same delay, same hand, same reach. Learn them, sting, and be gone before the slap lands. Nobody can reach the middle of their own back. Their friends can.</p>
+    <p>You drive one worker of a wasp colony. Every human reacts to a sting the same way every time. Learn them, sting, and be gone before the slap lands. Bring flies, caterpillars and pulp home so the brood keeps coming. Sting too much in one place and the neighborhood escalates: covered food, sprays, traps, and finally the exterminator. Stay away from the beehives.</p>
     <div class="keys">
       <div><kbd>Mouse</kbd>look</div>
       <div><kbd>W A S D</kbd>fly</div>
       <div><kbd>Space</kbd>/<kbd>C</kbd> up / down</div>
-      <div><kbd>Shift</kbd>burst</div>
-      <div><kbd>Hold LMB</kbd>/<kbd>F</kbd> sting, release to pull out</div>
+      <div><kbd>Shift</kbd>burst · mash to break free</div>
+      <div><kbd>Hold LMB</kbd>/<kbd>F</kbd> sting</div>
+      <div><kbd>E</kbd>catch · chew · crawl under clothes</div>
+      <div><kbd>Q</kbd>take over nearest worker</div>
+      <div><kbd>R</kbd>rest in the nest at night</div>
+      <div><kbd>N</kbd>nest panel</div>
       <div><kbd>Tab</kbd>lab overlay</div>
       <div><kbd>Arrows</kbd>look without mouse</div>
       <div><kbd>Esc</kbd>pause</div>
     </div>
     <div class="start">
       <label class="label" for="seed">World seed<input id="seed" value="1234" inputmode="numeric" autocomplete="off"></label>
+      <label class="label" for="dayLen">Day length<select id="dayLen"><option value="2" selected>2 min</option><option value="6">6 min</option><option value="12">12 min</option></select></label>
+      <label class="label" for="density">People<select id="density"><option value="0.7">Fewer</option><option value="1" selected>Normal</option><option value="1.15">Busy</option></select></label>
+      <label class="label" for="bees">Bees<select id="bees"><option value="0.7">Calm</option><option value="1" selected>Normal</option><option value="1.5">Vicious</option></select></label>
       <button id="bStart">Fly</button>
     </div>
-    <p class="label" id="startNote">Built for keyboard and mouse.</p>
+    <p class="label" id="startNote">Personal world. Built for keyboard and mouse.</p>
   </div>
 </div>
 
