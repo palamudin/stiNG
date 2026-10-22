@@ -15,7 +15,7 @@ The tier-0 slice of the GDD, built in the browser so it can move to Unity. Same 
 | `sim/bots.js` | Scripted pilots that produce ordinary input commands | test harness |
 | `game.js` | three.js rendering, animation, camera, input, HUD, sound | Unity scene, Animator, UI |
 | `index.html` | Page shell, HUD markup and styles | UI Toolkit |
-| `test/sim.test.mjs` | 66 headless sim checks | `Sting.Core.Tests` |
+| `test/sim.test.mjs` | 71 headless sim checks | `Sting.Core.Tests` |
 | `test/net.test.mjs` | 21 network checks | `Sting.Net.Tests` |
 
 Run the tests with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 18+, no packages).
@@ -64,6 +64,9 @@ Run the tests with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 1
 | 38 | Jumpy humans: each sting a person has had makes their swats faster and their panic sharper | 8.10 | 7 |
 | 39 | Save and continue a personal world: exact snapshot (34 KB), chunks regenerated from the seed and checked against their content hash, autosave each dawn and on pause | 4.3, 12.4 | 8 |
 | 40 | Late join: a second peer builds its world from a snapshot of the first and agrees on every human from its first tick | 11.10 | 8 |
+| 41 | Walk on surfaces: camera-relative on tables, benches and the ground; trunks block, edges drop you into flight, walking into a person climbs onto them; six legs with a tripod gait | 7.2 | 9 |
+| 42 | Sugar store capped at a few days of adult need, so stores drain in autumn instead of piling up | 6.3 | 9 |
+| 43 | Death screen says why: lingered after a sting, felt crawling, hovered at a face, caught in a swat meant for another wasp, bird, web, ball, trap, spray | 8.2 | 9 |
 
 ## Verified
 
@@ -83,10 +86,10 @@ Run the tests with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 1
 
 ## Known limits
 
-- The colony economy is balanced loosely; sugar stores grow large late in the season.
-- Wasps land and rest but cannot walk on surfaces.
+- The colony economy is balanced loosely: protein piles up mid-season before queen larvae eat it down.
+- Walking is on horizontal surfaces only; tree trunks and walls are obstacles, not surfaces.
 - Fights between a remote player's wasp and local rivals are not networked yet; rivals live on the first peer only.
 
 ## Controls
 
-Mouse look · WASD fly · Space / C up and down · Shift burst, mash to break free · hold LMB or F to sting · E catch, chew, crawl under clothes · Q take over nearest worker · R rest at night · N nest panel · Tab lab · M sound · Arrows look · Esc pause (Save world is on the pause screen; Continue appears on the start screen once a save exists).
+Mouse look · WASD fly · Space / C up and down · Shift burst, mash to break free · hold LMB or F to sting · E catch, chew, crawl under clothes · Q take over nearest worker · R rest at night · N nest panel · Tab lab · M sound · Arrows look · WASD walk when landed · Esc pause (Save world is on the pause screen; Continue appears on the start screen once a save exists).

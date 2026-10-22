@@ -48,6 +48,7 @@ export const T = {
     cellsPerPulp: 8, buildPerDay: 1.5,
     forageShare: 0.55, income: { sugar: 0.3, protein: 0.35, pulp: 0.15 },
     deficitSmoothing: 0.1, queenStarveDays: 1,
+    sugarCapBase: 6, sugarCapDays: 2.5,                            // bio: Vespula keep little sugar; a store of a few days of adult need
   },
   alloc: [
     { name: 'Balanced', sugar: 1, protein: 1, pulp: 1 },
@@ -95,7 +96,7 @@ export const T = {
   // Predators and rivals (GDD 9.3)
   web: { spiderSpeed: 0.06, spiderDelay: 60, escapePerPress: 0.22, aiEscape: 0.004 },
   bird: { sight: 7, minY: 1.5, abortY: 0.8, speed: 9, accel: 26, catch: 0.06, diveTicks: 150, coolTicks: 600 },
-  land: { maxSpeed: 0.25, gap: 0.004 },
+  land: { maxSpeed: 0.25, gap: 0.004, walkSpeed: 0.05 }, // bio: Vespula walk a few cm/s
   // Perching and crawling on people (GDD 7.2, 8.3): how long until they feel you
   perch: { crawlSpeed: 0.06, tickleBase: 4, bareMul: 1, thinMul: 2, backMul: 1.5, faceMul: 0.4, movingMul: 2, cooldown: 90, panic: 0.05 },
   memory: { fasterPerSting: 0.08, minFactor: 0.6, panicPerSting: 0.15, maxStings: 4 },

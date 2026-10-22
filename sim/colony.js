@@ -18,6 +18,7 @@ export function newColony(founding = false) {
   return c;
 }
 
+export const sugarCap = (c) => T.colony.sugarCapBase + c.adults * T.colony.adultSugar * T.colony.sugarCapDays;
 export const broodTotal = (c) => c.eggs + c.larvae + c.pupae + c.rEggs + c.rLarvae + c.rPupae;
 
 // Season phase from the season fraction (GDD 5.2)
@@ -44,6 +45,10 @@ export function colonyStep(c, dtDay, physical, foraging, frac = 0.3, bio = 1) {
     c.protein += f * C.income.protein * a.protein / wsum;
     c.pulp += f * C.income.pulp * a.pulp / wsum;
   }
+
+  // Wasps keep only a small sugar store: what does not fit is not collected
+  const cap = sugarCap(c);
+  if (c.sugar > cap) { c.stats.sugarSpilled = (c.stats.sugarSpilled || 0) + c.sugar - cap; c.sugar = cap; }
 
   // Larvae eat protein first; queen larvae eat more. Fed larvae return sugar secretion (GDD 6.3)
   const need = (c.larvae + c.rLarvae * S.reproProtein) * C.larvaProtein * dtDay;

@@ -333,7 +333,7 @@ export class Sim {
       case 'sting': {
         const hm = this.humanByHex(ev.humanHex);
         if (!hm) break;
-        for (const s of ev.swats) this.swats.push({ ...s, frameHex: hm.hex, stungHex: hm.hex, contactTick: ev.tick, hits: [], underOnly: ev.under ? ev.waspId : 0, byWasp: ev.waspId });
+        for (const s of ev.swats) this.swats.push({ ...s, frameHex: hm.hex, stungHex: hm.hex, contactTick: ev.tick, hits: [], underOnly: ev.under ? ev.waspId : 0, byWasp: ev.waspId, why: ev.under ? 'stungUnder' : 'stung' });
         if (!mine) this.emit('remoteSting', { waspId: ev.waspId, humanHex: hm.hex, zone: ev.zone, contactTick: ev.tick, under: ev.under, swats: ev.swats });
         break;
       }
@@ -342,7 +342,7 @@ export class Sim {
         if (!hm) break;
         this.swats.push({
           actorId: hm.id, actorHex: hm.hex, frameHex: hm.hex, stungHex: hm.hex, kind: ev.kind, start: ev.start, window: ev.window,
-          center: ev.center, radius: ev.radius, kills: ev.kills, contactTick: ev.tick, hits: [], pre: true, targetId: ev.waspId, underOnly: 0,
+          center: ev.center, radius: ev.radius, kills: ev.kills, contactTick: ev.tick, hits: [], pre: true, targetId: ev.waspId, underOnly: 0, why: ev.why,
         });
         if (mine) hm.cooldown = Math.max(hm.cooldown, ev.tick + T.esc.cooldownTicks);
         this.emit('preSwat', { humanHex: hm.hex, waspId: ev.waspId, kind: ev.kind, start: ev.start, window: ev.window, center: ev.center, why: ev.why, contactTick: ev.tick });
@@ -351,7 +351,7 @@ export class Sim {
       case 'press': {
         const hm = this.humanByHex(ev.humanHex);
         if (!hm) break;
-        for (const s of ev.swats) this.swats.push({ ...s, actorHex: hm.hex, frameHex: hm.hex, stungHex: hm.hex, contactTick: ev.tick, hits: [], underOnly: ev.waspId, byWasp: ev.waspId });
+        for (const s of ev.swats) this.swats.push({ ...s, actorHex: hm.hex, frameHex: hm.hex, stungHex: hm.hex, contactTick: ev.tick, hits: [], underOnly: ev.waspId, byWasp: ev.waspId, why: 'felt under clothing' });
         this.emit('press', { humanHex: hm.hex, start: ev.swats[0].start, center: ev.swats[0].center, contactTick: ev.tick });
         break;
       }
@@ -362,7 +362,7 @@ export class Sim {
       case 'notice': {
         const hm = this.humanByHex(ev.humanHex);
         if (!hm) break;
-        for (const s of ev.swats) this.swats.push({ ...s, frameHex: hm.hex, stungHex: hm.hex, contactTick: ev.tick, hits: [], underOnly: 0, byWasp: ev.waspId, pre: true });
+        for (const s of ev.swats) this.swats.push({ ...s, frameHex: hm.hex, stungHex: hm.hex, contactTick: ev.tick, hits: [], underOnly: 0, byWasp: ev.waspId, pre: true, why: 'felt' });
         this.emit('notice', { humanHex: hm.hex, waspId: ev.waspId, zone: ev.zone, swats: ev.swats, contactTick: ev.tick });
         break;
       }
@@ -543,10 +543,15 @@ export class Sim {
         } else if (armed && w.contact && w.contact.humanHex === w.ai.humanHex) this._beginSting(w, w.contact, 'jab');
         break;
       case 'landed': {
-        const still = !cmd.mx && !cmd.my && !cmd.mz && !cmd.burst && !cmd.sting && !(edge & Act.Interact);
-        if (!driven || !still) { w.state = 'fly'; w.vy = 0.5; this.emit('takeoff', { id: w.id }); if (driven && (edge & Act.Interact)) this._interact(w); }
-        else w.venom = Math.min(1, w.venom + T.venom.regenPerSec * DT);
-        if (driven) this._hints(w);
+        // Walk on the surface with the move keys; climb, burst or sting to take off (GDD 7.2)
+        if (!driven || cmd.my > 0 || cmd.burst || cmd.sting) { this._takeoff(w); break; }
+        if (edge & Act.Interact) { this._interact(w); if (w.state !== 'landed') break; }
+        w.walking = false;
+        if (cmd.mx || cmd.mz) this._walk(w, cmd);
+        if (w.state !== 'landed') break;
+        this._feed(w, driven);
+        if (w.state !== 'landed') break;
+        this._hints(w);
         break;
       }
       case 'webbed': this._webStep(w, cmd, driven); break;
@@ -1058,7 +1063,7 @@ export class Sim {
         s.hits.push(w.id);
         this.emit('swatHit', { waspId: w.id, actorHex: s.actorHex, frameHex: s.frameHex, kind: s.kind, kills: s.kills, delayTicks: s.start - s.contactTick });
         const causes = { [SwatKind.Slap]: 'slap', [SwatKind.Cover]: 'cover', [SwatKind.Compress]: 'crushed under clothing' };
-        if (s.kills) this._die(w, (causes[s.kind] || 'swat') + (s.actorHex === s.frameHex || s.pre ? '' : ' (helper)'), s.actorHex);
+        if (s.kills) this._die(w, (causes[s.kind] || 'swat') + (s.actorHex === s.frameHex || s.pre ? '' : ' (helper)'), s.actorHex, { why: s.why, own: s.byWasp === w.id || s.targetId === w.id, delay: s.start - s.contactTick });
         else this._stun(w);
       }
     }
@@ -1100,7 +1105,7 @@ export class Sim {
     this.emit('stunned', { id: w.id, driven: w.id === this.drivenId });
   }
 
-  _die(w, cause, byHex) {
+  _die(w, cause, byHex, detail = null) {
     const driven = w.id === this.drivenId;
     this.wasps = this.wasps.filter((x) => x !== w);
     w.state = 'dead';
@@ -1117,7 +1122,7 @@ export class Sim {
     }
     this._publish({ type: 'died', waspId: w.id, cause, x: w.x, y: w.y, z: w.z });
     this._releaseBees(w.id);
-    this.emit('waspDied', { id: w.id, driven, cause, byHex, x: w.x, y: w.y, z: w.z, adultsLeft: Math.floor(this.colony.adults) });
+    this.emit('waspDied', { id: w.id, driven, cause, byHex, detail, x: w.x, y: w.y, z: w.z, adultsLeft: Math.floor(this.colony.adults) });
     if (driven) {
       this.ghost = { ...w, state: 'dead' };
       this.respawnAt = this.tick + T.respawnTicks;
@@ -1715,6 +1720,30 @@ export class Sim {
     if (!surf) return;
     w.state = 'landed'; w.vx = w.vy = w.vz = 0;
     this.emit('landed', { id: w.id, surface: surf });
+  }
+
+  _takeoff(w) { w.state = 'fly'; w.vy = 0.5; w.walking = false; this.emit('takeoff', { id: w.id }); }
+
+  // Walk camera-relative across the surface the wasp stands on. Off the edge it drops into flight;
+  // the sides of boxes and tree trunks stop it.
+  _walk(w, cmd) {
+    const yaw = cmd.yawQ * 1e-4, sy = dsin(yaw), cy = dcos(yaw);
+    const mz = cmd.mz / 100, mx = cmd.mx / 100, sp = T.land.walkSpeed * DT;
+    const nx = w.x + (sy * mz - cy * mx) * sp, nz = w.z + (cy * mz + sy * mx) * sp;
+    const R = T.wasp.radius;
+    for (const rec of this.activeChunks) {
+      for (const b of rec.content.boxes) {
+        if (nx < b.minx - R || nx > b.maxx + R || nz < b.minz - R || nz > b.maxz + R) continue;
+        if (w.y > b.miny && w.y < b.maxy) return; // blocked by the side
+      }
+      for (const t of rec.content.trees) { const dx = nx - t.x, dz = nz - t.z; if (dx * dx + dz * dz < (t.r + R) ** 2) return; }
+    }
+    w.x = nx; w.z = nz; w.yaw = yaw; w.walking = true;
+    // walking into a person climbs onto them (an arm on the table, a leg on the grass)
+    this._contactQuery(w);
+    if (w.contact && !w.contact.blockedPerch) { w.walking = false; this._perch(w, w.contact); return; }
+    w.contact = null;
+    if (!this._surfaceBelow(w)) { w.state = 'fly'; w.walking = false; w.vy = 0; this.emit('walkOff', { id: w.id }); }
   }
 
   _nearCan(w) {

@@ -340,8 +340,36 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   w4.energy = 0.5;
   ev = run(s4, 300, () => idle());
   ok(w4.state === 'landed' && Math.abs(w4.energy - 0.5) < 0.01, `a still wasp lands on the bench and rests (${w4.state}, crop ${w4.energy.toFixed(3)})`);
-  run(s4, 2, () => idle({ mz: 100 }));
-  ok(w4.state === 'fly', 'any input takes off again');
+  // walking: the move keys walk camera-relative on the surface; off the edge the wasp drops into flight.
+  // The middle of the table top, walking along it, is clear of arms.
+  const table = s4.records.get('0,0').content.boxes[0];
+  place(w4, { x: (table.minx + table.maxx) / 2, y: table.maxy + 0.0071, z: (table.minz + table.maxz) / 2 });
+  run(s4, 120, () => idle());
+  const x0 = w4.x;
+  run(s4, 30, () => idle({ yawQ: 0, mx: -100 }));
+  ok(w4.state === 'landed' && w4.x > x0 + 0.02 && Math.abs(w4.y - (table.maxy + T.wasp.radius)) < 0.01, `a landed wasp walks across the table (${((w4.x - x0) * 100).toFixed(1)} cm)`);
+  ev = run(s4, 1500, () => idle({ yawQ: 0, mx: -100 }));
+  ok(count(ev, 'walkOff') === 1 && w4.state === 'fly' && w4.x >= table.maxx, `walking off the edge drops it into flight (${w4.state})`);
+  // walking into a seated person climbs onto them
+  // land on the bench 30 cm beside someone sitting on it (fresh world, so nobody has left yet), then walk toward them
+  {
+    const s5 = new Sim({ seed: 1234 }), b5 = s5.records.get('0,0').content.boxes[1], w5 = s5.wasp;
+    const sitter = s5.active.find((h) => h.posture === 'sit' && h.z > b5.minz - 0.2 && h.z < b5.maxz + 0.2 && h.x - 0.3 > b5.minx);
+    place(w5, { x: sitter.x - 0.3, y: b5.maxy + 0.0071, z: (b5.minz + b5.maxz) / 2 });
+    run(s5, 120, () => idle());
+    ok(w5.state === 'landed', `lands on the bench beside a seated person (${w5.state})`);
+    ev = run(s5, 600, () => idle({ yawQ: 0, mx: w5.state === 'landed' ? -100 : 0 }));
+    ok(count(ev, 'perch') >= 1, `walking along the bench into them climbs onto them (${w5.state})`);
+  }
+  // on the ground, a tree trunk stops it
+  const tree = s4.records.get('0,0').content.trees[0];
+  place(w4, { x: tree.x - tree.r - 0.05, y: T.wasp.radius + 0.001, z: tree.z });
+  run(s4, 120, () => idle());
+  const gx = w4.x;
+  run(s4, 600, () => idle({ yawQ: 0, mx: -100 }));
+  ok(w4.state === 'landed' && w4.x > gx && w4.x < tree.x - tree.r, `a tree trunk blocks a walking wasp (stopped ${((tree.x - tree.r - w4.x) * 1000).toFixed(1)} mm short)`);
+  run(s4, 2, () => idle({ my: 100 }));
+  ok(w4.state === 'fly', 'climbing takes off again');
 
   // rivals: a rival nest near the origin spawns workers; touching one starts a fight with a winner
   let rs = null, rkey = null;

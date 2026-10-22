@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import {
   Sim, Act, T, DT, ZONES, ZoneName, SwatKind, SwatKindName, StyleName, TopName, BottomName, Top, Bottom,
   toWorld, toLocal, chunkKey, chunkOf, hash, Domain, rangeInt, resolveSting, zoneCover, segClosest, classify, predictedKind,
-  NEST, NEST_ENTRANCE, flyPos, beePos, fmtClock, minuteOfDay, isLowerZone, broodTotal, garmentGraph, dayWeather,
+  NEST, NEST_ENTRANCE, flyPos, beePos, fmtClock, minuteOfDay, isLowerZone, broodTotal, sugarCap, garmentGraph, dayWeather,
   NetLab, LINKS, birdPos, snapshot, restore, replayFrom,
 } from './sim/index.js';
 
@@ -622,9 +622,19 @@ function buildWasp(remote = false, rival = false) {
   const wl = new THREE.Mesh(wingGeo, wingMat), wr = new THREE.Mesh(wingGeo, wingMat);
   wl.position.set(0.001, 0.0018, 0.003); wr.position.set(-0.001, 0.0018, 0.003); wr.scale.x = -1;
   const carry = new THREE.Mesh(new THREE.SphereGeometry(0.0035, 8, 6), mat('#1b1a17')); carry.position.set(0, -0.004, 0.004); carry.visible = false;
+  // six legs on hip pivots; tripod gait when walking or crawling
+  const legGeo = new THREE.BoxGeometry(0.0055, 0.00035, 0.00035); legGeo.translate(0.00275, 0, 0);
+  const legs = [];
+  for (let i = 0; i < 6; i++) {
+    const side = i < 3 ? 1 : -1, k = i % 3;
+    const hip = new THREE.Group(); hip.position.set(side * 0.0012, -0.0012, 0.0036 - k * 0.0011);
+    const leg = new THREE.Mesh(legGeo, black); hip.add(leg);
+    hip.userData = { side, base: (1 - k) * 0.55, phase: (k + (side > 0 ? 0 : 1)) % 2 };
+    legs.push(hip); g.add(hip);
+  }
   g.add(head, eyes, thorax, abdomen, wl, wr, carry);
   g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
-  Object.assign(g.userData, { abdomen, wl, wr, carry, yaw: 0 });
+  Object.assign(g.userData, { abdomen, wl, wr, carry, legs, yaw: 0, step: 0 });
   scene.add(g);
   return g;
 }
@@ -650,7 +660,7 @@ function renderWasps(alpha, t, dt) {
     g.position.copy(p);
     g.scale.setScalar(w.caste === 'queen' ? 1.3 : 1);
     g.rotation.order = 'YXZ';
-    if (driven && w.state !== 'balled') { g.rotation.y = input.yaw; g.rotation.x = -input.pitch * 0.6; }
+    if (driven && w.state !== 'balled') { g.rotation.y = input.yaw; g.rotation.x = w.state === 'landed' ? 0 : -input.pitch * 0.6; }
     else {
       const sp = Math.hypot(w.vx, w.vz);
       if (sp > 0.05) { let d = Math.atan2(w.vx, w.vz) - g.userData.yaw; d = Math.atan2(Math.sin(d), Math.cos(d)); g.userData.yaw += d * Math.min(1, dt * 10); }
@@ -659,6 +669,17 @@ function renderWasps(alpha, t, dt) {
     g.rotation.z = w.state === 'stunned' ? t * 0.6 : w.state === 'fighting' ? Math.sin(t * 3 + w.id) * 1.4 : 0;
     const flap = w.state === 'attached' || w.state === 'balled' || w.state === 'trapped' || w.state === 'landed' || w.state === 'perched' ? 0.15 : w.state === 'webbed' ? Math.sin(t * 2.3) * 0.3 : w.state === 'fighting' ? Math.sin(t * 5 + w.id) * 1.2 : Math.sin(performance.now() * 0.9 + w.id) * 0.9;
     g.userData.wl.rotation.z = flap; g.userData.wr.rotation.z = -flap;
+    // legs: planted and stepping on a surface, tucked back in flight
+    const onSurface = w.state === 'landed' || w.state === 'perched' || w.state === 'attached' || w.state === 'chewing';
+    const moving = pp && onSurface && pp.p.distanceToSquared(pp.c) > 1e-10;
+    if (moving) g.userData.step += dt * 14;
+    for (const hip of g.userData.legs) {
+      const u = hip.userData, swing = moving ? Math.sin(g.userData.step + u.phase * Math.PI) * 0.35 : 0;
+      const lift = moving ? Math.max(0, Math.cos(g.userData.step + u.phase * Math.PI)) * 0.25 : 0;
+      hip.rotation.order = 'YZX';
+      hip.rotation.y = u.side > 0 ? -(onSurface ? u.base + swing : -0.9) : Math.PI + (onSurface ? u.base + swing : -0.9);
+      hip.rotation.z = -(onSurface ? 0.75 - lift : 1.2);
+    }
     g.userData.abdomen.rotation.x = w.state === 'attached' ? 0.5 + Math.sin(t * 0.8) * 0.06 : 0;
     const cv = g.userData.carry;
     cv.visible = !!w.carry;
@@ -970,7 +991,7 @@ function updateNest() {
   $('nStores').innerHTML = [
     ['Queen', c.queenAlive ? 'laying' : c.nestAlive ? 'dead' : 'nest destroyed'],
     ['Adults inside / out', `${fmt(Math.max(0, c.adults - out))} / ${out}`],
-    ['Protein', c.protein.toFixed(1)], ['Sugar', c.sugar.toFixed(1)], ['Pulp', c.pulp.toFixed(1)],
+    ['Protein', c.protein.toFixed(1)], ['Sugar', `${c.sugar.toFixed(1)} / ${sugarCap(c).toFixed(0)}`], ['Pulp', c.pulp.toFixed(1)],
     ['Cells used', `${fmt(broodTotal(c))} / ${fmt(c.cells)}`], ['Larvae fed', Math.round(c.fed * 100) + '%'],
     ['Emerged · laid', `${fmt(c.stats.emerged)} · ${fmt(c.stats.laid)}`],
   ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
@@ -1095,7 +1116,7 @@ function updateHud() {
   if (w.state === 'balled') hint = `Mash ${kbd('Shift')} to break out`;
   else if (w.state === 'webbed') hint = `Mash ${kbd('Shift')} to tear free`;
   else if (w.state === 'fighting') hint = `Mash ${kbd('LMB')} to sting it first`;
-  else if (w.state === 'landed') hint = 'Resting costs no sugar · any key takes off';
+  else if (w.state === 'landed') hint = w.walking ? 'Walking · off the edge and you drop into flight' : 'Resting costs no sugar · WASD walk · Space, Shift or sting takes off';
   else if (w.state === 'perched') hint = `${kbd('W')}${kbd('A')}${kbd('S')}${kbd('D')} crawl (look up or down to climb) · ${kbd('LMB')} sting · ${kbd('Space')} take off · ${kbd('E')} crawl under at an opening`;
   else if (h.rival) hint = `${kbd('E')} steal a larva from the rival nest`;
   else if (w.state === 'under') {
@@ -1173,6 +1194,28 @@ function drawMap() {
 
 // ------------------------------------------------------------------ events
 
+// One line on why it happened, so a death teaches something (GDD 8.2: the outcome is fixed; the player should be able to read it)
+function deathWhy(e) {
+  const d = e.detail || {};
+  if (e.cause === 'taken by a bird') return 'Birds hunt wasps in open air above head height. Keep low or under the trees.';
+  if (e.cause === 'eaten by a spider') return 'Webs hang between trees. Mash Shift the moment you stick.';
+  if (e.cause === 'cooked by bees') return 'Bees ball an intruder and heat it. Mash Shift before it reaches 46 °C.';
+  if (e.cause === 'drowned in a trap') return 'Sweet-smelling bottles at alert level 3 are traps.';
+  if (e.cause === 'insecticide') return 'Some people carry spray once the area is alert. Stay out of the cone in front of them.';
+  if (e.cause === 'starved') return 'Your crop ran empty. Feed at flowers, cans or plates before it does.';
+  if (e.cause.startsWith('killed by a rival')) return 'Rival wasps defend their nest. Mash sting to win a fight.';
+  if (!d.own && d.why !== undefined) return 'You were caught in a swat aimed at another wasp.';
+  switch (d.why) {
+    case 'stung': return `You stung and were still there when the hand arrived (${ms(d.delay)} ms). Jab and pull out sooner.`;
+    case 'stungUnder': return 'You stung under the clothing; the hand pressed you flat through it.';
+    case 'felt under clothing': return 'They felt you moving under the clothing and pressed.';
+    case 'felt': return 'They felt you crawling on them. Bare skin and the face give you away fastest.';
+    case 'face': return 'You hovered in front of a face. Everyone swats at that.';
+    case 'head': return 'You hovered around a head in an alert area.';
+    case 'food': return 'You hung around their food in an alert area.';
+    default: return '';
+  }
+}
 const DEATH_TITLE = { 'eaten by a spider': 'EATEN', 'taken by a bird': 'TAKEN', 'killed by a rival wasp': 'KILLED', slap: 'SWATTED', cover: 'SMOTHERED', 'crushed under clothing': 'CRUSHED', insecticide: 'SPRAYED', 'drowned in a trap': 'DROWNED', 'cooked by bees': 'COOKED', starved: 'STARVED' };
 
 function pushSwatAnims(list, frameHex, contactTick) {
@@ -1289,6 +1332,7 @@ function handleEvents(events) {
         const when = sw && e.cause !== 'insecticide' ? ` · ${ms(sw.start - sw.contactTick)} ms after contact` : '';
         $('deadTitle').textContent = DEATH_TITLE[e.cause.replace(' (helper)', '')] || 'DEAD';
         $('deadSub').textContent = `${e.cause}${by}${when} · ${sim.colony.queenAlive ? fmt(e.adultsLeft) + ' adults left' : 'the queen is gone'}`;
+        $('deadWhy').textContent = deathWhy(e);
         $('dead').hidden = false;
         deadUntil = performance.now() + 2400;
         logEvent(`you died · ${e.cause}`);
