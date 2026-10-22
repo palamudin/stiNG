@@ -1,0 +1,53 @@
+# STING
+
+`stung: 0 / 8,200,000,000`
+
+An open-world, multiplayer wasp colony simulator. You run a colony through its yearly cycle and drive individual wasps into a world of humans whose reactions are fully determined, and bees who will kill you. No story, no quest, no ending. The game ends only when your colony line perishes, and then you start again from a single queen.
+
+**Play the proof of concept:** https://claude.ai/artifact/9vBh3XSLYZ8J8feaZrVyNh
+
+## What is here
+
+| Path | What it is |
+|---|---|
+| [`docs/STING_GDD.md`](docs/STING_GDD.md) | The game design document: pillars, simulation architecture, world, colony, wasp, humans, bees, multiplayer, Unity contract, decisions, open questions, and findings from the PoC |
+| [`poc/`](poc/) | The three.js proof of concept. A deterministic simulation core (`poc/sim/`) that owns every outcome, and a presentation layer (`poc/game.js`) that only draws. See [`poc/POC.md`](poc/POC.md) for the feature list and what has been verified |
+| [`protocode/`](protocode/) | C# protocode for the Unity port (`Sting.Core`): Fix64, the counter-based RNG, human traits, the sting resolver, reach, chunk storage and authority, colony economy. Compiles with zero packages |
+| [`art/keyart/`](art/keyart/) | Key art sources: the stare, the standoff, the logo lockup and a Steam capsule (Design canvas `.dc.html` files) |
+
+## Running it
+
+Everything runs on stock tooling with no packages installed, on purpose.
+
+**PoC in a browser** (Node 18+):
+
+```sh
+cd poc
+node serve.mjs          # http://127.0.0.1:8080
+```
+
+three.js r160 is the one outside dependency, loaded by exact version from jsDelivr in `poc/index.html`.
+
+**PoC tests** (headless, Node 18+):
+
+```sh
+cd poc
+node test/sim.test.mjs   # simulation: determinism, replay, colony, humans, swats, bees, seasons, saves
+node test/net.test.mjs   # two peers over simulated links: agreement on every human, late join, rival fights
+```
+
+**C# protocode** (.NET 8 SDK):
+
+```sh
+cd protocode/check  && dotnet run -c Release   # Fix64 arithmetic, resolver invariants, chunk authority
+cd protocode/parity && dotnet run -c Release   # must match poc/test/cs_parity.txt bit for bit
+```
+
+`protocode/nuget.config` clears every package source, so a build cannot pull anything from the network.
+
+## Ground rules
+
+- **Determinism.** The sim uses only IEEE-exact operations and its own trig in the PoC, and Fix64 in Unity. Same input, same outcome, on every machine. Replays and saves are bit-exact.
+- **Sim owns outcomes, the engine owns playout.** A person stung on the back will always try to slap where it hurts. Whether they can reach it is decided by their body; how the slap looks is animation.
+- **Multiplayer by design.** No rollback. Events carry positions and commit 30 ticks after they happen; every peer resolves the same humans identically. Owners decide about their own wasps.
+- **Own code.** No third-party packages in the sim or tooling. Supply-chain exposure is limited to one pinned rendering library in the PoC.

@@ -18,7 +18,7 @@ The tier-0 slice of the GDD, built in the browser so it can move to Unity. Same 
 | `test/sim.test.mjs` | 71 headless sim checks | `Sting.Core.Tests` |
 | `test/net.test.mjs` | 22 network checks | `Sting.Net.Tests` |
 
-Run the tests with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 18+, no packages).
+Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 18+, no packages). Play locally with `node serve.mjs`.
 
 ## Feature list
 
