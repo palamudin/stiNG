@@ -10,7 +10,7 @@ import {
   chunkOf, chunkKey, NEST, NEST_ENTRANCE, SPAWN, generateChunk, ticksPerMinute, clockMinutes, dayOf, minuteOfDay,
   isRaining, tempAt, isDaylight, humanWindow, flyPos, beePos,
 } from './world.js';
-import { newColony, colonyStep, destroyNest } from './colony.js';
+import { newColony, colonyStep, destroyNest, colonyFinished, seasonPhase } from './colony.js';
 
 const CMD_FIELDS = 9; // mx, my, mz, burst, sting, yawQ, pitchQ, act, alloc
 export const Act = { Interact: 1, Switch: 2, Rest: 4 };
@@ -54,6 +54,10 @@ export class Sim {
     this.logLen = 0;
     this.minute = clockMinutes(0, this.settings);
     this.day = dayOf(this.minute);
+    this.bio = this.settings.seasonDays / 200;
+    this.season = { n: 1, startMinute: this.minute - T.season.startFrac * this.settings.seasonDays * 1440, phase: '' };
+    this.season.phase = seasonPhase(this.seasonFrac);
+    this.lineage = 0;
     const w = this._spawnWasp(true);
     this.drivenId = w.id;
     this._updateChunks(true);
@@ -85,12 +89,13 @@ export class Sim {
   get temperature() { return tempAt(this.seed, this.minute); }
   get raining() { return isRaining(this.seed, this.minute); }
   get physicalCount() { return this.wasps.length; }
+  get seasonFrac() { return (this.minute - this.season.startMinute) / (this.settings.seasonDays * 1440); }
   canFly() { return this.temperature >= T.weather.flyMinTemp; }
 
-  _spawnWasp(driven) {
+  _spawnWasp(driven, caste = 'worker') {
     const id = this.nextWaspId++;
     const w = {
-      id, x: SPAWN.x, y: SPAWN.y, z: SPAWN.z, vx: 0, vy: 0, vz: 0, yaw: SPAWN.yaw, pitch: 0,
+      id, caste, x: SPAWN.x, y: SPAWN.y, z: SPAWN.z, vx: 0, vy: 0, vz: 0, yaw: SPAWN.yaw, pitch: 0,
       energy: 1, venom: 1, state: 'fly', stateTicks: 0, attach: null, under: null, ball: null,
       carry: null, groundTicks: 0, chew: 0, role: 'sugar',
       ai: { mode: 'pick', target: null, timer: 0, humanHex: null, stings: 0, stingHold: 0 },
@@ -102,7 +107,7 @@ export class Sim {
     }
     this.wasps.push(w);
     this.wasps.sort(byId);
-    this.emit('waspSpawn', { id, driven });
+    this.emit('waspSpawn', { id, driven, caste });
     return w;
   }
 
@@ -268,7 +273,7 @@ export class Sim {
     this.clockOffset += skipTicks;
     // the colony lives through the skipped time
     const steps = Math.floor(skipTicks / 60), dtDay = 60 / this.dayTicks;
-    for (let i = 0; i < steps; i++) colonyStep(this.colony, dtDay, this.wasps.length, false);
+    for (let i = 0; i < steps; i++) colonyStep(this.colony, dtDay, this.wasps.length, false, this.seasonFrac, this.bio);
     for (const w of this.wasps.slice()) if (w !== d) this._despawn(w);
     this._minute(clockMinutes(this.tick + this.clockOffset, this.settings));
     for (const hm of this.active) this._catchUpHuman(hm);
@@ -306,7 +311,7 @@ export class Sim {
         if (driven) { this._ballEscape(w, cmd.burst && !w.ball.prevBurst); if (w.ball) w.ball.prevBurst = cmd.burst; }
         break;
     }
-    if (this.waspById(w.id)) w.venom = Math.min(1, w.venom + T.venom.regenPerSec * DT);
+    if (this.waspById(w.id)) w.venom = Math.min(w.caste === 'queen' ? T.queen.venomMul : 1, w.venom + T.venom.regenPerSec * DT);
   }
 
   // ---------------- flight (GDD 7.2)
@@ -331,6 +336,7 @@ export class Sim {
     if (powered) {
       let top = burst ? W.burst : W.cruise;
       if (w.carry) top *= W.carrySpeedMul;
+      if (w.caste === 'queen') top *= T.queen.speedMul;
       if (rain) top *= T.weather.rainSpeedMul;
       dx *= top; dy *= top; dz *= top;
       let ex = dx - w.vx, ey = dy - w.vy, ez = dz - w.vz;
@@ -675,7 +681,13 @@ export class Sim {
     if (dist2(w, NEST_ENTRANCE) > 0.07 * 0.07) return;
     const col = this.colony;
     let deposited = false;
-    if (w.carry) {
+    if (w.carry && w.carry.kind === 'pulp' && w.caste === 'queen') {
+      // a founding queen builds her own cells straight away (GDD 6.1)
+      col.cells += w.carry.amount * T.colony.cellsPerPulp;
+      col.stats.deposited.pulp += w.carry.amount;
+      this.emit('deposit', { id: w.id, kind: 'cells', amount: w.carry.amount * T.colony.cellsPerPulp, what: 'cells' });
+      w.carry = null; deposited = true;
+    } else if (w.carry) {
       col[w.carry.kind] += w.carry.amount;
       col.stats.deposited[w.carry.kind] += w.carry.amount;
       this.emit('deposit', { id: w.id, kind: w.carry.kind, amount: w.carry.amount, what: w.carry.what });
@@ -850,7 +862,8 @@ export class Sim {
     const driven = w.id === this.drivenId;
     this.wasps = this.wasps.filter((x) => x !== w);
     w.state = 'dead';
-    this.colony.adults = Math.max(0, this.colony.adults - 1);
+    if (w.caste === 'queen') { this.colony.queenAlive = false; this.emit('queenDied', { cause }); }
+    else this.colony.adults = Math.max(0, this.colony.adults - 1);
     this.stats.deaths++;
     this.stats.causes[cause] = (this.stats.causes[cause] || 0) + 1;
     if (byHex) {
@@ -890,9 +903,43 @@ export class Sim {
       this.emit('possess', { id: best.id, from: 0 });
       return;
     }
-    if (col.nestAlive && col.pupae >= 1) { this.respawnAt = this.tick + 600; this.emit('waitingBrood'); return; }
-    this.extinct = true;
-    this.emit('lineExtinct', { nestAlive: col.nestAlive });
+    if (!colonyFinished(col, 0) && col.queenAlive) { this.respawnAt = this.tick + 600; this.emit('waitingBrood'); return; }
+    if (!colonyFinished(col, 0) && col.pupae >= 1) { this.respawnAt = this.tick + 600; this.emit('waitingBrood'); return; }
+    this._endSeason('colony lost');
+  }
+
+  // ---------------- the yearly cycle (GDD 2.2, 5.2, 6.7)
+
+  _endSeason(why) {
+    const S = T.season, col = this.colony;
+    const survivors = Math.floor(col.mated * S.winterSurvival + h32(this.season.n, 31));
+    const lineage = Math.floor(this.lineage * S.lineageSurvival + h32(this.season.n, 32));
+    this.emit('winter', { why, mated: col.mated, survivors, lineage, season: this.season.n });
+    if (survivors + lineage < 1) { this.extinct = true; for (const w of this.wasps.slice()) this._despawn(w); this.emit('lineExtinct', { nestAlive: col.nestAlive }); return; }
+    this._spring(survivors, lineage);
+  }
+
+  _spring(survivors, lineage) {
+    // the queen that continues is yours; the rest found lineage colonies (Q-10)
+    this.lineage = survivors + lineage - 1;
+    const winterDays = Math.round(this.settings.seasonDays * T.season.winterShare);
+    const target = (this.day + 1 + winterDays) * 1440 + T.time.dawn;
+    this.clockOffset += (target - this.minute) * this.tpm;
+    this._minute(clockMinutes(this.tick + this.clockOffset, this.settings));
+    this.season = { n: this.season.n + 1, startMinute: target, phase: 'Founding' };
+    const alloc = this.colony.alloc;
+    this.colony = newColony(true);
+    this.colony.alloc = alloc;
+    for (const w of this.wasps.slice()) this._despawn(w);
+    for (const s of this.chunkState.values()) s.esc = 0;
+    this.swats = []; this.sprays = []; this.alarms = []; this.hiveAlarms.clear();
+    this.ext = { visit: 0, state: 'none', arriveMinute: 0, hm: null };
+    this.ghost = null;
+    const q = this._spawnWasp(true, 'queen');
+    this.drivenId = q.id;
+    for (const hm of this.active) this._catchUpHuman(hm);
+    this._updateChunks(true);
+    this.emit('spring', { season: this.season.n, lineage: this.lineage, id: q.id });
   }
 
   // ---------------- humans (GDD 8.2, 8.9, 8.10)
@@ -1198,7 +1245,12 @@ export class Sim {
   _colonyTick() {
     const col = this.colony;
     const daylight = isDaylight(this.minute) && !this.raining && this.canFly();
-    colonyStep(col, 60 / this.dayTicks, this.wasps.length, daylight);
+    const frac = this.seasonFrac;
+    colonyStep(col, 60 / this.dayTicks, this.wasps.filter((w) => w.caste !== 'queen').length, daylight, frac, this.bio);
+    const ph = seasonPhase(frac);
+    if (ph !== this.season.phase) { this.season.phase = ph; this.emit('season', { phase: ph }); }
+    if (frac >= 1) { this._endSeason('autumn'); return; }
+    if (colonyFinished(col, this.wasps.length) && !this.wasps.length) { this._endSeason('colony lost'); return; }
     this._extCheck();
     // launch physical AI foragers while the player is near the nest (GDD 11.12: far colonies stay abstract)
     const nearNest = this.activeChunks.some((r) => r.cx === 0 && r.cz === 0);
@@ -1231,7 +1283,7 @@ export class Sim {
       }
     }
     const daylight = isDaylight(this.minute) && !this.raining;
-    if (!daylight && ai.mode !== 'home') { ai.mode = 'home'; ai.target = null; }
+    if ((!daylight || w.caste === 'queen') && ai.mode !== 'home') { ai.mode = 'home'; ai.target = null; }
     if (w.energy < 0.2 && ai.mode !== 'home' && ai.mode !== 'collect') { ai.mode = 'return'; ai.target = null; }
     switch (ai.mode) {
       case 'pick': this._aiPick(w); break;
@@ -1369,6 +1421,7 @@ export class Sim {
     for (const w of this.wasps) { f(w.id); f(w.x); f(w.y); f(w.z); f(w.vx); f(w.vy); f(w.vz); f(w.energy); f(w.venom); }
     const c = this.colony;
     f(c.adults); f(c.eggs); f(c.larvae); f(c.pupae); f(c.cells); f(c.protein); f(c.sugar); f(c.pulp); f(c.deficit);
+    f(c.rEggs); f(c.rLarvae); f(c.rPupae); f(c.gynes); f(c.mated); f(this.season.n); f(this.lineage);
     f(this.stung.size); f(this.stats.stings); f(this.stats.aiStings); f(this.records.size);
     for (const hm of this.active) { f(hm.x); f(hm.z); f(hm.panic); f(hm.posture === 'sit' ? 1 : 0); }
     for (const s of this.swats) { f(s.start); f(s.radius); }

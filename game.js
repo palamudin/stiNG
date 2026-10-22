@@ -95,7 +95,7 @@ function pick(seed, id, k, arr) { return arr[rangeInt(hash(seed, Domain.Cosmetic
 
 // ------------------------------------------------------------------ state
 
-let sim = null, settings = { seed: 1234, dayMinutes: 2, humanDensity: 1, beeAggression: 1 };
+let sim = null, settings = { seed: 1234, dayMinutes: 2, humanDensity: 1, beeAggression: 1, seasonDays: 40 };
 let running = false, paused = false;
 const input = { keys: new Set(), lmb: false, yaw: 0, pitch: 0, alloc: 1, autopilot: null };
 const chunkViews = new Map(), humanViews = new Map(), waspViews = new Map();
@@ -532,6 +532,7 @@ function renderWasps(alpha, t, dt) {
     if (driven) drivenPos = p;
     g.visible = w.state !== 'under';
     g.position.copy(p);
+    g.scale.setScalar(w.caste === 'queen' ? 1.3 : 1);
     g.rotation.order = 'YXZ';
     if (driven && w.state !== 'balled') { g.rotation.y = input.yaw; g.rotation.x = -input.pitch * 0.6; }
     else {
@@ -643,6 +644,86 @@ function lighting() {
   hemi.intensity = 0.18 + 0.97 * dayAmt;
 }
 
+// ------------------------------------------------------------------ sound (procedural, presentation only)
+
+const audio = { ctx: null, on: true };
+function initAudio() {
+  if (audio.ctx) return;
+  let ctx;
+  try { ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch { return; }
+  audio.ctx = ctx;
+  const master = ctx.createGain(); master.gain.value = 0.7; master.connect(ctx.destination); audio.master = master;
+  const noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+  const d = noiseBuf.getChannelData(0);
+  let b = 0;
+  for (let i = 0; i < d.length; i++) { const w = Math.random() * 2 - 1; b = 0.97 * b + 0.03 * w; d[i] = w * 0.6 + b * 2.5; }
+  audio.noiseBuf = noiseBuf;
+  const loopNoise = (type, freq, q) => {
+    const src = ctx.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+    const f = ctx.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q;
+    const g = ctx.createGain(); g.gain.value = 0;
+    src.connect(f); f.connect(g); g.connect(master); src.start();
+    return g;
+  };
+  const buzz = (freq) => {
+    const o1 = ctx.createOscillator(), o2 = ctx.createOscillator();
+    o1.type = 'sawtooth'; o2.type = 'sawtooth'; o1.frequency.value = freq; o2.frequency.value = freq * 1.012;
+    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 1400; f.Q.value = 2;
+    const g = ctx.createGain(); g.gain.value = 0;
+    o1.connect(f); o2.connect(f); f.connect(g); g.connect(master); o1.start(); o2.start();
+    return { o1, o2, g, f };
+  };
+  audio.wings = buzz(200);
+  audio.others = buzz(215);
+  audio.bees = buzz(245);
+  audio.wind = loopNoise('lowpass', 500, 0.5);
+  audio.rain = loopNoise('highpass', 2500, 0.4);
+  audio.spray = loopNoise('highpass', 4000, 0.7);
+  audio.nextChirp = 0;
+}
+function blip(freqA, freqB, dur, vol, type = 'sine', delay = 0) {
+  const ctx = audio.ctx; if (!ctx || !audio.on) return;
+  const t = ctx.currentTime + delay, o = ctx.createOscillator(), g = ctx.createGain();
+  o.type = type; o.frequency.setValueAtTime(freqA, t); o.frequency.exponentialRampToValueAtTime(freqB, t + dur);
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(audio.master); o.start(t); o.stop(t + dur + 0.05);
+}
+function thwack(vol) {
+  const ctx = audio.ctx; if (!ctx || !audio.on) return;
+  const t = ctx.currentTime, src = ctx.createBufferSource(); src.buffer = audio.noiseBuf;
+  const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1200; f.Q.value = 0.8;
+  const g = ctx.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+  src.connect(f); f.connect(g); g.connect(audio.master); src.start(t, Math.random()); src.stop(t + 0.15);
+}
+function yelp(height) { const base = 520 - (height - 1.5) * 500; blip(base * 1.4, base, 0.28, 0.12, 'triangle'); blip(base * 2.1, base * 1.5, 0.22, 0.04, 'sine'); }
+const near = (p, r) => { const w = sim.wasp; return w && Math.hypot(p.x - w.x, p.y - w.y, p.z - w.z) < r; };
+function updateAudio(dt) {
+  const ctx = audio.ctx; if (!ctx) return;
+  const now = ctx.currentTime, set = (g, v) => g.gain.setTargetAtTime(audio.on ? v : 0, now, 0.05);
+  const w = sim._driven();
+  const flying = w && (w.state === 'fly' || w.state === 'chewing') && !paused && running;
+  const sp = w ? Math.hypot(w.vx, w.vy, w.vz) : 0;
+  set(audio.wings.g, flying ? 0.035 + Math.min(0.03, sp * 0.006) : w && w.state === 'balled' ? 0.02 : 0);
+  if (w) { const f = (w.caste === 'queen' ? 165 : 195) + sp * 10; audio.wings.o1.frequency.setTargetAtTime(f, now, 0.08); audio.wings.o2.frequency.setTargetAtTime(f * 1.012, now, 0.08); }
+  let nd = Infinity;
+  if (w) for (const x of sim.wasps) if (x !== w) nd = Math.min(nd, Math.hypot(x.x - w.x, x.y - w.y, x.z - w.z));
+  set(audio.others.g, running && nd < 4 ? 0.03 / (1 + nd * nd * 4) : 0);
+  let bees = 0;
+  if (w) for (const al of sim.hiveAlarms.values()) for (const b in al.phys) { const p = al.phys[b]; if (Math.hypot(p.x - w.x, p.y - w.y, p.z - w.z) < 2) bees++; }
+  set(audio.bees.g, running ? Math.min(0.05, bees * 0.006) : 0);
+  const md = minuteOfDay(sim.minute), day = md >= T.time.dawn && md < T.time.dusk;
+  set(audio.wind, running ? 0.05 : 0.02);
+  set(audio.rain, sim.raining ? 0.09 : 0);
+  let spraying = false;
+  for (const spx of sim.sprays) if (sim.tick >= spx.start) { const h = sim.humanByHex(spx.hex); if (h && near(h, 4)) spraying = true; }
+  set(audio.spray, spraying ? 0.08 : 0);
+  if (running && !paused && now > audio.nextChirp) {
+    if (day && !sim.raining) { const f = 2500 + Math.random() * 2000; for (let i = 0; i < 2 + Math.random() * 3; i++) blip(f, f * (0.7 + Math.random() * 0.5), 0.07, 0.012, 'sine', i * 0.09); }
+    else if (!day) blip(4200, 4300, 0.04, 0.006, 'square');
+    audio.nextChirp = now + (day ? 1.5 + Math.random() * 4 : 0.35 + Math.random() * 0.4);
+  }
+}
+
 // ------------------------------------------------------------------ input
 
 function buildCmd() {
@@ -667,6 +748,7 @@ addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   if (e.code === 'Tab') { e.preventDefault(); toggleLab(); return; }
   if (e.code === 'KeyN' && !e.repeat) { toggleNest(); return; }
+  if (e.code === 'KeyM' && !e.repeat) { audio.on = !audio.on; toast(audio.on ? 'Sound on' : 'Sound off', 'var(--muted)', 1.2); return; }
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
   input.keys.add(e.code);
 });
@@ -690,7 +772,7 @@ function lock() { try { const p = canvas.requestPointerLock(); if (p && p.catch)
 document.addEventListener('pointerlockchange', () => {
   if (!running) return;
   const locked = document.pointerLockElement === canvas;
-  if (!locked && pointerLockWorked) setPaused(true);
+  if (!locked && pointerLockWorked && $('winterScreen').hidden && $('extinctScreen').hidden) setPaused(true);
   if (locked) { pointerLockWorked = true; setPaused(false); }
 });
 function setPaused(p) { paused = p; $('pauseScreen').hidden = !p; input.lmb = false; input.keys.clear(); }
@@ -740,6 +822,10 @@ function updateNest() {
   const max = Math.max(1, c.eggs, c.larvae, c.pupae);
   $('nBrood').innerHTML = [['Eggs', c.eggs], ['Larvae', c.larvae], ['Pupae', c.pupae]]
     .map(([k, v]) => `<span class="label">${k}</span><div class="b"><i style="width:${(v / max * 100).toFixed(0)}%"></i></div><span class="n">${fmt(v)}</span>`).join('');
+  $('nRepro').innerHTML = [
+    ['Queen cells (brood)', fmt(c.rEggs + c.rLarvae + c.rPupae)], ['Young queens in the nest', fmt(c.gynes)],
+    ['Mated and gone to hibernate', fmt(c.mated)], ['Males', fmt(c.males)], ['Sister nests of this line', fmt(sim.lineage)],
+  ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
   T.alloc.forEach((a, i) => $('alloc' + i).setAttribute('aria-pressed', c.alloc === i));
 }
 
@@ -797,10 +883,13 @@ function updateHud() {
   $('stungN').textContent = fmt(sim.stung.size);
   $('adults').textContent = fmt(c.adults);
   $('brood').textContent = fmt(broodTotal(c));
-  $('serial').textContent = w ? 'Worker ' + w.id : '-';
+  $('serial').textContent = w ? (w.caste === 'queen' ? 'The queen' : 'Worker ' + w.id) : '-';
   const md = minuteOfDay(sim.minute);
   $('clockT').textContent = `Day ${sim.day + 1} · ${fmtClock(sim.minute)}`;
   $('clockW').textContent = `${Math.round(sim.temperature)} °C · ${sim.raining ? 'rain' : md < T.time.dawn || md >= T.time.dusk ? 'night' : 'clear'}`;
+  const frac = Math.min(1, Math.max(0, sim.seasonFrac));
+  $('seasonBar').style.width = (frac * 100).toFixed(1) + '%';
+  $('seasonT').textContent = `Season ${sim.season.n} · ${sim.season.phase}${sim.lineage > 0 ? ` · ${sim.lineage} sister nest${sim.lineage === 1 ? '' : 's'}` : ''}`;
   const e = sim.ext;
   $('ext').textContent = e.state === 'scheduled' ? `Exterminator due ${dayLabel(e.arriveMinute)}` : e.state === 'active' && e.hm ? (e.hm.state === 'treat' ? 'Exterminator treating the nest' : 'Exterminator on the way') : '';
   const lv = w ? sim.escAt(w.x, w.z) : 0;
@@ -843,6 +932,7 @@ function updateHud() {
   else if (h.wood) hint = `Hold ${kbd('E')} to chew pulp`;
   else if (h.nest && (md < T.time.dawn || md >= T.time.dusk)) hint = `${kbd('R')} rest until morning`;
   else if (w.carry) hint = 'Bring it to the nest';
+  else if (w.caste === 'queen' && sim.colony.adults < 1) hint = 'Founding: chew pulp for cells, catch prey for the brood, bring both to the nest';
   $('hint').innerHTML = hint;
 
   const ret = $('reticle'), zl = $('zone'), ct = sim._driven() ? w.contact : null;
@@ -920,6 +1010,7 @@ function handleEvents(events) {
       case 'sting': {
         const v = humanViews.get(e.humanHex);
         if (v) v.flinch = 1;
+        { const hm = sim.humanByHex(e.humanHex); if (hm && near(hm, 6)) yelp(hm.tr.height); }
         pushSwatAnims(e.swats, e.humanHex, e.t);
         if (e.first && e.driven) { const b = $('bump'); b.textContent = '+1 · ' + zoneLabel(e.zone); b.style.opacity = 1; bumpTimer = 1.6; }
         logEvent(`${e.driven ? 'you stung' : 'a worker stung'} #${e.humanHex.slice(0, 4)} · ${zoneLabel(e.zone)}${e.under ? ' (under clothes)' : ''}`);
@@ -935,13 +1026,14 @@ function handleEvents(events) {
       case 'deepen': logEvent(`full sting #${e.humanHex.slice(0, 4)}`); break;
       case 'blocked': toast(`${zoneLabel(e.zone)} is covered. Can't sting through.`, 'var(--muted)', 1.6); break;
       case 'noVenom': toast('Out of venom', 'var(--muted)', 1.4); break;
+      case 'swatStrike': { const h = sim.humanByHex(e.actorHex); if (h && near(h, 4)) thwack(0.25); break; }
       case 'swatHit': if (e.waspId === sim.drivenId) logEvent(`${SwatKindName[e.kind].toLowerCase()} by #${e.actorHex.slice(0, 4)} at ${ms(e.delayTicks)} ms`); break;
       case 'stunned': if (e.driven) toast('Knocked away · stunned', 'var(--yellow)', 1.6); break;
       case 'flee': logEvent(`#${e.humanHex.slice(0, 4)} runs`); break;
       case 'exhausted': if (e.id === sim.drivenId) toast('Crop empty · feed on flowers or soda', 'var(--red)', 2.6); break;
-      case 'caught': if (e.id === sim.drivenId) toast(`Caught a ${e.kind}`, 'var(--yellow)', 1.4); break;
+      case 'caught': if (e.id === sim.drivenId) { toast(`Caught a ${e.kind}`, 'var(--yellow)', 1.4); blip(900, 600, 0.08, 0.05, 'square'); } break;
       case 'chewed': if (e.id === sim.drivenId) toast('Pulp ready · bring it home', 'var(--yellow)', 1.4); break;
-      case 'deposit': if (e.id === sim.drivenId) toast(`Delivered ${e.what}`, 'var(--yellow)', 1.2); break;
+      case 'deposit': if (e.id === sim.drivenId) { toast(`Delivered ${e.what}`, 'var(--yellow)', 1.2); blip(500, 750, 0.12, 0.05, 'triangle'); } break;
       case 'underEnter': if (e.id === sim.drivenId) toast(`In at the ${e.key}. Keep moving.`, 'var(--yellow)', 1.8); break;
       case 'rip': toast(`#${e.humanHex.slice(0, 4)} tears the shirt off`, 'var(--orange)', 2); logEvent(`#${e.humanHex.slice(0, 4)} rips the shirt off`); break;
       case 'trapped': if (e.driven) toast('Stuck in the sugar trap', 'var(--red)', 2); break;
@@ -962,6 +1054,28 @@ function handleEvents(events) {
       case 'cantRest': toast(e.why === 'day' ? 'Rest only at night' : 'Rest at the nest entrance', 'var(--muted)', 1.6); break;
       case 'rested': toast('Morning', 'var(--yellow)', 1.6); break;
       case 'newDay': logEvent(`day ${e.day + 1}`); break;
+      case 'season': {
+        const msg = { Growth: 'The first workers are out. Growth season.', Peak: 'Peak season. The queen starts laying queen cells.', Collapse: 'Autumn. The colony is dying off. Young queens are leaving to mate.' }[e.phase];
+        if (msg) toast(msg, 'var(--yellow)', 3.5);
+        logEvent(`season: ${e.phase}`);
+        break;
+      }
+      case 'queenDied': toast('The queen is dead', 'var(--red)', 3); logEvent(`the queen died · ${e.cause}`); break;
+      case 'winter':
+        {
+          const total = e.survivors + e.lineage;
+          $('winterText').textContent = `${e.why === 'autumn' ? 'The colony died with the autumn, as colonies do.' : 'Your colony did not make it through the season.'} ${fmt(e.mated)} young queen${Math.round(e.mated) === 1 ? '' : 's'} mated and went into hibernation; ${e.survivors} survived the cold.${e.lineage ? ` ${e.lineage} older sister nest${e.lineage === 1 ? '' : 's'} of your line also made it.` : ''} ${total > 1 ? `You wake as one of ${total} queens of the line.` : 'You wake as the last queen of the line.'}`;
+        }
+        break;
+      case 'spring':
+        $('winterScreen').hidden = false;
+        paused = true;
+        document.exitPointerLock?.();
+        $('pauseScreen').hidden = true;
+        logEvent(`season ${e.season} · you are the queen`);
+        waspSwitched(e.id, 0.98);
+        syncChunks();
+        break;
       case 'waspDied': {
         if (!e.driven) { logEvent(`worker ${e.id} died · ${e.cause}`); break; }
         deathSpot = new THREE.Vector3(e.x, e.y, e.z);
@@ -969,7 +1083,7 @@ function handleEvents(events) {
         const sw = anims.find((a) => a.actorHex === e.byHex);
         const when = sw && e.cause !== 'insecticide' ? ` · ${ms(sw.start - sw.contactTick)} ms after contact` : '';
         $('deadTitle').textContent = DEATH_TITLE[e.cause.replace(' (helper)', '')] || 'DEAD';
-        $('deadSub').textContent = `${e.cause}${by}${when} · ${fmt(e.adultsLeft)} adults left`;
+        $('deadSub').textContent = `${e.cause}${by}${when} · ${sim.colony.queenAlive ? fmt(e.adultsLeft) + ' adults left' : 'the queen is gone'}`;
         $('dead').hidden = false;
         deadUntil = performance.now() + 2400;
         logEvent(`you died · ${e.cause}`);
@@ -983,7 +1097,7 @@ function handleEvents(events) {
       case 'waitingBrood': toast('The nest is empty. Waiting for brood to emerge.', 'var(--muted)', 3); break;
       case 'lineExtinct':
         $('dead').hidden = true;
-        $('extinctStats').textContent = `${fmt(sim.stung.size)} humans stung (${fmt(sim.stats.stings)} by you, ${fmt(sim.stats.aiStings)} by workers). ${fmt(sim.stats.deaths)} workers lost. ${sim.day + 1} days. ${fmt(sim.records.size)} chunks discovered.${sim.colony.nestAlive ? '' : ' The nest was destroyed.'}`;
+        $('extinctStats').textContent = `No young queen survived the winter and no sister nest is left. ${sim.season.n} season${sim.season.n === 1 ? '' : 's'}, ${sim.day + 1} days. ${fmt(sim.stung.size)} humans stung (${fmt(sim.stats.stings)} by you, ${fmt(sim.stats.aiStings)} by workers). ${fmt(sim.stats.deaths)} wasps lost. ${fmt(sim.records.size)} chunks discovered.`;
         $('extinctScreen').hidden = false;
         document.exitPointerLock?.();
         break;
@@ -1063,6 +1177,7 @@ function frame(now) {
     renderSprays();
     renderRain(focus, dt);
     lighting();
+    updateAudio(dt);
     if (tm) { tm('fx', t0); t0 = performance.now(); }
     updateHud();
     if (tm) { tm('hud', t0); t0 = performance.now(); }
@@ -1106,15 +1221,16 @@ function readSettings() {
   const raw = $('seed').value.trim();
   let seed;
   try { seed = BigInt.asUintN(64, BigInt(raw || '0')); } catch { seed = BigInt(Array.from(raw).reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7)); }
-  return { seed, dayMinutes: +$('dayLen').value, humanDensity: +$('density').value, beeAggression: +$('bees').value };
+  return { seed, dayMinutes: +$('dayLen').value, humanDensity: +$('density').value, beeAggression: +$('bees').value, seasonDays: +$('seasonLen').value };
 }
 
-$('bStart').addEventListener('click', () => { newWorld(readSettings()); $('startScreen').hidden = true; running = true; lock(); });
+$('bStart').addEventListener('click', () => { initAudio(); newWorld(readSettings()); $('startScreen').hidden = true; running = true; lock(); });
+$('bSpring').addEventListener('click', () => { $('winterScreen').hidden = true; setPaused(false); lock(); toast('Spring. Build a nest: pulp for cells, prey for the first brood.', 'var(--yellow)', 4); });
 $('bNewLine').addEventListener('click', () => { $('extinctScreen').hidden = true; newWorld(settings); running = true; lock(); });
 try { if (localStorage.getItem('sting.lab') === '1') toggleLab(); } catch { /* optional */ }
 if (matchMedia('(pointer: coarse)').matches) $('startNote').textContent = 'Needs a keyboard and mouse. On touch devices you can look around but not fly.';
 
-newWorld({ seed: 1234n, dayMinutes: 2, humanDensity: 1, beeAggression: 1 });
+newWorld({ seed: 1234n, dayMinutes: 2, humanDensity: 1, beeAggression: 1, seasonDays: 40 });
 requestAnimationFrame(frame);
 
 // test hook for automated checks

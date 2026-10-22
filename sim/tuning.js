@@ -46,7 +46,7 @@ export const T = {
     larvaStarve: 0.25, adultMortality: 1 / 22,                     // bio: worker life ~14 days when foraging
     layBase: 20, layPerAdult: 0.8, layMax: 250,                    // bio: peak 200-300 eggs/day
     cellsPerPulp: 8, buildPerDay: 1.5,
-    forageShare: 0.55, income: { sugar: 0.5, protein: 0.35, pulp: 0.15 },
+    forageShare: 0.55, income: { sugar: 0.3, protein: 0.35, pulp: 0.15 },
     deficitSmoothing: 0.1, queenStarveDays: 1,
   },
   alloc: [
@@ -83,6 +83,14 @@ export const T = {
   },
 
   alarm: { radius: 6, ticks: 600, nestRadius: 3 },
+
+  // The yearly cycle (GDD 5.2, 6.7). Fractions of the season.
+  season: {
+    startFrac: 0.3, reproStart: 0.55, reproFull: 0.72, reproProtein: 3, gyneShare: 0.6,
+    matePerDay: 0.5, mateSuccess: 0.7, collapseFrom: 0.82, collapseMul: 5, queenDiesAt: 0.95,
+    winterSurvival: 0.03, lineageSurvival: 0.3, winterShare: 0.5,
+  },
+  queen: { speedMul: 0.8, venomMul: 1.5 },
 };
 
-export const DEFAULT_SETTINGS = { dayMinutes: 2, humanDensity: 1, beeAggression: 1 };
+export const DEFAULT_SETTINGS = { dayMinutes: 2, humanDensity: 1, beeAggression: 1, seasonDays: 40 };

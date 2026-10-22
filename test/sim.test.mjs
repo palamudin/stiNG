@@ -266,7 +266,40 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   ok(count(ev, 'possess') === 1 && s.drivenId !== before, `Q possesses a nearby worker (${before} -> ${s.drivenId})`);
 }
 
-// 13. Frozen chunks
+// 13. The yearly cycle: queen cells, collapse, winter, founding (GDD 5.2, 6.7)
+{
+  const c = newColony();
+  c.protein = 1e5; c.sugar = 1e5;
+  const days = 40, perDay = 120;
+  let peakAdults = 0, adultsAt95 = 0;
+  for (let i = 0; i < days * perDay; i++) {
+    const frac = 0.3 + 0.7 * i / (days * perDay * 0.7) * 0.7;
+    const f = Math.min(1, 0.3 + i / (days * perDay) * 0.7);
+    colonyStep(c, 1 / perDay, 0, true, f, 0.2);
+    peakAdults = Math.max(peakAdults, c.adults);
+    if (f >= 0.95 && !adultsAt95) adultsAt95 = c.adults;
+  }
+  ok(c.stats.gynesRaised > 5 && c.mated > 1, `late season raises young queens that leave to mate (${c.stats.gynesRaised.toFixed(0)} raised, ${c.mated.toFixed(0)} mated)`);
+  ok(!c.queenAlive && c.adults < peakAdults * 0.5, `the old queen dies and the colony collapses in autumn (${peakAdults.toFixed(0)} -> ${c.adults.toFixed(0)} adults)`);
+
+  const s = new Sim({ seed: 1234 });
+  s.colony.mated = 200;
+  s.season.startMinute -= 0.71 * s.settings.seasonDays * 1440;
+  const ev = run(s, 120, () => idle());
+  const wi = ev.find((e) => e.type === 'winter'), sp = ev.find((e) => e.type === 'spring');
+  ok(wi && sp, `the season ends: winter, then spring (${wi && wi.survivors} queens survived)`);
+  ok(s.wasp.caste === 'queen' && s.colony.adults === 0 && s.colony.cells === 0 && s.season.n === 2, 'spring: you are the founding queen of a new colony');
+  // founding: bring pulp and prey, the queen lays
+  const q = s.wasp;
+  q.carry = { kind: 'pulp', amount: 3, what: 'pulp' };
+  place(q, NEST_ENTRANCE); run(s, 2, () => idle());
+  q.carry = { kind: 'protein', amount: 3, what: 'fly' };
+  place(q, NEST_ENTRANCE); run(s, 2, () => idle());
+  run(s, s.dayTicks / 2, (sim) => { if (sim.wasp.state === 'fly') place(sim.wasp, { x: NEST_ENTRANCE.x + 0.3, y: NEST_ENTRANCE.y, z: NEST_ENTRANCE.z }); return idle(); });
+  ok(s.colony.cells > 10 && s.colony.eggs + s.colony.larvae > 1, `founding: pulp builds cells and the queen lays (${s.colony.cells.toFixed(0)} cells, ${(s.colony.eggs + s.colony.larvae).toFixed(1)} brood)`);
+}
+
+// 14. Frozen chunks
 {
   const s = new Sim({ seed: 5 });
   const rec = s.records.get('0,0'), before = rec.contentHash;
