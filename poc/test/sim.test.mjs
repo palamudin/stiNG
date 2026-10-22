@@ -570,5 +570,21 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   ok(Math.abs(g.cs(g.nest.key).esc - before - T.sites.ground.discovery) < 1e-9, 'stings near a burrow nest raise the alert faster');
 }
 
+// 23. Windfall fruit late in the season (GDD 9.4)
+{
+  const s = new Sim({ seed: 1234 });
+  const early = s.activeChunks.flatMap((r) => s.fruitIn(r)).length;
+  s.season.startMinute -= 0.45 * s.settings.seasonDays * 1440; // to 75% of the season
+  run(s, 2);
+  const fruit = s.activeChunks.flatMap((r) => s.fruitIn(r));
+  ok(early === 0 && fruit.length > 3, `no fruit in early summer; windfalls lie under fruit trees late in the season (${fruit.length} nearby)`);
+  const f = fruit[0], w = s.wasp;
+  place(w, { x: f.x, y: T.wasp.radius + 0.001, z: f.z }); w.state = 'landed'; w.energy = 0.3;
+  run(s, 120);
+  ok(w.energy > 0.6, `a wasp feeds on fallen fruit (crop ${w.energy.toFixed(2)})`);
+  const r = restore(snapshot(s));
+  ok(JSON.stringify(r.activeChunks.flatMap((c) => r.fruitIn(c))) === JSON.stringify(s.activeChunks.flatMap((c) => s.fruitIn(c))), 'the same fruit lies in the same places after a restore');
+}
+
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');
 process.exit(failures ? 1 : 0);

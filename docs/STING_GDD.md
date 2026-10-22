@@ -984,6 +984,10 @@ Three of the six site types exist; wall, attic and shed wait for buildings. Burr
 
 The choice is the founding queen's main decision: a burrow grows the biggest colony and gets found fastest, a branch hides best and stays small. If she has not chosen by 3% into the season, she settles where the last nest was, keeping its site type.
 
+### 18.16 Windfall fruit as built (9.4)
+
+30% of trees (by hash) bear fruit. From 55% of the season, each drops six fruits, each on a day picked by hash across the rest of the season, scattered up to 1.6 m beyond the trunk; a fruit lies for six days and feeds at 0.8× a can's rate. Like burrows and branch points, fruit is a pure function of the seed, the chunk and the day, so it needs no storage or network traffic. Late in the season this gives sugar foragers somewhere to go other than people's drinks.
+
 ---
 
 ## Appendix A — Protocode

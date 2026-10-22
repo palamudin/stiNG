@@ -318,6 +318,25 @@ const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vec
 // Pest-control bait stations: a dark box on the trunk with the bait showing through its slot
 const baitPool = [];
 const baitBoxGeo = new THREE.BoxGeometry(0.07, 0.1, 0.05), baitMeatGeo = new THREE.BoxGeometry(0.04, 0.012, 0.01);
+// Windfall fruit in the grass late in the season (apples and plums)
+const fruitMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.032, 10, 8), new THREE.MeshLambertMaterial({ color: '#ffffff' }), 400);
+fruitMesh.count = 0; fruitMesh.frustumCulled = false; fruitMesh.castShadow = true; scene.add(fruitMesh);
+const FRUIT_COLORS = ['#b8322a', '#c9a227', '#6e2a4a', '#9a3a1e'].map((c) => new THREE.Color(c));
+function renderFruit() {
+  let n = 0;
+  for (const rec of sim.activeChunks) for (const f of sim.fruitIn(rec)) {
+    if (n >= 400) break;
+    _p.set(f.x, f.y, f.z); _s.set(1, 0.9, 1);
+    _m4.compose(_p, _q, _s); fruitMesh.setMatrixAt(n, _m4);
+    fruitMesh.setColorAt(n, FRUIT_COLORS[f.i % FRUIT_COLORS.length]);
+    n++;
+  }
+  _s.set(1, 1, 1);
+  fruitMesh.count = n;
+  fruitMesh.instanceMatrix.needsUpdate = true;
+  if (fruitMesh.instanceColor) fruitMesh.instanceColor.needsUpdate = true;
+}
+
 // Burrows are always there; branch points show only while a queen is choosing a site
 const holePool = [], knobPool = [];
 const holeGeo = new THREE.CircleGeometry(0.035, 12), knobGeo = new THREE.SphereGeometry(0.035, 8, 6);
@@ -1615,6 +1634,7 @@ function frame(now) {
     renderCritters(t);
     renderBaits();
     renderSites();
+    renderFruit();
     renderBirdsAndSpiders(t, dt);
     renderSwats(t);
     renderSprays();

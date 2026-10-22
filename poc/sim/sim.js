@@ -1016,7 +1016,7 @@ export class Sim {
         }
       }
       if (w.energy >= 1 && !(w.ai.mode === 'collect' && w.role === 'sugar')) continue;
-      for (const s of c.sugar.concat(this.spillsIn(key))) {
+      for (const s of c.sugar.concat(this.spillsIn(key), this.fruitIn(rec))) {
         if (s.kind === 'can' && (lvl >= 2 || this.canSpilled(key, c.sugar.indexOf(s)))) continue; // food covered (GDD 8.10) or knocked over
         if (dist2(w, s) <= d2max) {
           const add = T.energy.refuelPerSec * s.rate * DT;
@@ -1749,6 +1749,29 @@ export class Sim {
     return out;
   }
 
+  // Windfall fruit under fruit trees from mid-season (GDD 9.4). Each fruit falls on a day picked by hash and lies
+  // for a few days; a pure function of the seed, the chunk and the clock.
+  fruitIn(rec) {
+    const F = T.fruit, frac = this.seasonFrac;
+    if (frac < F.startFrac) return [];
+    const sd = Number(this.seed & 0xffffffffn), key = chunkKey(rec.cx, rec.cz), today = this.day;
+    const cache = this._fruitCache || (this._fruitCache = new Map()), ck = key + '|' + today + '|' + this.season.n;
+    if (cache.has(ck)) return cache.get(ck);
+    const out = [], span = 1 - F.startFrac, days = this.settings.seasonDays * span;
+    rec.content.trees.forEach((t, ti) => {
+      if (h32(sd, rec.cx, rec.cz, ti, 931) >= F.treeShare) return;
+      for (let k = 0; k < F.perTree; k++) {
+        const fall = Math.floor(this.season.startMinute / 1440 + this.settings.seasonDays * (F.startFrac + span * h32(sd, rec.cx, rec.cz, ti, k, 932)));
+        if (today < fall || today >= fall + F.rotDays) continue;
+        const a = h32(sd, ti, k, 933) * 6.28318, d = t.r + 0.2 + F.spread * h32(sd, ti, k, 934);
+        out.push({ x: t.x + d * dcos(a), y: 0.03, z: t.z + d * dsin(a), rate: F.rate, kind: 'fruit', i: ti * 16 + k });
+      }
+    });
+    if (cache.size > 128) cache.clear();
+    cache.set(ck, out);
+    return out;
+  }
+
   _siteNear(w) {
     for (const rec of this.activeChunks) {
       const { holes, branches } = this.sitesIn(rec);
@@ -2308,6 +2331,7 @@ export class Sim {
         });
         if (lvl >= 3 && col.deficit >= T.ai.canDeficit) c.traps.forEach((tr, i) => consider({ kind: 'trap', key, i, c: ri + 50 }, tr));
         this.spillsIn(key).forEach((sp) => consider({ kind: 'spill', key, i: sp.i, c: ri + 60 }, sp));
+        this.fruitIn(rec).forEach((f) => consider({ kind: 'fruit', key, i: f.i, c: ri + 80 }, f));
       } else if (w.role === 'protein') {
         c.flies.forEach((f, i) => { if ((st.caughtFly[i] || 0) <= this.tick) consider({ kind: 'prey', sub: 'fly', key, i, c: ri }, flyPos(f, this.tick)); });
         c.caterpillars.forEach((f, i) => { if (!st.caughtCat[i]) consider({ kind: 'prey', sub: 'cat', key, i, c: ri + 20 }, f); });
@@ -2331,6 +2355,7 @@ export class Sim {
     const c = rec.content, st = this.cs(t.key);
     if (t.kind === 'sugar') { const s = c.sugar[t.i]; return { x: s.x, y: s.y + 0.012, z: s.z }; }
     if (t.kind === 'trap') return c.traps[t.i];
+    if (t.kind === 'fruit') { const f = this.fruitIn(rec).find((x) => x.i === t.i); return f ? { x: f.x, y: f.y + 0.015, z: f.z } : null; }
     if (t.kind === 'spill') { const sp = this.spillsIn(t.key).find((x) => x.i === t.i); return sp ? { x: sp.x, y: sp.y + 0.012, z: sp.z } : null; }
     if (t.kind === 'bait') return this._baitsIn(t.key)[t.i] || null;
     if (t.kind === 'wood') { const b = c.boxes[t.i]; return { x: (b.minx + b.maxx) / 2 + 0.2 * (h32(w.id, t.i) - 0.5), y: b.maxy + T.wasp.radius + 0.008, z: (b.minz + b.maxz) / 2 }; }

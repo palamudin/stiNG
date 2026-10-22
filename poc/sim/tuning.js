@@ -85,6 +85,8 @@ export const T = {
     branch: { name: 'hanging from a branch', maxCells: 1800, flood: 0, exposure: 2, discovery: 0.5 },
     rainMortality: 0.06, holesPerChunk: 2,
   },
+  // Fallen fruit (GDD 9.4). bio: windfall apples and plums are a major late-summer sugar source for Vespula.
+  fruit: { treeShare: 0.3, startFrac: 0.55, perTree: 6, rate: 0.8, spread: 1.6, rotDays: 6 },
   // Level 5: municipal pest control (GDD 8.10). Poisoned protein bait stations across the area for a few days.
   // bio: real programs use protein baits laced with insecticide; foragers carry them home and poison the brood.
   muni: { level: 5, radius: 1, days: 3, cooldownDays: 4, aftermath: 0.5, baitsPerChunk: 3, baitHeight: 1.2, baitDist: 0.04, baitProtein: 2,
