@@ -8,7 +8,7 @@ import {
 } from './body.js';
 import {
   chunkOf, chunkKey, NEST, NEST_ENTRANCE, SPAWN, generateChunk, ticksPerMinute, clockMinutes, dayOf, minuteOfDay,
-  isRaining, tempAt, isDaylight, humanWindow, flyPos, beePos,
+  isRaining, tempAt, isDaylight, humanWindow, flyPos, beePos, birdPos,
 } from './world.js';
 import { newColony, colonyStep, destroyNest, colonyFinished, seasonPhase } from './colony.js';
 
@@ -50,6 +50,7 @@ export class Sim {
     this.sprays = [];
     this.alarms = [];
     this.hiveAlarms = new Map();
+    this.birdState = new Map();
     this.colony = newColony();
     this.stung = new Set();
     this.stats = { stings: 0, aiStings: 0, remoteStings: 0, full: 0, deaths: 0, causes: {}, caught: 0, deposits: 0 };
@@ -100,7 +101,8 @@ export class Sim {
   addEsc(x, z, pts) { const k = chunkKey(chunkOf(x), chunkOf(z)); const before = this.escLevel(k); this.cs(k).esc += pts; const after = this.escLevel(k); if (after !== before) this.emit('escalation', { key: k, level: after }); }
   get temperature() { return tempAt(this.seed, this.minute); }
   get raining() { return isRaining(this.seed, this.minute); }
-  get physicalCount() { return this.wasps.length; }
+  get physicalCount() { return this._own().length; }
+  _own() { return this.wasps.filter((w) => w.colony === 'own'); }
   get seasonFrac() { return (this.minute - this.season.startMinute) / (this.settings.seasonDays * 1440); }
   canFly() { return this.temperature >= T.weather.flyMinTemp; }
 
@@ -109,7 +111,7 @@ export class Sim {
     const w = {
       id, caste, x: SPAWN.x, y: SPAWN.y, z: SPAWN.z, vx: 0, vy: 0, vz: 0, yaw: SPAWN.yaw, pitch: 0,
       energy: 1, venom: 1, state: 'fly', stateTicks: 0, attach: null, under: null, ball: null,
-      carry: null, groundTicks: 0, chew: 0, role: 'sugar',
+      carry: null, groundTicks: 0, chew: 0, role: 'sugar', colony: 'own', web: null, fight: null,
       ai: { mode: 'pick', target: null, timer: 0, humanHex: null, stings: 0, stingHold: 0 },
     };
     if (!driven) {
@@ -224,6 +226,8 @@ export class Sim {
     this._swats();
     this._sprays();
     this._bees();
+    this._birds();
+    this._fights(cmd);
     this._alarmDecay();
     // 3. humans at 20 Hz
     if (this.tick % 3 === 0) this._humans();
@@ -444,7 +448,7 @@ export class Sim {
     if (!d || d.state === 'under' || d.state === 'balled') return;
     let best = null, bd = 30 * 30;
     for (const w of this.wasps) {
-      if (w === d || w.state === 'dead') continue;
+      if (w === d || w.state === 'dead' || w.colony !== 'own') continue;
       const q = dist2(w, d);
       if (q < bd) { bd = q; best = w; }
     }
@@ -493,9 +497,19 @@ export class Sim {
         if (driven) {
           if (edge & Act.Interact) this._interact(w);
           if (w.state === 'fly' && armed && w.contact) { this.pressUsed = true; this._beginSting(w, w.contact, 'jab'); }
+          if (w.state === 'fly') this._maybeLand(w, cmd);
           this._hints(w);
         } else if (armed && w.contact && w.contact.humanHex === w.ai.humanHex) this._beginSting(w, w.contact, 'jab');
         break;
+      case 'landed': {
+        const still = !cmd.mx && !cmd.my && !cmd.mz && !cmd.burst && !cmd.sting && !(edge & Act.Interact);
+        if (!driven || !still) { w.state = 'fly'; w.vy = 0.5; this.emit('takeoff', { id: w.id }); if (driven && (edge & Act.Interact)) this._interact(w); }
+        else w.venom = Math.min(1, w.venom + T.venom.regenPerSec * DT);
+        if (driven) this._hints(w);
+        break;
+      }
+      case 'webbed': this._webStep(w, cmd, driven); break;
+      case 'fighting': if (driven && cmd.sting && !this.pressUsed) { this.pressUsed = true; w.fight.mash += T.rival.mash; } break;
       case 'attached': this._attached(w, cmd, driven); break;
       case 'under': this._underStep(w, cmd, edge, armed); break;
       case 'chewing': this._chewStep(w, cmd, driven); break;
@@ -550,11 +564,12 @@ export class Sim {
       if (w.vy < -W.maxFall) w.vy = -W.maxFall;
       w.vx *= 0.97; w.vz *= 0.97;
     }
-    const n = W.substeps, h = DT / n;
+    const n = W.substeps, h = DT / n, p0 = { x: w.x, y: w.y, z: w.z };
     for (let i = 0; i < n; i++) {
       w.x += w.vx * h; w.y += w.vy * h; w.z += w.vz * h;
       this._collide(w);
     }
+    this._webCheck(w, p0);
     // grounded without fuel: starvation clock
     if (w.energy <= 0 && w.y <= W.radius + 1e-6) {
       if (++w.groundTicks > W.starveTicks) this._die(w, 'starved', null);
@@ -740,6 +755,8 @@ export class Sim {
   // ---------------- interactions (E): crawl under, catch prey, chew pulp
 
   _interact(w) {
+    const rv = this._rivalNestNear(w);
+    if (rv && !w.carry) { this._raid(w, rv); return; }
     const c = w.contact;
     if (c && c.opening >= 0 && !w.carry) { this._enterUnder(w, c); return; }
     const prey = this._preyNear(w);
@@ -755,6 +772,7 @@ export class Sim {
       prey: !w.carry && this._preyNear(w) ? this._preyNear(w).kind : null,
       wood: !w.carry && !c && this._woodNear(w),
       nest: dist2(w, NEST_ENTRANCE) < 0.4 * 0.4,
+      rival: !w.carry && !!this._rivalNestNear(w),
     };
   }
 
@@ -858,7 +876,7 @@ export class Sim {
   }
 
   _nestTouch(w) {
-    if (!this.colony.nestAlive) return;
+    if (!this.colony.nestAlive || w.colony !== 'own') return;
     if (dist2(w, NEST_ENTRANCE) > 0.07 * 0.07) return;
     const col = this.colony;
     let deposited = false;
@@ -990,7 +1008,7 @@ export class Sim {
       const c = toWorld(hm, s.center), r = s.radius + T.wasp.radius;
       for (const w of this.wasps.slice()) {
         if (s.hits.includes(w.id)) continue;
-        if (s.underOnly ? w.id !== s.underOnly || w.state !== 'under' : !(w.state === 'fly' || w.state === 'attached' || w.state === 'stunned' || w.state === 'chewing')) continue;
+        if (s.underOnly ? w.id !== s.underOnly || w.state !== 'under' : !(w.state === 'fly' || w.state === 'attached' || w.state === 'stunned' || w.state === 'chewing' || w.state === 'landed')) continue;
         if (dist2(w, c) > r * r) continue;
         s.hits.push(w.id);
         this.emit('swatHit', { waspId: w.id, actorHex: s.actorHex, frameHex: s.frameHex, kind: s.kind, kills: s.kills, delayTicks: s.start - s.contactTick });
@@ -1006,7 +1024,7 @@ export class Sim {
     // A wasp that was swatted at and survived may take it personally (GDD 6.3, 8.10)
     const w = this.waspById(s.targetId);
     if (!w || w.id === this.drivenId || w.state !== 'fly') return;
-    if (h32(w.id, this.tick, 5) < this.colony.deficit + 0.15) this._aiAttack(w, s.actorHex);
+    if (h32(w.id, this.tick, 5) < (w.colony === 'own' ? this.colony.deficit : 0.3) + 0.15) this._aiAttack(w, s.actorHex);
   }
 
   _sprays() {
@@ -1020,7 +1038,7 @@ export class Sim {
       if (!hm || hm.state === 'away') continue;
       const headY = hm.parts[hm.posture][0].a.y;
       for (const w of this.wasps.slice()) {
-        if (!(w.state === 'fly' || w.state === 'stunned' || w.state === 'attached' || w.state === 'chewing')) continue;
+        if (!(w.state === 'fly' || w.state === 'stunned' || w.state === 'attached' || w.state === 'chewing' || w.state === 'landed')) continue;
         const lp = toLocal(hm, w);
         for (const [z, r] of [[0.35, 0.14], [0.7, 0.22], [1.05, 0.3]]) {
           const dx = lp.x, dy = lp.y - headY, dz = lp.z - z;
@@ -1041,8 +1059,10 @@ export class Sim {
     const driven = w.id === this.drivenId;
     this.wasps = this.wasps.filter((x) => x !== w);
     w.state = 'dead';
-    if (w.caste === 'queen') { this.colony.queenAlive = false; this.emit('queenDied', { cause }); }
+    if (w.colony !== 'own') { /* a rival worker */ }
+    else if (w.caste === 'queen') { this.colony.queenAlive = false; this.emit('queenDied', { cause }); }
     else this.colony.adults = Math.max(0, this.colony.adults - 1);
+    if (w.fight) { const o = this.waspById(w.fight.other); if (o && o.state === 'fighting') { o.state = 'fly'; o.fight = null; } }
     this.stats.deaths++;
     this.stats.causes[cause] = (this.stats.causes[cause] || 0) + 1;
     if (byHex) {
@@ -1068,17 +1088,17 @@ export class Sim {
 
   _respawn() {
     const col = this.colony;
-    const inside = col.adults - this.wasps.length;
+    const inside = col.adults - this._own().length;
     if (col.nestAlive && inside >= 1) {
       const w = this._spawnWasp(true);
       this.drivenId = w.id; this.ghost = null;
       this.emit('respawn', { id: w.id, yaw: SPAWN.yaw });
       return;
     }
-    if (this.wasps.length) {
+    if (this._own().length) {
       const g = this.ghost || SPAWN;
-      let best = this.wasps[0], bd = Infinity;
-      for (const w of this.wasps) { const q = dist2(w, g); if (q < bd) { bd = q; best = w; } }
+      let best = null, bd = Infinity;
+      for (const w of this._own()) { const q = dist2(w, g); if (q < bd) { bd = q; best = w; } }
       this.drivenId = best.id; this.ghost = null;
       this.emit('possess', { id: best.id, from: 0 });
       return;
@@ -1203,14 +1223,14 @@ export class Sim {
     const head = hm.parts[hm.posture][0];
     let target = null, why = null;
     for (const w of this.wasps) {
-      if (!(w.state === 'fly' || w.state === 'chewing')) continue;
+      if (!(w.state === 'fly' || w.state === 'chewing' || w.state === 'landed')) continue;
       const dx = w.x - hm.x, dz = w.z - hm.z;
       if (dx * dx + dz * dz > 4) continue;
       const lp = toLocal(hm, w);
       const hd2 = dist2(lp, head.a);
       if (hd2 < E.faceRadius * E.faceRadius) { target = w; why = 'face'; break; }
       if (lvl >= 1 && hd2 < E.headRadius * E.headRadius) { target = w; why = 'head'; break; }
-      if (lvl >= 1 && w.ai.atFood === 'can' && dx * dx + dz * dz < 1.5) { target = w; why = 'food'; break; }
+      if (lvl >= 1 && (w.ai.atFood === 'can' || (w.state === 'landed' && this._nearCan(w))) && dx * dx + dz * dz < 1.5) { target = w; why = 'food'; break; }
       if (lvl >= 3 && hm.tr.escalation >= E.sprayTrait && lp.z > 0.1 && lp.z < E.sprayRange && Math.abs(lp.x) < lp.z) { target = w; why = 'spray'; break; }
     }
     if (!target) { hm.annoy = 0; hm.annoyId = 0; return; }
@@ -1290,7 +1310,7 @@ export class Sim {
     } else if (hm.state === 'treat') {
       hm.treat += 3;
       if (hm.treat >= T.ext.treatTicks) {
-        const outside = this.wasps.length;
+        const outside = this._own().length;
         const died = Math.max(0, this.colony.adults - outside);
         destroyNest(this.colony);
         this.colony.adults = outside;
@@ -1338,7 +1358,7 @@ export class Sim {
       const key = chunkKey(rec.cx, rec.cz);
       rec.content.hives.forEach((hv, h) => {
         for (const w of this.wasps) {
-          if (w.state !== 'fly' && w.state !== 'chewing') continue;
+          if (w.state !== 'fly' && w.state !== 'chewing' && w.state !== 'landed') continue;
           const dx = w.x - hv.ex, dy = w.y - hv.ey, dz = w.z - hv.ez;
           if (dx * dx + dy * dy + dz * dz < T.bees.entranceAlarm ** 2) { this._alarmHive(key, h, w, 2); break; }
         }
@@ -1419,26 +1439,255 @@ export class Sim {
 
   _alarmDecay() { if (this.alarms.length) this.alarms = this.alarms.filter((a) => a.until > this.tick); }
 
+  // ---------------- predators (GDD 9.3)
+
+  // A wasp that flies through a web sticks where it crossed the web's plane
+  _webCheck(w, p0) {
+    if (w.state !== 'fly' && w.state !== 'stunned') return;
+    for (const rec of this.activeChunks) {
+      const webs = rec.content.webs;
+      if (!webs.length) continue;
+      const st = this.cs(chunkKey(rec.cx, rec.cz));
+      for (let i = 0; i < webs.length; i++) {
+        const wb = webs[i];
+        if (st.webTorn && st.webTorn[i] === this.day) continue;
+        const d0 = (p0.x - wb.x) * wb.nx + (p0.z - wb.z) * wb.nz, d1 = (w.x - wb.x) * wb.nx + (w.z - wb.z) * wb.nz;
+        if (d0 * d1 > 0 && Math.abs(d1) > T.wasp.radius) continue;
+        const t = d0 === d1 ? 1 : clamp(d0 / (d0 - d1), 0, 1);
+        const q = { x: p0.x + (w.x - p0.x) * t, y: p0.y + (w.y - p0.y) * t, z: p0.z + (w.z - p0.z) * t };
+        const dx = q.x - wb.x, dy = q.y - wb.y, dz = q.z - wb.z;
+        const r2 = dx * dx + dy * dy + dz * dz;
+        if (r2 > wb.r * wb.r) continue;
+        w.x = q.x; w.y = q.y; w.z = q.z; w.vx = w.vy = w.vz = 0;
+        w.state = 'webbed';
+        w.web = { key: chunkKey(rec.cx, rec.cz), i, progress: 0, prevBurst: 1, start: this.tick, spiderAt: this.tick + T.web.spiderDelay + Math.ceil(Math.sqrt(r2) / T.web.spiderSpeed * 60) };
+        if (w.attach) w.attach = null;
+        this.emit('webbed', { id: w.id, driven: w.id === this.drivenId, spiderAt: w.web.spiderAt });
+        return;
+      }
+    }
+  }
+
+  _webStep(w, cmd, driven) {
+    const wb = w.web;
+    if (driven) { if (cmd.burst && !wb.prevBurst) wb.progress += T.web.escapePerPress; wb.prevBurst = cmd.burst; }
+    else if (h32(w.id, this.tick, 41) < T.web.aiEscape) wb.progress = 1;
+    if (wb.progress >= 1) {
+      const st = this.cs(wb.key);
+      (st.webTorn || (st.webTorn = {}))[wb.i] = this.day;
+      w.web = null; w.state = 'stunned'; w.stateTicks = 15; w.vy = 0.4;
+      this.emit('webEscape', { id: w.id });
+      return;
+    }
+    if (this.tick >= wb.spiderAt) this._die(w, 'eaten by a spider', null);
+  }
+
+  // Canopy cover: a tree crown overhead hides a wasp from birds
+  _underCanopy(w) {
+    for (const rec of this.activeChunks) for (const t of rec.content.trees) {
+      const dx = w.x - t.x, dz = w.z - t.z;
+      if (dx * dx + dz * dz < t.cr * t.cr && w.y < t.h + t.cr) return true;
+    }
+    return false;
+  }
+
+  _birds() {
+    const B = T.bird;
+    for (const rec of this.activeChunks) {
+      const key = chunkKey(rec.cx, rec.cz);
+      rec.content.birds.forEach((bd, i) => {
+        const k = key + '#' + i;
+        let st = this.birdState.get(k);
+        if (!st) {
+          if (this.tick % 6 !== i % 6) return;
+          const p = birdPos(bd, this.tick);
+          let target = null, best = B.sight * B.sight;
+          for (const w of this.wasps) {
+            if (w.state !== 'fly' || w.y < B.minY) continue;
+            const q = dist2(w, p);
+            if (q < best && !this._underCanopy(w)) { best = q; target = w; }
+          }
+          if (!target) return;
+          const d = Math.sqrt(best) || 1;
+          st = { mode: 'dive', x: p.x, y: p.y, z: p.z, vx: (target.x - p.x) / d * 3, vy: (target.y - p.y) / d * 3, vz: (target.z - p.z) / d * 3, target: target.id, until: this.tick + B.diveTicks };
+          this.birdState.set(k, st);
+          this.emit('birdDive', { key, i, target: target.id, driven: target.id === this.drivenId });
+          return;
+        }
+        let tx, ty, tz, speed = B.speed;
+        if (st.mode === 'dive') {
+          const t = this.waspById(st.target);
+          if (!t || t.state !== 'fly' || t.y < B.abortY || this.tick > st.until || this._underCanopy(t)) {
+            st.mode = 'cool'; st.until = this.tick + B.coolTicks;
+            if (t && t.id === this.drivenId) this.emit('birdMiss', { id: t.id });
+            return;
+          }
+          tx = t.x; ty = t.y; tz = t.z;
+          if (dist2(st, t) < B.catch * B.catch) { this._die(t, 'taken by a bird', null); st.mode = 'cool'; st.until = this.tick + B.coolTicks; return; }
+        } else {
+          const p = birdPos(bd, this.tick);
+          tx = p.x; ty = p.y; tz = p.z; speed = 6;
+          if (dist2(st, p) < 0.25 || this.tick > st.until + 900) { this.birdState.delete(k); return; }
+        }
+        let dx = tx - st.x, dy = ty - st.y, dz = tz - st.z;
+        const d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+        dx = dx / d * speed - st.vx; dy = dy / d * speed - st.vy; dz = dz / d * speed - st.vz;
+        const dl = Math.sqrt(dx * dx + dy * dy + dz * dz), amax = B.accel * DT;
+        if (dl > amax) { dx *= amax / dl; dy *= amax / dl; dz *= amax / dl; }
+        st.vx += dx; st.vy += dy; st.vz += dz;
+        st.x += st.vx * DT; st.y = Math.max(0.3, st.y + st.vy * DT); st.z += st.vz * DT;
+      });
+    }
+  }
+
+  // ---------------- landing (GDD 7.2)
+
+  _surfaceBelow(w) {
+    const R = T.wasp.radius, g = T.land.gap;
+    if (w.y <= R + g) return 'ground';
+    for (const rec of this.activeChunks) for (const b of rec.content.boxes) {
+      if (w.x < b.minx || w.x > b.maxx || w.z < b.minz || w.z > b.maxz) continue;
+      if (Math.abs(w.y - (b.maxy + R)) <= g) return b.hive ? 'hive' : 'wood';
+    }
+    return null;
+  }
+
+  _maybeLand(w, cmd) {
+    if (cmd.mx || cmd.my || cmd.mz || cmd.burst || cmd.sting) return;
+    if (w.vx * w.vx + w.vy * w.vy + w.vz * w.vz > T.land.maxSpeed * T.land.maxSpeed) return;
+    const surf = this._surfaceBelow(w);
+    if (!surf) return;
+    w.state = 'landed'; w.vx = w.vy = w.vz = 0;
+    this.emit('landed', { id: w.id, surface: surf });
+  }
+
+  _nearCan(w) {
+    for (const rec of this.activeChunks) for (const c of rec.content.cans) { const dx = w.x - c.x, dz = w.z - c.z; if (dx * dx + dz * dz < 0.09) return true; }
+    return false;
+  }
+
+  // ---------------- rival colonies (GDD 9.3)
+
+  _rivalNestNear(w) {
+    for (const rec of this.activeChunks) {
+      const rv = rec.content.rival;
+      if (rv && (w.x - rv.ex) ** 2 + (w.y - rv.ey) ** 2 + (w.z - rv.ez) ** 2 < 0.08 * 0.08) return { rv, key: chunkKey(rec.cx, rec.cz) };
+    }
+    return null;
+  }
+
+  _raid(w, r) {
+    w.carry = { kind: 'protein', amount: T.rival.raidProtein, what: 'larva' };
+    for (const x of this.wasps) if (x.colony === r.key && dist2(x, w) < 64) { x.ai.mode = 'hunt'; x.ai.huntId = w.id; x.ai.timer = this.tick + T.rival.huntTicks; }
+    this.emit('raid', { id: w.id, key: r.key });
+  }
+
+  // Rival workers come and go only around their own nest, and only on the world-authority peer
+  _rivals(daylight) {
+    if (this.net && this.peer !== 0) return;
+    const activeKeys = new Set(this.activeChunks.map((r) => chunkKey(r.cx, r.cz)));
+    for (const w of this.wasps.slice()) if (w.colony !== 'own' && !activeKeys.has(w.colony)) this._despawn(w);
+    if (!daylight) return;
+    for (const rec of this.activeChunks) {
+      const rv = rec.content.rival;
+      if (!rv) continue;
+      const key = chunkKey(rec.cx, rec.cz);
+      const n = this.wasps.filter((x) => x.colony === key).length;
+      if (n >= Math.min(T.rival.maxPhysical, rv.workers) || this.tick % 180 >= 60) continue;
+      const w = this._spawnWasp(false);
+      w.colony = key; w.x = rv.ex; w.y = rv.ey - 0.03; w.z = rv.ez;
+      w.role = n === 0 ? 'guard' : h32(w.id, 9) < 0.5 ? 'sugar' : 'protein';
+      w.ai.mode = w.role === 'guard' ? 'guard' : 'pick';
+    }
+  }
+
+  _thinkRival(w, cmd) {
+    const ai = w.ai, rec = this.records.get(w.colony), rv = rec && rec.content.rival;
+    if (!rv) { this._despawn(w); return cmd; }
+    const home = { x: rv.ex, y: rv.ey - 0.02, z: rv.ez };
+    if (!isDaylight(this.minute) || this.raining) ai.mode = 'home';
+    if (ai.mode === 'guard') {
+      const t = this.wasps.find((x) => x.colony === 'own' && (x.state === 'fly' || x.state === 'landed') && dist2(x, home) < T.rival.guardRadius ** 2);
+      if (t) { ai.mode = 'hunt'; ai.huntId = t.id; ai.timer = this.tick + T.rival.huntTicks; }
+      else { this._steer(w, { x: home.x + 0.12 * dcos(this.tick / 40 + w.id), y: home.y + 0.05, z: home.z + 0.12 * dsin(this.tick / 40 + w.id) }, cmd); return cmd; }
+    }
+    if (ai.mode === 'hunt') {
+      const t = this.waspById(ai.huntId);
+      if (!t || t.colony !== 'own' || this.tick > ai.timer || (t.state !== 'fly' && t.state !== 'landed' && t.state !== 'chewing')) { ai.mode = w.role === 'guard' ? 'guard' : 'return'; return cmd; }
+      this._steer(w, t, cmd); cmd.throttle = 1; cmd.burst = 1;
+      return cmd;
+    }
+    if (ai.mode === 'home' || ai.mode === 'return') {
+      this._steer(w, home, cmd);
+      if (dist2(w, home) < 0.07 * 0.07) {
+        w.carry = null; w.ai.cargo = 0; w.energy = 1;
+        if (ai.mode === 'home') { this._despawn(w); return cmd; }
+        ai.mode = w.role === 'guard' ? 'guard' : 'pick';
+      }
+      return cmd;
+    }
+    if (w.energy < 0.2) { ai.mode = 'return'; return cmd; }
+    if (ai.mode === 'pick') { this._aiPick(w); return cmd; }
+    if (ai.mode === 'outbound' || ai.mode === 'collect') {
+      const tp = this._aiTargetPos(w);
+      if (!tp) { ai.mode = w.carry ? 'return' : 'pick'; return cmd; }
+      this._steer(w, tp, cmd);
+      if (ai.mode === 'outbound' && dist2(w, tp) < T.ai.arrive * T.ai.arrive) { ai.mode = 'collect'; ai.timer = this.tick + T.ai.collectTicks; }
+      if (ai.mode === 'collect') {
+        if (ai.target.kind === 'prey') { const p = this._preyNear(w); if (p) { this._catch(w, p); ai.mode = 'return'; } else if (this.tick > ai.timer) ai.mode = 'pick'; }
+        else if ((ai.cargo || 0) >= 0.95 || this.tick > ai.timer + 300) ai.mode = 'return';
+      }
+      return cmd;
+    }
+    ai.mode = 'pick';
+    return cmd;
+  }
+
+  // Wasps of different colonies that touch grapple; the weaker one dies (GDD 9.3)
+  _fights() {
+    const R = T.rival;
+    for (const w of this.wasps) {
+      if (w.state !== 'fighting' || this.tick < w.fight.until || w.fight.other < w.id) continue;
+      const o = this.waspById(w.fight.other);
+      if (!o) { w.state = 'fly'; w.fight = null; continue; }
+      const score = (x) => x.venom + (x.caste === 'queen' ? 1 : 0) + x.fight.mash + h32(x.id, this.tick, 61) * 1.2;
+      const [win, lose] = score(w) >= score(o) ? [w, o] : [o, w];
+      win.state = 'stunned'; win.stateTicks = 20; win.fight = null;
+      this._die(lose, lose.colony === 'own' ? 'killed by a rival wasp' : 'killed by your worker', null);
+      this.emit('fightOver', { winner: win.id, loser: lose.id });
+    }
+    const free = this.wasps.filter((w) => w.state === 'fly' || w.state === 'landed' || w.state === 'chewing');
+    for (let i = 0; i < free.length; i++) for (let j = i + 1; j < free.length; j++) {
+      const a = free[i], b = free[j];
+      if (a.colony === b.colony || a.state === 'fighting' || b.state === 'fighting') continue;
+      if (dist2(a, b) > R.fightRange * R.fightRange) continue;
+      for (const [x, y] of [[a, b], [b, a]]) { x.state = 'fighting'; x.vx = x.vy = x.vz = 0; x.fight = { other: y.id, until: this.tick + R.fightTicks, mash: 0 }; }
+      this.emit('fight', { a: a.id, b: b.id, driven: a.id === this.drivenId || b.id === this.drivenId });
+    }
+  }
+
   // ---------------- colony tick (1 Hz)
 
   _colonyTick() {
     const col = this.colony;
     const daylight = isDaylight(this.minute) && !this.raining && this.canFly();
     const frac = this.seasonFrac;
-    colonyStep(col, 60 / this.dayTicks, this.wasps.filter((w) => w.caste !== 'queen').length, daylight, frac, this.bio);
+    colonyStep(col, 60 / this.dayTicks, this._own().filter((w) => w.caste !== 'queen').length, daylight, frac, this.bio);
     const ph = seasonPhase(frac);
     if (ph !== this.season.phase) { this.season.phase = ph; this.emit('season', { phase: ph }); }
     if (frac >= 1) { this._endSeason('autumn'); return; }
-    if (colonyFinished(col, this.wasps.length) && !this.wasps.length) { this._endSeason('colony lost'); return; }
+    if (colonyFinished(col, this._own().length) && !this._own().length) { this._endSeason('colony lost'); return; }
     this._extCheck();
     // launch physical AI foragers while the player is near the nest (GDD 11.12: far colonies stay abstract)
+    this._rivals(daylight);
     const nearNest = this.activeChunks.some((r) => r.cx === 0 && r.cz === 0);
     if (!nearNest) {
-      for (const w of this.wasps.slice()) if (w.id !== this.drivenId) this._despawn(w);
+      for (const w of this._own()) if (w.id !== this.drivenId) this._despawn(w);
       return;
     }
-    const inside = col.adults - this.wasps.length;
-    const ai = this.wasps.length - (this._driven() ? 1 : 0);
+    const own = this._own().length;
+    const inside = col.adults - own;
+    const ai = own - (this._driven() ? 1 : 0);
     const cap = Math.min(T.ai.maxPhysical, Math.floor(col.adults * 0.4));
     if (!this.noAI && daylight && col.nestAlive && inside >= 1 && ai < cap && this.tick % T.ai.launchEvery < 60) this._spawnWasp(false);
   }
@@ -1455,6 +1704,7 @@ export class Sim {
     const cmd = { dirX: 0, dirY: 0, dirZ: 0, throttle: 0, burst: 0, sting: 0, act: 0 };
     if (w.state === 'balled') { this._ballEscape(w, false); return cmd; }
     if (w.state !== 'fly') return cmd;
+    if (w.colony !== 'own') return this._thinkRival(w, cmd);
     // alarm pheromone pulls nearby workers into an attack
     if (ai.mode !== 'attack' && ai.mode !== 'evade') {
       for (const a of this.alarms) {

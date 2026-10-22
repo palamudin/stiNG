@@ -5,7 +5,7 @@ import {
   Sim, Act, T, DT, ZONES, ZoneName, SwatKind, SwatKindName, StyleName, TopName, BottomName, Top, Bottom,
   toWorld, toLocal, chunkKey, chunkOf, hash, Domain, rangeInt, resolveSting, zoneCover, segClosest, classify, predictedKind,
   NEST, NEST_ENTRANCE, flyPos, beePos, fmtClock, minuteOfDay, isLowerZone, broodTotal, garmentGraph, dayWeather,
-  NetLab, LINKS,
+  NetLab, LINKS, birdPos,
 } from './sim/index.js';
 
 const $ = (id) => document.getElementById(id);
@@ -119,6 +119,7 @@ const geoHead = new THREE.IcosahedronGeometry(0.022, 1);
 const geoBottle = new THREE.CylinderGeometry(0.035, 0.04, 0.2, 12);
 const geoCandle = new THREE.CylinderGeometry(0.04, 0.04, 0.07, 14);
 const geoFlame = new THREE.ConeGeometry(0.008, 0.025, 6);
+const webMat = new THREE.LineBasicMaterial({ color: '#f4f4f4', transparent: true, opacity: 0.32 });
 
 function buildChunk(rec) {
   const g = new THREE.Group();
@@ -193,6 +194,28 @@ function buildChunk(rec) {
     for (const m of [stand, s1, s2, lid]) { m.castShadow = m.receiveShadow = true; }
     g.add(stand, s1, s2, lid, slot);
   }
+  dyn.webs = c.webs.map((wb) => {
+    const pts = [];
+    const ux = -wb.nz, uz = wb.nx; // in-plane horizontal axis
+    const P = (r, a) => [wb.x + ux * r * Math.cos(a), wb.y + r * Math.sin(a), wb.z + uz * r * Math.cos(a)];
+    for (let k = 0; k < 10; k++) { const a = k / 10 * Math.PI * 2; pts.push(...P(0, a), ...P(wb.r, a)); }
+    for (let ring = 1; ring <= 6; ring++) {
+      const r = wb.r * ring / 6.5;
+      for (let k = 0; k < 10; k++) { const a0 = k / 10 * Math.PI * 2, a1 = (k + 1) / 10 * Math.PI * 2; pts.push(...P(r, a0), ...P(r, a1)); }
+    }
+    const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    const lines = new THREE.LineSegments(geo, webMat);
+    g.add(lines);
+    return lines;
+  });
+  if (c.rival) {
+    const rv = c.rival;
+    const nest = new THREE.Mesh(new THREE.SphereGeometry(rv.r, 18, 14), new THREE.MeshLambertMaterial({ map: paperTex, color: '#9a958a' }));
+    nest.scale.set(1, 1.3, 1); nest.position.set(rv.x, rv.y, rv.z); nest.castShadow = true;
+    const hole = new THREE.Mesh(new THREE.CircleGeometry(0.025, 14), mat('#120d08', { side: THREE.DoubleSide }));
+    hole.rotation.x = Math.PI / 2; hole.position.set(rv.ex, rv.ey + 0.005, rv.ez);
+    g.add(nest, hole);
+  }
   if (c.nest) {
     const n = c.nest;
     const nest = new THREE.Mesh(new THREE.SphereGeometry(n.r, 20, 16), new THREE.MeshLambertMaterial({ map: paperTex }));
@@ -222,7 +245,8 @@ function syncChunks() {
 
 function updateChunkDynamics() {
   for (const [k, g] of chunkViews) {
-    const lv = sim.escLevel(k), d = g.userData.dyn;
+    const lv = sim.escLevel(k), d = g.userData.dyn, torn = (sim.chunkState.get(k) || {}).webTorn || {};
+    d.webs.forEach((l, i) => { l.visible = torn[i] !== sim.day; });
     for (const l of d.lids) l.visible = lv >= 2;
     for (const c of d.candles) c.visible = lv >= 2;
     for (const t of d.traps) t.visible = lv >= 3;
@@ -267,6 +291,68 @@ function renderCritters(t) {
   }
   flyMesh.count = nf; catMesh.count = nc; beeMesh.count = nb;
   flyMesh.instanceMatrix.needsUpdate = catMesh.instanceMatrix.needsUpdate = beeMesh.instanceMatrix.needsUpdate = true;
+}
+
+// ------------------------------------------------------------------ birds and spiders
+
+function buildBird() {
+  const g = new THREE.Group();
+  const brown = mat('#3b2f26'), dark = mat('#1e1813');
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), brown); body.scale.set(0.8, 0.7, 1.6);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 6), dark); head.position.z = 0.08; head.position.y = 0.015;
+  const beak = new THREE.Mesh(new THREE.ConeGeometry(0.008, 0.03, 6), mat('#d8a43a')); beak.rotation.x = Math.PI / 2; beak.position.set(0, 0.012, 0.115);
+  const wingGeo = new THREE.BoxGeometry(0.16, 0.006, 0.07); wingGeo.translate(0.08, 0, 0);
+  const wl = new THREE.Mesh(wingGeo, brown), wr = new THREE.Mesh(wingGeo, brown); wr.scale.x = -1;
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.005, 0.06), dark); tail.position.z = -0.09;
+  g.add(body, head, beak, wl, wr, tail);
+  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  g.userData = { wl, wr, prev: new THREE.Vector3() };
+  scene.add(g);
+  return g;
+}
+const birdViews = new Map();
+const spiderPool = [];
+function renderBirdsAndSpiders(t, dt) {
+  const seen = new Set();
+  for (const rec of sim.activeChunks) {
+    const key = chunkKey(rec.cx, rec.cz);
+    rec.content.birds.forEach((bd, i) => {
+      const k = key + '#' + i;
+      seen.add(k);
+      let g = birdViews.get(k);
+      if (!g) { g = buildBird(); birdViews.set(k, g); }
+      const st = sim.birdState.get(k);
+      const p = st ? new THREE.Vector3(st.x, st.y, st.z) : V(birdPos(bd, t));
+      const v = st ? new THREE.Vector3(st.vx, st.vy, st.vz) : V(birdPos(bd, t + 1)).sub(p);
+      g.position.lerp(p, g.userData.init ? 1 - Math.exp(-dt * 20) : 1); g.userData.init = true;
+      if (v.lengthSq() > 1e-8) { g.rotation.order = 'YXZ'; g.rotation.y = Math.atan2(v.x, v.z); g.rotation.x = -Math.atan2(v.y, Math.hypot(v.x, v.z)); }
+      const diving = st && st.mode === 'dive';
+      const flap = diving ? 0.15 : Math.sin(t * 0.35 + i) * 0.7;
+      g.userData.wl.rotation.z = flap; g.userData.wr.rotation.z = -flap;
+    });
+  }
+  for (const [k, g] of birdViews) if (!seen.has(k)) { scene.remove(g); birdViews.delete(k); }
+  // a spider walks out to every stuck wasp
+  let n = 0;
+  for (const w of sim.wasps) {
+    if (w.state !== 'webbed' || !w.web) continue;
+    const rec = sim.records.get(w.web.key), wb = rec && rec.content.webs[w.web.i];
+    if (!wb) continue;
+    while (spiderPool.length <= n) {
+      const sp = new THREE.Group();
+      const body = new THREE.Mesh(new THREE.SphereGeometry(0.006, 8, 6), mat('#1a1410'));
+      const abd = new THREE.Mesh(new THREE.SphereGeometry(0.009, 8, 6), mat('#2b2018')); abd.position.y = 0.011;
+      sp.add(body, abd);
+      for (let l = 0; l < 8; l++) { const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.0007, 0.0007, 0.02, 3), mat('#1a1410')); leg.rotation.z = (l < 4 ? 1 : -1) * (0.9 + (l % 4) * 0.2); leg.position.x = (l < 4 ? 1 : -1) * 0.008; leg.position.y = -0.002 + (l % 4) * 0.003; sp.add(leg); }
+      scene.add(sp); spiderPool.push(sp);
+    }
+    const sp = spiderPool[n++];
+    const u = Math.min(1, Math.max(0, (t - w.web.start) / Math.max(1, w.web.spiderAt - w.web.start)));
+    sp.visible = true;
+    sp.position.set(wb.x + (w.x - wb.x) * u, wb.y + (w.y - wb.y) * u, wb.z + (w.z - wb.z) * u);
+    sp.rotation.y = Math.atan2(wb.nx, wb.nz);
+  }
+  for (; n < spiderPool.length; n++) spiderPool[n].visible = false;
 }
 
 // ------------------------------------------------------------------ humans
@@ -491,14 +577,14 @@ function applyZoneColors(view, on) {
 
 // ------------------------------------------------------------------ wasps
 
-function buildWasp(remote = false) {
+function buildWasp(remote = false, rival = false) {
   const g = new THREE.Group();
   if (remote) {
     const ring = new THREE.Mesh(new THREE.TorusGeometry(0.009, 0.0009, 6, 24), new THREE.MeshBasicMaterial({ color: '#4fd1ff' }));
     ring.rotation.x = Math.PI / 2; ring.position.y = 0.007;
     g.add(ring);
   }
-  const black = mat('#15120c'), yellow = mat('#f2c200');
+  const black = mat('#15120c'), yellow = mat(rival ? '#e0901a' : '#f2c200');
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.0021, 12, 10), yellow); head.position.z = 0.0058; head.scale.set(1.15, 1, 0.9);
   const eyes = new THREE.Mesh(new THREE.SphereGeometry(0.0013, 8, 6), black); eyes.scale.set(2.0, 1.1, 0.8); eyes.position.set(0, 0.0004, 0.0062);
   const thorax = new THREE.Mesh(new THREE.SphereGeometry(0.0026, 12, 10), black); thorax.position.z = 0.0025; thorax.scale.set(1, 0.95, 1.2);
@@ -532,7 +618,7 @@ function renderWasps(alpha, t, dt) {
   for (const w of sim.wasps) {
     seen.add(w.id);
     let g = waspViews.get(w.id);
-    if (!g) { g = buildWasp(); waspViews.set(w.id, g); }
+    if (!g) { g = buildWasp(false, w.colony !== 'own'); waspViews.set(w.id, g); }
     const pp = pos.get(w.id);
     const p = pp ? new THREE.Vector3().lerpVectors(pp.p, pp.c, alpha) : V(w);
     const driven = w.id === sim.drivenId;
@@ -547,8 +633,8 @@ function renderWasps(alpha, t, dt) {
       if (sp > 0.05) { let d = Math.atan2(w.vx, w.vz) - g.userData.yaw; d = Math.atan2(Math.sin(d), Math.cos(d)); g.userData.yaw += d * Math.min(1, dt * 10); }
       g.rotation.y = g.userData.yaw; g.rotation.x = -Math.atan2(w.vy, Math.max(0.3, sp)) * 0.6;
     }
-    g.rotation.z = w.state === 'stunned' ? t * 0.6 : 0;
-    const flap = w.state === 'attached' || w.state === 'balled' || w.state === 'trapped' ? 0.15 : Math.sin(performance.now() * 0.9 + w.id) * 0.9;
+    g.rotation.z = w.state === 'stunned' ? t * 0.6 : w.state === 'fighting' ? Math.sin(t * 3 + w.id) * 1.4 : 0;
+    const flap = w.state === 'attached' || w.state === 'balled' || w.state === 'trapped' || w.state === 'landed' ? 0.15 : w.state === 'webbed' ? Math.sin(t * 2.3) * 0.3 : w.state === 'fighting' ? Math.sin(t * 5 + w.id) * 1.2 : Math.sin(performance.now() * 0.9 + w.id) * 0.9;
     g.userData.wl.rotation.z = flap; g.userData.wr.rotation.z = -flap;
     g.userData.abdomen.rotation.x = w.state === 'attached' ? 0.5 + Math.sin(t * 0.8) * 0.06 : 0;
     const cv = g.userData.carry;
@@ -944,6 +1030,9 @@ function updateHud() {
   else if (w.state === 'under') status = 'Under the clothes';
   else if (w.state === 'chewing') status = `Chewing pulp ${Math.round(w.chew / T.pulp.chewTicks * 100)}%`;
   else if (w.state === 'trapped') status = 'Stuck in the trap';
+  else if (w.state === 'webbed') status = `Stuck in a web · spider in ${Math.max(0, (w.web.spiderAt - sim.tick) / 60).toFixed(1)} s`;
+  else if (w.state === 'landed') status = 'Resting';
+  else if (w.state === 'fighting') status = 'Fighting a rival wasp';
   else if (!sim._driven()) status = '';
   else if (!sim.canFly()) status = 'Too cold to fly';
   else if (sim.feeding) status = 'Feeding';
@@ -955,6 +1044,10 @@ function updateHud() {
   let hint = '';
   const h = sim.hint || {};
   if (w.state === 'balled') hint = `Mash ${kbd('Shift')} to break out`;
+  else if (w.state === 'webbed') hint = `Mash ${kbd('Shift')} to tear free`;
+  else if (w.state === 'fighting') hint = `Mash ${kbd('LMB')} to sting it first`;
+  else if (w.state === 'landed') hint = 'Resting costs no sugar · any key takes off';
+  else if (h.rival) hint = `${kbd('E')} steal a larva from the rival nest`;
   else if (w.state === 'under') {
     const hm = sim.humanByHex(w.under.hex);
     const g = garmentGraph(hm.tr, hm.clothing, hm.posture, hm.parts[hm.posture]);
@@ -1006,6 +1099,7 @@ function drawMap() {
       for (const t of rec.content.tables) { const [x, y] = toS(t.x, t.z); ctx.fillRect(x - 2, y - 2, 4, 4); }
       ctx.fillStyle = '#ece8dc';
       for (const hv of rec.content.hives) { const [x, y] = toS(hv.x, hv.z); ctx.fillRect(x - 3, y - 3, 6, 6); }
+      if (rec.content.rival) { const [x, y] = toS(rec.content.rival.x, rec.content.rival.z); ctx.strokeStyle = css('--orange'); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.stroke(); }
     } else { ctx.strokeStyle = 'rgba(165,157,138,.2)'; ctx.strokeRect(sx + 1.5, sy + 1.5, cell - 3, cell - 3); }
     if (Math.abs(dx) <= T.chunk.activeRadius && Math.abs(dz) <= T.chunk.activeRadius) { ctx.strokeStyle = 'rgba(246,199,0,.3)'; ctx.strokeRect(sx + 0.5, sy + 0.5, cell - 1, cell - 1); }
   }
@@ -1016,7 +1110,7 @@ function drawMap() {
     ctx.fillRect(x - 2, y - 2, hm.special ? 6 : 4, hm.special ? 6 : 4);
   }
   ctx.fillStyle = 'rgba(246,199,0,.8)';
-  for (const x of sim.wasps) { if (x.id === sim.drivenId) continue; const [px, py] = toS(x.x, x.z); ctx.fillRect(px - 1, py - 1, 2, 2); }
+  for (const x of sim.wasps) { if (x.id === sim.drivenId) continue; ctx.fillStyle = x.colony === 'own' ? 'rgba(246,199,0,.8)' : css('--orange'); const [px, py] = toS(x.x, x.z); ctx.fillRect(px - 1, py - 1, 2, 2); }
   const [nx, ny] = toS(NEST.x, NEST.z);
   ctx.strokeStyle = sim.colony.nestAlive ? yellow : red; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.arc(nx, ny, 5, 0, Math.PI * 2); ctx.stroke();
@@ -1027,7 +1121,7 @@ function drawMap() {
 
 // ------------------------------------------------------------------ events
 
-const DEATH_TITLE = { slap: 'SWATTED', cover: 'SMOTHERED', 'crushed under clothing': 'CRUSHED', insecticide: 'SPRAYED', 'drowned in a trap': 'DROWNED', 'cooked by bees': 'COOKED', starved: 'STARVED' };
+const DEATH_TITLE = { 'eaten by a spider': 'EATEN', 'taken by a bird': 'TAKEN', 'killed by a rival wasp': 'KILLED', slap: 'SWATTED', cover: 'SMOTHERED', 'crushed under clothing': 'CRUSHED', insecticide: 'SPRAYED', 'drowned in a trap': 'DROWNED', 'cooked by bees': 'COOKED', starved: 'STARVED' };
 
 function pushSwatAnims(list, frameHex, contactTick) {
   const frame = sim.humanByHex(frameHex);
@@ -1104,6 +1198,13 @@ function handleEvents(events) {
         break;
       }
       case 'queenDied': toast('The queen is dead', 'var(--red)', 3); logEvent(`the queen died · ${e.cause}`); break;
+      case 'webbed': if (e.driven) { toast('Stuck in a web · mash Shift', 'var(--red)', 2); blip(300, 260, 0.2, 0.05, 'triangle'); } break;
+      case 'webEscape': if (e.id === sim.drivenId) toast('Tore free', 'var(--yellow)', 1.2); break;
+      case 'birdDive': if (e.driven) { toast('A bird is diving at you · get low or under a tree', 'var(--red)', 2.4); blip(2600, 1800, 0.3, 0.06, 'sine'); } break;
+      case 'birdMiss': toast('The bird missed', 'var(--yellow)', 1.2); break;
+      case 'fight': if (e.driven) toast('Grappling a rival wasp · mash LMB', 'var(--red)', 1.8); break;
+      case 'fightOver': logEvent(`fight: worker ${e.winner} killed worker ${e.loser}`); break;
+      case 'raid': toast('Stole a larva · their workers are coming', 'var(--orange)', 2.2); break;
       case 'winter':
         {
           const total = e.survivors + e.lineage;
@@ -1216,6 +1317,7 @@ function frame(now) {
     const focus = updateCamera(p, dt);
     if (tm) { tm('wasps+cam', t0); t0 = performance.now(); }
     renderCritters(t);
+    renderBirdsAndSpiders(t, dt);
     renderSwats(t);
     renderSprays();
     renderRain(focus, dt);

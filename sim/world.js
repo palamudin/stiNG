@@ -66,6 +66,12 @@ export function flyPos(f, tick) {
   };
 }
 
+// A bird on its patrol circle (pure function of time).
+export function birdPos(b, tick) {
+  const a = ((tick + b.phase) / b.period) * 6.283185307179586 * b.dir;
+  return { x: b.x + b.r * dcos(a), y: b.y + 0.6 * dsin(a * 3), z: b.z + b.r * dsin(a) };
+}
+
 // Bee k of a hive. Guards circle the entrance; foragers commute to a flower and back.
 export function beePos(hive, k, tick) {
   const b = hive.bees[k];
@@ -93,6 +99,7 @@ export function generateChunk(seed, cx, cz) {
   const c = {
     cx, cz, tint: unit(H(0)), trees: [], tables: [], benches: [], cans: [], flowers: [], caterpillars: [], flies: [],
     humans: [], boxes: [], cylinders: [], sugar: [], hives: [], traps: [], nest: null,
+    webs: [], birds: [], rival: null,
   };
   const occupied = [];
   const isOrigin = cx === 0 && cz === 0;
@@ -208,6 +215,24 @@ export function generateChunk(seed, cx, cz) {
   for (let i = 0; i < nt; i++) {
     const x = ox + range(H(150 + i * 4), -30, 30), z = oz + range(H(151 + i * 4), -30, 30);
     if (free(x, z, 3)) { addTree(x, z, 200 + i * 4); occupied.push({ x, z, r: 2 }); }
+  }
+  // Spider webs: vertical discs beside tree trunks (GDD 9.3)
+  c.trees.forEach((t, i) => {
+    if (unit(H(700 + i)) > 0.45) return;
+    const a = range(H(710 + i), 0, 6.28), d = t.r + range(H(720 + i), 0.15, 0.35);
+    const x = t.x + d * dcos(a), z = t.z + d * dsin(a);
+    // the web hangs between the trunk and a twig, facing across the line to the trunk
+    c.webs.push({ x, y: range(H(730 + i), 0.45, 1.6), z, nx: -dsin(a), nz: dcos(a), r: range(H(740 + i), 0.12, 0.26), tree: i });
+  });
+  // Birds: one patrol circle per chunk at most (GDD 9.3)
+  if (unit(H(800)) < 0.55) {
+    c.birds.push({ x: ox + range(H(801), -15, 15), z: oz + range(H(802), -15, 15), y: range(H(803), 4, 8), r: range(H(804), 7, 14), period: rangeInt(H(805), 1200, 2400), phase: rangeInt(H(806), 0, 2400), dir: unit(H(807)) < 0.5 ? 1 : -1 });
+  }
+  // A rival wasp colony hangs in one of the trees (GDD 9.3)
+  if (!isOrigin && !(cx === 1 && cz === 0) && c.trees.length && unit(H(900)) < 0.12) {
+    const t = c.trees[rangeInt(H(901), 0, c.trees.length)];
+    const y = Math.min(t.h - 0.6, range(H(902), 1.8, 2.6));
+    c.rival = { x: t.x + t.r + 0.25, y, z: t.z, r: 0.12, ex: t.x + t.r + 0.25, ey: y - 0.15, ez: t.z, workers: rangeInt(H(903), 3, 6) };
   }
   // Bees: guards at the entrance, foragers commute to this chunk's flowers
   for (const hv of c.hives) {

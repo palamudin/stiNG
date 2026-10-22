@@ -92,6 +92,12 @@ export const T = {
   },
   queen: { speedMul: 0.8, venomMul: 1.5 },
 
+  // Predators and rivals (GDD 9.3)
+  web: { spiderSpeed: 0.06, spiderDelay: 60, escapePerPress: 0.22, aiEscape: 0.004 },
+  bird: { sight: 7, minY: 1.5, abortY: 0.8, speed: 9, accel: 26, catch: 0.06, diveTicks: 150, coolTicks: 600 },
+  land: { maxSpeed: 0.25, gap: 0.004 },
+  rival: { maxPhysical: 3, fightRange: 0.025, fightTicks: 40, guardRadius: 1.5, raidProtein: 2, huntTicks: 600, mash: 0.15 },
+
   // Networking (GDD 11): human-side effects of events commit at the end of the consequence window
   net: { commitTicks: 30, stateEvery: 3, remoteTimeout: 45 },
 };

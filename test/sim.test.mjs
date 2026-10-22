@@ -299,7 +299,66 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   ok(s.colony.cells > 10 && s.colony.eggs + s.colony.larvae > 1, `founding: pulp builds cells and the queen lays (${s.colony.cells.toFixed(0)} cells, ${(s.colony.eggs + s.colony.larvae).toFixed(1)} brood)`);
 }
 
-// 14. Frozen chunks
+// 14. Predators, landing, rivals (GDD 7.2, 9.3)
+{
+  // spider web: fly into it, hang still, get eaten; mash burst, tear free
+  const findWeb = (s) => { for (const r of s.activeChunks) if (r.content.webs.length) return { w: r.content.webs[0], key: `${r.cx},${r.cz}` }; return null; };
+  const s = new Sim({ seed: 1234 });
+  const { w: wb } = findWeb(s);
+  const into = (sim) => { const w = sim.wasp; place(w, { x: wb.x - wb.nx * 0.1, y: wb.y, z: wb.z - wb.nz * 0.1 }); w.vx = wb.nx * 2; w.vz = wb.nz * 2; };
+  into(s);
+  let ev = run(s, 5, () => idle());
+  ok(s.wasp.state === 'webbed', `flying through a web sticks the wasp (${s.wasp.state})`);
+  ev = run(s, 900, () => idle());
+  const eaten = ev.find((e) => e.type === 'waspDied');
+  ok(eaten && eaten.cause === 'eaten by a spider', `a stuck wasp that does nothing is eaten (${eaten && eaten.cause})`);
+  const s2 = new Sim({ seed: 1234 });
+  into(s2); run(s2, 5, () => idle());
+  ev = run(s2, 60, (sim, i) => idle({ burst: i % 2 }));
+  ok(count(ev, 'webEscape') === 1, 'mashing burst tears free');
+
+  // bird: hover in the open at 3 m and get taken; stay low and live
+  const s3 = new Sim({ seed: 1234 });
+  let bird = null, bkey = null;
+  for (const r of s3.activeChunks) if (r.content.birds.length) { bird = r.content.birds[0]; bkey = r; break; }
+  ok(!!bird, 'a bird patrols near the nest');
+  const open = (sim) => { const w = sim._driven(); if (!w || w.state !== 'fly') return; const p = { x: bird.x + bird.r, y: 3, z: bird.z }; place(w, p); };
+  ev = run(s3, 2400, (sim) => { open(sim); return idle(); });
+  const taken = ev.find((e) => e.type === 'waspDied');
+  ok(count(ev, 'birdDive') > 0 && taken && taken.cause === 'taken by a bird', `a wasp hanging in open air is taken by a bird (${taken && taken.cause})`);
+
+  // landing: hover still over a bench, land, stop burning sugar
+  const s4 = new Sim({ seed: 1234 });
+  const bench = s4.records.get('0,0').content.boxes[1];
+  const w4 = s4.wasp; place(w4, { x: (bench.minx + bench.maxx) / 2 + 0.3, y: bench.maxy + 0.0071, z: (bench.minz + bench.maxz) / 2 });
+  w4.energy = 0.5;
+  ev = run(s4, 300, () => idle());
+  ok(w4.state === 'landed' && Math.abs(w4.energy - 0.5) < 0.01, `a still wasp lands on the bench and rests (${w4.state}, crop ${w4.energy.toFixed(3)})`);
+  run(s4, 2, () => idle({ mz: 100 }));
+  ok(w4.state === 'fly', 'any input takes off again');
+
+  // rivals: a rival nest near the origin spawns workers; touching one starts a fight with a winner
+  let rs = null, rkey = null;
+  for (let seed = 1; seed < 60 && !rs; seed++) {
+    const t = new Sim({ seed });
+    for (const r of t.activeChunks) if (r.content.rival) { rs = t; rkey = r; break; }
+  }
+  ok(!!rs, 'found a world with a rival nest next to the home chunk');
+  const rv = rkey.content.rival;
+  place(rs.wasp, { x: rv.ex + 3, y: rv.ey, z: rv.ez });
+  ev = run(rs, 1200, (sim) => { const w = sim._driven(); if (w && w.state === 'fly') place(w, { x: rv.ex + 3, y: rv.ey, z: rv.ez }); return idle(); });
+  const rivals = rs.wasps.filter((w) => w.colony !== 'own');
+  ok(rivals.length > 0, `rival workers fly from their nest (${rivals.length})`);
+  // raid: E at their entrance steals a larva and sends the guard after you
+  place(rs.wasp, { x: rv.ex, y: rv.ey - 0.02, z: rv.ez });
+  ev = run(rs, 2, (sim, i) => idle({ act: i === 1 ? Act.Interact : 0 }));
+  ok(count(ev, 'raid') === 1 && rs.wasp.carry && rs.wasp.carry.what === 'larva', 'E at a rival entrance steals a larva');
+  ev = run(rs, 600, () => idle());
+  const fought = ev.find((e) => e.type === 'fightOver');
+  ok(count(ev, 'fight') > 0 && fought, 'rival workers hunt the raider and the fight ends with one dead');
+}
+
+// 15. Frozen chunks
 {
   const s = new Sim({ seed: 5 });
   const rec = s.records.get('0,0'), before = rec.contentHash;
