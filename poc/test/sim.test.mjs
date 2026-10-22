@@ -449,6 +449,34 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   ok(s.records.get('0,0') === rec && rec.contentHash === before, 'discovered chunk record stays frozen');
 }
 
+// 19b. Panic spills a drink: a new sugar source (GDD 8.9)
+{
+  const s = new Sim({ seed: 1234 });
+  const cans = s.records.get('0,0').content.cans;
+  let ev = [];
+  for (const hm of s.active.filter((h) => h.posture === 'sit' && h.chunk === '0,0')) {
+    if (count(ev, 'spill')) break;
+    s._startFlee(hm, null);
+    ev.push(...s.drainEvents());
+  }
+  const sp = ev.find((e) => e.type === 'spill');
+  ok(!!sp && s.canSpilled('0,0', sp.i) && s.spillsIn('0,0').length === 1, 'a sitter who jumps up knocks a drink over');
+  const pud = s.spillsIn('0,0')[0], w = s.wasp;
+  w.energy = 0.3;
+  // land in the puddle (hovering this close to people would end up perched on an arm)
+  place(w, { x: pud.x, y: 0.75 + T.wasp.radius, z: pud.z }); w.state = 'landed';
+  run(s, 120);
+  ok(w.energy > 0.6, `the puddle feeds a wasp (crop ${w.energy.toFixed(2)})`);
+  const c = cans[sp.i];
+  w.energy = 0.3;
+  run(s, 240, () => { place(w, { x: c.x, y: 0.87, z: c.z }); return idle(); });
+  ok(w.energy < 0.35, `the knocked-over can itself is empty (crop ${w.energy.toFixed(2)})`);
+  const t = new Sim({ seed: 1234 }); t.cs('0,0').esc = 9; // lids on
+  let e2 = [];
+  for (const hm of t.active.filter((h) => h.posture === 'sit' && h.chunk === '0,0')) { t._startFlee(hm, null); e2.push(...t.drainEvents()); }
+  ok(count(e2, 'spill') === 0, 'lidded drinks at alert level 2 do not spill');
+}
+
 // 20. Level 5: municipal pest control (GDD 8.10)
 {
   const s = new Sim({ seed: 1234 });

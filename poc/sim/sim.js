@@ -496,7 +496,10 @@ export class Sim {
     const states = ['away', 'arrive', 'idle', 'flee', 'return', 'leave', 'treat'];
     for (const hm of this.active) { f(hm.x); f(hm.z); f(hm.panic); f(states.indexOf(hm.state)); f(hm.stungCount); f(hm.clothing.topOff ? 1 : 0); }
     // alert points, in key order; chunks a peer never touched count as zero on both sides
-    for (const [k, st] of [...this.chunkState].filter(([, x]) => x.esc > 0).sort((a, b) => (a[0] < b[0] ? -1 : 1))) { f(k.length); f(st.esc); }
+    for (const [k, st] of [...this.chunkState].filter(([, x]) => x.esc > 0).sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+      f(k.length); f(st.esc);
+      if (st.spilled) for (const i of Object.keys(st.spilled).sort()) { f(+i); f(st.spilled[i]); }
+    }
     f(this.stung.size);
     return (h >>> 0).toString(16).padStart(8, '0');
   }
@@ -956,8 +959,8 @@ export class Sim {
         }
       }
       if (w.energy >= 1 && !(w.ai.mode === 'collect' && w.role === 'sugar')) continue;
-      for (const s of c.sugar) {
-        if (s.kind === 'can' && lvl >= 2) continue; // food covered (GDD 8.10)
+      for (const s of c.sugar.concat(this.spillsIn(key))) {
+        if (s.kind === 'can' && (lvl >= 2 || this.canSpilled(key, c.sugar.indexOf(s)))) continue; // food covered (GDD 8.10) or knocked over
         if (dist2(w, s) <= d2max) {
           const add = T.energy.refuelPerSec * s.rate * DT;
           if (w.energy < 1) w.energy = Math.min(1, w.energy + add);
@@ -1246,7 +1249,37 @@ export class Sim {
   // ---------------- humans (GDD 8.2, 8.9, 8.10)
 
   // p: where the threat came from ({x, z}); null flees backwards. Never a live wasp position, so peers agree.
+  // A sitter who jumps up jolts the table: the nearest drink on it may go over and become an open puddle of sugar.
+  // Pure function of shared human state and the tick, so every peer spills the same can. Lidded drinks (level 2+) stay put.
+  _spill(hm) {
+    const P = T.panic, key = hm.chunk, rec = this.records.get(key);
+    if (!rec || this.escLevel(key) >= 2) return;
+    if (unit(hash(this.seed, Domain.HumanSchedule, hm.id, BigInt(this.tick) * 2n + 1n)) >= P.spillChance) return;
+    let best = -1, bd = P.spillReach * P.spillReach;
+    rec.content.cans.forEach((c, i) => { const d = (c.x - hm.x) ** 2 + (c.z - hm.z) ** 2; if (d < bd) { bd = d; best = i; } });
+    if (best < 0) return;
+    const st = this.cs(key), sp = st.spilled || (st.spilled = {});
+    if ((sp[best] || 0) > this.minute) return;
+    sp[best] = this.minute + P.spillMinutes;
+    this.emit('spill', { key, i: best, humanHex: hm.hex });
+  }
+
+  // live puddles in a chunk: { x, y, z, rate, kind: 'spill', i }
+  spillsIn(key) {
+    const st = this.chunkState.get(key), rec = this.records.get(key);
+    if (!st || !st.spilled || !rec) return [];
+    const out = [];
+    for (const i of Object.keys(st.spilled).map(Number).sort((a, b) => a - b)) {
+      if (st.spilled[i] <= this.minute) continue;
+      const c = rec.content.cans[i];
+      out.push({ x: c.x + 0.06, y: 0.765, z: c.z, rate: T.panic.spillRate, kind: 'spill', i });
+    }
+    return out;
+  }
+  canSpilled(key, i) { const st = this.chunkState.get(key); return !!(st && st.spilled && st.spilled[i] > this.minute); }
+
   _startFlee(hm, p) {
+    if (hm.posture === 'sit') this._spill(hm);
     const w = p;
     let dx = hm.x - (w ? w.x : hm.x - hm.fx), dz = hm.z - (w ? w.z : hm.z - hm.fz);
     let d = Math.sqrt(dx * dx + dz * dz);
@@ -2163,6 +2196,7 @@ export class Sim {
           consider({ kind: 'sugar', key, i, c: ri }, s);
         });
         if (lvl >= 3 && col.deficit >= T.ai.canDeficit) c.traps.forEach((tr, i) => consider({ kind: 'trap', key, i, c: ri + 50 }, tr));
+        this.spillsIn(key).forEach((sp) => consider({ kind: 'spill', key, i: sp.i, c: ri + 60 }, sp));
       } else if (w.role === 'protein') {
         c.flies.forEach((f, i) => { if ((st.caughtFly[i] || 0) <= this.tick) consider({ kind: 'prey', sub: 'fly', key, i, c: ri }, flyPos(f, this.tick)); });
         c.caterpillars.forEach((f, i) => { if (!st.caughtCat[i]) consider({ kind: 'prey', sub: 'cat', key, i, c: ri + 20 }, f); });
@@ -2186,6 +2220,7 @@ export class Sim {
     const c = rec.content, st = this.cs(t.key);
     if (t.kind === 'sugar') { const s = c.sugar[t.i]; return { x: s.x, y: s.y + 0.012, z: s.z }; }
     if (t.kind === 'trap') return c.traps[t.i];
+    if (t.kind === 'spill') { const sp = this.spillsIn(t.key).find((x) => x.i === t.i); return sp ? { x: sp.x, y: sp.y + 0.012, z: sp.z } : null; }
     if (t.kind === 'bait') return this._baitsIn(t.key)[t.i] || null;
     if (t.kind === 'wood') { const b = c.boxes[t.i]; return { x: (b.minx + b.maxx) / 2 + 0.2 * (h32(w.id, t.i) - 0.5), y: b.maxy + T.wasp.radius + 0.008, z: (b.minz + b.maxz) / 2 }; }
     if (t.sub === 'fly') return (st.caughtFly[t.i] || 0) > this.tick ? null : flyPos(c.flies[t.i], this.tick);

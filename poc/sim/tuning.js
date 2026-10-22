@@ -35,6 +35,7 @@ export const T = {
   },
   panic: {
     decayPerStep: 0.993, contagionRadius: 5, contagionRate: 0.03, contagionMin: 0.3,
+    spillChance: 0.6, spillReach: 0.75, spillRate: 1.6, spillMinutes: 240, // GDD 8.9: a panicked sitter jolts the table and knocks a drink over
     calm: 0.2, fleeSpeed: 3.2, walkSpeed: 1.3, fleeStepsMin: 60, fleeStepsMax: 120, approachDist: 26,
   },
 

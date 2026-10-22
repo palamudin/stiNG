@@ -129,7 +129,7 @@ const webMat = new THREE.LineBasicMaterial({ color: '#f4f4f4', transparent: true
 function buildChunk(rec) {
   const g = new THREE.Group();
   const c = rec.content;
-  const dyn = { lids: [], traps: [], candles: [] };
+  const dyn = { lids: [], traps: [], candles: [], cans: [], puddles: [] };
   for (const t of c.trees) {
     const trunk = new THREE.Mesh(geoTrunk, mat('#5b4330'));
     trunk.scale.set(t.r, t.h, t.r); trunk.position.set(t.x, t.h / 2, t.z);
@@ -166,7 +166,9 @@ function buildChunk(rec) {
     g.add(candle); dyn.candles.push(candle);
   });
   for (const can of c.cans) {
-    const m = new THREE.Mesh(geoCan, mat(CANS[can.color])); m.position.set(can.x, 0.81, can.z); m.castShadow = true; g.add(m);
+    const m = new THREE.Mesh(geoCan, mat(CANS[can.color])); m.position.set(can.x, 0.81, can.z); m.castShadow = true; g.add(m); dyn.cans.push(m);
+    const pud = new THREE.Mesh(new THREE.CircleGeometry(0.075, 18), new THREE.MeshLambertMaterial({ color: '#b07a1e', transparent: true, opacity: 0.75 }));
+    pud.rotation.x = -Math.PI / 2; pud.position.set(can.x + 0.06, 0.752, can.z); pud.visible = false; g.add(pud); dyn.puddles.push(pud);
     const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.006, 14), mat('#d9d4c7')); lid.position.set(can.x, 0.874, can.z); lid.visible = false;
     g.add(lid); dyn.lids.push(lid);
   }
@@ -241,7 +243,12 @@ function updateChunkDynamics() {
   for (const [k, g] of chunkViews) {
     const lv = sim.escLevel(k), d = g.userData.dyn, torn = (sim.chunkState.get(k) || {}).webTorn || {};
     d.webs.forEach((l, i) => { l.visible = torn[i] !== sim.day; });
-    for (const l of d.lids) l.visible = lv >= 2;
+    d.lids.forEach((l, i) => { l.visible = lv >= 2 && !sim.canSpilled(k, i); });
+    d.cans.forEach((m, i) => {
+      const down = sim.canSpilled(k, i);
+      m.rotation.z = down ? Math.PI / 2 : 0; m.position.y = down ? 0.785 : 0.81;
+      d.puddles[i].visible = down;
+    });
     for (const c of d.candles) c.visible = lv >= 2;
     for (const t of d.traps) t.visible = lv >= 3;
 
@@ -1352,6 +1359,7 @@ function handleEvents(events) {
       case 'aiAttack': logEvent(`worker ${e.id} attacks #${e.humanHex.slice(0, 4)}`); break;
       case 'alarm': logEvent('alarm pheromone'); break;
       case 'extScheduled': toast(`Exterminator booked for ${dayLabel(e.arriveMinute)}`, 'var(--red)', 3); logEvent('exterminator booked'); break;
+      case 'spill': logEvent('a drink went over · open sugar on the table'); break;
       case 'muniStart': toast('The council sent pest control. Bait stations on the trees.', 'var(--red)', 3.4); logEvent(`pest control: ${e.keys.length} chunks baited`); break;
       case 'muniEnd': logEvent('pest control packed up'); break;
       case 'baitTaken': if (e.driven) toast('Meat from the station', 'var(--yellow)', 1.4); break;

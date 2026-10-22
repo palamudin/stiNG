@@ -960,6 +960,10 @@ Joining a world in progress uses the same snapshot instead of the event replay l
 
 Vespula keep little in the nest: sugar goes to adults and prey goes straight to larvae. Uncapped, a simulated season ended with 444 units of sugar banked. The stores are now capped: sugar at 2.5 days of adult need, protein at 2 days of larval need (queen larvae count at their higher rate), each plus a small base. Anything over the cap is not collected. In the same idle season, protein now runs out when queen larvae arrive (about 70% of the season), which is when the player's hunting matters most, and the colony still raised and mated about 190 young queens.
 
+### 18.12 Spills as built (8.9)
+
+A seated human who starts to flee rolls once (60%) to knock over the nearest drink within 0.75 m. The can goes down for four in-game hours: it gives nothing, and a puddle beside it feeds at 1.6× a can's rate. Sugar foragers seek puddles out. The roll is a hash of the human and the tick, and spills are stored in chunk state and included in the human hash, so every peer spills the same can and the lab checks it. Lidded drinks at alert level 2 and above never spill.
+
 ---
 
 ## Appendix A — Protocode
