@@ -1,6 +1,6 @@
 # Key art
 
-Direction (GDD 12): the Italo-western and kung-fu standoff, the "death stare". Letterboxed extreme close-ups, bone, ochre, black and wasp yellow, a woodtype title (Rye) and a red brush seal reading 螫 ("sting").
+Direction (GDD 12): the Italo-western and kung-fu standoff, the "death stare". Letterboxed extreme close-ups, bone, ochre, black and wasp yellow, the game's own type (Big Shoulders Display for the title, STI with a yellow NG; IBM Plex Mono for small text) and a red brush seal reading 螫 ("sting").
 
 | File | Size | What |
 |---|---|---|

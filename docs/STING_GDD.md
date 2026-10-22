@@ -802,7 +802,7 @@ On Main the entity count is dominated by AI wasps: one player's colony can hold 
 - **Unity physics:** not used for anything that affects gameplay. A table knocked over is a sim event with a final state; Unity animates the tumble to that state.
 - **Wasps:** rendered from sim transforms; wing animation is cosmetic.
 - **Body zones:** the rendered skeleton is fitted to the sim zone capsules, not the other way round.
-- **Key art and title direction:** the Italo-western and kung-fu standoff, the "death stare". Extreme close-ups cut between the wasp's compound eyes and a human's eyes, letterboxed wide, high contrast, sun-bleached palette (bone, ochre, black, wasp yellow), long silence before the strike. The title card and promo use the same grammar. In-game, the camera's tight framing on a perch or before a sting can borrow it, but the HUD stays plain (P1: nothing emotes; the stare is framing, not a face).
+- **Key art and title direction:** the Italo-western and kung-fu standoff, the "death stare". Extreme close-ups cut between the wasp's compound eyes and a human's eyes, letterboxed wide, high contrast, sun-bleached palette (bone, ochre, black, wasp yellow), long silence before the strike. The title card and promo use the same grammar. Type stays the game's own: Big Shoulders Display for the title (STI with a yellow NG) and IBM Plex Mono for small text; a red brush seal reading 螫 ("sting") is the one ornament. The stare face is the main carrier; the split-frame standoff is the promo. In-game, the camera's tight framing on a perch or before a sting can borrow it, but the HUD stays plain (P1: nothing emotes; the stare is framing, not a face).
 
 ---
 
