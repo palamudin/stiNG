@@ -359,6 +359,13 @@ export class Sim {
         this.sprays.push({ hex: ev.humanHex, start: ev.start, end: ev.end });
         this.emit('spray', { humanHex: ev.humanHex });
         break;
+      case 'notice': {
+        const hm = this.humanByHex(ev.humanHex);
+        if (!hm) break;
+        for (const s of ev.swats) this.swats.push({ ...s, frameHex: hm.hex, stungHex: hm.hex, contactTick: ev.tick, hits: [], underOnly: 0, byWasp: ev.waspId, pre: true });
+        this.emit('notice', { humanHex: hm.hex, waspId: ev.waspId, zone: ev.zone, swats: ev.swats, contactTick: ev.tick });
+        break;
+      }
       case 'caught': {
         if (mine) break;
         const st = this.cs(ev.key);
@@ -427,6 +434,13 @@ export class Sim {
         this.interest.set(ev.peer, ev.key);
         this._rebuildHumans();
         break;
+      case 'notice': {
+        const hm = this.humanByHex(ev.humanHex);
+        if (!hm) break;
+        hm.panic = Math.min(1, hm.panic + T.perch.panic * hm.tr.panicSusceptibility);
+        this.addEsc(hm.x, hm.z, T.esc.nuisance);
+        break;
+      }
     }
   }
 
@@ -536,6 +550,7 @@ export class Sim {
         break;
       }
       case 'webbed': this._webStep(w, cmd, driven); break;
+      case 'perched': this._perchStep(w, cmd, edge, armed, driven); break;
       case 'fighting': if (driven && cmd.sting && !this.pressUsed) { this.pressUsed = true; w.fight.mash += T.rival.mash; } break;
       case 'attached': this._attached(w, cmd, driven); break;
       case 'under': this._underStep(w, cmd, edge, armed); break;
@@ -742,7 +757,7 @@ export class Sim {
     const comps = under ? [] : this._companions(hm);
     const lvl = this.escAt(hm.x, hm.z);
     const plan = resolveSting(ev, hm.tr, ZONES[zone], {
-      clothingStiffness: hm.clothing.stiffness, panic: hm.panic, companions: comps, panicMul: lvl >= 2 ? 1.3 : 1,
+      clothingStiffness: hm.clothing.stiffness, panic: hm.panic, companions: comps, panicMul: lvl >= 2 ? 1.3 : 1, stung: hm.stungCount,
     });
     const actorHex = (id) => (id === hm.id ? hm.hex : comps.find((x) => x.id === id).hex);
     const swats = plan.swats.map((s) => ({ actorHex: actorHex(s.actorId), kind: s.kind, start: s.start, window: s.window, radius: s.radius, kills: s.kills, center: { ...s.center } }));
@@ -787,6 +802,7 @@ export class Sim {
     if (rv && !w.carry) { this._raid(w, rv); return; }
     const c = w.contact;
     if (c && c.opening >= 0 && !w.carry) { this._enterUnder(w, c); return; }
+    if (c && w.state === 'fly') { this._perch(w, c); return; }
     const prey = this._preyNear(w);
     if (prey) { this._catch(w, prey); return; }
     if (!w.carry && this._woodNear(w)) { w.state = 'chewing'; w.chew = 0; w.vx = w.vy = w.vz = 0; this.emit('chewStart', { id: w.id }); return; }
@@ -994,7 +1010,7 @@ export class Sim {
     // The human presses the cloth wherever they feel the wasp
     if (this.tick >= u.nextPress) {
       const point = this._underPoint(u, nodes);
-      const plan = resolveSting({ contactTick: this.tick, zone: here.zone, contactPointBody: point, mode: 'jab', under: true }, hm.tr, ZONES[here.zone], { clothingStiffness: 0, panic: hm.panic, companions: [] });
+      const plan = resolveSting({ contactTick: this.tick, zone: here.zone, contactPointBody: point, mode: 'jab', under: true }, hm.tr, ZONES[here.zone], { clothingStiffness: 0, panic: hm.panic, companions: [], stung: hm.stungCount });
       const swats = plan.swats.map((s) => ({ kind: s.kind, start: Math.max(s.start, this.tick + T.net.commitTicks), window: s.window, radius: s.radius, kills: s.kills, center: { ...point } }));
       this._publish({ type: 'press', humanHex: hm.hex, waspId: w.id, swats });
       u.nextPress = this.tick + hm.tr.reactionTicks + T.under.compressEvery;
@@ -1037,7 +1053,7 @@ export class Sim {
       const c = toWorld(hm, s.center), r = s.radius + T.wasp.radius;
       for (const w of this.wasps.slice()) {
         if (s.hits.includes(w.id)) continue;
-        if (s.underOnly ? w.id !== s.underOnly || w.state !== 'under' : !(w.state === 'fly' || w.state === 'attached' || w.state === 'stunned' || w.state === 'chewing' || w.state === 'landed')) continue;
+        if (s.underOnly ? w.id !== s.underOnly || w.state !== 'under' : !(w.state === 'fly' || w.state === 'attached' || w.state === 'stunned' || w.state === 'chewing' || w.state === 'landed' || w.state === 'perched')) continue;
         if (dist2(w, c) > r * r) continue;
         s.hits.push(w.id);
         this.emit('swatHit', { waspId: w.id, actorHex: s.actorHex, frameHex: s.frameHex, kind: s.kind, kills: s.kills, delayTicks: s.start - s.contactTick });
@@ -1067,7 +1083,7 @@ export class Sim {
       if (!hm || hm.state === 'away') continue;
       const headY = hm.parts[hm.posture][0].a.y;
       for (const w of this.wasps.slice()) {
-        if (!(w.state === 'fly' || w.state === 'stunned' || w.state === 'attached' || w.state === 'chewing' || w.state === 'landed')) continue;
+        if (!(w.state === 'fly' || w.state === 'stunned' || w.state === 'attached' || w.state === 'chewing' || w.state === 'landed' || w.state === 'perched')) continue;
         const lp = toLocal(hm, w);
         for (const [z, r] of [[0.35, 0.14], [0.7, 0.22], [1.05, 0.3]]) {
           const dx = lp.x, dy = lp.y - headY, dz = lp.z - z;
@@ -1472,6 +1488,91 @@ export class Sim {
 
   _alarmDecay() { if (this.alarms.length) this.alarms = this.alarms.filter((a) => a.until > this.tick); }
 
+  // ---------------- perching and crawling on people (GDD 7.2, 8.3)
+
+  _tickleNeed(hm, zone) {
+    const P = T.perch, cover = zoneCover(hm.clothing, zone);
+    let k = P.tickleBase * (cover === 2 ? P.thinMul * 1.5 : cover === 1 ? P.thinMul : P.bareMul);
+    if (zone === Zone.UpperBack || zone === Zone.Acnestis || zone === Zone.LowerBack || zone === Zone.Buttocks) k *= P.backMul;
+    if (zone === Zone.Face || zone === Zone.Ears || zone === Zone.NeckFront) k *= P.faceMul;
+    return Math.max(T.resolve.minConsequenceTicks, Math.round(hm.tr.reactionTicks * k));
+  }
+
+  _perch(w, c) {
+    const hm = this.humanByHex(c.humanHex);
+    if (!hm) return;
+    const R = T.wasp.radius;
+    w.state = 'perched'; w.vx = w.vy = w.vz = 0;
+    w.perch = { hex: hm.hex, posture: hm.posture, local: { x: c.surf.x + c.n.x * R, y: c.surf.y + c.n.y * R, z: c.surf.z + c.n.z * R }, n: c.n, surf: c.surf, zone: c.zone, part: c.part, tickle: 0, need: this._tickleNeed(hm, c.zone), quietUntil: 0 };
+    this.emit('perch', { id: w.id, humanHex: hm.hex, zone: c.zone });
+  }
+
+  // Put a local point back on the nearest body surface; returns the new contact description
+  _onBody(hm, lp) {
+    let best = null, bd = Infinity;
+    for (const part of hm.parts[hm.posture]) {
+      const q = segClosest(part.a, part.b, lp);
+      const ex = lp.x - q.x, ey = lp.y - q.y, ez = lp.z - q.z, d = Math.sqrt(ex * ex + ey * ey + ez * ez) || 1e-9;
+      const gap = d - part.r;
+      if (gap < bd) { bd = gap; best = { part, q, n: { x: ex / d, y: ey / d, z: ez / d } }; }
+    }
+    const { part, q, n } = best, R = T.wasp.radius;
+    const surf = { x: q.x + n.x * part.r, y: q.y + n.y * part.r, z: q.z + n.z * part.r };
+    return { part: part.name, n, surf, local: { x: surf.x + n.x * R, y: surf.y + n.y * R, z: surf.z + n.z * R }, zone: classify(part, q, n, surf, hm.tr.height / 1.75) };
+  }
+
+  _perchStep(w, cmd, edge, armed, driven) {
+    const p = w.perch, hm = this.humanByHex(p.hex);
+    if (!hm || hm.state === 'away' || hm.posture !== p.posture) { w.perch = null; w.state = 'stunned'; w.stateTicks = 20; w.vy = 0.3; this.emit('knockedOff', { id: w.id }); return; }
+    if (!driven || cmd.burst || cmd.my > 0) { // take off
+      const n = dirToWorld(hm, p.n);
+      w.perch = null; w.state = 'fly'; w.vx = n.x * 0.6; w.vy = n.y * 0.6 + 0.4; w.vz = n.z * 0.6;
+      this.emit('takeoff', { id: w.id });
+      return;
+    }
+    let moving = false;
+    if (cmd.mx || cmd.mz) {
+      // crawl relative to the camera, projected onto the skin
+      const yaw = cmd.yawQ * 1e-4, sy = dsin(yaw), cy = dcos(yaw);
+      const mz = cmd.mz / 100, mx = cmd.mx / 100, sp = T.perch.crawlSpeed * DT;
+      const wx = (sy * mz - cy * mx) * sp, wz = (cy * mz + sy * mx) * sp;
+      const lw = { x: hm.fz * wx - hm.fx * wz, z: hm.fx * wx + hm.fz * wz }; // world delta -> body frame
+      const pitch = cmd.pitchQ * 1e-4;
+      const nl = { x: p.local.x + lw.x, y: p.local.y + mz * sp * dsin(pitch) * 2, z: p.local.z + lw.z };
+      const c = this._onBody(hm, nl);
+      Object.assign(p, { local: c.local, n: c.n, surf: c.surf, zone: c.zone, part: c.part });
+      p.need = this._tickleNeed(hm, c.zone);
+      moving = true;
+    }
+    const at = toWorld(hm, p.local);
+    w.x = at.x; w.y = at.y; w.z = at.z;
+    if (edge & Act.Interact) {
+      const nodes = garmentGraph(hm.tr, hm.clothing, hm.posture, hm.parts[hm.posture]);
+      let best = -1, bd = T.under.openingRadius * T.under.openingRadius;
+      nodes.forEach((nd, i) => { if (nd.opening) { const q = dist2(nd.pos, p.local); if (q <= bd) { bd = q; best = i; } } });
+      if (best >= 0) { w.perch = null; w.state = 'fly'; this._enterUnder(w, { humanHex: hm.hex, opening: best }); return; }
+    }
+    if (armed) {
+      this.pressUsed = true;
+      const c = { humanHex: hm.hex, zone: p.zone, surf: p.surf, n: p.n, blocked: zoneCover(hm.clothing, p.zone) === 2 };
+      w.perch = null; w.state = 'fly';
+      if (!this._beginSting(w, c, 'jab')) this._perch(w, { humanHex: hm.hex, zone: c.zone, surf: c.surf, n: c.n, part: '' });
+      return;
+    }
+    // they start to feel the feet on their skin
+    if (this.tick >= p.quietUntil) {
+      p.tickle += moving ? T.perch.movingMul : 1;
+      if (p.tickle >= p.need) {
+        p.tickle = 0; p.quietUntil = this.tick + T.perch.cooldown;
+        const comps = this._companions(hm);
+        const plan = resolveSting({ contactTick: this.tick, zone: p.zone, contactPointBody: p.surf, mode: 'touch' }, hm.tr, ZONES[p.zone], { clothingStiffness: hm.clothing.stiffness, panic: hm.panic, companions: comps, stung: hm.stungCount });
+        const actorHex = (id) => (id === hm.id ? hm.hex : comps.find((x) => x.id === id).hex);
+        const swats = plan.swats.map((s) => ({ actorHex: actorHex(s.actorId), kind: s.kind, start: s.start, window: s.window, radius: s.radius, kills: s.kills, center: { ...s.center } }));
+        this._publish({ type: 'notice', humanHex: hm.hex, waspId: w.id, zone: p.zone, swats });
+      }
+    }
+  }
+
   // ---------------- founding a nest (GDD 6.6)
 
   _trunkNear(w) {
@@ -1609,6 +1710,7 @@ export class Sim {
   _maybeLand(w, cmd) {
     if (cmd.mx || cmd.my || cmd.mz || cmd.burst || cmd.sting) return;
     if (w.vx * w.vx + w.vy * w.vy + w.vz * w.vz > T.land.maxSpeed * T.land.maxSpeed) return;
+    if (w.contact && !w.contact.blockedPerch) { this._perch(w, w.contact); return; }
     const surf = this._surfaceBelow(w);
     if (!surf) return;
     w.state = 'landed'; w.vx = w.vy = w.vz = 0;

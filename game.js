@@ -657,7 +657,7 @@ function renderWasps(alpha, t, dt) {
       g.rotation.y = g.userData.yaw; g.rotation.x = -Math.atan2(w.vy, Math.max(0.3, sp)) * 0.6;
     }
     g.rotation.z = w.state === 'stunned' ? t * 0.6 : w.state === 'fighting' ? Math.sin(t * 3 + w.id) * 1.4 : 0;
-    const flap = w.state === 'attached' || w.state === 'balled' || w.state === 'trapped' || w.state === 'landed' ? 0.15 : w.state === 'webbed' ? Math.sin(t * 2.3) * 0.3 : w.state === 'fighting' ? Math.sin(t * 5 + w.id) * 1.2 : Math.sin(performance.now() * 0.9 + w.id) * 0.9;
+    const flap = w.state === 'attached' || w.state === 'balled' || w.state === 'trapped' || w.state === 'landed' || w.state === 'perched' ? 0.15 : w.state === 'webbed' ? Math.sin(t * 2.3) * 0.3 : w.state === 'fighting' ? Math.sin(t * 5 + w.id) * 1.2 : Math.sin(performance.now() * 0.9 + w.id) * 0.9;
     g.userData.wl.rotation.z = flap; g.userData.wr.rotation.z = -flap;
     g.userData.abdomen.rotation.x = w.state === 'attached' ? 0.5 + Math.sin(t * 0.8) * 0.06 : 0;
     const cv = g.userData.carry;
@@ -1067,6 +1067,8 @@ function updateHud() {
   $('cropBar').style.width = (w.energy * 100).toFixed(1) + '%';
   $('cropBar').style.background = w.energy < 0.2 ? 'var(--red)' : '';
   $('ball').hidden = w.state !== 'balled';
+  $('tickle').hidden = w.state !== 'perched';
+  if (w.state === 'perched') $('tickleBar').style.width = Math.min(100, w.perch.tickle / w.perch.need * 100).toFixed(0) + '%';
   if (w.state === 'balled') $('heatBar').style.width = Math.min(100, (w.ball.temp - T.bees.startTemp) / (T.bees.lethal - T.bees.startTemp) * 100).toFixed(0) + '%';
   let status = '';
   if (w.state === 'attached') status = sim.tick - w.attach.start >= T.sting.jabTicks ? 'Stinging · release to pull out' : 'Stinging';
@@ -1077,6 +1079,7 @@ function updateHud() {
   else if (w.state === 'trapped') status = 'Stuck in the trap';
   else if (w.state === 'webbed') status = `Stuck in a web · spider in ${Math.max(0, (w.web.spiderAt - sim.tick) / 60).toFixed(1)} s`;
   else if (w.state === 'landed') status = 'Resting';
+  else if (w.state === 'perched') status = `On #${w.perch.hex.slice(0, 4)} · ${zoneLabel(w.perch.zone)}`;
   else if (w.state === 'fighting') status = 'Fighting a rival wasp';
   else if (!sim._driven()) status = '';
   else if (!sim.canFly()) status = 'Too cold to fly';
@@ -1092,6 +1095,7 @@ function updateHud() {
   else if (w.state === 'webbed') hint = `Mash ${kbd('Shift')} to tear free`;
   else if (w.state === 'fighting') hint = `Mash ${kbd('LMB')} to sting it first`;
   else if (w.state === 'landed') hint = 'Resting costs no sugar · any key takes off';
+  else if (w.state === 'perched') hint = `${kbd('W')}${kbd('A')}${kbd('S')}${kbd('D')} crawl (look up or down to climb) · ${kbd('LMB')} sting · ${kbd('Space')} take off · ${kbd('E')} crawl under at an opening`;
   else if (h.rival) hint = `${kbd('E')} steal a larva from the rival nest`;
   else if (w.state === 'under') {
     const hm = sim.humanByHex(w.under.hex);
@@ -1253,6 +1257,13 @@ function handleEvents(events) {
       case 'fight': if (e.driven) toast('Grappling a rival wasp · mash LMB', 'var(--red)', 1.8); break;
       case 'fightOver': logEvent(`fight: worker ${e.winner} killed worker ${e.loser}`); break;
       case 'raid': toast('Stole a larva · their workers are coming', 'var(--orange)', 2.2); break;
+      case 'notice':
+        pushSwatAnims(e.swats, e.humanHex, e.contactTick);
+        if (e.waspId === sim.drivenId) toast('They felt you · get off', 'var(--red)', 1.6);
+        logEvent(`#${e.humanHex.slice(0, 4)} felt a wasp on the ${zoneLabel(e.zone).toLowerCase()}`);
+        break;
+      case 'perch': if (sim.wasp && e.id === sim.drivenId) logEvent(`perched on #${e.humanHex.slice(0, 4)}`); break;
+      case 'knockedOff': if (e.id === sim.drivenId) toast('Knocked off', 'var(--yellow)', 1.2); break;
       case 'nestFounded': toast(e.auto ? 'The queen settled in last year\'s tree' : 'Nest founded', 'var(--yellow)', 2.4); logEvent('nest founded'); break;
       case 'winter':
         {
@@ -1313,10 +1324,20 @@ function updateCamera(p, dt) {
   const w = sim.wasp;
   const dead = !sim._driven();
   const fwd = new THREE.Vector3(Math.sin(input.yaw) * Math.cos(input.pitch), Math.sin(input.pitch), Math.cos(input.yaw) * Math.cos(input.pitch));
-  const want = dead ? 0.9 : w.state === 'attached' || w.state === 'under' ? 0.17 : w.state === 'balled' ? 0.25 : w.contact ? 0.13 : 0.1;
+  const want = dead ? 0.9 : w.state === 'attached' || w.state === 'under' || w.state === 'perched' ? 0.17 : w.state === 'balled' ? 0.25 : w.contact ? 0.13 : 0.1;
   camDist += (want - camDist) * (1 - Math.exp(-dt * 4));
   const focus = dead && deathSpot ? deathSpot : p || V(w);
-  const target = focus.clone().addScaledVector(fwd, -camDist).add(new THREE.Vector3(0, camDist * 0.28, 0));
+  let target = focus.clone().addScaledVector(fwd, -camDist).add(new THREE.Vector3(0, camDist * 0.28, 0));
+  // on a body: look at the wasp from outside the skin, along the surface normal, blended with the view direction
+  const onBody = !dead && (w.state === 'perched' ? w.perch : w.state === 'attached' ? w.attach : null);
+  if (onBody) {
+    const hm = sim.humanByHex(onBody.hex);
+    if (hm) {
+      const n = onBody.n, nw = new THREE.Vector3(hm.fz * n.x + hm.fx * n.z, n.y, -hm.fx * n.x + hm.fz * n.z).normalize();
+      const out = nw.clone().multiplyScalar(0.75).addScaledVector(fwd, -0.45).normalize();
+      target = focus.clone().addScaledVector(out, camDist).add(new THREE.Vector3(0, camDist * 0.2, 0));
+    }
+  }
   if (target.y < 0.006) target.y = 0.006;
   camPos.lerp(target, 1 - Math.exp(-dt * (dead ? 2 : 14)));
   for (const hm of sim.active) {
@@ -1331,7 +1352,7 @@ function updateCamera(p, dt) {
     if (pushed) { const wpt = toWorld(hm, lp); camPos.set(wpt.x, wpt.y, wpt.z); }
   }
   camera.position.copy(camPos);
-  camera.lookAt(focus.clone().addScaledVector(fwd, 0.06));
+  camera.lookAt(onBody ? focus : focus.clone().addScaledVector(fwd, 0.06));
   sun.position.copy(focus).addScaledVector(sunDir, 40);
   sun.target.position.copy(focus);
   ground.position.set(Math.round(focus.x / GROUND_TILE) * GROUND_TILE, 0, Math.round(focus.z / GROUND_TILE) * GROUND_TILE);

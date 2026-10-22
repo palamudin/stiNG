@@ -233,13 +233,16 @@ export function predictedKind(zone, h, clothing) {
 export function resolveSting(e, h, z, ctx) {
   const t = T.resolve;
   const plan = { swats: [], panicGain: 0, flee: false };
-  const pain = (e.mode === 'full' ? t.fullPain : t.jabPain) * z.sens * (e.under ? T.under.panicMul : 1);
-  plan.panicGain = pain * h.panicSusceptibility * (ctx.panicMul || 1);
-  plan.flee = !e.under && (ctx.panic + plan.panicGain >= t.fleePanic || h.style === Style.Runner);
+  // People who have been stung before are jumpier: faster hands, more panic (GDD 8.10 memory)
+  const M = T.memory, n = Math.min(ctx.stung || 0, M.maxStings);
+  const quick = Math.max(M.minFactor, 1 - M.fasterPerSting * n);
+  const pain = e.mode === 'touch' ? 0 : (e.mode === 'full' ? t.fullPain : t.jabPain) * z.sens * (e.under ? T.under.panicMul : 1);
+  plan.panicGain = pain * h.panicSusceptibility * (ctx.panicMul || 1) * (1 + M.panicPerSting * n);
+  plan.flee = e.mode !== 'touch' && !e.under && (ctx.panic + plan.panicGain >= t.fleePanic || h.style === Style.Runner);
 
   if (e.under) {
     // Pressing the cloth against the body. Freezers press too: it is a reflex.
-    let delay = h.reactionTicks;
+    let delay = Math.round(h.reactionTicks * quick);
     if (delay < t.minConsequenceTicks) delay = t.minConsequenceTicks;
     plan.swats.push({
       actorId: h.id, kind: SwatKind.Compress, start: e.contactTick + delay, window: windowFor(SwatKind.Compress),
@@ -250,7 +253,7 @@ export function resolveSting(e, h, z, ctx) {
   if (h.style !== Style.Freezer) {
     const reach = selfReach(z, h, ctx.clothingStiffness);
     const kind = kindFor(z.policy, reach);
-    let delay = h.reactionTicks + z.extra + (kind === SwatKind.Contort ? t.contortExtraTicks : 0);
+    let delay = Math.round((h.reactionTicks + z.extra + (kind === SwatKind.Contort ? t.contortExtraTicks : 0)) * quick);
     if (delay < t.minConsequenceTicks) delay = t.minConsequenceTicks;
     plan.swats.push({
       actorId: h.id, kind, start: e.contactTick + delay, window: windowFor(kind),
@@ -264,7 +267,7 @@ export function resolveSting(e, h, z, ctx) {
       if (c.distance > t.helperRange || c.style === Style.Freezer) continue;
       plan.swats.push({
         actorId: c.id, kind: SwatKind.Slap,
-        start: e.contactTick + h.reactionTicks + t.helperNoticeTicks + c.reactionTicks,
+        start: e.contactTick + Math.max(t.minConsequenceTicks, Math.round((h.reactionTicks + t.helperNoticeTicks + c.reactionTicks) * quick)),
         window: windowFor(SwatKind.Slap), center: e.contactPointBody,
         radius: c.style === Style.Precise ? t.preciseRadius : t.flailerRadius,
         kills: true, reach: 1,

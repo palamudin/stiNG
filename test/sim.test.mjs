@@ -364,7 +364,37 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   ok(count(ev, 'fight') > 0 && fought, 'rival workers hunt the raider and the fight ends with one dead');
 }
 
-// 15. Frozen chunks
+// 15. Perching and crawling on people; jumpy humans (GDD 7.2, 8.3, 8.10)
+{
+  const s = new Sim({ seed: 1234 });
+  const hm = seated(s, (h) => h.tr.style !== 3 && h.clothing.top !== Top.Jacket);
+  const torso = hm.parts.sit.find((p) => p.name === 'Torso');
+  // hover still just behind the lower back
+  const lb = { x: 0.03, y: torso.a.y + (torso.b.y - torso.a.y) * 0.25, z: -(torso.r + 0.012) };
+  place(s.wasp, toWorld(hm, lb));
+  let ev = run(s, 3, () => idle());
+  ok(s.wasp.state === 'perched', `hovering still against a back perches the wasp (${s.wasp.state}, ${s.wasp.perch && ZoneName[s.wasp.perch.zone]})`);
+  // crawl up the back toward the acnestis: hold W while looking up, facing the same way as the human
+  const face = Math.round(Math.atan2(hm.fx, hm.fz) * 1e4);
+  let reached = false;
+  ev = run(s, 400, (sim) => {
+    const w = sim.wasp;
+    if (w.state !== 'perched') return idle();
+    if (ZoneName[w.perch.zone] === 'Acnestis') { reached = true; return idle({ yawQ: face }); }
+    return idle({ mz: 100, yawQ: face, pitchQ: 14000 });
+  });
+  ok(reached, 'crawling up the back reaches the acnestis without stinging');
+  ok(count(ev, 'notice') > 0, `sooner or later they feel the feet and swat (${count(ev, 'notice')} notices)`);
+
+  // jumpy: the same human reacts faster after being stung
+  const h = humanTraits(1234n, 77n), z = ZONES[Zone.Forearms];
+  const plan = (n) => resolveSting({ contactTick: 0, zone: Zone.Forearms, contactPointBody: { x: 0, y: 1, z: 0 }, mode: 'jab' }, h, z, { clothingStiffness: 0, panic: 0, companions: [], stung: n });
+  const d0 = plan(0).swats[0]?.start, d3 = plan(3).swats[0]?.start;
+  ok(h.style === 3 || (d3 < d0 && d3 >= T.resolve.minConsequenceTicks), `after three stings the swat comes sooner (${d0} -> ${d3} ticks)`);
+  ok(plan(3).panicGain > plan(0).panicGain, 'and each sting hurts more');
+}
+
+// 16. Frozen chunks
 {
   const s = new Sim({ seed: 5 });
   const rec = s.records.get('0,0'), before = rec.contentHash;

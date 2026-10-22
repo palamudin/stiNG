@@ -14,7 +14,7 @@ The tier-0 slice of the GDD, built in the browser so it can move to Unity. Same 
 | `sim/bots.js` | Scripted pilots that produce ordinary input commands | test harness |
 | `game.js` | three.js rendering, animation, camera, input, HUD, sound | Unity scene, Animator, UI |
 | `index.html` | Page shell, HUD markup and styles | UI Toolkit |
-| `test/sim.test.mjs` | 58 headless sim checks | `Sting.Core.Tests` |
+| `test/sim.test.mjs` | 63 headless sim checks | `Sting.Core.Tests` |
 | `test/net.test.mjs` | 20 network checks | `Sting.Net.Tests` |
 
 Run the tests with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 18+, no packages).
@@ -59,6 +59,8 @@ Run the tests with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 1
 | 34 | Gamepad: sticks fly and look, triggers sting and burst, face buttons act, switch, rest | 10.4 | 6 |
 | 35 | Graphics quality (shadows, resolution) and a hardcore HUD | 10.2 | 6 |
 | 36 | Binary state packets: chunk-relative 16-bit positions, 19 bytes per wasp; bandwidth shown in the lab | 11.12 | 6 |
+| 37 | Perch on people and crawl over their body (camera-relative, look up or down to climb); a tickle meter fills by zone and clothing, then they or a friend swat where they feel you | 7.2, 8.3 | 7 |
+| 38 | Jumpy humans: each sting a person has had makes their swats faster and their panic sharper | 8.10 | 7 |
 
 ## Verified
 
