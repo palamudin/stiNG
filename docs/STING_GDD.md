@@ -972,6 +972,18 @@ A check that drops a shared event must give the same verdict on every honest pee
 
 Modifiers live in the world's settings: day length, season length, people density, human reaction speed (scales every trait's reaction ticks, never below the consequence window), escalation rate (scales alert points), bee aggression, and switches for exterminators, pest control, birds and rival colonies. The rules hash is FNV-32 over the generator version and those settings in a fixed order, independent of the seed; the lab shows both peers' hashes side by side. The tag lists only what differs from the standard rules, so an unmodified world reads "Standard rules" and others read like "slow humans · bees ×1.5 · no exterminators". Human traits are rebuilt through the same modifier path on load, so a modified world restores exactly.
 
+### 18.15 Nest sites as built (6.6)
+
+Three of the six site types exist; wall, attic and shed wait for buildings. Burrows (two per chunk) and branch points (one per tree, under the crown) are derived from the seed and the chunk's frozen content, so they cost nothing to store and every peer sees the same ones.
+
+| Site | Max cells | Rain | Discovery |
+|---|---|---|---|
+| Trunk | 3,500 | adults die at the base rate (6% of those inside per rainy day) | ×1 |
+| Burrow | 5,000 | 25% of brood lost per rainy day; adults ×0.4 | ×1.6 alert points in the nest's chunk |
+| Branch | 1,800 | adults ×2 | ×0.5 |
+
+The choice is the founding queen's main decision: a burrow grows the biggest colony and gets found fastest, a branch hides best and stays small. If she has not chosen by 3% into the season, she settles where the last nest was, keeping its site type.
+
 ---
 
 ## Appendix A — Protocode

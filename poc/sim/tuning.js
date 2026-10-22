@@ -76,6 +76,15 @@ export const T = {
 
   under: { moveTicks: 18, noticeMul: 2, compressRadius: 0.06, compressEvery: 25, ripPanic: 0.92, panicMul: 1.5, openingRadius: 0.035 },
 
+  // Nest sites (GDD 6.6). bio: Vespula nest in old rodent burrows, wall and tree cavities, and sometimes in the open.
+  // maxCells caps nest size; flood is brood lost per rainy day; exposure scales adult deaths in rain;
+  // discovery scales the alert points people add in the nest's chunk (they notice traffic at their feet).
+  sites: {
+    trunk: { name: 'against a trunk', maxCells: 3500, flood: 0, exposure: 1, discovery: 1 },
+    ground: { name: 'in an old burrow', maxCells: 5000, flood: 0.25, exposure: 0.4, discovery: 1.6 },
+    branch: { name: 'hanging from a branch', maxCells: 1800, flood: 0, exposure: 2, discovery: 0.5 },
+    rainMortality: 0.06, holesPerChunk: 2,
+  },
   // Level 5: municipal pest control (GDD 8.10). Poisoned protein bait stations across the area for a few days.
   // bio: real programs use protein baits laced with insecticide; foragers carry them home and poison the brood.
   muni: { level: 5, radius: 1, days: 3, cooldownDays: 4, aftermath: 0.5, baitsPerChunk: 3, baitHeight: 1.2, baitDist: 0.04, baitProtein: 2,

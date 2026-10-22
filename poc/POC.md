@@ -15,7 +15,7 @@ The tier-0 slice of the GDD, built in the browser so it can move to Unity. Same 
 | `sim/bots.js` | Scripted pilots that produce ordinary input commands | test harness |
 | `game.js` | three.js rendering, animation, camera, input, HUD, sound | Unity scene, Animator, UI |
 | `index.html` | Page shell, HUD markup and styles | UI Toolkit |
-| `test/sim.test.mjs` | 88 headless sim checks | `Sting.Core.Tests` |
+| `test/sim.test.mjs` | 94 headless sim checks | `Sting.Core.Tests` |
 | `test/net.test.mjs` | 29 network checks | `Sting.Net.Tests` |
 
 Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 18+, no packages). Play locally with `node serve.mjs`.
@@ -77,6 +77,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 51 | Panic feeds the wasps: a sitter who jumps up may knock their drink over; the can lies empty and the puddle is a rich sugar source for four hours. Lidded drinks (level 2+) never spill. Part of the shared human state, so peers agree | 8.9 | 12 |
 | 52 | Plausibility checks on received traffic: commit ticks, order, future ticks, swat count and timing, panic range, sting reach from the human, sting rate. Three strikes quarantine the peer. A peer that delays the slaps aimed at its wasps is cut off within a minute; honest traffic on every link is never rejected | 11.8 | 12 |
 | 53 | World modifiers: humans react fast/normal/slow, neighborhoods easygoing/normal/touchy, and exterminators, pest control, birds and rival colonies switchable. A short tag names the world ("slow humans · bees ×1.5 · no exterminators") and a rules hash lets peers confirm they play the same world; both survive saves | 4.8 | 12 |
+| 54 | Nest sites: a founding queen picks a trunk (up to 3,500 cells), an old burrow in the grass (5,000 cells, floods in rain, people notice it 1.6× faster) or a branch in the canopy (1,800 cells, twice as cold in rain, half as noticeable). Burrows are always visible; branch points show while choosing | 6.6 | 12 |
 
 ## Verified
 
@@ -97,6 +98,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 ## Known limits
 
 - The colony economy is tuned against one simulated season with an idle player; it needs real play data.
+- Wall, attic and shed nest sites need buildings, which the PoC world does not have yet.
 - Walking is on horizontal surfaces only; tree trunks and walls are obstacles, not surfaces.
 - Two players' colonies never fight each other: whether players are co-op, rivals or both is still open (Q-07).
 

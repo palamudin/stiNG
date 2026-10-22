@@ -11,9 +11,11 @@ export const NEST_ENTRANCE = { x: NEST.x, y: NEST.y - NEST.r * 1.25, z: NEST.z }
 export const SPAWN = { x: -3, y: 2.05, z: -1.25, yaw: 0.98 };
 
 // A nest hanging from a tree (GDD 6.6). The first one is in the home tree; founding queens pick their own.
-export function makeNest(treeX, treeZ, x, y, z, r = NEST.r) {
-  const entrance = { x, y: y - r * 1.25, z };
-  return { x, y, z, r, treeX, treeZ, entrance, spawn: { x, y: entrance.y - 0.1, z: z + 0.3, yaw: 0.98 }, key: chunkKey(chunkOf(x), chunkOf(z)) };
+// site: 'trunk' (paper nest against a trunk), 'ground' (old burrow, entrance in the grass), 'branch' (hanging in the canopy)
+export function makeNest(treeX, treeZ, x, y, z, r = NEST.r, site = 'trunk') {
+  const entrance = site === 'ground' ? { x, y: 0.02, z } : { x, y: y - r * 1.25, z };
+  const spawn = site === 'ground' ? { x, y: 0.3, z: z + 0.3, yaw: 0.98 } : { x, y: entrance.y - 0.1, z: z + 0.3, yaw: 0.98 };
+  return { x, y, z, r, treeX, treeZ, entrance, spawn, site, key: chunkKey(chunkOf(x), chunkOf(z)) };
 }
 
 // ---------------------------------------------------------------- clock and weather (GDD 5)

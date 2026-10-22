@@ -531,5 +531,44 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   ok(!count(ev, 'muniStart') && !count(ev, 'extScheduled') && !quiet.birdState.size, 'systems switched off stay off: no pest control, no exterminator, no birds');
 }
 
+// 22. Nest sites (GDD 6.6): a trunk, an old burrow, or a branch, each with its own trade-offs
+{
+  const spring = () => {
+    const t = new Sim({ seed: 1234 });
+    t.colony.mated = 200;
+    t.season.startMinute -= 0.71 * t.settings.seasonDays * 1440;
+    run(t, 120);
+    return t;
+  };
+  const found = (t, p) => { place(t.wasp, p); return run(t, 2, (sim, i) => idle({ act: i === 1 ? Act.Interact : 0 })); };
+  const g = spring();
+  const hole = g.activeChunks.flatMap((r) => g.sitesIn(r).holes).find((h) => Math.hypot(h.x - g.wasp.x, h.z - g.wasp.z) < 40);
+  let ev = found(g, { x: hole.x + 0.03, y: 0.12, z: hole.z });
+  ok(count(ev, 'nestFounded') === 1 && g.nest.site === 'ground' && g.nest.entrance.y < 0.05 && g.colony.maxCells === T.sites.ground.maxCells, 'E at a burrow in the grass founds an underground nest');
+  const b = spring();
+  const br = b.activeChunks.flatMap((r) => b.sitesIn(r).branches).find((x) => Math.hypot(x.t.x - NEST.treeX, x.t.z - NEST.treeZ) > 3);
+  ev = found(b, { x: br.x, y: br.y - 0.05, z: br.z });
+  ok(count(ev, 'nestFounded') === 1 && b.nest.site === 'branch' && b.nest.y > 1.5, `E under a branch founds a hanging nest (${b.nest.y.toFixed(1)} m up)`);
+  // size: a branch nest stops growing at its cap
+  b.colony.pulp = 1e4; b.colony.adults = 2000; b.colony.sugar = 1e3;
+  for (let i = 0; i < 400; i++) colonyStep(b.colony, 0.05, 0, false, 0.3, 0.2);
+  ok(b.colony.cells === T.sites.branch.maxCells, `a branch nest stops at ${T.sites.branch.maxCells} cells`);
+  // rain: the burrow floods, the open nest chills
+  const tr = spring(); const t0 = tr.activeChunks.flatMap((r) => r.content.trees).find((t) => Math.hypot(t.x - NEST.treeX, t.z - NEST.treeZ) > 3 && t.h > 3);
+  found(tr, { x: t0.x + t0.r + 0.03, y: 2, z: t0.z });
+  const rainy = (t) => {
+    Object.defineProperty(t, 'raining', { get: () => true });
+    Object.assign(t.colony, { adults: 100, eggs: 50, larvae: 50, pupae: 50, protein: 50, sugar: 50 });
+    run(t, t.dayTicks / 4);
+    return { brood: t.colony.eggs + t.colony.larvae + t.colony.pupae, adults: t.colony.adults };
+  };
+  const rg = rainy(g), rt = rainy(tr), rb = rainy(b);
+  ok(rg.brood < rt.brood * 0.97, `rain floods a burrow's brood (${rg.brood.toFixed(0)} vs ${rt.brood.toFixed(0)} in a trunk nest)`);
+  ok(rb.adults < rt.adults && rt.adults < rg.adults, `rain chills an open nest most and a burrow least (adults: branch ${rb.adults.toFixed(1)}, trunk ${rt.adults.toFixed(1)}, burrow ${rg.adults.toFixed(1)})`);
+  // discovery: traffic at people's feet is noticed
+  const before = g.cs(g.nest.key).esc; g.addEsc(g.nest.x, g.nest.z, 1);
+  ok(Math.abs(g.cs(g.nest.key).esc - before - T.sites.ground.discovery) < 1e-9, 'stings near a burrow nest raise the alert faster');
+}
+
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');
 process.exit(failures ? 1 : 0);

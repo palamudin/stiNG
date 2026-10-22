@@ -57,6 +57,7 @@ export class Sim {
     this.birdState = new Map();
     this.colony = newColony();
     this.nest = makeNest(NEST.treeX, NEST.treeZ, NEST.x, NEST.y, NEST.z);
+    this.colony.maxCells = T.sites.trunk.maxCells;
     this.oldNests = [];
     this.stung = new Set();
     this.stats = { stings: 0, aiStings: 0, remoteStings: 0, full: 0, deaths: 0, causes: {}, caught: 0, deposits: 0 };
@@ -111,7 +112,7 @@ export class Sim {
     return lv;
   }
   escAt(x, z) { return this.escLevel(chunkKey(chunkOf(x), chunkOf(z))); }
-  addEsc(x, z, pts) { const k = chunkKey(chunkOf(x), chunkOf(z)); const before = this.escLevel(k); this.cs(k).esc += pts * this.settings.escalation; const after = this.escLevel(k); if (after !== before) this.emit('escalation', { key: k, level: after }); }
+  addEsc(x, z, pts) { const k = chunkKey(chunkOf(x), chunkOf(z)); const before = this.escLevel(k); this.cs(k).esc += pts * this.settings.escalation * (this.colony && this.colony.sited && k === this.nest.key ? T.sites[this.nest.site || 'trunk'].discovery : 1); const after = this.escLevel(k); if (after !== before) this.emit('escalation', { key: k, level: after }); }
   get temperature() { return tempAt(this.seed, this.minute); }
   get raining() { return isRaining(this.seed, this.minute); }
   get physicalCount() { return this._own().length; }
@@ -905,7 +906,7 @@ export class Sim {
   // ---------------- interactions (E): crawl under, catch prey, chew pulp
 
   _interact(w) {
-    if (w.caste === 'queen' && !this.colony.sited) { const t = this._trunkNear(w); if (t) { this._foundNest(w, t); return; } }
+    if (w.caste === 'queen' && !this.colony.sited) { const site = this._siteNear(w); if (site) { this._foundNest(w, site); return; } }
     const rv = this._rivalNestNear(w);
     if (rv && !w.carry) { this._raid(w, rv); return; }
     const c = w.contact;
@@ -926,7 +927,7 @@ export class Sim {
       bait: !w.carry && !!this._baitNear(w),
       wood: !w.carry && !c && this._woodNear(w),
       nest: dist2(w, this.nest.entrance) < 0.4 * 0.4,
-      site: w.caste === 'queen' && !this.colony.sited && this._trunkNear(w) ? true : false,
+      site: w.caste === 'queen' && !this.colony.sited ? (this._siteNear(w) || {}).type || null : null,
       rival: !w.carry && !!this._rivalNestNear(w),
     };
   }
@@ -1727,15 +1728,55 @@ export class Sim {
     return null;
   }
 
-  _foundNest(w, t) {
-    let dx = w.x - t.x, dz = w.z - t.z;
-    const d = Math.sqrt(dx * dx + dz * dz) || 1;
-    dx /= d; dz /= d;
-    const y = clamp(w.y, 1.2, Math.max(1.2, t.h - 0.6));
-    this.nest = makeNest(t.x, t.z, t.x + dx * (t.r + 0.2), y, t.z + dz * (t.r + 0.2));
+  // Candidate nest sites around the queen (GDD 6.6). Burrows and branch points are derived from the seed and the
+  // chunk's frozen content, so they cost nothing to store and every peer sees the same ones.
+  sitesIn(rec) {
+    const cache = this._siteCache || (this._siteCache = new Map()), key = chunkKey(rec.cx, rec.cz);
+    if (cache.has(key)) return cache.get(key);
+    const S = T.sites, CS = T.chunk.size, sd = Number(this.seed & 0xffffffffn);
+    const holes = [];
+    for (let i = 0; i < S.holesPerChunk; i++) {
+      const x = (rec.cx + (h32(sd, rec.cx, rec.cz, i, 913) - 0.5) * 0.8) * CS, z = (rec.cz + (h32(sd, rec.cx, rec.cz, i, 914) - 0.5) * 0.8) * CS;
+      holes.push({ x, z });
+    }
+    const branches = rec.content.trees.map((t, i) => {
+      const a = h32(sd, rec.cx, rec.cz, i, 915) * 6.28318, d = t.cr * 0.55;
+      return { x: t.x + d * dcos(a), y: Math.max(1.8, t.h - t.cr * 0.7), z: t.z + d * dsin(a), t };
+    });
+    const out = { holes, branches };
+    if (cache.size > 64) cache.clear();
+    cache.set(key, out);
+    return out;
+  }
+
+  _siteNear(w) {
+    for (const rec of this.activeChunks) {
+      const { holes, branches } = this.sitesIn(rec);
+      for (const h of holes) if (w.y < 0.3 && (w.x - h.x) ** 2 + (w.z - h.z) ** 2 < 0.12 * 0.12) return { type: 'ground', x: h.x, z: h.z };
+      for (const b of branches) if (dist2(w, b) < 0.15 * 0.15) return { type: 'branch', x: b.x, y: b.y, z: b.z, t: b.t };
+    }
+    const t = this._trunkNear(w);
+    return t ? { type: 'trunk', t } : null;
+  }
+
+  _foundNest(w, site) {
+    if (!site.type) site = { type: 'trunk', t: site }; // older callers pass a tree
+    if (site.type === 'ground') {
+      this.nest = makeNest(site.x - 0.5, site.z, site.x, -0.25, site.z, NEST.r, 'ground');
+    } else if (site.type === 'branch') {
+      this.nest = makeNest(site.t.x, site.t.z, site.x, site.y - NEST.r * 1.3, site.z, NEST.r, 'branch');
+    } else {
+      const t = site.t;
+      let dx = w.x - t.x, dz = w.z - t.z;
+      const d = Math.sqrt(dx * dx + dz * dz) || 1;
+      dx /= d; dz /= d;
+      const y = clamp(w.y, 1.2, Math.max(1.2, t.h - 0.6));
+      this.nest = makeNest(t.x, t.z, t.x + dx * (t.r + 0.2), y, t.z + dz * (t.r + 0.2), NEST.r, 'trunk');
+    }
     this.colony.sited = true;
+    this.colony.maxCells = T.sites[this.nest.site].maxCells;
     w.x = this.nest.spawn.x; w.y = this.nest.spawn.y; w.z = this.nest.spawn.z; w.vx = w.vy = w.vz = 0;
-    this.emit('nestFounded', { x: this.nest.x, y: this.nest.y, z: this.nest.z, key: this.nest.key });
+    this.emit('nestFounded', { x: this.nest.x, y: this.nest.y, z: this.nest.z, key: this.nest.key, site: this.nest.site });
   }
 
   // ---------------- predators (GDD 9.3)
@@ -2144,11 +2185,21 @@ export class Sim {
     const frac = this.seasonFrac;
     if (this.colony.sited === false && frac > 0.03) {
       const old = this.oldNests[this.oldNests.length - 1] || this.nest;
-      this.nest = makeNest(old.treeX, old.treeZ, old.x, old.y, old.z);
+      this.nest = makeNest(old.treeX, old.treeZ, old.x, old.y, old.z, old.r, old.site || 'trunk');
       this.colony.sited = true;
+      this.colony.maxCells = T.sites[this.nest.site].maxCells;
       this.emit('nestFounded', { x: this.nest.x, y: this.nest.y, z: this.nest.z, key: this.nest.key, auto: true });
     }
     colonyStep(col, 60 / this.dayTicks, this._own().filter((w) => w.caste !== 'queen').length, daylight, frac, this.bio);
+    if (this.raining && col.nestAlive && col.sited) {
+      // the site decides what rain costs: burrows flood, open nests chill (GDD 6.6)
+      const st = T.sites[this.nest.site || 'trunk'], dt = 60 / this.dayTicks;
+      const fl = st.flood * dt, inside = Math.max(0, col.adults - this._own().length);
+      col.eggs -= col.eggs * fl; col.larvae -= col.larvae * fl; col.pupae -= col.pupae * fl;
+      col.rEggs -= col.rEggs * fl; col.rLarvae -= col.rLarvae * fl; col.rPupae -= col.rPupae * fl;
+      const cold = Math.min(inside, inside * T.sites.rainMortality * st.exposure * dt);
+      col.adults -= cold; col.stats.died += cold;
+    }
     const ph = seasonPhase(frac);
     if (ph !== this.season.phase) { this.season.phase = ph; this.emit('season', { phase: ph }); }
     if (frac >= 1) { this._endSeason('autumn'); return; }

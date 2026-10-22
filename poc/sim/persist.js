@@ -28,7 +28,7 @@ const reviver = (k, v) => {
 };
 
 const HUMAN_FIXED = new Set(['id', 'hex', 'short', 'tr', 'chunk', 'home', 'parts']);
-const SKIP = new Set(['events', 'outbox', 'remote', 'log', 'logLen', 'hint', 'feeding', 'humans', 'active', 'activeChunks', 'records', 'ext', 'netStats', '_baitCache']);
+const SKIP = new Set(['events', 'outbox', 'remote', 'log', 'logLen', 'hint', 'feeding', 'humans', 'active', 'activeChunks', 'records', 'ext', 'netStats', '_baitCache', '_siteCache']);
 
 export function snapshot(sim) {
   const out = { v: SAVE_VERSION, gen: GEN_VERSION, opts: { peer: sim.peer, net: sim.net, noAI: sim.noAI, peers: [...sim.interest.keys()] } };
@@ -110,7 +110,7 @@ export function joinFrom(json, peer, opts = {}) {
   sim.noAI = !!opts.noAI;
   sim.nextWaspId = peer * 1000000 + 1;
   sim.wasps = []; sim.remote = new Map(); sim.outbox = [];
-  sim.colony = newColony(); sim.nest = makeNest(NEST.treeX, NEST.treeZ, NEST.x, NEST.y, NEST.z); sim.oldNests = [];
+  sim.colony = newColony(); sim.nest = makeNest(NEST.treeX, NEST.treeZ, NEST.x, NEST.y, NEST.z); sim.colony.maxCells = T.sites.trunk.maxCells; sim.oldNests = [];
   sim.stats = { stings: 0, aiStings: 0, remoteStings: 0, full: 0, deaths: 0, causes: {}, caught: 0, deposits: 0 };
   sim.netStats = { sent: 0, recv: 0, late: 0, lateMax: 0 };
   sim.ghost = null; sim.extinct = false; sim.lineage = 0; sim.evSeq = 0; sim.prevAct = 0; sim.pressUsed = false;

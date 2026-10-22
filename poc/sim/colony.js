@@ -101,7 +101,7 @@ export function colonyStep(c, dtDay, physical, foraging, frac = 0.3, bio = 1) {
   if (frac >= S.queenDiesAt) c.queenAlive = false;
 
   const use = Math.min(c.pulp, C.buildPerDay * dtDay * (1 + inside / 40));
-  c.pulp -= use; c.cells += use * C.cellsPerPulp;
+  c.pulp -= use; c.cells = Math.min(c.cells + use * C.cellsPerPulp, c.maxCells || Infinity); // the site caps nest size (GDD 6.6)
 
   if (c.queenAlive && c.protein > 0) {
     const free = Math.max(0, c.cells - broodTotal(c));

@@ -259,15 +259,32 @@ function updateChunkDynamics() {
 
 function buildNestMesh(n, abandoned) {
   const g = new THREE.Group();
+  if (n.site === 'ground') {
+    // an old burrow: a low ring of dug-out soil around a dark hole
+    const mound = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.03, 8, 20), mat(abandoned ? '#5a4a3a' : '#6d5139'));
+    mound.rotation.x = Math.PI / 2; mound.position.set(n.entrance.x, 0.012, n.entrance.z); mound.scale.z = 0.5; mound.receiveShadow = true;
+    const hole = new THREE.Mesh(new THREE.CircleGeometry(0.045, 16), mat('#0c0905'));
+    hole.rotation.x = -Math.PI / 2; hole.position.set(n.entrance.x, 0.006, n.entrance.z);
+    g.add(mound, hole);
+    g.userData.ball = hole;
+    scene.add(g);
+    return g;
+  }
   const ball = new THREE.Mesh(new THREE.SphereGeometry(n.r, 20, 16), new THREE.MeshLambertMaterial({ map: paperTex, color: abandoned ? '#857a68' : '#ffffff' }));
   ball.scale.set(1, 1.25, 1); ball.position.set(n.x, n.y, n.z); ball.castShadow = true;
   const hole = new THREE.Mesh(new THREE.CircleGeometry(0.03, 16), mat('#120d08', { side: THREE.DoubleSide }));
   hole.rotation.x = Math.PI / 2; hole.position.set(n.entrance.x, n.entrance.y + 0.002, n.entrance.z);
   const dx = n.x - n.treeX, dz = n.z - n.treeZ, len = Math.hypot(dx, dz);
   const branch = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.03, len, 6), mat('#5b4330'));
-  branch.position.set((n.x + n.treeX) / 2, n.y + n.r * 1.1, (n.z + n.treeZ) / 2);
+  branch.position.set((n.x + n.treeX) / 2, n.y + n.r * (n.site === 'branch' ? 1.6 : 1.1), (n.z + n.treeZ) / 2);
   branch.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(dx, 0, dz).normalize());
   g.add(ball, hole, branch);
+  if (n.site === 'branch') {
+    // hanging from a stalk under the branch
+    const stalk = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, n.r * 0.5, 5), mat('#5b4330'));
+    stalk.position.set(n.x, n.y + n.r * 1.4, n.z);
+    g.add(stalk);
+  }
   g.userData.ball = ball;
   scene.add(g);
   return g;
@@ -281,7 +298,7 @@ function syncNests() {
     nestView = sim.colony.sited !== false ? buildNestMesh(n, false) : null;
     nestSig = sig;
   }
-  if (nestView) nestView.userData.ball.material.color.set(sim.colony.nestAlive ? '#ffffff' : '#6b5d4a');
+  if (nestView && sim.nest.site !== 'ground') nestView.userData.ball.material.color.set(sim.colony.nestAlive ? '#ffffff' : '#6b5d4a');
   while (oldNestViews.length < sim.oldNests.length) {
     const o = sim.oldNests[oldNestViews.length];
     const same = o.x === n.x && o.y === n.y && o.z === n.z && sim.colony.sited !== false;
@@ -301,6 +318,23 @@ const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vec
 // Pest-control bait stations: a dark box on the trunk with the bait showing through its slot
 const baitPool = [];
 const baitBoxGeo = new THREE.BoxGeometry(0.07, 0.1, 0.05), baitMeatGeo = new THREE.BoxGeometry(0.04, 0.012, 0.01);
+// Burrows are always there; branch points show only while a queen is choosing a site
+const holePool = [], knobPool = [];
+const holeGeo = new THREE.CircleGeometry(0.035, 12), knobGeo = new THREE.SphereGeometry(0.035, 8, 6);
+function renderSites() {
+  const holes = [], knobs = [];
+  const choosing = sim.colony.sited === false && sim.wasp && sim.wasp.caste === 'queen';
+  for (const rec of sim.activeChunks) {
+    const st = sim.sitesIn(rec);
+    holes.push(...st.holes);
+    if (choosing) knobs.push(...st.branches);
+  }
+  while (holePool.length < holes.length) { const m = new THREE.Mesh(holeGeo, mat('#15100a')); m.rotation.x = -Math.PI / 2; scene.add(m); holePool.push(m); }
+  while (knobPool.length < knobs.length) { const m = new THREE.Mesh(knobGeo, mat('#7a5a3c')); scene.add(m); knobPool.push(m); }
+  holePool.forEach((m, i) => { const h = holes[i]; m.visible = !!h && !(sim.nest.site === 'ground' && Math.hypot(h.x - sim.nest.x, h.z - sim.nest.z) < 0.01); if (h) m.position.set(h.x, 0.004, h.z); });
+  knobPool.forEach((m, i) => { const k = knobs[i]; m.visible = !!k; if (k) m.position.set(k.x, k.y + 0.06, k.z); });
+}
+
 function renderBaits() {
   const baits = sim.muniBaits ? sim.muniBaits() : [];
   while (baitPool.length < baits.length) {
@@ -1065,6 +1099,7 @@ function updateNest() {
   const c = sim.colony, out = sim.wasps.length;
   $('nStores').innerHTML = [
     ['Queen', c.queenAlive ? 'laying' : c.nestAlive ? 'dead' : 'nest destroyed'],
+    ...(c.sited !== false ? [['Site', `${T.sites[sim.nest.site || 'trunk'].name} · up to ${fmt(c.maxCells || T.sites.trunk.maxCells)} cells`]] : []),
     ['Adults inside / out', `${fmt(Math.max(0, c.adults - out))} / ${out}`],
     ['Protein', `${c.protein.toFixed(1)} / ${proteinCap(c).toFixed(0)}`], ['Sugar', `${c.sugar.toFixed(1)} / ${sugarCap(c).toFixed(0)}`], ['Pulp', c.pulp.toFixed(1)],
     ['Cells used', `${fmt(broodTotal(c))} / ${fmt(c.cells)}`], ['Larvae fed', Math.round(c.fed * 100) + '%'],
@@ -1216,8 +1251,8 @@ function updateHud() {
   else if (h.wood) hint = `Hold ${kbd('E')} to chew pulp`;
   else if (h.nest && (md < T.time.dawn || md >= T.time.dusk)) hint = `${kbd('R')} rest until morning`;
   else if (w.carry) hint = 'Bring it to the nest';
-  else if (h.site) hint = `${kbd('E')} found the nest in this tree`;
-  else if (w.caste === 'queen' && sim.colony.sited === false) hint = 'Pick a tree for the nest: fly to a trunk and press E';
+  else if (h.site) hint = `${kbd('E')} found the nest ${T.sites[h.site].name} · ${SITE_NOTE[h.site]}`;
+  else if (w.caste === 'queen' && sim.colony.sited === false) hint = 'Pick a nest site and press E: a trunk, a burrow in the grass, or under a branch';
   else if (w.caste === 'queen' && sim.colony.adults < 1) hint = 'Founding: chew pulp for cells, catch prey for the brood, bring both to the nest';
   $('hint').innerHTML = hint;
 
@@ -1278,6 +1313,12 @@ function drawMap() {
 // ------------------------------------------------------------------ events
 
 // One line on why it happened, so a death teaches something (GDD 8.2: the outcome is fixed; the player should be able to read it)
+const SITE_NOTE = {
+  trunk: 'medium nest, sheltered',
+  ground: 'biggest nest, floods in rain, people notice it fastest',
+  branch: 'small nest, cold in rain, hardest to find',
+};
+
 function deathWhy(e) {
   const d = e.detail || {};
   if (e.cause === 'taken by a bird') return 'Birds hunt wasps in open air above head height. Keep low or under the trees.';
@@ -1573,6 +1614,7 @@ function frame(now) {
     if (tm) { tm('wasps+cam', t0); t0 = performance.now(); }
     renderCritters(t);
     renderBaits();
+    renderSites();
     renderBirdsAndSpiders(t, dt);
     renderSwats(t);
     renderSprays();
