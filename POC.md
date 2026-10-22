@@ -16,7 +16,7 @@ The tier-0 slice of the GDD, built in the browser so it can move to Unity. Same 
 | `game.js` | three.js rendering, animation, camera, input, HUD, sound | Unity scene, Animator, UI |
 | `index.html` | Page shell, HUD markup and styles | UI Toolkit |
 | `test/sim.test.mjs` | 71 headless sim checks | `Sting.Core.Tests` |
-| `test/net.test.mjs` | 21 network checks | `Sting.Net.Tests` |
+| `test/net.test.mjs` | 22 network checks | `Sting.Net.Tests` |
 
 Run the tests with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 18+, no packages).
 
@@ -67,11 +67,13 @@ Run the tests with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 1
 | 41 | Walk on surfaces: camera-relative on tables, benches and the ground; trunks block, edges drop you into flight, walking into a person climbs onto them; six legs with a tripod gait | 7.2 | 9 |
 | 42 | Sugar store capped at a few days of adult need, so stores drain in autumn instead of piling up | 6.3 | 9 |
 | 43 | Death screen says why: lingered after a sting, felt crawling, hovered at a face, caught in a swat meant for another wasp, bird, web, ball, trap, spray | 8.2 | 9 |
+| 44 | Rival fights across peers: the rival's owner starts the fight (or the other peer asks, when its wasp touches a rival on its own screen); each peer decides only its own wasp from the same published scores | 9.3, 11.6 | 10 |
+| 45 | Late join in the lab: "Bot joins after 1 min" builds player 2 from a snapshot mid-game | 11.10 | 10 |
 
 ## Verified
 
 - **Sim:** traits and hash match the compiled C# protocode; trig error 6.6e-10; no swat or press lands inside the consequence window; fed colonies grow and starved larvae die; the yearly cycle raises and mates young queens and collapses in autumn; winter and spring hand the line to a founding queen; two runs and a replay give the same hash; lingering kills, jab-and-run survives; AI workers launch and deposit; covered food, traps, preemptive slaps, compression under a shirt, crawling to the acnestis, bee balls and escape, the exterminator destroying an unguarded nest and aborting when stung under his collar, the day cycle, possession, frozen chunks, and a restored snapshot that stays bit-identical to the original for 6000 more ticks and replays the input recorded after it.
-- **Network:** two peers sting the same humans over four links, from LAN up to 16±6 ticks one-way with 10% loss. Human state is identical on both peers at every check (300/300 per link) and no event arrives after its commit tick. With the peers two chunks apart, all 63 shared humans still agree at every check. A peer that joins 50 s in from a snapshot agrees on every check after joining (200/200). State packets round-trip within 0.4 mm; a colony with 22 wasps out sends about 4.8 KB/s upstream.
+- **Network:** two peers sting the same humans over four links, from LAN up to 16±6 ticks one-way with 10% loss. Human state is identical on both peers at every check (300/300 per link) and no event arrives after its commit tick. With the peers two chunks apart, all 63 shared humans still agree at every check. A peer that joins 50 s in from a snapshot agrees on every check after joining (200/200). A remote player's wasp fought A's rivals 62 times over good and bad links, and both peers agreed on every winner. State packets round-trip within 0.4 mm; a colony with 22 wasps out sends about 4.8 KB/s upstream.
 - **Rendering:** headless Chromium screenshots of every system. The software renderer runs at under 1 fps, so frame rate on real GPUs is not measured.
 
 ## Design changes found by building (fold into the GDD)
@@ -88,7 +90,7 @@ Run the tests with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 1
 
 - The colony economy is balanced loosely: protein piles up mid-season before queen larvae eat it down.
 - Walking is on horizontal surfaces only; tree trunks and walls are obstacles, not surfaces.
-- Fights between a remote player's wasp and local rivals are not networked yet; rivals live on the first peer only.
+- Rival AI still runs on the first peer only: a remote player's raid on a rival nest does not send its guards after them.
 
 ## Controls
 

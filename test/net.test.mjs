@@ -1,5 +1,5 @@
 // Two peers over a simulated link must agree on every shared human (GDD 11.5). Run: node test/net.test.mjs
-import { NetLab, stingBot, idleCmd, encodeState, decodeState, BYTES_PER_WASP } from '../sim/index.js';
+import { NetLab, Sim, stingBot, idleCmd, encodeState, decodeState, BYTES_PER_WASP } from '../sim/index.js';
 
 let failures = 0;
 const ok = (cond, msg) => { console.log((cond ? 'PASS ' : 'FAIL ') + msg); if (!cond) failures++; };
@@ -56,6 +56,38 @@ for (const name of ['lan', 'good', 'bad', 'awful']) {
   const c = lab.checks;
   console.log(`  late join at tick ${lab.joined}: ${c.agreed}/${c.compared} checks agree after joining; A stung ${lab.a.stats.stings + lab.a.stats.aiStings} before and after, B ${lab.b.stats.stings}`);
   ok(lab.joined === 3000 && c.compared > 150 && c.agreed === c.compared, `a peer joining mid-game agrees on every human from its first tick (${c.agreed}/${c.compared})`);
+}
+
+// Rival fights across peers: A owns the rivals; B's wasp grapples one. Each peer decides only its own wasp,
+// and both must agree on who died (GDD 9.3, 11.6)
+{
+  let seed = 0, rv = null;
+  for (let sd = 1; sd < 80 && !rv; sd++) { const t = new Sim({ seed: sd }); for (const r of t.activeChunks) if (r.content.rival) { seed = sd; rv = r.content.rival; break; } }
+  const fights = { a: 0, b: 0, overA: [], overB: [] };
+  let agree = 0, total = 0;
+  for (const link of ['good', 'bad']) {
+    const lab = new NetLab({ seed }, link);
+    const hold = (w, p) => Object.assign(w, { x: p.x, y: p.y, z: p.z, vx: 0, vy: 0, vz: 0 });
+    for (let i = 0; i < 9000; i++) {
+      const aw = lab.a._driven(), bw = lab.b._driven();
+      if (aw && aw.state === 'fly') hold(aw, { x: rv.ex + 2.5, y: rv.ey + 1, z: rv.ez });
+      if (bw && (bw.state === 'fly' || bw.state === 'landed')) {
+        bw.state = 'fly';
+        // B flies onto the nearest rival it can see
+        let best = null, bd = 1e9;
+        for (const r of lab.b.remote.values()) if (r.rival && r.state === 'fly') { const d = (r.x - bw.x) ** 2 + (r.z - bw.z) ** 2; if (d < bd) { bd = d; best = r; } }
+        hold(bw, best && bd < 25 ? { x: best.x + 0.01, y: best.y, z: best.z } : { x: rv.ex + 0.5, y: rv.ey, z: rv.ez });
+      }
+      lab.step(idleCmd(), idleCmd({ sting: i % 6 < 3 ? 1 : 0 }));
+      for (const e of lab.a.drainEvents()) { if (e.type === 'fightOver' && (e.winner > 1000000 || e.loser > 1000000)) fights.overA.push([e.winner, e.loser]); }
+      for (const e of lab.bEvents || []) { if (e.type === 'fight' && e.remote) fights.b++; if (e.type === 'fightOver') fights.overB.push([e.winner, e.loser]); }
+    }
+  }
+  const key = (x) => x.join('>');
+  const setA = new Set(fights.overA.map(key));
+  for (const f of fights.overB) { total++; if (setA.has(key(f))) agree++; }
+  console.log(`  rival fights across peers (seed ${seed}): B grappled ${fights.b} times, ${total} resolved, ${agree} with the same winner on A`);
+  ok(fights.b >= 2 && total >= 2 && agree === total, `a remote player's wasp fights A's rivals and both peers agree on every winner (${agree}/${total})`);
 }
 
 // Wire format: quantization error and bandwidth (GDD 11.12)

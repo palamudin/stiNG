@@ -100,7 +100,7 @@ export const T = {
   // Perching and crawling on people (GDD 7.2, 8.3): how long until they feel you
   perch: { crawlSpeed: 0.06, tickleBase: 4, bareMul: 1, thinMul: 2, backMul: 1.5, faceMul: 0.4, movingMul: 2, cooldown: 90, panic: 0.05 },
   memory: { fasterPerSting: 0.08, minFactor: 0.6, panicPerSting: 0.15, maxStings: 4 },
-  rival: { maxPhysical: 3, fightRange: 0.025, fightTicks: 40, guardRadius: 1.5, raidProtein: 2, huntTicks: 600, mash: 0.15 },
+  rival: { maxPhysical: 3, fightRange: 0.025, remoteFightRange: 0.06, remoteFightTimeout: 240, fightTicks: 40, guardRadius: 1.5, raidProtein: 2, huntTicks: 600, mash: 0.15 },
 
   // Networking (GDD 11): human-side effects of events commit at the end of the consequence window
   net: { commitTicks: 30, stateEvery: 3, remoteTimeout: 45 },

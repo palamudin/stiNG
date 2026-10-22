@@ -21,7 +21,7 @@ const byHumanId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 // Events that change shared world state. Most commit at the end of the consequence window so every
 // peer applies them on the same tick (GDD 11.5); a few cosmetic or owner-decided ones apply on receipt.
-const IMMEDIATE = new Set(['caught', 'beeAlarm', 'died']);
+const IMMEDIATE = new Set(['caught', 'beeAlarm', 'died', 'fight', 'fightReq', 'fightJoin', 'fightRefuse', 'fightEnd']); // wasp-level: never touch humans
 
 export class Sim {
   constructor(settings = {}, opts = {}) {
@@ -299,7 +299,7 @@ export class Sim {
   _sendState() {
     const wasps = this.wasps.map((w) => ({
       id: w.id, caste: w.caste, x: w.x, y: w.y, z: w.z, vx: w.vx, vy: w.vy, vz: w.vz, state: w.state,
-      carry: w.carry ? w.carry.what : null, under: w.under ? w.under.hex : null,
+      carry: w.carry ? w.carry.what : null, under: w.under ? w.under.hex : null, rival: w.colony !== 'own',
     }));
     this.outbox.push({ mk: 'state', peer: this.peer, tick: this.tick, wasps });
   }
@@ -364,6 +364,47 @@ export class Sim {
         if (!hm) break;
         for (const s of ev.swats) this.swats.push({ ...s, frameHex: hm.hex, stungHex: hm.hex, contactTick: ev.tick, hits: [], underOnly: 0, byWasp: ev.waspId, pre: true, why: 'felt' });
         this.emit('notice', { humanHex: hm.hex, waspId: ev.waspId, zone: ev.zone, swats: ev.swats, contactTick: ev.tick });
+        break;
+      }
+      // Fights between a rival (owned by the world-authority peer) and another peer's wasp (GDD 9.3, 11.6).
+      // Each peer decides only about its own wasp; both compute the same winner from published values.
+      case 'fight': {
+        if (mine || ev.toPeer !== this.peer) break;
+        const w = this.waspById(ev.b);
+        if (w && (w.state === 'fly' || w.state === 'landed' || w.state === 'chewing')) {
+          w.state = 'fighting'; w.vx = w.vy = w.vz = 0;
+          w.fight = { other: ev.a, remote: true, peer: ev.peer, start: ev.tick, until: this.tick + T.rival.fightTicks, mash: 0, theirVenom: ev.venom, theirQueen: ev.queen, myVenom: w.venom };
+          this._publish({ type: 'fightJoin', a: ev.a, b: ev.b, toPeer: ev.peer, venom: w.venom, queen: w.caste === 'queen' });
+          this.emit('fight', { a: ev.a, b: ev.b, driven: w.id === this.drivenId, remote: true });
+        } else this._publish({ type: 'fightRefuse', a: ev.a, b: ev.b, toPeer: ev.peer });
+        break;
+      }
+      case 'fightReq': {
+        // another peer's wasp touched one of my rivals on its own screen: start the fight if the rival is free
+        if (mine || ev.toPeer !== this.peer) break;
+        const a = this.waspById(ev.a);
+        if (a && a.colony !== 'own' && (a.state === 'fly' || a.state === 'landed' || a.state === 'chewing')) this._startRemoteFight(a, ev.b, ev.peer);
+        break;
+      }
+      case 'fightJoin': {
+        if (mine || ev.toPeer !== this.peer) break;
+        const w = this.waspById(ev.a);
+        if (w && w.fight && w.fight.other === ev.b) { w.fight.theirVenom = ev.venom; w.fight.theirQueen = ev.queen; }
+        break;
+      }
+      case 'fightRefuse': {
+        if (mine || ev.toPeer !== this.peer) break;
+        const w = this.waspById(ev.a);
+        if (w && w.fight && w.fight.other === ev.b) { w.state = 'fly'; w.fight = null; }
+        break;
+      }
+      case 'fightEnd': {
+        if (mine || ev.toPeer !== this.peer) break;
+        const w = this.waspById(ev.a);
+        if (!w || !w.fight || w.fight.other !== ev.b) break;
+        const f = w.fight;
+        const aWins = this._fightScore(w.id, f.myVenom, w.caste === 'queen', 0, f.start) >= this._fightScore(ev.b, ev.venom, ev.queen, ev.mash, f.start);
+        this._fightResolve(w, aWins, ev.b);
         break;
       }
       case 'caught': {
@@ -1829,10 +1870,36 @@ export class Sim {
   }
 
   // Wasps of different colonies that touch grapple; the weaker one dies (GDD 9.3)
+  _startRemoteFight(a, otherId, peer) {
+    a.state = 'fighting'; a.vx = a.vy = a.vz = 0;
+    a.fight = { other: otherId, remote: true, starter: true, peer, start: this.tick, until: this.tick + T.rival.fightTicks, myVenom: a.venom, mash: 0 };
+    this._publish({ type: 'fight', a: a.id, b: otherId, toPeer: peer, venom: a.venom, queen: a.caste === 'queen' });
+  }
+
+  _fightScore(id, venom, queen, mash, start) { return venom + (queen ? 1 : 0) + mash + h32(id, start, 61) * 1.2; }
+
+  _fightResolve(w, won, otherId) {
+    if (won) { w.state = 'stunned'; w.stateTicks = 20; w.fight = null; this.emit('fightOver', { winner: w.id, loser: otherId }); }
+    else { this._die(w, w.colony === 'own' ? 'killed by a rival wasp' : 'killed by a player\'s wasp', null); this.emit('fightOver', { winner: otherId, loser: w.id }); }
+  }
+
+  // A fight with a wasp another peer owns. The joining side resolves when the fight ends and publishes its mash;
+  // the starting side waits for that, and gives up if it never comes.
+  _remoteFightTick(w) {
+    const f = w.fight;
+    if (f.starter) { if (this.tick > f.until + T.rival.remoteFightTimeout) { w.state = 'fly'; w.fight = null; } return; }
+    if (this.tick < f.until) return;
+    const bWins = this._fightScore(w.id, f.myVenom, w.caste === 'queen', f.mash, f.start) > this._fightScore(f.other, f.theirVenom, f.theirQueen, 0, f.start);
+    this._publish({ type: 'fightEnd', a: f.other, b: w.id, toPeer: f.peer, mash: f.mash, venom: f.myVenom, queen: w.caste === 'queen' });
+    this._fightResolve(w, bWins, f.other);
+  }
+
   _fights() {
     const R = T.rival;
-    for (const w of this.wasps) {
-      if (w.state !== 'fighting' || this.tick < w.fight.until || w.fight.other < w.id) continue;
+    for (const w of this.wasps.slice()) {
+      if (w.state !== 'fighting') continue;
+      if (w.fight.remote) { this._remoteFightTick(w); continue; }
+      if (this.tick < w.fight.until || w.fight.other < w.id) continue;
       const o = this.waspById(w.fight.other);
       if (!o) { w.state = 'fly'; w.fight = null; continue; }
       const score = (x) => x.venom + (x.caste === 'queen' ? 1 : 0) + x.fight.mash + h32(x.id, this.tick, 61) * 1.2;
@@ -1848,6 +1915,32 @@ export class Sim {
       if (dist2(a, b) > R.fightRange * R.fightRange) continue;
       for (const [x, y] of [[a, b], [b, a]]) { x.state = 'fighting'; x.vx = x.vy = x.vz = 0; x.fight = { other: y.id, until: this.tick + R.fightTicks, mash: 0 }; }
       this.emit('fight', { a: a.id, b: b.id, driven: a.id === this.drivenId || b.id === this.drivenId });
+    }
+    if (!this.net || !this.remote.size) return;
+    // My wasps touching another peer's rival on my screen: ask its owner to start the fight
+    for (const w of free) {
+      if (w.colony !== 'own' || (w.fightReqUntil || 0) > this.tick) continue;
+      for (const [id, r] of this.remote) {
+        if (!r.rival || r.state !== 'fly' && r.state !== 'landed' && r.state !== 'chewing') continue;
+        if (dist2(w, r) > R.fightRange * R.fightRange * 4) continue;
+        w.fightReqUntil = this.tick + 30;
+        this._publish({ type: 'fightReq', a: id, b: w.id, toPeer: r.peer });
+        break;
+      }
+    }
+    // My rivals against other peers' wasps: I own the rivals, so I start these fights
+    const busy = new Set();
+    for (const w of this.wasps) if (w.state === 'fighting' && w.fight.remote) busy.add(w.fight.other);
+    const rr = R.remoteFightRange * R.remoteFightRange;
+    for (const a of free) {
+      if (a.colony === 'own' || a.state === 'fighting') continue;
+      for (const [id, r] of this.remote) {
+        if (r.rival || busy.has(id) || !(r.state === 'fly' || r.state === 'landed' || r.state === 'chewing')) continue;
+        if (dist2(a, r) > rr) continue;
+        this._startRemoteFight(a, id, r.peer);
+        busy.add(id);
+        break;
+      }
     }
   }
 

@@ -24,7 +24,7 @@ export function encodeState(m) {
     v.setUint16(o + 8, q16(w.x - cx * CS, -CS / 2, CS / 2)); v.setUint16(o + 10, q16(w.y, 0, YMAX)); v.setUint16(o + 12, q16(w.z - cz * CS, -CS / 2, CS / 2));
     v.setInt8(o + 14, q8(w.vx)); v.setInt8(o + 15, q8(w.vy)); v.setInt8(o + 16, q8(w.vz));
     v.setUint8(o + 17, Math.max(0, STATES.indexOf(w.state)));
-    v.setUint8(o + 18, (w.caste === 'queen' ? 128 : 0) | (w.under ? 64 : 0) | Math.max(0, CARRY.indexOf(w.carry)));
+    v.setUint8(o + 18, (w.caste === 'queen' ? 128 : 0) | (w.under ? 64 : 0) | (w.rival ? 32 : 0) | Math.max(0, CARRY.indexOf(w.carry)));
     o += BYTES_PER_WASP;
   }
   return buf;
@@ -39,7 +39,7 @@ export function decodeState(buf, underHex = null) {
     wasps.push({
       id: v.getUint32(o), x: cx * CS + d16(v.getUint16(o + 8), -CS / 2, CS / 2), y: d16(v.getUint16(o + 10), 0, YMAX), z: cz * CS + d16(v.getUint16(o + 12), -CS / 2, CS / 2),
       vx: v.getInt8(o + 14) / 127 * VMAX, vy: v.getInt8(o + 15) / 127 * VMAX, vz: v.getInt8(o + 16) / 127 * VMAX,
-      state: STATES[v.getUint8(o + 17)], caste: flags & 128 ? 'queen' : 'worker', under: flags & 64 ? underHex || 'yes' : null, carry: CARRY[flags & 63],
+      state: STATES[v.getUint8(o + 17)], caste: flags & 128 ? 'queen' : 'worker', under: flags & 64 ? underHex || 'yes' : null, rival: !!(flags & 32), carry: CARRY[flags & 31],
     });
     o += BYTES_PER_WASP;
   }
@@ -123,7 +123,7 @@ export class NetLab {
     if (!this.b) {
       this.a.step(cmdA);
       this.a.outbox.length = 0; // nobody to send to yet
-      if (this.a.tick >= this.joinAt) { this.b = joinFrom(snapshot(this.a), 1, { noAI: true }); this.joined = this.a.tick; }
+      if (this.a.tick >= this.joinAt) { const snap = snapshot(this.a); this.joinBytes = snap.length; this.b = joinFrom(snap, 1, { noAI: true }); this.joined = this.a.tick; }
       return;
     }
     this.a.receive(this._in(this.ba.poll(t)));
@@ -132,7 +132,7 @@ export class NetLab {
     this.b.step(cmdB || this.botB(this.b));
     this._out(this.a, this.ab, 'ab');
     this._out(this.b, this.ba, 'ba');
-    this.b.drainEvents();
+    this.bEvents = this.b.drainEvents(); // kept for one step so tests and the lab can look
   }
   // Compare the shared humans: both peers simulate the same union of interest, so they must agree everywhere.
   check() {

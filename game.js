@@ -695,7 +695,7 @@ function renderWasps(alpha, t, dt) {
   for (const [id, r] of sim.remote) {
     seen.add(id);
     let g = waspViews.get(id);
-    if (!g) { g = buildWasp(true); waspViews.set(id, g); g.position.set(r.x, r.y, r.z); }
+    if (!g) { g = buildWasp(!r.rival, !!r.rival); waspViews.set(id, g); g.position.set(r.x, r.y, r.z); }
     const tgt = new THREE.Vector3(r.x, r.y, r.z);
     if (g.position.distanceTo(tgt) > 0.5) g.position.copy(tgt); else g.position.lerp(tgt, 1 - Math.exp(-dt * 25));
     g.visible = r.state !== 'under';
@@ -1052,11 +1052,12 @@ function updateLab() {
     $('lNet').innerHTML = [
       ['Link', `${L.name}`], ['One-way delay', `${ms(L.latency)}–${ms(L.latency + L.jitter)} ms`], ['Loss', `${Math.round(L.loss * 100)}%`],
       ['Commit window', `${T.net.commitTicks} ticks · ${ms(T.net.commitTicks)} ms`],
-      ['Events sent / received', `${sim.netStats.sent} / ${sim.netStats.recv}`], ['Late events', `${sim.netStats.late + lab.b.netStats.late}${sim.netStats.lateMax ? ` (max ${sim.netStats.lateMax} ticks)` : ''}`],
+      ['Player 2', lab.b ? (lab.joined ? `joined after ${Math.round(lab.joined / 60)} s from a ${(lab.joinBytes / 1024).toFixed(0)} KB snapshot` : 'in from the start') : `joins in ${Math.ceil((lab.joinAt - sim.tick) / 60)} s`],
+      ['Events sent / received', `${sim.netStats.sent} / ${sim.netStats.recv}`], ['Late events', `${sim.netStats.late + (lab.b ? lab.b.netStats.late : 0)}${sim.netStats.lateMax ? ` (max ${sim.netStats.lateMax} ticks)` : ''}`],
       ['Humans agree', c.compared ? `${c.agreed}/${c.compared} checks${c.agreed === c.compared ? '' : ' · diverged at tick ' + c.firstDiverge}` : '-'],
       ['Player 2 drawn off by', err === null ? '-' : `${(err * 100).toFixed(1)} cm`],
       ['Your upstream', (() => { const b = lab.bandwidth(); return `${(b.total / 1024).toFixed(1)} KB/s · ${sim.wasps.length} wasps at 20 Hz`; })()],
-      ['Player 2 stings', `${lab.b.stats.stings}`],
+      ['Player 2 stings', lab.b ? `${lab.b.stats.stings}` : '-'],
     ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
   }
 }
@@ -1476,7 +1477,7 @@ function newWorld(s, restored = null) {
   else {
     loadSnap = null;
     settings = s;
-    lab = s.net && s.net !== 'off' ? new NetLab(settings, s.net) : null;
+    lab = s.net && s.net !== 'off' ? new NetLab(settings, s.net.replace('+late', ''), {}, s.net.endsWith('+late') ? 3600 : 0) : null;
     sim = lab ? lab.a : new Sim(settings);
   }
   sim.drainEvents();
