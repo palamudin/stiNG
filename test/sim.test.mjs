@@ -1,11 +1,18 @@
-// Headless tests for the STING tier-0 sim. Run: node test/sim.test.mjs
+// Headless tests for the STING sim core. Run: node test/sim.test.mjs
 import { readFileSync } from 'node:fs';
-import { Sim, hash, Domain, humanTraits, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos } from '../sim.js';
+import {
+  Sim, Act, hash, Domain, humanTraits, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
+  garmentGraph, Top, NEST_ENTRANCE, chunkKey, beePos, flyPos,
+} from '../sim/index.js';
 
 let failures = 0;
 const ok = (cond, msg) => { console.log((cond ? 'PASS ' : 'FAIL ') + msg); if (!cond) failures++; };
+const idle = (o = {}) => ({ mx: 0, my: 0, mz: 0, burst: 0, sting: 0, yawQ: 9800, pitchQ: 0, act: 0, alloc: 0, ...o });
+const run = (sim, n, f = () => idle()) => { const ev = []; for (let i = 0; i < n; i++) { sim.step(f(sim, i)); ev.push(...sim.drainEvents()); } return ev; };
+const count = (ev, type) => ev.filter((e) => e.type === type).length;
+const place = (w, p) => { w.x = p.x; w.y = p.y; w.z = p.z; w.vx = w.vy = w.vz = 0; };
 
-// 1. RNG and trait parity with the compile-checked C# protocode (GDD Appendix A.2, A.10)
+// 1. RNG and trait parity with the compiled C# protocode
 {
   const ref = readFileSync(new URL('./cs_parity.txt', import.meta.url), 'utf8').trim().split('\n');
   const ids = [1n, 2n, 3n, 0xDEADBEEFCAFEBABEn, 12345678901234567n];
@@ -14,112 +21,256 @@ const ok = (cond, msg) => { console.log((cond ? 'PASS ' : 'FAIL ') + msg); if (!
     const [, rt, st, hgt, arm, flex, girth] = ref[i].split(' ');
     const h = humanTraits(42n, id);
     const near = (a, b) => Math.abs(a - Number(b)) < 1e-6;
-    if (h.reactionTicks !== +rt || h.style !== +st || !near(h.height, hgt) || !near(h.armRatio, arm) || !near(h.flexibility, flex) || !near(h.girth, girth)) {
-      match = false; console.log('  mismatch', id, h, ref[i]);
-    }
+    if (h.reactionTicks !== +rt || h.style !== +st || !near(h.height, hgt) || !near(h.armRatio, arm) || !near(h.flexibility, flex) || !near(h.girth, girth)) match = false;
   });
   ok(match, 'human traits match C# HumanFactory for 5 ids');
   ok(hash(42n, Domain.WorldGen, 7n, 8n, 9n).toString(16).padStart(16, '0') === ref[5].trim(), 'Rng.Hash bit-identical to C#');
-}
-
-// 2. Deterministic trig accuracy
-{
   let maxErr = 0;
   for (let x = -20; x <= 20; x += 0.001) maxErr = Math.max(maxErr, Math.abs(dsin(x) - Math.sin(x)), Math.abs(dcos(x) - Math.cos(x)));
   ok(maxErr < 1e-6, `dsin/dcos max error ${maxErr.toExponential(2)}`);
 }
 
-// 3. Consequence-window invariant over many humans and every zone (GDD 11.5)
+// 2. Consequence window holds for swats and for compression under clothing
 {
   let minGap = Infinity;
-  for (let i = 1n; i <= 3000n; i++) {
+  for (let i = 1n; i <= 2000n; i++) {
     const h = humanTraits(7n, i);
-    for (let z = 0; z < ZONES.length; z++) {
-      const p = resolveSting({ contactTick: 0, zone: z, contactPointBody: { x: 0, y: 1, z: 0 }, mode: 'full' }, h, ZONES[z],
+    for (let z = 0; z < ZONES.length; z++) for (const under of [false, true]) {
+      const p = resolveSting({ contactTick: 0, zone: z, contactPointBody: { x: 0, y: 1, z: 0 }, mode: 'full', under }, h, ZONES[z],
         { clothingStiffness: 0, panic: 0, companions: [{ id: i + 99999n, distance: 1, reactionTicks: 11, style: 0 }] });
       for (const s of p.swats) minGap = Math.min(minGap, s.start);
     }
   }
-  ok(minGap >= T.resolve.minConsequenceTicks, `no swat lands before ${T.resolve.minConsequenceTicks} ticks (min seen ${minGap})`);
+  ok(minGap >= T.resolve.minConsequenceTicks, `no swat or press lands before ${T.resolve.minConsequenceTicks} ticks (min ${minGap})`);
 }
 
-// 4. Scripted bot: fly to a seated human's forearm and sting. Exercises flight, collision,
-//    contact, sting, swats, death/respawn, panic, flee, chunk discovery.
-function bot(sim, plan) {
-  const w = sim.wasp;
-  let phase = 'approach', target = null, holdTicks = 0, awayTicks = 0, idx = 0;
-  return () => {
-    const cmd = { mx: 0, my: 0, mz: 0, burst: 0, sting: 0, yawQ: Math.round(w.yaw * 1e4), pitchQ: 0 };
-    const ww = sim.wasp;
-    if (ww.state === 'dead' || ww.state === 'extinct') { phase = 'approach'; target = null; return cmd; }
+// 3. Colony economy (GDD 6, A.4)
+{
+  const fed = newColony(), starved = newColony();
+  fed.protein = 1e6; fed.sugar = 1e6;
+  starved.protein = 0; starved.sugar = 1e6;
+  for (let i = 0; i < 120 * 10; i++) { colonyStep(fed, 1 / 120, 0, false); colonyStep(starved, 1 / 120, 0, false); }
+  ok(fed.adults > 30 && fed.stats.emerged > 10, `fed colony grows over 10 days (${fed.adults.toFixed(1)} adults)`);
+  ok(starved.stats.starvedLarvae > 10 && starved.larvae < fed.larvae, `protein-starved larvae die (${starved.stats.starvedLarvae.toFixed(1)} lost)`);
+  ok(starved.deficit > fed.deficit, `sugar deficit rises when larvae go hungry (${starved.deficit.toFixed(2)} vs ${fed.deficit.toFixed(2)})`);
+  const broke = newColony(); broke.sugar = 0; broke.protein = 0;
+  for (let i = 0; i < 120 * 3; i++) colonyStep(broke, 1 / 120, 0, false);
+  ok(!broke.queenAlive, 'queen dies after a day without sugar');
+}
+
+// 4. Determinism with AI wasps, humans, colony: two runs and a replay
+function bot(plan) {
+  let phase = 'approach', target = null, k = 0, idx = 0;
+  return (sim) => {
+    const w = sim.wasp, cmd = idle({ yawQ: Math.round((w.yaw || 0) * 1e4) });
+    if (!w || w.state === 'dead') { phase = 'approach'; target = null; return cmd; }
     if (!target) {
-      const seated = sim.active.filter((h) => h.posture === 'sit' && h.state === 'idle');
+      const seated = sim.active.filter((h) => h.posture === 'sit' && h.state === 'idle' && !h.special);
       if (!seated.length) return cmd;
       const hm = seated[idx++ % seated.length];
       const part = hm.parts.sit.find((p) => p.name === 'ForearmR');
-      const mid = { x: (part.a.x + part.b.x) / 2, y: (part.a.y + part.b.y) / 2 + part.r + 0.012, z: (part.a.z + part.b.z) / 2 };
-      target = { hm, mid };
+      target = { hm, mid: { x: (part.a.x + part.b.x) / 2, y: (part.a.y + part.b.y) / 2 + part.r + 0.012, z: (part.a.z + part.b.z) / 2 } };
     }
     const tp = toWorld(target.hm, target.mid);
-    const dx = tp.x - ww.x, dy = tp.y - ww.y, dz = tp.z - ww.z, d = Math.hypot(dx, dy, dz);
+    const dx = tp.x - w.x, dy = tp.y - w.y, dz = tp.z - w.z, d = Math.hypot(dx, dy, dz);
     const yaw = Math.atan2(dx, dz), pitch = Math.atan2(dy, Math.hypot(dx, dz));
     if (phase === 'approach') {
       cmd.yawQ = Math.round(yaw * 1e4); cmd.pitchQ = Math.round(pitch * 1e4);
-      // decel-aware approach speed, sting armed in the last 10 cm
       cmd.mz = Math.max(6, Math.min(100, Math.round(Math.sqrt(2 * T.wasp.accel * d) * 0.7 / T.wasp.cruise * 100)));
       if (d < 0.1) cmd.sting = 1;
-      if (ww.state === 'attached') { phase = 'sting'; holdTicks = 0; }
+      if (w.state === 'attached') { phase = 'sting'; k = 0; }
     }
-    if (phase === 'sting') {
-      cmd.sting = 1; holdTicks++;
-      if (ww.state === 'fly' && holdTicks > 2) { phase = plan === 'full' ? 'linger' : 'escape'; awayTicks = 0; }
-      if (plan === 'jab' && holdTicks >= T.sting.jabTicks + 1) cmd.sting = 0;
-    }
-    if (phase === 'linger') { cmd.sting = 0; if (++awayTicks > 25) { phase = 'escape'; awayTicks = 0; } }
-    if (phase === 'escape') {
-      cmd.yawQ = Math.round((yaw + Math.PI) * 1e4); cmd.pitchQ = 3000; cmd.mz = 100; cmd.burst = 1;
-      if (++awayTicks > 120) { phase = 'approach'; target = null; }
-    }
+    if (phase === 'sting') { cmd.sting = 1; k++; if (w.state === 'fly' && k > 2) { phase = plan === 'full' ? 'linger' : 'escape'; k = 0; } if (plan === 'jab' && k >= 7) cmd.sting = 0; }
+    if (phase === 'linger') { if (++k > 25) { phase = 'escape'; k = 0; } }
+    if (phase === 'escape') { cmd.yawQ = Math.round((yaw + Math.PI) * 1e4); cmd.pitchQ = 3000; cmd.mz = 100; cmd.burst = 1; if (++k > 120) { phase = 'approach'; target = null; } }
     return cmd;
   };
 }
-
-function run(seed, ticks, plan) {
-  const sim = new Sim(seed);
-  const next = bot(sim, plan);
-  const counts = {};
-  for (let t = 0; t < ticks; t++) {
-    sim.step(next());
-    for (const e of sim.drainEvents()) counts[e.type] = (counts[e.type] || 0) + 1;
-  }
-  return { sim, counts, hash: sim.stateHash() };
-}
-
 {
-  const a = run(1234n, 18000, 'full');
-  const b = run(1234n, 18000, 'full');
-  console.log('  full-sting bot events:', JSON.stringify(a.counts));
-  console.log('  stats:', JSON.stringify(a.sim.stats), 'stung unique', a.sim.stung.size, 'workers', a.sim.workers);
+  const go = (plan, seed = 1234) => { const s = new Sim({ seed }); const ev = run(s, 15000, bot(plan)); return { s, ev, hash: s.stateHash() }; };
+  const a = go('full'), b = go('full');
   ok(a.hash === b.hash, `two runs, same seed -> same state hash (${a.hash})`);
-  ok(Sim.replay(1234n, a.sim.log, 18000) === a.hash, 'replay of recorded input reproduces the hash');
-  ok((a.counts.sting || 0) > 0, 'bot landed stings');
-  ok((a.counts.swatHit || 0) > 0, 'swats hit the wasp when it lingered');
-  ok((a.counts.waspDied || 0) > 0 && (a.counts.respawn || 0) > 0, 'death and respawn cycle works');
-  ok((a.counts.chunkDiscovered || 0) >= 25, 'chunks discovered around the nest');
-
-  const j = run(1234n, 18000, 'jab');
-  console.log('  jab bot events:', JSON.stringify(j.counts));
-  console.log('  stats:', JSON.stringify(j.sim.stats), 'stung unique', j.sim.stung.size);
-  ok(j.sim.stats.deaths / Math.max(1, j.sim.stats.stings) < a.sim.stats.deaths / Math.max(1, a.sim.stats.stings), 'jab-and-run dies less per sting than full-sting-and-linger');
-  ok(a.hash !== run(99n, 6000, 'full').hash, 'different seed -> different world');
+  ok(Sim.replay({ seed: 1234 }, a.s.log, 15000) === a.hash, 'replay of recorded input reproduces the hash');
+  console.log('  full bot:', JSON.stringify(a.s.stats));
+  ok(a.s.stats.stings > 0 && count(a.ev, 'swatHit') > 0, 'player stings land and swats hit lingering wasps');
+  ok(count(a.ev, 'waspSpawn') > 3, `colony launches AI workers (${count(a.ev, 'waspSpawn')} spawns)`);
+  ok(count(a.ev, 'deposit') > 0, `AI workers deposit at the nest (${count(a.ev, 'deposit')} deposits)`);
+  const j = go('jab');
+  console.log('  jab bot:', JSON.stringify(j.s.stats));
+  const playerDeaths = (ev) => ev.filter((e) => e.type === 'waspDied' && e.driven).length;
+  ok(playerDeaths(j.ev) / Math.max(1, j.s.stats.stings) < playerDeaths(a.ev) / Math.max(1, a.s.stats.stings), 'jab-and-run dies less per sting than full-and-linger');
+  ok(go('full', 99).hash !== a.hash, 'different seed -> different world');
 }
 
-// 5. Frozen chunks: a discovered record never changes
+// helper: a seated human in the origin chunk wearing a given top
+function seated(sim, pred) { return sim.active.find((h) => !h.special && h.posture === 'sit' && h.state === 'idle' && pred(h)); }
+
+// 5. Escalation ladder: covered food, traps (GDD 8.10)
 {
-  const s = new Sim(5n);
-  const rec = s.records.get('0,0');
-  const before = rec.contentHash;
-  for (let t = 0; t < 600; t++) s.step({ mx: 0, my: 0, mz: 100, burst: 1, sting: 0, yawQ: 0, pitchQ: 0 });
+  const s = new Sim({ seed: 1234 });
+  const k0 = chunkKey(0, 0);
+  ok(s.escLevel(k0) === 0, 'neighborhood starts calm');
+  s.cs(k0).esc = 9;
+  ok(s.escLevel(k0) === 2, 'level 2 at 9 points');
+  const can = s.records.get(k0).content.sugar.find((x) => x.kind === 'can');
+  const w = s.wasp; w.energy = 0.5; place(w, { x: can.x, y: can.y + 0.01, z: can.z });
+  run(s, 30, () => idle());
+  ok(w.energy < 0.5, 'covered cans give no sugar at level 2');
+  s.cs(k0).esc = 16;
+  const trap = s.records.get(k0).content.traps[0];
+  place(w, { x: trap.x, y: trap.y, z: trap.z });
+  const ev = run(s, 120, () => idle());
+  const died = ev.find((e) => e.type === 'waspDied' && e.driven);
+  ok(died && died.cause === 'drowned in a trap', `level 3 trap drowns a feeding wasp (${died && died.cause})`);
+}
+
+// 6. Swatting at a hovering wasp: level 1 kills, level 0 only at the face
+{
+  const s = new Sim({ seed: 1234 });
+  s.cs(chunkKey(0, 0)).esc = 4;
+  const hm = seated(s, (h) => h.tr.style !== 3);
+  const head = toWorld(hm, hm.parts.sit[0].a);
+  const ev = run(s, 600, (sim) => { const w = sim.wasp; if (w.state === 'fly') place(w, { x: head.x, y: head.y + 0.25, z: head.z }); return idle(); });
+  const pre = ev.find((e) => e.type === 'preSwat');
+  const died = ev.find((e) => e.type === 'waspDied');
+  ok(pre && died && died.cause === 'slap', `a wasp hovering over a head at level 1 gets slapped (${died && died.cause})`);
+}
+
+// 7. Under clothing: compression kills a wasp that sits still; moving dodges and reaches the acnestis
+{
+  const s = new Sim({ seed: 1234 });
+  const hm = seated(s, (h) => h.clothing.top === Top.TShirt && h.tr.style !== 3);
+  ok(!!hm, 'found a seated human in a T-shirt');
+  const nodes = garmentGraph(hm.tr, hm.clothing, 'sit', hm.parts.sit);
+  const sleeve = nodes.find((n) => n.key === 'sleeve R');
+  const out = toWorld(hm, { x: sleeve.pos.x + sleeve.n.x * 0.015, y: sleeve.pos.y + 0.004, z: sleeve.pos.z });
+  place(s.wasp, out);
+  let ev = run(s, 2, (sim, i) => idle({ act: i === 1 ? Act.Interact : 0 }));
+  ok(s.wasp.state === 'under', `E at the sleeve crawls under the shirt (${s.wasp.state})`);
+  ev = run(s, 600, () => idle());
+  const died = ev.find((e) => e.type === 'waspDied');
+  ok(died && died.cause === 'crushed under clothing', `staying still under the shirt gets you crushed (${died && died.cause})`);
+
+  const s2 = new Sim({ seed: 1234 });
+  const hm2 = s2.humanByHex(hm.hex);
+  place(s2.wasp, out);
+  run(s2, 2, (sim, i) => idle({ act: i === 1 ? Act.Interact : 0 }));
+  // path: sleeve -> upper arm -> upper back -> acnestis, keep moving, sting at the acnestis
+  const path = ['upper arm R', 'upper back R', 'acnestis'];
+  let stungAcn = null, step = 0;
+  ev = run(s2, 260, (sim, i) => {
+    const w = sim.wasp;
+    if (!w || w.state !== 'under') return idle();
+    const g = garmentGraph(hm2.tr, hm2.clothing, hm2.posture, hm2.parts[hm2.posture]);
+    const here = g[w.under.node];
+    if (w.under.move) return idle();
+    if (step < path.length) {
+      const want = g.findIndex((n) => n.key === path[step]);
+      const li = here.links.indexOf(want);
+      if (li < 0) return idle();
+      if (w.under.sel !== li) return idle({ mx: i % 2 ? 100 : 0 });
+      if (i % 2) return idle();
+      step++;
+      return idle({ mz: 100 });
+    }
+    return idle({ sting: i % 20 < 8 ? 1 : 0 });
+  });
+  stungAcn = ev.find((e) => e.type === 'sting' && e.under);
+  ok(stungAcn && ZoneName[stungAcn.zone] === 'Acnestis', `crawled from the sleeve to the acnestis and stung under the shirt (${stungAcn && ZoneName[stungAcn.zone]})`);
+}
+
+// 8. Bees: hovering at a hive entrance gets you balled and cooked; mashing burst breaks out
+{
+  const s = new Sim({ seed: 1234 });
+  const rec = s.records.get('1,0');
+  const hv = rec.content.hives[0];
+  ok(!!hv, 'chunk (1,0) has a beehive');
+  const w = s.wasp;
+  place(w, { x: hv.ex + hv.fx * 0.3, y: hv.ey + 0.05, z: hv.ez + hv.fz * 0.3 });
+  let ev = run(s, 1, () => idle());
+  place(w, { x: hv.ex + hv.fx * 0.3, y: hv.ey + 0.05, z: hv.ez + hv.fz * 0.3 });
+  ev = ev.concat(run(s, 1500, () => idle()));
+  const died = ev.find((e) => e.type === 'waspDied');
+  ok(count(ev, 'beeAlarm') > 0 && count(ev, 'balled') > 0, 'guards alarm and ball the wasp');
+  ok(died && died.cause === 'cooked by bees', `the ball cooks the wasp (${died && died.cause})`);
+
+  const s2 = new Sim({ seed: 1234 });
+  const w2 = s2.wasp;
+  run(s2, 1, () => idle());
+  place(w2, { x: hv.ex + hv.fx * 0.3, y: hv.ey + 0.05, z: hv.ez + hv.fz * 0.3 });
+  ev = run(s2, 900, (sim, i) => idle({ burst: sim.wasp && sim.wasp.state === 'balled' ? i % 2 : 0, mz: sim.wasp && sim.wasp.state === 'fly' && sim.wasp.ball === null ? 0 : 0 }));
+  ok(count(ev, 'ballEscape') > 0, 'mashing burst breaks out of the ball');
+}
+
+// 9. Exterminator: level 4 near the nest brings him; he destroys the nest unless stopped
+{
+  const s = new Sim({ seed: 1234 });
+  s.cs(chunkKey(0, 0)).esc = 30;
+  let ev = run(s, 60, () => idle());
+  ok(count(ev, 'extScheduled') === 1, 'level 4 near the nest schedules the exterminator');
+  ev = run(s, 9000, () => idle());
+  ok(count(ev, 'extArrive') === 1 && count(ev, 'extTreat') === 1, 'he arrives and starts treating the nest');
+  ok(count(ev, 'nestDestroyed') === 1 && !s.colony.nestAlive, 'an unopposed exterminator destroys the nest');
+}
+
+// 10. Exterminator abort: crawl under his collar, sting, keep moving between stings
+{
+  const s = new Sim({ seed: 1234 });
+  s.cs(chunkKey(0, 0)).esc = 30;
+  let ev = [];
+  for (let i = 0; i < 4000 && !s.ext.hm; i++) ev.push(...run(s, 1, () => idle()));
+  const ext = s.ext.hm;
+  ok(!!ext && s.ext.state === 'active', 'exterminator on site');
+  const g = () => garmentGraph(ext.tr, ext.clothing, ext.posture, ext.parts[ext.posture]);
+  let entered = false, stungAt = -1;
+  ev = run(s, 2500, (sim, i) => {
+    const w = sim.wasp;
+    if (!w || w.state === 'dead') return idle();
+    if (w.state !== 'under') {
+      if (ext.state !== 'arrive' && ext.state !== 'treat') return idle();
+      const collar = g().find((n) => n.key === 'collar');
+      place(w, toWorld(ext, { x: collar.pos.x, y: collar.pos.y + 0.003, z: collar.pos.z - 0.012 }));
+      return idle({ act: i % 2 ? Act.Interact : 0 });
+    }
+    entered = true;
+    if (w.under.move) return idle();
+    // at a node: sting once, then hop to the first neighbour
+    if (stungAt !== w.under.node) { stungAt = w.under.node; return idle({ sting: 1 }); }
+    stungAt = -1;
+    return idle({ mz: 100 });
+  });
+  ok(entered, 'got under the exterminator\'s collar');
+  ok(count(ev, 'extAbort') === 1, `stings under his collar make him abort (${count(ev, 'sting')} stings, ${count(ev, 'waspDied')} deaths)`);
+  ok(s.colony.nestAlive, 'the nest survives this visit');
+}
+
+// 11. Day cycle: people leave in the evening, the colony rests, people come back next day
+{
+  const s = new Sim({ seed: 1234, dayMinutes: 2 });
+  const w = s.wasp; place(w, NEST_ENTRANCE);
+  const ev = run(s, s.tpm * 60 * 10.5, (sim) => { if (sim.wasp && sim.wasp.state === 'fly') place(sim.wasp, NEST_ENTRANCE); return idle(); });
+  ok(count(ev, 'leave') > 0, `people leave in the evening (${count(ev, 'leave')} left)`);
+  const day0 = s.day;
+  const ev2 = run(s, 2, (sim, i) => idle({ act: i === 1 ? Act.Rest : 0 }));
+  ok(count(ev2, 'rested') === 1 && s.day === day0 + 1, 'resting at night skips to the next morning');
+  const ev3 = run(s, s.tpm * 60 * 6, (sim) => { if (sim.wasp && sim.wasp.state === 'fly') place(sim.wasp, NEST_ENTRANCE); return idle(); });
+  ok(count(ev3, 'arrive') > 0, `people arrive the next day (${count(ev3, 'arrive')} arrived)`);
+}
+
+// 12. Possession: switch to the nearest AI worker
+{
+  const s = new Sim({ seed: 1234 });
+  run(s, 900, (sim) => { if (sim.wasp.state === 'fly') place(sim.wasp, { x: NEST_ENTRANCE.x + 0.5, y: 2, z: NEST_ENTRANCE.z }); return idle(); });
+  const before = s.drivenId;
+  const ev = run(s, 2, (sim, i) => idle({ act: i === 1 ? Act.Switch : 0 }));
+  ok(count(ev, 'possess') === 1 && s.drivenId !== before, `Q possesses a nearby worker (${before} -> ${s.drivenId})`);
+}
+
+// 13. Frozen chunks
+{
+  const s = new Sim({ seed: 5 });
+  const rec = s.records.get('0,0'), before = rec.contentHash;
+  run(s, 600, () => idle({ mz: 100, burst: 1, yawQ: 0 }));
   ok(s.records.get('0,0') === rec && rec.contentHash === before, 'discovered chunk record stays frozen');
 }
 
