@@ -441,6 +441,17 @@ Swat, crush under clothing, insecticide spray, bee balling, bird, spider web, dr
 
 ---
 
+### 7.8 Reflex (skill tree, later)
+
+A slowdown on detection in the manner of Metal Gear Solid V's Reflex mode, unlocked through wasp progression. It triggers when a swat, spray or press is scheduled against your driven wasp (a `preSwat`, `notice`, `press` or own-sting swat), because that is the moment the sim already knows the hand is coming and exactly when it lands.
+
+The determinism and netcode rules decide how it can work:
+
+- **Personal instances, solo.** Real slowdown. The sim keeps its 60 Hz tick but the wall clock advances it at a fraction of real time (for example 0.25× for one real second). Outcomes are unchanged because the sim never sees wall time; only the player gets more real time to act per tick.
+- **Shared worlds (personal with friends, offshoot, Main).** No sim slowdown. Peers run free against the wall clock and events commit 30 ticks after they happen (18.2); a peer that slowed itself would fall behind and its events would arrive past their commit tick. Reflex is presentation-only here: a short slow-motion of the *render* of the incoming hand while input stays live, plus the swat's known landing point and tick drawn as a warning. The sim's swat start and volume are already known when the swat is scheduled, so the cue is exact, not a guess.
+- **Tuning.** A skill tree can scale the cue (earlier warning, longer slow-motion in solo, the predicted swat volume shown), never the outcome. The consequence window (7.4, minimum 11 ticks) stays as it is.
+
+
 ## 8. Humans
 
 Humans are the most important system in the game, and they are the most deterministic one.
@@ -791,6 +802,7 @@ On Main the entity count is dominated by AI wasps: one player's colony can hold 
 - **Unity physics:** not used for anything that affects gameplay. A table knocked over is a sim event with a final state; Unity animates the tumble to that state.
 - **Wasps:** rendered from sim transforms; wing animation is cosmetic.
 - **Body zones:** the rendered skeleton is fitted to the sim zone capsules, not the other way round.
+- **Key art and title direction:** the Italo-western and kung-fu standoff, the "death stare". Extreme close-ups cut between the wasp's compound eyes and a human's eyes, letterboxed wide, high contrast, sun-bleached palette (bone, ochre, black, wasp yellow), long silence before the strike. The title card and promo use the same grammar. In-game, the camera's tight framing on a perch or before a sting can borrow it, but the HUD stays plain (P1: nothing emotes; the stare is framing, not a face).
 
 ---
 
