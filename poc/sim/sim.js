@@ -8,7 +8,7 @@ import {
 } from './body.js';
 import {
   chunkOf, chunkKey, NEST, NEST_ENTRANCE, SPAWN, generateChunk, ticksPerMinute, clockMinutes, dayOf, minuteOfDay,
-  isRaining, tempAt, isDaylight, humanWindow, flyPos, beePos, birdPos, makeNest,
+  isRaining, tempAt, isDaylight, humanWindow, flyPos, beePos, birdPos, dragonPos, shedSites, makeNest,
 } from './world.js';
 import { newColony, colonyStep, destroyNest, colonyFinished, seasonPhase } from './colony.js';
 
@@ -55,6 +55,7 @@ export class Sim {
     this.alarms = [];
     this.hiveAlarms = new Map();
     this.birdState = new Map();
+    this.dragonState = new Map();
     this.colony = newColony();
     this.nest = makeNest(NEST.treeX, NEST.treeZ, NEST.x, NEST.y, NEST.z);
     this.colony.maxCells = T.sites.trunk.maxCells;
@@ -259,6 +260,7 @@ export class Sim {
     this._sprays();
     this._bees();
     this._birds();
+    this._dragonflies();
     this._fights(cmd);
     this._alarmDecay();
     // 3. humans at 20 Hz
@@ -1810,6 +1812,10 @@ export class Sim {
       const { holes, branches } = this.sitesIn(rec);
       for (const h of holes) if (w.y < 0.3 && (w.x - h.x) ** 2 + (w.z - h.z) ** 2 < 0.12 * 0.12) return { type: 'ground', x: h.x, z: h.z };
       for (const b of branches) if (dist2(w, b) < 0.15 * 0.15) return { type: 'branch', x: b.x, y: b.y, z: b.z, t: b.t };
+      for (const sh of rec.content.sheds) {
+        const ss = shedSites(sh);
+        for (const type of ['wall', 'attic']) { const p = ss[type]; if (dist2(w, p) < 0.14 * 0.14) return { type, ...p }; }
+      }
     }
     const t = this._trunkNear(w);
     return t ? { type: 'trunk', t } : null;
@@ -1819,6 +1825,8 @@ export class Sim {
     if (!site.type) site = { type: 'trunk', t: site }; // older callers pass a tree
     if (site.type === 'ground') {
       this.nest = makeNest(site.x - 0.5, site.z, site.x, -0.25, site.z, NEST.r, 'ground');
+    } else if (site.type === 'wall' || site.type === 'attic') {
+      this.nest = makeNest(site.ix, site.iz, site.x, site.y, site.z, NEST.r, site.type);
     } else if (site.type === 'branch') {
       this.nest = makeNest(site.t.x, site.t.z, site.x, site.y - NEST.r * 1.3, site.z, NEST.r, 'branch');
     } else {
@@ -1889,42 +1897,54 @@ export class Sim {
 
   _birds() {
     if (!this.settings.birds) return;
-    const B = T.bird;
+    this._hunters('birds', birdPos, T.bird, this.birdState, (w) => w.y >= T.bird.minY, (t) => t.y < T.bird.abortY, 'taken by a bird', 'bird', 6);
+  }
+
+  // Dragonflies hunt the low air birds leave alone; landing, perching or ducking under a canopy is safe (GDD 9.3)
+  _dragonflies() {
+    if (!this.settings.birds) return;
+    const D = T.dragon;
+    this._hunters('dragonflies', dragonPos, { ...D, diveTicks: D.dartTicks }, this.dragonState || (this.dragonState = new Map()), (w) => w.y <= D.maxY, (t) => t.y > D.maxY + 0.5, 'taken by a dragonfly', 'dragon', 4);
+  }
+
+  // One code path for every aerial hunter: patrol a pure-function loop, pick a flying wasp in sight, chase it with a
+  // capped acceleration (so sharp turns escape), give up after a while, then cool off and return to the loop.
+  _hunters(listName, posFn, B, states, canSee, abort, cause, ev, cruise) {
     for (const rec of this.activeChunks) {
       const key = chunkKey(rec.cx, rec.cz);
-      rec.content.birds.forEach((bd, i) => {
+      rec.content[listName].forEach((bd, i) => {
         const k = key + '#' + i;
-        let st = this.birdState.get(k);
+        let st = states.get(k);
         if (!st) {
           if (this.tick % 6 !== i % 6) return;
-          const p = birdPos(bd, this.tick);
+          const p = posFn(bd, this.tick);
           let target = null, best = B.sight * B.sight;
           for (const w of this.wasps) {
-            if (w.state !== 'fly' || w.y < B.minY) continue;
+            if (w.state !== 'fly' || !canSee(w)) continue;
             const q = dist2(w, p);
             if (q < best && !this._underCanopy(w)) { best = q; target = w; }
           }
           if (!target) return;
           const d = Math.sqrt(best) || 1;
           st = { mode: 'dive', x: p.x, y: p.y, z: p.z, vx: (target.x - p.x) / d * 3, vy: (target.y - p.y) / d * 3, vz: (target.z - p.z) / d * 3, target: target.id, until: this.tick + B.diveTicks };
-          this.birdState.set(k, st);
-          this.emit('birdDive', { key, i, target: target.id, driven: target.id === this.drivenId });
+          states.set(k, st);
+          this.emit(ev + 'Dive', { key, i, target: target.id, driven: target.id === this.drivenId });
           return;
         }
         let tx, ty, tz, speed = B.speed;
         if (st.mode === 'dive') {
           const t = this.waspById(st.target);
-          if (!t || t.state !== 'fly' || t.y < B.abortY || this.tick > st.until || this._underCanopy(t)) {
+          if (!t || t.state !== 'fly' || abort(t) || this.tick > st.until || this._underCanopy(t)) {
             st.mode = 'cool'; st.until = this.tick + B.coolTicks;
-            if (t && t.id === this.drivenId) this.emit('birdMiss', { id: t.id });
+            if (t && t.id === this.drivenId) this.emit(ev + 'Miss', { id: t.id });
             return;
           }
           tx = t.x; ty = t.y; tz = t.z;
-          if (dist2(st, t) < B.catch * B.catch) { this._die(t, 'taken by a bird', null); st.mode = 'cool'; st.until = this.tick + B.coolTicks; return; }
+          if (dist2(st, t) < B.catch * B.catch) { this._die(t, cause, null); st.mode = 'cool'; st.until = this.tick + B.coolTicks; return; }
         } else {
-          const p = birdPos(bd, this.tick);
-          tx = p.x; ty = p.y; tz = p.z; speed = 6;
-          if (dist2(st, p) < 0.25 || this.tick > st.until + 900) { this.birdState.delete(k); return; }
+          const p = posFn(bd, this.tick);
+          tx = p.x; ty = p.y; tz = p.z; speed = cruise;
+          if (dist2(st, p) < 0.25 || this.tick > st.until + 900) { states.delete(k); return; }
         }
         let dx = tx - st.x, dy = ty - st.y, dz = tz - st.z;
         const d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
@@ -1936,6 +1956,7 @@ export class Sim {
       });
     }
   }
+
 
   // ---------------- landing (GDD 7.2)
 

@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, NEST, chunkKey, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash,
+  garmentGraph, Top, NEST_ENTRANCE, NEST, chunkKey, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos,
 } from '../sim/index.js';
 
 let failures = 0;
@@ -597,6 +597,39 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   ok(pend && s.drivenId === d.id, `far from every worker, switching is relayed with a delay (${pend && pend.seconds} s)`);
   ev = run(s, T.possess.relayTicks + 5, () => { place(d, { x: s.nest.x + 80, y: 2, z: s.nest.z }); return idle(); });
   ok(count(ev, 'possess') === 1 && s.drivenId !== d.id, 'after the delay you drive another worker');
+}
+
+// 25. Dragonflies hunt low; sheds give wall and attic nest sites (GDD 9.3, 6.6)
+{
+  let ds = null, df = null;
+  for (let seed = 1; seed < 40 && !ds; seed++) { const t = new Sim({ seed }); for (const r of t.activeChunks) if (r.content.dragonflies.length) { ds = t; df = r.content.dragonflies[0]; break; } }
+  const w = ds.wasp;
+  const p0 = dragonPos(df, ds.tick);
+  let ev = run(ds, 600, (sim) => { const d = sim._driven(); if (d && d.state === 'fly') place(d, { x: p0.x + 1, y: 1, z: p0.z }); return idle(); });
+  ok(count(ev, 'dragonDive') >= 1 && ev.some((e) => e.type === 'waspDied' && e.cause === 'taken by a dragonfly'), 'a dragonfly darts at a wasp hovering low in the open and takes it');
+  const t2 = new Sim({ seed: ds.seed });
+  const w2 = t2.wasp;
+  place(w2, { x: p0.x + 1, y: T.wasp.radius + 0.001, z: p0.z }); w2.state = 'landed';
+  ev = run(t2, 600);
+  ok(!ev.some((e) => e.type === 'waspDied' && e.cause === 'taken by a dragonfly'), 'a landed wasp is left alone');
+  // sheds
+  let ss = null;
+  for (let seed = 1; seed < 60 && !ss; seed++) {
+    const t = new Sim({ seed });
+    t.colony.mated = 200; t.season.startMinute -= 0.71 * t.settings.seasonDays * 1440; run(t, 120);
+    const rec = t.activeChunks.find((r) => r.content.sheds.length);
+    if (rec) ss = { t, sh: rec.content.sheds[0] };
+  }
+  ok(!!ss && ss.t.records.size > 0, 'some chunks near home have a garden shed');
+  const sites = shedSites(ss.sh);
+  for (const type of ['wall', 'attic']) {
+    const t = new Sim({ seed: ss.t.seed });
+    t.colony.mated = 200; t.season.startMinute -= 0.71 * t.settings.seasonDays * 1440; run(t, 120);
+    const p = sites[type];
+    place(t.wasp, { x: p.x + p.nx * 0.05, y: p.y, z: p.z + p.nz * 0.05 });
+    ev = run(t, 2, (sim, i) => idle({ act: i === 1 ? Act.Interact : 0 }));
+    ok(count(ev, 'nestFounded') === 1 && t.nest.site === type && t.colony.maxCells === T.sites[type].maxCells, `E at the ${type === 'wall' ? 'crack in the wall' : 'gap under the eaves'} founds a nest ${T.sites[type].name}`);
+  }
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');

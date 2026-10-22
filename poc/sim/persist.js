@@ -114,7 +114,7 @@ export function joinFrom(json, peer, opts = {}) {
   sim.stats = { stings: 0, aiStings: 0, remoteStings: 0, full: 0, deaths: 0, causes: {}, caught: 0, deposits: 0 };
   sim.netStats = { sent: 0, recv: 0, late: 0, lateMax: 0 };
   sim.ghost = null; sim.extinct = false; sim.lineage = 0; sim.evSeq = 0; sim.prevAct = 0; sim.pressUsed = false;
-  sim.alarms = []; sim.birdState = new Map();
+  sim.alarms = []; sim.birdState = new Map(); sim.dragonState = new Map();
   const w = sim._spawnWasp(true);
   sim.drivenId = w.id;
   sim.activeKey = '';

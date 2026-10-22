@@ -974,7 +974,7 @@ Modifiers live in the world's settings: day length, season length, people densit
 
 ### 18.15 Nest sites as built (6.6)
 
-Three of the six site types exist; wall, attic and shed wait for buildings. Burrows (two per chunk) and branch points (one per tree, under the crown) are derived from the seed and the chunk's frozen content, so they cost nothing to store and every peer sees the same ones.
+Five of the six site types exist (generator 3 added garden sheds with a wall crack and an eave gap; wall 4,000 cells, discovery ×1.2; attic 6,000 cells, discovery ×0.8, best shelter). Separate shed nests (inside, not in the wall) are folded into the attic. Burrows (two per chunk) and branch points (one per tree, under the crown) are derived from the seed and the chunk's frozen content, so they cost nothing to store and every peer sees the same ones.
 
 | Site | Max cells | Rain | Discovery |
 |---|---|---|---|
@@ -987,6 +987,10 @@ The choice is the founding queen's main decision: a burrow grows the biggest col
 ### 18.16 Windfall fruit as built (9.4)
 
 30% of trees (by hash) bear fruit. From 55% of the season, each drops six fruits, each on a day picked by hash across the rest of the season, scattered up to 1.6 m beyond the trunk; a fruit lies for six days and feeds at 0.8× a can's rate. Like burrows and branch points, fruit is a pure function of the seed, the chunk and the day, so it needs no storage or network traffic. Late in the season this gives sugar foragers somewhere to go other than people's drinks.
+
+### 18.17 Dragonflies as built (9.3)
+
+A dragonfly patrols a low loop (0.6–1.4 m) in about half the chunks. It darts at a wasp flying in the open below 2.5 m within 2.5 m of it, at 7.5 m/s (faster than a wasp's 6 m/s burst) but with only 14 m/s² of steering, so a hard turn breaks the chase; landed, perched or canopy-covered wasps are ignored. After 1.5 s it gives up and cools off for 7 s. Birds and dragonflies run through one hunter routine with different parameters, so together they make the air layered: high and open belongs to birds, low and open to dragonflies, and cover is safe from both.
 
 ---
 

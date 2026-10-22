@@ -12,9 +12,12 @@ export const SPAWN = { x: -3, y: 2.05, z: -1.25, yaw: 0.98 };
 
 // A nest hanging from a tree (GDD 6.6). The first one is in the home tree; founding queens pick their own.
 // site: 'trunk' (paper nest against a trunk), 'ground' (old burrow, entrance in the grass), 'branch' (hanging in the canopy)
+// 'wall' and 'attic' are inside a shed: (x, y, z) is the entrance on the outside face, (treeX, treeZ) a point inside.
 export function makeNest(treeX, treeZ, x, y, z, r = NEST.r, site = 'trunk') {
-  const entrance = site === 'ground' ? { x, y: 0.02, z } : { x, y: y - r * 1.25, z };
-  const spawn = site === 'ground' ? { x, y: 0.3, z: z + 0.3, yaw: 0.98 } : { x, y: entrance.y - 0.1, z: z + 0.3, yaw: 0.98 };
+  const inside = site === 'wall' || site === 'attic';
+  const entrance = site === 'ground' ? { x, y: 0.02, z } : inside ? { x, y, z } : { x, y: y - r * 1.25, z };
+  let spawn = site === 'ground' ? { x, y: 0.3, z: z + 0.3, yaw: 0.98 } : { x, y: entrance.y - 0.1, z: z + 0.3, yaw: 0.98 };
+  if (inside) { const dx = x - treeX, dz = z - treeZ, d = Math.hypot(dx, dz) || 1; spawn = { x: x + dx / d * 0.3, y, z: z + dz / d * 0.3, yaw: Math.atan2(dx, dz) }; }
   return { x, y, z, r, treeX, treeZ, entrance, spawn, site, key: chunkKey(chunkOf(x), chunkOf(z)) };
 }
 
@@ -80,6 +83,23 @@ export function birdPos(b, tick) {
   return { x: b.x + b.r * dcos(a), y: b.y + 0.6 * dsin(a * 3), z: b.z + b.r * dsin(a) };
 }
 
+// A dragonfly on patrol: quick loops with darting height changes
+export function dragonPos(b, tick) {
+  const a = ((tick + b.phase) / b.period) * 6.283185307179586 * b.dir;
+  return { x: b.x + b.r * dcos(a) * (1 + 0.3 * dsin(a * 2)), y: b.y + 0.25 * dsin(a * 5), z: b.z + b.r * dsin(a) };
+}
+
+// Shed nest sites: a crack in one wall at chest height, and the gap under the eaves on one side.
+// (x, z) is just outside the face; (ix, iz) is inside the shed.
+export function shedSites(sh) {
+  const faces = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  const at = (f, y) => {
+    const [fx, fz] = faces[f], ex = fx ? fx * (sh.hw + 0.01) : 0.3, ez = fz ? fz * (sh.hd + 0.01) : -0.2;
+    return { x: sh.x + ex, y, z: sh.z + ez, ix: sh.x + ex - fx * 0.3, iz: sh.z + ez - fz * 0.3, nx: fx, nz: fz };
+  };
+  return { wall: at(sh.crack, 1.0), attic: at(sh.eave, sh.h - 0.08) };
+}
+
 // Bee k of a hive. Guards circle the entrance; foragers commute to a flower and back.
 export function beePos(hive, k, tick) {
   const b = hive.bees[k];
@@ -107,7 +127,7 @@ export function generateChunk(seed, cx, cz) {
   const c = {
     cx, cz, tint: unit(H(0)), trees: [], tables: [], benches: [], cans: [], flowers: [], caterpillars: [], flies: [],
     humans: [], boxes: [], cylinders: [], sugar: [], hives: [], traps: [], nest: null,
-    webs: [], birds: [], rival: null,
+    webs: [], birds: [], rival: null, sheds: [], dragonflies: [],
   };
   const occupied = [];
   const isOrigin = cx === 0 && cz === 0;
@@ -216,6 +236,16 @@ export function generateChunk(seed, cx, cz) {
       const hx = forcedHive ? ox - 18 : ox + range(H(13), -22, 22), hz = forcedHive ? oz + 6 : oz + range(H(14), -22, 22);
       if (free(hx, hz, 3)) addHive(hx, hz, 1500);
     }
+    // A garden shed (GDD 6.6: wall and attic nest sites). Solid wood: wasps chew it, land on its roof.
+    if (unit(H(15)) < 0.35) {
+      const sx = ox + range(H(16), -22, 22), sz = oz + range(H(17), -22, 22);
+      if (free(sx, sz, 3)) {
+        occupied.push({ x: sx, z: sz, r: 4 });
+        const axisX = unit(H(18)) < 0.5, hw = axisX ? 1.2 : 0.9, hd = axisX ? 0.9 : 1.2, h = 2.1;
+        c.sheds.push({ x: sx, z: sz, hw, hd, h, crack: rangeInt(H(19), 0, 4), eave: rangeInt(H(21), 0, 4) });
+        c.boxes.push({ minx: sx - hw, maxx: sx + hw, miny: 0, maxy: h, minz: sz - hd, maxz: sz + hd, wood: true, shed: true });
+      }
+    }
     const np = rangeInt(H(10), 3, 9);
     for (let i = 0; i < np; i++) addFlowers(ox + range(H(20 + i), -28, 28), oz + range(H(40 + i), -28, 28), 400 + i * 80);
   }
@@ -235,6 +265,10 @@ export function generateChunk(seed, cx, cz) {
   // Birds: one patrol circle per chunk at most (GDD 9.3)
   if (unit(H(800)) < 0.55) {
     c.birds.push({ x: ox + range(H(801), -15, 15), z: oz + range(H(802), -15, 15), y: range(H(803), 4, 8), r: range(H(804), 7, 14), period: rangeInt(H(805), 1200, 2400), phase: rangeInt(H(806), 0, 2400), dir: unit(H(807)) < 0.5 ? 1 : -1 });
+  }
+  // Dragonflies: a low patrol loop over open ground (GDD 9.3)
+  if (unit(H(820)) < 0.45) {
+    c.dragonflies.push({ x: ox + range(H(821), -20, 20), z: oz + range(H(822), -20, 20), y: range(H(823), 0.6, 1.4), r: range(H(824), 2, 5), period: rangeInt(H(825), 500, 1100), phase: rangeInt(H(826), 0, 1100), dir: unit(H(827)) < 0.5 ? 1 : -1 });
   }
   // A rival wasp colony hangs in one of the trees (GDD 9.3)
   if (!isOrigin && !(cx === 1 && cz === 0) && c.trees.length && unit(H(900)) < 0.12) {

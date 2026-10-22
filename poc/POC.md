@@ -15,7 +15,7 @@ The tier-0 slice of the GDD, built in the browser so it can move to Unity. Same 
 | `sim/bots.js` | Scripted pilots that produce ordinary input commands | test harness |
 | `game.js` | three.js rendering, animation, camera, input, HUD, sound | Unity scene, Animator, UI |
 | `index.html` | Page shell, HUD markup and styles | UI Toolkit |
-| `test/sim.test.mjs` | 99 headless sim checks | `Sting.Core.Tests` |
+| `test/sim.test.mjs` | 104 headless sim checks | `Sting.Core.Tests` |
 | `test/net.test.mjs` | 29 network checks | `Sting.Net.Tests` |
 
 Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 18+, no packages). Play locally with `node serve.mjs`.
@@ -82,6 +82,8 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 56 | Scent cues: three small markers around the crosshair point toward the nearest sugar (yellow), prey (orange) and alarm (red: crushed nestmates, alarmed hives), brighter when closer; hidden in hardcore and in the eye view | 10.2 | 12 |
 | 57 | Switching limits (Q-03): any worker within 30 m is instant; otherwise the colony relays you in 4 s to the nearest worker anywhere, or to a worker coming out of the nest. Q again cancels | 7.7 | 12 |
 | 58 | Old age: the worker you drive lives as long as her sisters (about 22 bio-days, scaled to the season, ±20%), shown as an age bar; the queen does not age out | 7.5 | 12 |
+| 59 | Dragonflies patrol low over open ground and dart at wasps flying under 2.5 m; faster than a burst but worse at turning, so break hard, land or get under a tree. Birds and dragonflies share one hunter code path | 9.3 | 13 |
+| 60 | Garden sheds (about a third of chunks): solid wood to chew and land on, and two nest sites, a crack in a wall (4,000 cells) and a gap under the eaves (6,000 cells, best shelter). World generator 3; older saves are refused with a message | 6.6 | 13 |
 
 ## Verified
 
@@ -102,7 +104,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 ## Known limits
 
 - The colony economy is tuned against one simulated season with an idle player; it needs real play data.
-- Wall, attic and shed nest sites need buildings, which the PoC world does not have yet.
+- Shed roofs are drawn pitched but collide as a flat top.
 - Walking is on horizontal surfaces only; tree trunks and walls are obstacles, not surfaces.
 - Two players' colonies never fight each other: whether players are co-op, rivals or both is still open (Q-07).
 

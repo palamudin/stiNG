@@ -3,7 +3,7 @@
 
 export const TICK_RATE = 60;
 export const DT = 1 / TICK_RATE;
-export const GEN_VERSION = 2;
+export const GEN_VERSION = 3; // 3: sheds and dragonflies
 
 export const T = {
   population: 8200000000,
@@ -83,6 +83,8 @@ export const T = {
     trunk: { name: 'against a trunk', maxCells: 3500, flood: 0, exposure: 1, discovery: 1 },
     ground: { name: 'in an old burrow', maxCells: 5000, flood: 0.25, exposure: 0.4, discovery: 1.6 },
     branch: { name: 'hanging from a branch', maxCells: 1800, flood: 0, exposure: 2, discovery: 0.5 },
+    wall: { name: 'in a shed wall', maxCells: 4000, flood: 0, exposure: 0.3, discovery: 1.2 },
+    attic: { name: 'under a shed roof', maxCells: 6000, flood: 0, exposure: 0.2, discovery: 0.8 },
     rainMortality: 0.06, holesPerChunk: 2,
   },
   // Switching wasps (GDD 7.7, Q-03): free within 30 m, otherwise the colony relays you after a delay
@@ -113,6 +115,8 @@ export const T = {
 
   // Predators and rivals (GDD 9.3)
   web: { spiderSpeed: 0.06, spiderDelay: 60, escapePerPress: 0.22, aiEscape: 0.004 },
+  // Dragonflies hunt low over open ground (GDD 9.3): faster than a wasp's burst, worse at turning
+  dragon: { sight: 2.5, maxY: 2.5, speed: 7.5, accel: 14, catch: 0.04, dartTicks: 90, coolTicks: 420 },
   bird: { sight: 7, minY: 1.5, abortY: 0.8, speed: 9, accel: 26, catch: 0.06, diveTicks: 150, coolTicks: 600 },
   land: { maxSpeed: 0.25, gap: 0.004, walkSpeed: 0.05 }, // bio: Vespula walk a few cm/s
   // Perching and crawling on people (GDD 7.2, 8.3): how long until they feel you

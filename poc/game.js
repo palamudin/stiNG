@@ -5,7 +5,7 @@ import {
   Sim, Act, T, DT, ZONES, ZoneName, SwatKind, SwatKindName, StyleName, TopName, BottomName, Top, Bottom,
   toWorld, toLocal, chunkKey, chunkOf, hash, Domain, rangeInt, resolveSting, zoneCover, segClosest, classify, predictedKind,
   NEST, NEST_ENTRANCE, flyPos, beePos, fmtClock, minuteOfDay, isLowerZone, broodTotal, sugarCap, proteinCap, garmentGraph, dayWeather,
-  NetLab, LINKS, birdPos, snapshot, restore, replayFrom, worldTag, rulesHash,
+  NetLab, LINKS, birdPos, dragonPos, shedSites, snapshot, restore, replayFrom, worldTag, rulesHash,
 } from './sim/index.js';
 
 const $ = (id) => document.getElementById(id);
@@ -130,6 +130,25 @@ function buildChunk(rec) {
   const g = new THREE.Group();
   const c = rec.content;
   const dyn = { lids: [], traps: [], candles: [], cans: [], puddles: [] };
+  // garden sheds: plank walls, a pitched roof, a crack in one wall and a gap under one eave (nest sites)
+  for (const sh of c.sheds || []) {
+    const walls = new THREE.Mesh(new THREE.BoxGeometry(sh.hw * 2, sh.h, sh.hd * 2), mat('#7a5a3c'));
+    walls.position.set(sh.x, sh.h / 2, sh.z); walls.castShadow = walls.receiveShadow = true;
+    const long = sh.hw >= sh.hd, span = long ? sh.hd : sh.hw, len = (long ? sh.hw : sh.hd) * 2 + 0.2, rise = 0.55;
+    const slope = Math.hypot(span + 0.12, rise), ang = Math.atan2(rise, span + 0.12);
+    for (const side of [-1, 1]) {
+      const roof = new THREE.Mesh(new THREE.BoxGeometry(long ? len : slope, 0.05, long ? slope : len), mat('#3d3a36'));
+      if (long) { roof.position.set(sh.x, sh.h + rise / 2, sh.z + side * (span + 0.12) / 2); roof.rotation.x = side * ang; }
+      else { roof.position.set(sh.x + side * (span + 0.12) / 2, sh.h + rise / 2, sh.z); roof.rotation.z = -side * ang; }
+      roof.castShadow = true; g.add(roof);
+    }
+    const ss = shedSites(sh);
+    const crack = new THREE.Mesh(new THREE.BoxGeometry(ss.wall.nx ? 0.012 : 0.05, 0.12, ss.wall.nz ? 0.012 : 0.05), mat('#0d0a07'));
+    crack.position.set(ss.wall.x - ss.wall.nx * 0.008, ss.wall.y, ss.wall.z - ss.wall.nz * 0.008);
+    const eave = new THREE.Mesh(new THREE.BoxGeometry(ss.attic.nx ? 0.012 : 0.4, 0.03, ss.attic.nz ? 0.012 : 0.4), mat('#0d0a07'));
+    eave.position.set(ss.attic.x - ss.attic.nx * 0.008, ss.attic.y, ss.attic.z - ss.attic.nz * 0.008);
+    g.add(walls, crack, eave);
+  }
   for (const t of c.trees) {
     const trunk = new THREE.Mesh(geoTrunk, mat('#5b4330'));
     trunk.scale.set(t.r, t.h, t.r); trunk.position.set(t.x, t.h / 2, t.z);
@@ -259,6 +278,18 @@ function updateChunkDynamics() {
 
 function buildNestMesh(n, abandoned) {
   const g = new THREE.Group();
+  if (n.site === 'wall' || n.site === 'attic') {
+    // the nest is inside the shed; outside you see papery comb pushing out of the gap
+    const dx = n.x - n.treeX, dz = n.z - n.treeZ, d = Math.hypot(dx, dz) || 1;
+    const rim = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 8), new THREE.MeshLambertMaterial({ map: paperTex, color: abandoned ? '#857a68' : '#ffffff' }));
+    rim.scale.set(dx ? 0.35 : 1, 0.8, dz ? 0.35 : 1); rim.position.set(n.x + dx / d * 0.005, n.y, n.z + dz / d * 0.005);
+    const hole = new THREE.Mesh(new THREE.CircleGeometry(0.02, 12), mat('#0c0905', { side: THREE.DoubleSide }));
+    hole.position.set(n.x + dx / d * 0.03, n.y, n.z + dz / d * 0.03); hole.lookAt(n.x + dx / d, n.y, n.z + dz / d);
+    g.add(rim, hole);
+    g.userData.ball = rim;
+    scene.add(g);
+    return g;
+  }
   if (n.site === 'ground') {
     // an old burrow: a low ring of dug-out soil around a dark hole
     const mound = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.03, 8, 20), mat(abandoned ? '#5a4a3a' : '#6d5139'));
@@ -408,6 +439,21 @@ function renderCritters(t) {
 
 // ------------------------------------------------------------------ birds and spiders
 
+function buildDragonfly() {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.002, 0.07, 6), mat('#1f5f6b')); body.rotation.x = Math.PI / 2; body.position.z = -0.02;
+  const thorax = new THREE.Mesh(new THREE.SphereGeometry(0.006, 8, 6), mat('#2b7f8a')); thorax.position.z = 0.016;
+  const eyes = new THREE.Mesh(new THREE.SphereGeometry(0.0055, 8, 6), mat('#4a9fb0')); eyes.scale.set(1.5, 1, 1); eyes.position.z = 0.025;
+  const wmat = new THREE.MeshBasicMaterial({ color: '#dfeff2', transparent: true, opacity: 0.3, side: THREE.DoubleSide, depthWrite: false });
+  const wgeo = new THREE.PlaneGeometry(0.045, 0.01); wgeo.rotateX(-Math.PI / 2); wgeo.translate(0.0225, 0, 0);
+  const mk = (z, sx) => { const m = new THREE.Mesh(wgeo, wmat); m.position.set(0, 0.003, z); m.scale.x = sx; return m; };
+  const w1 = mk(0.018, 1), w2 = mk(0.018, -1), w3 = mk(0.008, 1), w4 = mk(0.008, -1);
+  g.add(body, thorax, eyes, w1, w2, w3, w4);
+  g.userData = { w1, w2, w3, w4 };
+  scene.add(g);
+  return g;
+}
+
 function buildBird() {
   const g = new THREE.Group();
   const brown = mat('#3b2f26'), dark = mat('#1e1813');
@@ -445,6 +491,25 @@ function renderBirdsAndSpiders(t, dt) {
     });
   }
   for (const [k, g] of birdViews) if (!seen.has(k)) { scene.remove(g); birdViews.delete(k); }
+  // dragonflies: long thin body, two pairs of glassy wings
+  const dstate = sim.dragonState || new Map();
+  for (const rec of sim.activeChunks) {
+    const key = chunkKey(rec.cx, rec.cz);
+    (rec.content.dragonflies || []).forEach((df, i) => {
+      const k = 'D' + key + '#' + i;
+      seen.add(k);
+      let g = birdViews.get(k);
+      if (!g) { g = buildDragonfly(); birdViews.set(k, g); }
+      const st = dstate.get(key + '#' + i);
+      const p = st ? new THREE.Vector3(st.x, st.y, st.z) : V(dragonPos(df, t));
+      const v = st ? new THREE.Vector3(st.vx, st.vy, st.vz) : V(dragonPos(df, t + 1)).sub(p);
+      g.position.lerp(p, g.userData.init ? 1 - Math.exp(-dt * 25) : 1); g.userData.init = true;
+      if (v.lengthSq() > 1e-8) { g.rotation.order = 'YXZ'; g.rotation.y = Math.atan2(v.x, v.z); g.rotation.x = -Math.atan2(v.y, Math.hypot(v.x, v.z)) * 0.5; }
+      const flap = Math.sin(performance.now() * 0.6 + i * 7) * 0.5;
+      g.userData.w1.rotation.z = flap; g.userData.w2.rotation.z = -flap; g.userData.w3.rotation.z = -flap * 0.8; g.userData.w4.rotation.z = flap * 0.8;
+    });
+  }
+  for (const [k, g] of birdViews) if (k[0] === 'D' && !seen.has(k)) { scene.remove(g); birdViews.delete(k); }
   // a spider walks out to every stuck wasp
   let n = 0;
   for (const w of sim.wasps) {
@@ -1272,7 +1337,7 @@ function updateHud() {
   else if (h.nest && (md < T.time.dawn || md >= T.time.dusk)) hint = `${kbd('R')} rest until morning`;
   else if (w.carry) hint = 'Bring it to the nest';
   else if (h.site) hint = `${kbd('E')} found the nest ${T.sites[h.site].name} · ${SITE_NOTE[h.site]}`;
-  else if (w.caste === 'queen' && sim.colony.sited === false) hint = 'Pick a nest site and press E: a trunk, a burrow in the grass, or under a branch';
+  else if (w.caste === 'queen' && sim.colony.sited === false) hint = 'Pick a nest site and press E: a trunk, a burrow in the grass, under a branch, or a gap in a shed';
   else if (w.caste === 'queen' && sim.colony.adults < 1) hint = 'Founding: chew pulp for cells, catch prey for the brood, bring both to the nest';
   $('hint').innerHTML = hint;
 
@@ -1337,11 +1402,14 @@ const SITE_NOTE = {
   trunk: 'medium nest, sheltered',
   ground: 'biggest nest, floods in rain, people notice it fastest',
   branch: 'small nest, cold in rain, hardest to find',
+  wall: 'big nest, sheltered, people use the shed',
+  attic: 'biggest nest, best shelter, rare',
 };
 
 function deathWhy(e) {
   const d = e.detail || {};
   if (e.cause === 'taken by a bird') return 'Birds hunt wasps in open air above head height. Keep low or under the trees.';
+  if (e.cause === 'taken by a dragonfly') return 'Dragonflies hunt low over open ground. They outrun you but turn worse: break hard, land, or stay under the trees.';
   if (e.cause === 'eaten by a spider') return 'Webs hang between trees. Mash Shift the moment you stick.';
   if (e.cause === 'cooked by bees') return 'Bees ball an intruder and heat it. Mash Shift before it reaches 46 °C.';
   if (e.cause === 'drowned in a trap') return 'Sweet-smelling bottles at alert level 3 are traps.';
@@ -1361,7 +1429,7 @@ function deathWhy(e) {
     default: return '';
   }
 }
-const DEATH_TITLE = { 'eaten by a spider': 'EATEN', 'taken by a bird': 'TAKEN', 'killed by a rival wasp': 'KILLED', slap: 'SWATTED', cover: 'SMOTHERED', 'crushed under clothing': 'CRUSHED', insecticide: 'SPRAYED', 'drowned in a trap': 'DROWNED', 'cooked by bees': 'COOKED', starved: 'STARVED', 'old age': 'SPENT' };
+const DEATH_TITLE = { 'eaten by a spider': 'EATEN', 'taken by a bird': 'TAKEN', 'killed by a rival wasp': 'KILLED', slap: 'SWATTED', cover: 'SMOTHERED', 'crushed under clothing': 'CRUSHED', insecticide: 'SPRAYED', 'drowned in a trap': 'DROWNED', 'cooked by bees': 'COOKED', starved: 'STARVED', 'old age': 'SPENT', 'taken by a dragonfly': 'TAKEN' };
 
 function pushSwatAnims(list, frameHex, contactTick) {
   const frame = sim.humanByHex(frameHex);
@@ -1426,6 +1494,8 @@ function handleEvents(events) {
       case 'spill': logEvent('a drink went over · open sugar on the table'); break;
       case 'quarantine': toast('Player 2 failed the plausibility checks and was cut off', 'var(--red)', 3); logEvent(`peer ${e.peer} quarantined`); break;
       case 'implausible': logEvent(`rejected ${e.evType} from peer ${e.peer}: ${e.why}`); break;
+      case 'dragonDive': if (e.driven) toast('Dragonfly! Turn hard or land', 'var(--red)', 1.6); break;
+      case 'dragonMiss': if (e.id === sim.drivenId) toast('It missed', 'var(--yellow)', 1.2); break;
       case 'muniStart': toast('The council sent pest control. Bait stations on the trees.', 'var(--red)', 3.4); logEvent(`pest control: ${e.keys.length} chunks baited`); break;
       case 'muniEnd': logEvent('pest control packed up'); break;
       case 'baitTaken': if (e.driven) toast('Meat from the station', 'var(--yellow)', 1.4); break;
@@ -1786,7 +1856,7 @@ $('bContinue').addEventListener('click', () => {
     newWorld(null, { sim: restore(json), json });
     $('startScreen').hidden = true; running = true; lock();
     toast(`Day ${sim.day + 1} · season ${sim.season.n}`, 'var(--yellow)', 2);
-  } catch (err) { $('startNote').textContent = `That save could not be loaded: ${err.message}`; }
+  } catch (err) { $('startNote').textContent = /generator/.test(err.message) ? 'That save is from an older version of the world generator and cannot be continued. Start a new world.' : `That save could not be loaded: ${err.message}`; }
 });
 showContinue();
 
