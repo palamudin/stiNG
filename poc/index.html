@@ -117,6 +117,12 @@
   .start label { display: grid; gap: 4px; }
   .start input, .start select { font: 500 14px var(--mono); background: var(--panel-solid); color: var(--fg); border: 1px solid rgba(243,238,226,.3); padding: 7px 9px; }
   .start input { width: 12ch; }
+  .opts { width: min(360px, 100%); display: grid; gap: 8px; text-align: left; margin: 4px 0 10px; }
+  .opts label { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .opts label.check { justify-content: flex-start; align-items: center; gap: 10px; margin-top: 6px; cursor: pointer; }
+  .opts output { font: 500 12px var(--mono); color: var(--fg); }
+  .opts input[type=range] { width: 100%; accent-color: var(--yellow); margin: 0 0 6px; }
+  .opts input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--yellow); margin: 0; }
   .stripe { height: 10px; background: repeating-linear-gradient(-45deg, var(--yellow) 0 12px, var(--ink) 12px 24px); }
 
   #pauseScreen { z-index: 5; }
@@ -240,6 +246,7 @@
     <p>You drive one worker of a wasp colony. Every human reacts to a sting the same way every time. Learn them, sting, and be gone before the slap lands. Bring flies, caterpillars and pulp home so the brood keeps coming. Sting too much in one place and the neighborhood escalates: covered food, sprays, traps, and finally the exterminator. Beehives cook intruders, birds take wasps in open air, spiders wait in webs by the trees, and rival colonies guard their nests. Every autumn the colony dies; young queens carry the line into spring.</p>
     <div class="keys">
       <div><kbd>Mouse</kbd>look</div>
+      <div><kbd>Hold RMB</kbd>free look around</div>
       <div><kbd>W A S D</kbd>fly</div>
       <div><kbd>Space</kbd>/<kbd>C</kbd> up / down</div>
       <div><kbd>Shift</kbd>burst · mash to break free</div>
@@ -273,9 +280,17 @@
 <div class="screen" id="pauseScreen" hidden>
   <div class="card" style="text-align:center;justify-items:center">
     <p class="sub">Paused</p>
+    <div class="opts">
+      <label for="optVol"><span class="label">Volume</span><output id="optVolOut" for="optVol">70%</output></label>
+      <input type="range" id="optVol" min="0" max="100" step="1" value="70">
+      <label for="optSens"><span class="label">Mouse sensitivity</span><output id="optSensOut" for="optSens">1.00×</output></label>
+      <input type="range" id="optSens" min="25" max="300" step="5" value="100">
+      <label class="check" for="optInvert"><input type="checkbox" id="optInvert"><span class="label">Invert look up / down</span></label>
+    </div>
     <div class="row" style="justify-content:center">
-      <button id="bResume">Click to resume</button>
+      <button id="bResume">Return to game</button>
       <button class="ghost" id="bSave">Save world</button>
+      <button class="ghost" id="bQuit">Quit to title</button>
     </div>
     <p class="label" id="saveNote"></p>
   </div>

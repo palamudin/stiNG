@@ -71,6 +71,8 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 45 | Late join in the lab: "Bot joins after 1 min" builds player 2 from a snapshot mid-game | 11.10 | 10 |
 | 46 | The stare: hovering in front of a face pulls in letterbox bars, narrows the lens to a close-up and drops the soundscape to a low drone (presentation only) | 12 | 10 |
 | 47 | Rival guards across peers: they hunt any player's wasp near their nest, and a raid by another player sends them after the thief | 9.3 | 10 |
+| 48 | Esc menu: volume, mouse sensitivity, invert look up/down (mouse and gamepad), return, save, quit to title; settings kept per browser | 10.1 | 11 |
+| 49 | Free look: hold the right mouse button to orbit the camera while the wasp keeps its heading; let go and it eases back behind the direction of travel | 10.1 | 11 |
 
 ## Verified
 
@@ -96,4 +98,4 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 
 ## Controls
 
-Mouse look · WASD fly · Space / C up and down · Shift burst, mash to break free · hold LMB or F to sting · E catch, chew, crawl under clothes · Q take over nearest worker · R rest at night · N nest panel · Tab lab · M sound · Arrows look · WASD walk when landed · Esc pause (Save world is on the pause screen; Continue appears on the start screen once a save exists).
+Mouse look · hold RMB free look · WASD fly · Space / C up and down · Shift burst, mash to break free · hold LMB or F to sting · E catch, chew, crawl under clothes · Q take over nearest worker · R rest at night · N nest panel · Tab lab · M sound · Arrows look · WASD walk when landed · Esc pause (Save world is on the pause screen; Continue appears on the start screen once a save exists).

@@ -99,7 +99,12 @@ function pick(seed, id, k, arr) { return arr[rangeInt(hash(seed, Domain.Cosmetic
 let lab = null; // two-peer network lab when a second player is on
 let sim = null, settings = { seed: 1234, dayMinutes: 2, humanDensity: 1, beeAggression: 1, seasonDays: 40 };
 let running = false, paused = false;
-const input = { keys: new Set(), lmb: false, yaw: 0, pitch: 0, alloc: 1, autopilot: null };
+const input = { keys: new Set(), lmb: false, yaw: 0, pitch: 0, alloc: 1, autopilot: null, free: { yaw: 0, pitch: 0, held: false } };
+// Player options from the Esc menu, kept per browser
+const opts = { volume: 0.7, sens: 1, invert: false };
+try { Object.assign(opts, JSON.parse(localStorage.getItem('sting.options') || '{}')); } catch { /* optional */ }
+const saveOpts = () => { try { localStorage.setItem('sting.options', JSON.stringify(opts)); } catch { /* optional */ } };
+const ySign = () => (opts.invert ? -1 : 1);
 const chunkViews = new Map(), humanViews = new Map(), waspViews = new Map();
 const pos = new Map(); // wasp id -> {p: prev, c: current}
 const anims = [];
@@ -806,7 +811,7 @@ function initAudio() {
   let ctx;
   try { ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch { return; }
   audio.ctx = ctx;
-  const master = ctx.createGain(); master.gain.value = 0.7; master.connect(ctx.destination); audio.master = master;
+  const master = ctx.createGain(); master.gain.value = opts.volume; master.connect(ctx.destination); audio.master = master;
   const noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
   const d = noiseBuf.getChannelData(0);
   let b = 0;
@@ -899,8 +904,8 @@ function buildCmd() {
   if (input.autopilot) return input.autopilot(sim); // test hook: scripted pilots use the same input path
   const gp = readPad();
   if (gp) {
-    input.yaw -= gp.rx * 2.4 * DT;
-    input.pitch = Math.max(-1.45, Math.min(1.45, input.pitch - gp.ry * 1.8 * DT));
+    input.yaw -= gp.rx * 2.4 * opts.sens * DT;
+    input.pitch = Math.max(-1.45, Math.min(1.45, input.pitch - ySign() * gp.ry * 1.8 * opts.sens * DT));
   }
   const k = input.keys, a = (p, n) => ((k.has(p) ? 100 : 0) - (k.has(n) ? 100 : 0));
   const look = 1.6 * DT;
@@ -930,7 +935,7 @@ addEventListener('keydown', (e) => {
   input.keys.add(e.code);
 });
 addEventListener('keyup', (e) => input.keys.delete(e.code));
-addEventListener('blur', () => { input.keys.clear(); input.lmb = false; });
+addEventListener('blur', () => { input.keys.clear(); input.lmb = false; input.free.held = false; });
 let lockFailed = false, pointerLockWorked = false;
 document.addEventListener('pointerlockerror', () => { lockFailed = true; toast('Mouse capture unavailable · drag with right button to look', 'var(--muted)', 3); });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -938,12 +943,22 @@ canvas.addEventListener('mousedown', (e) => {
   if (!running || paused) return;
   if (document.pointerLockElement !== canvas && !lockFailed && !pointerLockWorked) { lock(); return; }
   if (e.button === 0) input.lmb = true;
+  if (e.button === 2 && document.pointerLockElement === canvas) input.free.held = true; // free look
 });
-addEventListener('mouseup', (e) => { if (e.button === 0) input.lmb = false; });
+addEventListener('mouseup', (e) => { if (e.button === 0) input.lmb = false; if (e.button === 2) input.free.held = false; });
 addEventListener('mousemove', (e) => {
   if (document.pointerLockElement !== canvas && !(e.buttons & 2)) return;
-  input.yaw -= e.movementX * 0.0022;
-  input.pitch = Math.max(-1.45, Math.min(1.45, input.pitch - e.movementY * 0.0022));
+  if (paused) return;
+  const k = 0.0022 * opts.sens;
+  if (input.free.held) {
+    // free look: the camera orbits, the wasp keeps its heading
+    const f = input.free;
+    f.yaw -= e.movementX * k;
+    f.pitch = Math.max(-1.45 - input.pitch, Math.min(1.45 - input.pitch, f.pitch - ySign() * e.movementY * k));
+    return;
+  }
+  input.yaw -= e.movementX * k;
+  input.pitch = Math.max(-1.45, Math.min(1.45, input.pitch - ySign() * e.movementY * k));
 });
 function lock() { try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch { /* optional */ } }
 document.addEventListener('pointerlockchange', () => {
@@ -952,8 +967,32 @@ document.addEventListener('pointerlockchange', () => {
   if (!locked && pointerLockWorked && $('winterScreen').hidden && $('extinctScreen').hidden) setPaused(true);
   if (locked) { pointerLockWorked = true; setPaused(false); }
 });
-function setPaused(p) { paused = p; $('pauseScreen').hidden = !p; input.lmb = false; input.keys.clear(); if (p) { $('saveNote').textContent = ''; saveWorld(false); } }
+function setPaused(p) { paused = p; input.free.held = false; $('pauseScreen').hidden = !p; input.lmb = false; input.keys.clear(); if (p) { $('saveNote').textContent = ''; saveWorld(false); } }
 $('bResume').addEventListener('click', () => { setPaused(false); lock(); });
+function showOpts() {
+  $('optVol').value = Math.round(opts.volume * 100); $('optVolOut').textContent = Math.round(opts.volume * 100) + '%';
+  $('optSens').value = Math.round(opts.sens * 100); $('optSensOut').textContent = opts.sens.toFixed(2) + '×';
+  $('optInvert').checked = opts.invert;
+}
+showOpts();
+$('optVol').addEventListener('input', (e) => {
+  opts.volume = +e.target.value / 100; saveOpts(); showOpts();
+  if (audio.master) audio.master.gain.setTargetAtTime(opts.volume, audio.ctx.currentTime, 0.03);
+});
+$('optSens').addEventListener('input', (e) => { opts.sens = +e.target.value / 100; saveOpts(); showOpts(); });
+$('optInvert').addEventListener('change', (e) => { opts.invert = e.target.checked; saveOpts(); });
+$('bQuit').addEventListener('click', () => {
+  if (!lab) saveWorld(true);
+  paused = false; running = false; input.keys.clear(); input.lmb = false;
+  $('pauseScreen').hidden = true; $('startScreen').hidden = false;
+  showContinue();
+});
+// Esc opens the menu even when the mouse was never captured (the browser handles Esc itself while it is)
+addEventListener('keydown', (e) => {
+  if (e.code !== 'Escape' || !running || document.pointerLockElement === canvas) return;
+  if (!$('winterScreen').hidden || !$('extinctScreen').hidden) return;
+  setPaused(!paused);
+});
 
 // ------------------------------------------------------------------ panels
 
@@ -1376,7 +1415,7 @@ function updateStare(dt) {
   const w = sim._driven();
   let k = 0;
   if (w && running && !paused && (w.state === 'fly' || w.state === 'perched')) {
-    const fwd = { x: Math.sin(input.yaw), z: Math.cos(input.yaw) };
+    const fwd = { x: Math.sin(input.yaw + input.free.yaw), z: Math.cos(input.yaw + input.free.yaw) };
     for (const hm of sim.active) {
       if (hm.state === 'away' || Math.abs(hm.x - w.x) > 1.2 || Math.abs(hm.z - w.z) > 1.2) continue;
       const head = hm.parts[hm.posture][0], lp = toLocal(hm, w);
@@ -1397,7 +1436,11 @@ function updateStare(dt) {
 function updateCamera(p, dt) {
   const w = sim.wasp;
   const dead = !sim._driven();
-  const fwd = new THREE.Vector3(Math.sin(input.yaw) * Math.cos(input.pitch), Math.sin(input.pitch), Math.cos(input.yaw) * Math.cos(input.pitch));
+  // free look: ease back behind the direction of travel once the button is let go
+  const fl = input.free;
+  if (!fl.held) { const e = Math.exp(-dt * 6); fl.yaw = Math.atan2(Math.sin(fl.yaw), Math.cos(fl.yaw)) * e; fl.pitch *= e; if (Math.abs(fl.yaw) < 1e-3) fl.yaw = 0; if (Math.abs(fl.pitch) < 1e-3) fl.pitch = 0; }
+  const cy = input.yaw + fl.yaw, cpt = Math.max(-1.45, Math.min(1.45, input.pitch + fl.pitch));
+  const fwd = new THREE.Vector3(Math.sin(cy) * Math.cos(cpt), Math.sin(cpt), Math.cos(cy) * Math.cos(cpt));
   const want = dead ? 0.9 : w.state === 'attached' || w.state === 'under' || w.state === 'perched' ? 0.17 : w.state === 'balled' ? 0.25 : w.contact ? 0.13 : 0.1;
   camDist += (want - camDist) * (1 - Math.exp(-dt * 4));
   const focus = dead && deathSpot ? deathSpot : p || V(w);
