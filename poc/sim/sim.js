@@ -33,7 +33,8 @@ export class Sim {
     this.pending = [];
     this.evSeq = 0;
     this.remote = new Map();
-    this.netStats = { sent: 0, recv: 0, late: 0, lateMax: 0 };
+    this.netStats = { sent: 0, recv: 0, late: 0, lateMax: 0, rejected: 0, dropped: 0 };
+    this.plaus = { strikes: {}, quarantined: [], lastSeq: {}, stingTicks: {} };
     // Which chunks each peer is near. Humans are simulated over the union, changes commit like any event (Q-16)
     this.interest = new Map();
     for (const p of opts.peers || [this.peer]) this.interest.set(p, chunkKey(chunkOf(SPAWN.x), chunkOf(SPAWN.z)));
@@ -284,7 +285,10 @@ export class Sim {
   receive(msgs) {
     for (const m of msgs) {
       this.netStats.recv++;
+      if (this.plaus.quarantined.includes(m.peer)) { this.netStats.dropped++; continue; }
       if (m.mk === 'state') { this._remoteState(m); continue; }
+      const why = this._implausible(m);
+      if (why) { this._strike(m.peer, m.type, why); continue; }
       this._applyImmediate(m);
       if (IMMEDIATE.has(m.type)) continue;
       if (m.commit < this.tick) { this.netStats.late++; this.netStats.lateMax = Math.max(this.netStats.lateMax, this.tick - m.commit); this.emit('lateEvent', { type: m.type, by: this.tick - m.commit }); }
@@ -304,9 +308,54 @@ export class Sim {
     this.outbox.push({ mk: 'state', peer: this.peer, tick: this.tick, wasps });
   }
 
+  // GDD 11.8. Checks on events read only the event and shared human state, so every honest peer drops the same ones.
+  _implausible(ev) {
+    const P = T.plaus, last = this.plaus.lastSeq[ev.peer] || 0;
+    if (typeof ev.tick !== 'number' || ev.commit !== ev.tick + T.net.commitTicks) return 'commit tick';
+    if (ev.seq <= last) return 'replayed or out of order';
+    this.plaus.lastSeq[ev.peer] = ev.seq;
+    if (ev.tick > this.tick + P.futureTicks) return 'from the future';
+    if (ev.type === 'sting' || ev.type === 'notice' || ev.type === 'press' || ev.type === 'preSwat') {
+      const hm = this.humanByHex(ev.humanHex);
+      const swats = ev.swats || (ev.type === 'preSwat' ? [{ start: ev.start }] : []);
+      if (swats.length > P.maxSwats) return 'too many swats';
+      for (const sw of swats) if (sw.start - ev.tick < (ev.type === 'sting' ? T.resolve.minConsequenceTicks : 0) || sw.start - ev.tick > P.maxSwatDelay) return 'swat timing';
+      if (ev.type === 'sting') {
+        if (!(ev.panicGain >= 0 && ev.panicGain <= 1)) return 'panic out of range';
+        if (hm && typeof ev.sx === 'number') {
+          const drift = P.humanDrift * Math.max(0, this.tick - ev.tick) / 60;
+          if (Math.hypot(ev.sx - hm.x, ev.sz - hm.z) > P.stingReach + drift) return 'stung from out of reach';
+        }
+        const k = ev.peer + ':' + ev.waspId, ts = (this.plaus.stingTicks[k] || []).filter((t) => t > ev.tick - P.rateWindow);
+        ts.push(ev.tick); this.plaus.stingTicks[k] = ts;
+        if (ts.length > P.rateMax) return 'stinging faster than venom allows';
+      }
+    }
+    return null;
+  }
+
+  _strike(peer, type, why) {
+    this.netStats.rejected++;
+    const n = (this.plaus.strikes[peer] || 0) + 1;
+    this.plaus.strikes[peer] = n;
+    this.emit('implausible', { peer, evType: type, why, strikes: n });
+    if (n >= T.plaus.strikes && !this.plaus.quarantined.includes(peer)) {
+      this.plaus.quarantined.push(peer);
+      for (const [id, r] of this.remote) if (r.peer === peer) this.remote.delete(id);
+      this.emit('quarantine', { peer });
+    }
+  }
+
   _remoteState(m) {
     const ids = new Set();
     for (const r of m.wasps) {
+      const prev = this.remote.get(r.id);
+      // display only: a wasp that moved faster than any wasp can is not drawn there (local, so it cannot desync)
+      if (prev && prev.peer === m.peer && m.tick > prev.stamp) {
+        const v = Math.hypot(r.x - prev.px, r.y - prev.py, r.z - prev.pz) / ((m.tick - prev.stamp) / 60);
+        if (v > T.plaus.maxSpeed && (prev.bad = (prev.bad || 0) + 1) < 4) { this.netStats.dropped++; ids.add(r.id); prev.seen = this.tick; continue; }
+        prev.bad = 0;
+      }
       ids.add(r.id);
       const e = this.remote.get(r.id) || {};
       Object.assign(e, r, { peer: m.peer, stamp: m.tick, px: r.x, py: r.y, pz: r.z, seen: this.tick });

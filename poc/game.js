@@ -1131,6 +1131,7 @@ function updateLab() {
       ['Commit window', `${T.net.commitTicks} ticks · ${ms(T.net.commitTicks)} ms`],
       ['Player 2', lab.b ? (lab.joined ? `joined after ${Math.round(lab.joined / 60)} s from a ${(lab.joinBytes / 1024).toFixed(0)} KB snapshot` : 'in from the start') : `joins in ${Math.ceil((lab.joinAt - sim.tick) / 60)} s`],
       ['Events sent / received', `${sim.netStats.sent} / ${sim.netStats.recv}`], ['Late events', `${sim.netStats.late + (lab.b ? lab.b.netStats.late : 0)}${sim.netStats.lateMax ? ` (max ${sim.netStats.lateMax} ticks)` : ''}`],
+      ['Rejected by checks', `${sim.netStats.rejected}${sim.plaus.quarantined.length ? ' · player 2 quarantined' : ''}`],
       ['Humans agree', c.compared ? `${c.agreed}/${c.compared} checks${c.agreed === c.compared ? '' : ' · diverged at tick ' + c.firstDiverge}` : '-'],
       ['Player 2 drawn off by', err === null ? '-' : `${(err * 100).toFixed(1)} cm`],
       ['Your upstream', (() => { const b = lab.bandwidth(); return `${(b.total / 1024).toFixed(1)} KB/s · ${sim.wasps.length} wasps at 20 Hz`; })()],
@@ -1360,6 +1361,8 @@ function handleEvents(events) {
       case 'alarm': logEvent('alarm pheromone'); break;
       case 'extScheduled': toast(`Exterminator booked for ${dayLabel(e.arriveMinute)}`, 'var(--red)', 3); logEvent('exterminator booked'); break;
       case 'spill': logEvent('a drink went over · open sugar on the table'); break;
+      case 'quarantine': toast('Player 2 failed the plausibility checks and was cut off', 'var(--red)', 3); logEvent(`peer ${e.peer} quarantined`); break;
+      case 'implausible': logEvent(`rejected ${e.evType} from peer ${e.peer}: ${e.why}`); break;
       case 'muniStart': toast('The council sent pest control. Bait stations on the trees.', 'var(--red)', 3.4); logEvent(`pest control: ${e.keys.length} chunks baited`); break;
       case 'muniEnd': logEvent('pest control packed up'); break;
       case 'baitTaken': if (e.driven) toast('Meat from the station', 'var(--yellow)', 1.4); break;

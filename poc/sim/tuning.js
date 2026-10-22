@@ -109,6 +109,10 @@ export const T = {
 
   // Networking (GDD 11): human-side effects of events commit at the end of the consequence window
   net: { commitTicks: 30, stateEvery: 3, remoteTimeout: 45 },
+  // Plausibility checks on what peers send (GDD 11.8). Margins are generous: honest traffic must always pass,
+  // only gross violations fail, so honest peers reach the same verdict.
+  plaus: { futureTicks: 120, stingReach: 1.6, humanDrift: 3, maxSwatDelay: 240, maxSwats: 4, rateWindow: 120, rateMax: 6,
+    maxSpeed: 12, strikes: 3 },
 };
 
 export const DEFAULT_SETTINGS = { dayMinutes: 2, humanDensity: 1, beeAggression: 1, seasonDays: 40 };

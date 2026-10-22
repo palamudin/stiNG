@@ -27,6 +27,7 @@ for (const name of ['lan', 'good', 'bad', 'awful']) {
   ok(Math.abs(r.lab.a.stats.remoteStings - r.lab.b.stats.stings) <= 1 && Math.abs(r.lab.b.stats.remoteStings - r.lab.a.stats.stings - r.lab.a.stats.aiStings) <= 1, `${name}: every sting reaches the other peer (A saw ${r.lab.a.stats.remoteStings} of B's ${r.lab.b.stats.stings}; B saw ${r.lab.b.stats.remoteStings} of A's ${r.lab.a.stats.stings} + AI ${r.lab.a.stats.aiStings})`);
   ok(r.c.compared > 100 && r.c.agreed === r.c.compared, `${name}: human state identical on both peers at every check (${r.c.agreed}/${r.c.compared})`);
   ok(r.lab.a.netStats.late === 0 && r.lab.b.netStats.late === 0, `${name}: no event arrived after its commit tick`);
+  ok(r.lab.a.netStats.rejected === 0 && r.lab.b.netStats.rejected === 0, `${name}: plausibility checks never reject honest traffic`);
 }
 
 // Peers far apart: B works a picnic two chunks east while A stays home. Humans still agree everywhere (Q-16).
@@ -130,6 +131,27 @@ for (const name of ['lan', 'good', 'bad', 'awful']) {
   const c = lab.checks;
   console.log(`  municipal campaign: started A ${starts.a} B ${starts.b}, ended A ${ends.a} B ${ends.b}; humans ${c.agreed}/${c.compared}`);
   ok(starts.a && starts.a === starts.b && ends.a && ends.a === ends.b && c.agreed === c.compared, 'both peers run the municipal campaign on the same ticks and still agree on every human');
+}
+
+// A cheating peer (GDD 11.8): B pushes every slap aimed at its wasps 1000 ticks into the future.
+// A rejects those stings, and after three strikes stops listening to B.
+{
+  const lab = new NetLab({ seed: 1234 }, 'good');
+  const out = lab._out.bind(lab);
+  lab._out = (sim, link, dir) => {
+    if (dir === 'ba' && sim.tick > 1200) for (const m of sim.outbox) if (m.type === 'sting') for (const sw of m.swats) sw.start += 1000;
+    out(sim, link, dir);
+  };
+  const botA = stingBot({ plan: 'jab', rest: 200 });
+  const whys = new Set();
+  let quarantinedAt = 0;
+  for (let i = 0; i < 18000; i++) {
+    lab.step(botA(lab.a));
+    for (const e of lab.a.drainEvents()) { if (e.type === 'implausible') whys.add(e.why); if (e.type === 'quarantine') quarantinedAt = lab.a.tick; }
+  }
+  const st = lab.a.netStats;
+  console.log(`  cheater: A rejected ${st.rejected} events (${[...whys].join(', ')}), quarantined B at tick ${quarantinedAt}, then dropped ${st.dropped} messages`);
+  ok(whys.has('swat timing') && quarantinedAt > 1200 && lab.a.plaus.quarantined.includes(1) && lab.a.remote.size === 0, 'a peer that delays the slaps aimed at its wasps is rejected and quarantined');
 }
 
 // Wire format: quantization error and bandwidth (GDD 11.12)
