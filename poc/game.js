@@ -111,7 +111,7 @@ const anims = [];
 const ui = { lab: false, nest: false, zones: false, swats: true, log: [] };
 let deathSpot = null, deadUntil = 0, toastTimer = 0, bumpTimer = 0;
 const camPos = new THREE.Vector3();
-let camDist = 0.1;
+let camDist = 0.1, eyeBlend = 0;
 
 // ------------------------------------------------------------------ chunk visuals
 
@@ -639,7 +639,7 @@ function buildWasp(remote = false, rival = false) {
   }
   g.add(head, eyes, thorax, abdomen, wl, wr, carry);
   g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
-  Object.assign(g.userData, { abdomen, wl, wr, carry, legs, yaw: 0, step: 0 });
+  Object.assign(g.userData, { abdomen, wl, wr, carry, legs, head, eyes, yaw: 0, step: 0 });
   scene.add(g);
   return g;
 }
@@ -661,7 +661,8 @@ function renderWasps(alpha, t, dt) {
     const p = pp ? new THREE.Vector3().lerpVectors(pp.p, pp.c, alpha) : V(w);
     const driven = w.id === sim.drivenId;
     if (driven) drivenPos = p;
-    g.visible = w.state !== 'under';
+    // looking out of its own eyes: the body is not drawn (compound eyes see nearly all the way round)
+    g.visible = w.state !== 'under' && !(driven && eyeBlend > 0.5);
     g.position.copy(p);
     g.scale.setScalar(w.caste === 'queen' ? 1.3 : 1);
     g.rotation.order = 'YXZ';
@@ -954,7 +955,8 @@ addEventListener('mousemove', (e) => {
     // free look: the camera orbits, the wasp keeps its heading
     const f = input.free;
     f.yaw -= e.movementX * k;
-    f.pitch = Math.max(-1.45 - input.pitch, Math.min(1.45 - input.pitch, f.pitch - ySign() * e.movementY * k));
+    f.pitch = Math.max(-1.5 - input.pitch, Math.min(1.5 - input.pitch, f.pitch - ySign() * e.movementY * k));
+    f.yaw = Math.atan2(Math.sin(f.yaw), Math.cos(f.yaw));
     return;
   }
   input.yaw -= e.movementX * k;
@@ -1403,7 +1405,7 @@ function waspSwitched(id, yaw) {
   input.yaw = yaw ?? (Math.hypot(w.vx, w.vz) > 0.05 ? Math.atan2(w.vx, w.vz) : input.yaw);
   input.pitch = 0;
   pos.set(id, { p: V(w), c: V(w) });
-  if (yaw !== undefined) camPos.copy(V(w)).add(new THREE.Vector3(-Math.sin(yaw) * 0.3, 0.1, -Math.cos(yaw) * 0.3));
+  if (yaw !== undefined) camOff.set(-Math.sin(yaw) * 0.3, 0.1, -Math.cos(yaw) * 0.3);
 }
 
 // ------------------------------------------------------------------ camera and frame
@@ -1433,43 +1435,62 @@ function updateStare(dt) {
   if (Math.abs(camera.fov - fov) > 0.05) { camera.fov = fov; camera.updateProjectionMatrix(); }
 }
 
+// The wasp carries the camera: the camera's position is the wasp's position plus an offset, so flight itself adds
+// no lag or pull. Only the offset (where the camera sits around the wasp) is smoothed.
+// Holding RMB switches to the wasp's own eyes: a free first-person look all the way round. Letting go blends back
+// out to the chase view behind the direction of travel.
+const camOff = new THREE.Vector3(0, 0.03, -0.1);
 function updateCamera(p, dt) {
   const w = sim.wasp;
   const dead = !sim._driven();
-  // free look: ease back behind the direction of travel once the button is let go
   const fl = input.free;
-  if (!fl.held) { const e = Math.exp(-dt * 6); fl.yaw = Math.atan2(Math.sin(fl.yaw), Math.cos(fl.yaw)) * e; fl.pitch *= e; if (Math.abs(fl.yaw) < 1e-3) fl.yaw = 0; if (Math.abs(fl.pitch) < 1e-3) fl.pitch = 0; }
-  const cy = input.yaw + fl.yaw, cpt = Math.max(-1.45, Math.min(1.45, input.pitch + fl.pitch));
-  const fwd = new THREE.Vector3(Math.sin(cy) * Math.cos(cpt), Math.sin(cpt), Math.cos(cy) * Math.cos(cpt));
+  eyeBlend = fl.held && !dead ? Math.min(1, eyeBlend + dt / 0.12) : Math.max(0, eyeBlend - dt / 0.35);
+  if (!fl.held && eyeBlend === 0) { fl.yaw = 0; fl.pitch = 0; }
+  // chase view: always behind the heading
+  const fwd = new THREE.Vector3(Math.sin(input.yaw) * Math.cos(input.pitch), Math.sin(input.pitch), Math.cos(input.yaw) * Math.cos(input.pitch));
   const want = dead ? 0.9 : w.state === 'attached' || w.state === 'under' || w.state === 'perched' ? 0.17 : w.state === 'balled' ? 0.25 : w.contact ? 0.13 : 0.1;
   camDist += (want - camDist) * (1 - Math.exp(-dt * 4));
   const focus = dead && deathSpot ? deathSpot : p || V(w);
-  let target = focus.clone().addScaledVector(fwd, -camDist).add(new THREE.Vector3(0, camDist * 0.28, 0));
+  let off = fwd.clone().multiplyScalar(-camDist).add(new THREE.Vector3(0, camDist * 0.28, 0));
   // on a body: look at the wasp from outside the skin, along the surface normal, blended with the view direction
   const onBody = !dead && (w.state === 'perched' ? w.perch : w.state === 'attached' ? w.attach : null);
   if (onBody) {
     const hm = sim.humanByHex(onBody.hex);
     if (hm) {
       const n = onBody.n, nw = new THREE.Vector3(hm.fz * n.x + hm.fx * n.z, n.y, -hm.fx * n.x + hm.fz * n.z).normalize();
-      const out = nw.clone().multiplyScalar(0.75).addScaledVector(fwd, -0.45).normalize();
-      target = focus.clone().addScaledVector(out, camDist).add(new THREE.Vector3(0, camDist * 0.2, 0));
+      off = nw.multiplyScalar(0.75).addScaledVector(fwd, -0.45).normalize().multiplyScalar(camDist).add(new THREE.Vector3(0, camDist * 0.2, 0));
     }
   }
-  if (target.y < 0.006) target.y = 0.006;
-  camPos.lerp(target, 1 - Math.exp(-dt * (dead ? 2 : 14)));
+  camOff.lerp(off, 1 - Math.exp(-dt * (dead ? 2 : 14)));
+  const chase = focus.clone().add(camOff);
+  if (chase.y < 0.006) chase.y = 0.006;
   for (const hm of sim.active) {
-    if (hm.state === 'away' || Math.hypot(hm.x - camPos.x, hm.z - camPos.z) > 1.5) continue;
-    const lp = toLocal(hm, camPos);
+    if (hm.state === 'away' || Math.hypot(hm.x - chase.x, hm.z - chase.z) > 1.5) continue;
+    const lp = toLocal(hm, chase);
     let pushed = false;
     for (const part of hm.parts[hm.posture]) {
       const q = segClosest(part.a, part.b, lp);
       const ex = lp.x - q.x, ey = lp.y - q.y, ez = lp.z - q.z, d = Math.hypot(ex, ey, ez), rr = part.r + 0.012;
       if (d < rr && d > 1e-6) { lp.x = q.x + ex / d * rr; lp.y = q.y + ey / d * rr; lp.z = q.z + ez / d * rr; pushed = true; }
     }
-    if (pushed) { const wpt = toWorld(hm, lp); camPos.set(wpt.x, wpt.y, wpt.z); }
+    if (pushed) { const wpt = toWorld(hm, lp); chase.set(wpt.x, wpt.y, wpt.z); }
   }
-  camera.position.copy(camPos);
-  camera.lookAt(onBody ? focus : focus.clone().addScaledVector(fwd, 0.06));
+  const chaseLook = onBody ? focus.clone() : focus.clone().addScaledVector(fwd, 0.06);
+  let pos = chase, look = chaseLook;
+  if (eyeBlend > 0 && !dead) {
+    // eye view: at the front of the head, looking wherever the mouse says, carried rigidly
+    const sc = w.caste === 'queen' ? 1.3 : 1;
+    const eye = focus.clone().add(new THREE.Vector3(Math.sin(input.yaw) * 0.0078 * sc, 0.0012 * sc, Math.cos(input.yaw) * 0.0078 * sc));
+    const ly = input.yaw + fl.yaw, lp = Math.max(-1.5, Math.min(1.5, input.pitch + fl.pitch));
+    const dir = new THREE.Vector3(Math.sin(ly) * Math.cos(lp), Math.sin(lp), Math.cos(ly) * Math.cos(lp));
+    const k = eyeBlend * eyeBlend * (3 - 2 * eyeBlend);
+    pos = chase.clone().lerp(eye, k);
+    const d0 = chaseLook.clone().sub(chase).normalize();
+    look = pos.clone().add(d0.lerp(dir, k).normalize());
+  }
+  camPos.copy(pos);
+  camera.position.copy(pos);
+  camera.lookAt(look);
   sun.position.copy(focus).addScaledVector(sunDir, 40);
   sun.target.position.copy(focus);
   ground.position.set(Math.round(focus.x / GROUND_TILE) * GROUND_TILE, 0, Math.round(focus.z / GROUND_TILE) * GROUND_TILE);
@@ -1557,7 +1578,7 @@ function newWorld(s, restored = null) {
   const w = sim.wasp;
   input.yaw = w.yaw; input.pitch = 0; input.alloc = 1;
   pos.set(w.id, { p: V(w), c: V(w) });
-  camPos.copy(V(w)).add(new THREE.Vector3(-Math.sin(input.yaw) * 0.6, 0.2, -Math.cos(input.yaw) * 0.6));
+  camOff.set(-Math.sin(input.yaw) * 0.6, 0.2, -Math.cos(input.yaw) * 0.6);
   $('verifyOut').textContent = '';
 }
 
