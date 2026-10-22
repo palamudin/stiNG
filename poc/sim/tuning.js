@@ -67,7 +67,7 @@ export const T = {
 
   // Escalation ladder (GDD 8.10)
   esc: {
-    levels: [0, 3, 8, 15, 25], decayPerDay: 0.25,
+    levels: [0, 3, 8, 15, 25, 40], decayPerDay: 0.25,
     sting: 1, full: 1, death: 0.3, nuisance: 0.15,
     headRadius: 0.4, foodRadius: 0.35, faceRadius: 0.2, noticeMul: 1, cooldownTicks: 80,
     sprayTrait: 0.55, sprayRange: 1.5, sprayTicks: 40, trapsPerTable: 1, citronellaDrain: 1.5,
@@ -75,6 +75,10 @@ export const T = {
 
   under: { moveTicks: 18, noticeMul: 2, compressRadius: 0.06, compressEvery: 25, ripPanic: 0.92, panicMul: 1.5, openingRadius: 0.035 },
 
+  // Level 5: municipal pest control (GDD 8.10). Poisoned protein bait stations across the area for a few days.
+  // bio: real programs use protein baits laced with insecticide; foragers carry them home and poison the brood.
+  muni: { level: 5, radius: 1, days: 3, cooldownDays: 4, aftermath: 0.5, baitsPerChunk: 3, baitHeight: 1.2, baitDist: 0.04, baitProtein: 2,
+    poisonAdults: 0.03, poisonLarvae: 0.08, abstractKillPerDay: 0.18, aiLure: 6 },
   ext: { speed: 1.1, treatTicks: 600, arriveMinute: 9 * 60, level: 4, minPanicAbort: 0.8 },
 
   bees: {

@@ -449,5 +449,41 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   ok(s.records.get('0,0') === rec && rec.contentHash === before, 'discovered chunk record stays frozen');
 }
 
+// 20. Level 5: municipal pest control (GDD 8.10)
+{
+  const s = new Sim({ seed: 1234 });
+  s.cs('0,0').esc = 45;
+  let ev = run(s, 120);
+  const m = s.muni && s.muni.active;
+  ok(count(ev, 'muniStart') === 1 && m && m.keys.length === 9 && m.keys.includes('0,0'), `a chunk at level 5 starts a campaign over the 3×3 area around it (${m ? m.keys.length : 0} chunks)`);
+  const baits = s.muniBaits();
+  ok(baits.length >= 6 && baits.every((b) => Math.abs(b.y - T.muni.baitHeight) < 1e-9), `bait stations hang on trees in every discovered chunk of the area (${baits.length})`);
+  // the player takes meat from a station and brings it home
+  const w = s.wasp, b = baits[0];
+  place(w, { x: b.x + 0.01, y: b.y, z: b.z });
+  run(s, 2, (sim, i) => idle({ act: i === 1 ? Act.Interact : 0 }));
+  ok(w.carry && w.carry.poison && w.carry.what === 'bait', 'E at a station takes the bait');
+  const L0 = s.colony.larvae, A0 = s.colony.adults;
+  place(w, s.nest.entrance);
+  ev = run(s, 3);
+  const po = ev.find((e) => e.type === 'poisoned');
+  ok(po && s.colony.larvae < L0 * 0.9 && s.colony.adults < A0, `bait carried home poisons the brood and the workers (larvae ${L0.toFixed(0)} → ${s.colony.larvae.toFixed(0)}, adults ${A0.toFixed(1)} → ${s.colony.adults.toFixed(1)})`);
+  // the same save, continued, has the same baits
+  const r = restore(snapshot(s));
+  ok(r.muni.active && r.muni.active.n === s.muni.active.n && JSON.stringify(r.muniBaits()) === JSON.stringify(s.muniBaits()), 'a campaign survives save and restore');
+  // abstract foragers: hunting protein brings more poison home than gathering sugar
+  const loss = (alloc) => {
+    const t = new Sim({ seed: 1234 });
+    t.cs('0,0').esc = 45;
+    run(t, 120 * 60, (sim) => { const d = sim._driven(); if (d) place(d, { x: sim.nest.entrance.x, y: sim.nest.entrance.y + 0.3, z: sim.nest.entrance.z }); return idle({ alloc }); });
+    return t.colony.stats.poisoned || 0;
+  };
+  const lp = loss(2), ls = loss(3); // alloc commands are 1-based: 2 = Protein, 3 = Sugar
+  ok(lp > ls * 1.5 && ls > 0, `foraging for protein in a baited area poisons more of the colony than foraging for sugar (${lp.toFixed(1)} vs ${ls.toFixed(1)} lost in 2 h)`);
+  // the campaign ends after its days, and the area calms
+  ev = run(s, (m.until - s.minute) * s.tpm + 120);
+  ok(count(ev, 'muniEnd') === 1 && !s.muni.active && s.cs('0,0').esc < 25 && s.muniBaits().length === 0, `after ${T.muni.days} days the stations come down and the area calms (escalation ${s.cs('0,0').esc.toFixed(1)})`);
+}
+
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');
 process.exit(failures ? 1 : 0);

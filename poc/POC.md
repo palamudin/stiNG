@@ -15,8 +15,8 @@ The tier-0 slice of the GDD, built in the browser so it can move to Unity. Same 
 | `sim/bots.js` | Scripted pilots that produce ordinary input commands | test harness |
 | `game.js` | three.js rendering, animation, camera, input, HUD, sound | Unity scene, Animator, UI |
 | `index.html` | Page shell, HUD markup and styles | UI Toolkit |
-| `test/sim.test.mjs` | 71 headless sim checks | `Sting.Core.Tests` |
-| `test/net.test.mjs` | 23 network checks | `Sting.Net.Tests` |
+| `test/sim.test.mjs` | 78 headless sim checks | `Sting.Core.Tests` |
+| `test/net.test.mjs` | 24 network checks | `Sting.Net.Tests` |
 
 Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 18+, no packages). Play locally with `node serve.mjs`.
 
@@ -73,6 +73,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 47 | Rival guards across peers: they hunt any player's wasp near their nest, and a raid by another player sends them after the thief | 9.3 | 10 |
 | 48 | Esc menu: volume, mouse sensitivity, invert look up/down (mouse and gamepad), return, save, quit to title; settings kept per browser | 10.1 | 11 |
 | 49 | Camera carried by the wasp (no lag or pull from flight). Hold the right mouse button to look out of the wasp's own eyes, freely all the way round, while it keeps its heading; let go and the view blends back to the chase camera behind the direction of travel | 10.1 | 11 |
+| 50 | Escalation level 5, municipal pest control: a chunk at 40 points baits the 3×3 area for 3 days. Stations on the trees hold poisoned meat; carried home it kills larvae and workers, and abstract foragers bring poison in proportion to how hard the colony hunts protein. Afterwards the area's escalation halves | 8.10 | 12 |
 
 ## Verified
 

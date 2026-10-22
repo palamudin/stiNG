@@ -291,6 +291,31 @@ const beeMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.0045, 8, 6), 
 for (const m of [flyMesh, catMesh, beeMesh]) { m.count = 0; m.frustumCulled = false; scene.add(m); }
 const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(1, 1, 1), _p = new THREE.Vector3();
 
+// Pest-control bait stations: a dark box on the trunk with the bait showing through its slot
+const baitPool = [];
+const baitBoxGeo = new THREE.BoxGeometry(0.07, 0.1, 0.05), baitMeatGeo = new THREE.BoxGeometry(0.04, 0.012, 0.01);
+function renderBaits() {
+  const baits = sim.muniBaits ? sim.muniBaits() : [];
+  while (baitPool.length < baits.length) {
+    const g = new THREE.Group();
+    const box = new THREE.Mesh(baitBoxGeo, mat('#24402c')); box.castShadow = true;
+    const meat = new THREE.Mesh(baitMeatGeo, mat('#8a3b2a')); meat.position.set(0, 0.012, 0.026);
+    const lid = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.008, 0.055), mat('#d8c64a')); lid.position.y = 0.054;
+    g.add(box, meat, lid); scene.add(g); baitPool.push(g);
+  }
+  baitPool.forEach((g, i) => {
+    const b = baits[i];
+    g.visible = !!b;
+    if (!b) return;
+    g.position.set(b.x, b.y, b.z);
+    // face away from the trunk the station hangs on
+    let best = null, bd = Infinity;
+    const rec = sim.records.get(b.key);
+    if (rec) for (const tr of rec.content.trees) { const d = (tr.x - b.x) ** 2 + (tr.z - b.z) ** 2; if (d < bd) { bd = d; best = tr; } }
+    if (best) g.rotation.y = Math.atan2(b.x - best.x, b.z - best.z);
+  });
+}
+
 function renderCritters(t) {
   let nf = 0, nc = 0, nb = 0;
   for (const rec of sim.activeChunks) {
@@ -1037,6 +1062,8 @@ function updateNest() {
     ['Protein', `${c.protein.toFixed(1)} / ${proteinCap(c).toFixed(0)}`], ['Sugar', `${c.sugar.toFixed(1)} / ${sugarCap(c).toFixed(0)}`], ['Pulp', c.pulp.toFixed(1)],
     ['Cells used', `${fmt(broodTotal(c))} / ${fmt(c.cells)}`], ['Larvae fed', Math.round(c.fed * 100) + '%'],
     ['Emerged · laid', `${fmt(c.stats.emerged)} · ${fmt(c.stats.laid)}`],
+    ...(sim.muni && sim.muni.active ? [['Pest control', `${sim.muni.active.keys.includes(sim.nest.key) ? 'baits around the nest' : 'baits nearby'} · until ${dayLabel(sim.muni.active.until)}`]] : []),
+    ...(c.stats.poisoned ? [['Lost to poison', fmt(c.stats.poisoned)]] : []),
   ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
   $('nDeficit').style.width = (c.deficit * 100).toFixed(0) + '%';
   const max = Math.max(1, c.eggs, c.larvae, c.pupae);
@@ -1125,7 +1152,9 @@ function updateHud() {
   $('seasonBar').style.width = (frac * 100).toFixed(1) + '%';
   $('seasonT').textContent = `Season ${sim.season.n} · ${sim.season.phase}${sim.lineage > 0 ? ` · ${sim.lineage} sister nest${sim.lineage === 1 ? '' : 's'}` : ''}`;
   const e = sim.ext;
-  $('ext').textContent = e.state === 'scheduled' ? `Exterminator due ${dayLabel(e.arriveMinute)}` : e.state === 'active' && e.hm ? (e.hm.state === 'treat' ? 'Exterminator treating the nest' : 'Exterminator on the way') : '';
+  const extT = e.state === 'scheduled' ? `Exterminator due ${dayLabel(e.arriveMinute)}` : e.state === 'active' && e.hm ? (e.hm.state === 'treat' ? 'Exterminator treating the nest' : 'Exterminator on the way') : '';
+  const muniT = sim.muni && sim.muni.active ? `Pest control baits out until ${dayLabel(sim.muni.active.until)}` : '';
+  $('ext').textContent = [extT, muniT].filter(Boolean).join(' · ');
   const lv = w ? sim.escAt(w.x, w.z) : 0;
   document.querySelectorAll('#alert i').forEach((el, i) => { el.className = i < lv ? (lv >= 3 ? 'on hot' : 'on') : ''; });
   if (!w) return;
@@ -1174,6 +1203,7 @@ function updateHud() {
   } else if (w.state === 'chewing') hint = `Keep holding ${kbd('E')}`;
   else if (h.opening) hint = `${kbd('E')} crawl in at the ${h.opening}`;
   else if (h.prey) hint = `${kbd('E')} catch the ${h.prey}`;
+  else if (h.bait) hint = `${kbd('E')} take the meat from the station`;
   else if (h.wood) hint = `Hold ${kbd('E')} to chew pulp`;
   else if (h.nest && (md < T.time.dawn || md >= T.time.dusk)) hint = `${kbd('R')} rest until morning`;
   else if (w.carry) hint = 'Bring it to the nest';
@@ -1322,6 +1352,10 @@ function handleEvents(events) {
       case 'aiAttack': logEvent(`worker ${e.id} attacks #${e.humanHex.slice(0, 4)}`); break;
       case 'alarm': logEvent('alarm pheromone'); break;
       case 'extScheduled': toast(`Exterminator booked for ${dayLabel(e.arriveMinute)}`, 'var(--red)', 3); logEvent('exterminator booked'); break;
+      case 'muniStart': toast('The council sent pest control. Bait stations on the trees.', 'var(--red)', 3.4); logEvent(`pest control: ${e.keys.length} chunks baited`); break;
+      case 'muniEnd': logEvent('pest control packed up'); break;
+      case 'baitTaken': if (e.driven) toast('Meat from the station', 'var(--yellow)', 1.4); break;
+      case 'poisoned': if (e.id === sim.drivenId) toast('The brood is dying. That meat was poisoned.', 'var(--red)', 3.4); else logEvent(`a forager brought poison home · ${fmt(e.adults + e.larvae)} died`); break;
       case 'extArrive': toast(e.taped ? 'The exterminator is back. Collar taped.' : 'The exterminator is here. Get under his collar.', 'var(--red)', 3.2); break;
       case 'extAbort': toast('The exterminator gives up for today', 'var(--yellow)', 3); break;
       case 'extCancelled': toast('Exterminator cancelled', 'var(--yellow)', 2.4); break;
@@ -1526,6 +1560,7 @@ function frame(now) {
     updateStare(dt);
     if (tm) { tm('wasps+cam', t0); t0 = performance.now(); }
     renderCritters(t);
+    renderBaits();
     renderBirdsAndSpiders(t, dt);
     renderSwats(t);
     renderSprays();

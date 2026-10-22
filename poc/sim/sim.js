@@ -854,6 +854,7 @@ export class Sim {
     if (c && w.state === 'fly') { this._perch(w, c); return; }
     const prey = this._preyNear(w);
     if (prey) { this._catch(w, prey); return; }
+    if (!w.carry && this._baitNear(w)) { this._takeBait(w); return; }
     if (!w.carry && this._woodNear(w)) { w.state = 'chewing'; w.chew = 0; w.vx = w.vy = w.vz = 0; this.emit('chewStart', { id: w.id }); return; }
     if (w.carry) this.emit('carrying', { kind: w.carry.kind });
   }
@@ -863,6 +864,7 @@ export class Sim {
     this.hint = {
       opening: c && c.opening >= 0 ? c.openingKey : null,
       prey: !w.carry && this._preyNear(w) ? this._preyNear(w).kind : null,
+      bait: !w.carry && !!this._baitNear(w),
       wood: !w.carry && !c && this._woodNear(w),
       nest: dist2(w, this.nest.entrance) < 0.4 * 0.4,
       site: w.caste === 'queen' && !this.colony.sited && this._trunkNear(w) ? true : false,
@@ -979,6 +981,9 @@ export class Sim {
       col.cells += w.carry.amount * T.colony.cellsPerPulp;
       col.stats.deposited.pulp += w.carry.amount;
       this.emit('deposit', { id: w.id, kind: 'cells', amount: w.carry.amount * T.colony.cellsPerPulp, what: 'cells' });
+      w.carry = null; deposited = true;
+    } else if (w.carry && w.carry.poison) {
+      this._poison(w.carry.amount, w.id);
       w.carry = null; deposited = true;
     } else if (w.carry) {
       col[w.carry.kind] += w.carry.amount;
@@ -1790,6 +1795,88 @@ export class Sim {
     if (!this._surfaceBelow(w)) { w.state = 'fly'; w.walking = false; w.vy = 0; this.emit('walkOff', { id: w.id }); }
   }
 
+  // ---------------- level 5: municipal pest control (GDD 8.10)
+
+  // Runs first in every colony tick on every peer. It reads only shared state (chunk escalation and the clock),
+  // so every peer starts and ends a campaign on the same tick.
+  _muniTick() {
+    const M = T.muni, m = this.muni || (this.muni = { n: 0, active: null, cooldownUntil: 0 });
+    if (m.active) {
+      if (this.minute >= m.active.until) {
+        for (const k of m.active.keys) { const st = this.chunkState.get(k); if (st) st.esc *= M.aftermath; }
+        this.emit('muniEnd', { n: m.active.n, keys: m.active.keys });
+        m.active = null; m.cooldownUntil = this.minute + M.cooldownDays * 1440;
+      } else this._muniAbstract();
+      return;
+    }
+    if (this.minute < m.cooldownUntil) return;
+    const keys = [...this.chunkState.keys()].sort();
+    for (const k of keys) {
+      if (this.escLevel(k) < M.level) continue;
+      const [cx, cz] = k.split(',').map(Number), area = [];
+      for (let dz = -M.radius; dz <= M.radius; dz++) for (let dx = -M.radius; dx <= M.radius; dx++) area.push(chunkKey(cx + dx, cz + dz));
+      m.n++;
+      m.active = { n: m.n, center: k, keys: area, until: this.minute + M.days * 1440 };
+      this.emit('muniStart', { n: m.n, center: k, keys: area, until: m.active.until });
+      return;
+    }
+  }
+
+  // Bait stations hang on tree trunks at chest height, picked by hash from the chunk's trees
+  _baitsIn(key) {
+    const m = this.muni;
+    if (!m || !m.active || !m.active.keys.includes(key)) return [];
+    const rec = this.records.get(key);
+    if (!rec) return [];
+    const cache = this._baitCache || (this._baitCache = new Map()), ck = m.active.n + '|' + key;
+    if (cache.has(ck)) return cache.get(ck);
+    const trees = rec.content.trees.map((t, i) => ({ t, h: h32(m.active.n, rec.cx, rec.cz, i, 77) })).sort((a, b) => a.h - b.h).slice(0, T.muni.baitsPerChunk);
+    const out = trees.map(({ t, h }) => {
+      const a = h * 6.28318, r = t.r + 0.03;
+      return { x: t.x + r * dcos(a), y: T.muni.baitHeight, z: t.z + r * dsin(a), key };
+    });
+    if (cache.size > 64) cache.clear();
+    cache.set(ck, out);
+    return out;
+  }
+
+  muniBaits() { const m = this.muni; if (!m || !m.active) return []; return this.activeChunks.flatMap((r) => this._baitsIn(chunkKey(r.cx, r.cz))); }
+
+  _baitNear(w) {
+    const r2 = T.muni.baitDist * T.muni.baitDist;
+    for (const b of this.muniBaits()) if (dist2(w, b) <= r2) return b;
+    return null;
+  }
+
+  _takeBait(w) {
+    w.carry = { kind: 'protein', amount: T.muni.baitProtein, what: 'bait', poison: true };
+    this.emit('baitTaken', { id: w.id, driven: w.id === this.drivenId });
+  }
+
+  // A poisoned load reaches the nest: it is fed to larvae and shared with adults
+  _poison(amount, byId) {
+    const M = T.muni, col = this.colony;
+    const inside = Math.max(0, col.adults - this._own().filter((x) => x.caste !== 'queen').length);
+    const adults = Math.min(inside, col.adults * M.poisonAdults * amount);
+    const lf = Math.min(1, M.poisonLarvae * amount), larvae = col.larvae * lf + col.rLarvae * lf;
+    col.adults -= adults; col.larvae -= col.larvae * lf; col.rLarvae -= col.rLarvae * lf;
+    col.stats.poisoned = (col.stats.poisoned || 0) + adults + larvae;
+    this.emit('poisoned', { id: byId, adults, larvae });
+  }
+
+  // Abstract foragers in a baited area bring poison home too, in proportion to how hard they hunt protein
+  _muniAbstract() {
+    const m = this.muni, col = this.colony;
+    if (!col.nestAlive || !m.active.keys.includes(this.nest.key)) return;
+    if (!(isDaylight(this.minute) && !this.raining && this.canFly())) return;
+    const a = T.alloc[col.alloc], share = a.protein / ((a.sugar + a.protein + a.pulp) / 3);
+    const dtDay = 60 / this.dayTicks;
+    const inside = Math.max(0, col.adults - this._own().length);
+    const kill = inside * T.muni.abstractKillPerDay * share * dtDay;
+    col.adults -= kill; col.larvae -= col.larvae * T.muni.abstractKillPerDay * share * dtDay;
+    col.stats.poisoned = (col.stats.poisoned || 0) + kill;
+  }
+
   _nearCan(w) {
     for (const rec of this.activeChunks) for (const c of rec.content.cans) { const dx = w.x - c.x, dz = w.z - c.z; if (dx * dx + dz * dz < 0.09) return true; }
     return false;
@@ -1871,6 +1958,7 @@ export class Sim {
       if (ai.mode === 'outbound' && dist2(w, tp) < T.ai.arrive * T.ai.arrive) { ai.mode = 'collect'; ai.timer = this.tick + T.ai.collectTicks; }
       if (ai.mode === 'collect') {
         if (ai.target.kind === 'prey') { const p = this._preyNear(w); if (p) { this._catch(w, p); ai.mode = 'return'; } else if (this.tick > ai.timer) ai.mode = 'pick'; }
+        else if (ai.target.kind === 'bait') { if (!w.carry) this._takeBait(w); ai.mode = 'return'; ai.target = null; }
         else if ((ai.cargo || 0) >= 0.95 || this.tick > ai.timer + 300) ai.mode = 'return';
       }
       return cmd;
@@ -1957,6 +2045,7 @@ export class Sim {
   // ---------------- colony tick (1 Hz)
 
   _colonyTick() {
+    this._muniTick();
     const col = this.colony;
     const daylight = isDaylight(this.minute) && !this.raining && this.canFly();
     const frac = this.seasonFrac;
@@ -2077,6 +2166,11 @@ export class Sim {
       } else if (w.role === 'protein') {
         c.flies.forEach((f, i) => { if ((st.caughtFly[i] || 0) <= this.tick) consider({ kind: 'prey', sub: 'fly', key, i, c: ri }, flyPos(f, this.tick)); });
         c.caterpillars.forEach((f, i) => { if (!st.caughtCat[i]) consider({ kind: 'prey', sub: 'cat', key, i, c: ri + 20 }, f); });
+        this._baitsIn(key).forEach((b, i) => {
+          // a bait station smells of meat from a long way off
+          const s = Math.sqrt(dist2(w, b)) - T.muni.aiLure + h32(w.id, i, ri + 70, this.day) * 12;
+          if (s < bs) { bs = s; best = { kind: 'bait', key, i, c: ri + 70 }; }
+        });
       } else {
         c.boxes.forEach((b, i) => { if (b.wood && !b.hive) consider({ kind: 'wood', key, i, c: ri + 40 }, { x: (b.minx + b.maxx) / 2, y: b.maxy, z: (b.minz + b.maxz) / 2 }); });
       }
@@ -2092,6 +2186,7 @@ export class Sim {
     const c = rec.content, st = this.cs(t.key);
     if (t.kind === 'sugar') { const s = c.sugar[t.i]; return { x: s.x, y: s.y + 0.012, z: s.z }; }
     if (t.kind === 'trap') return c.traps[t.i];
+    if (t.kind === 'bait') return this._baitsIn(t.key)[t.i] || null;
     if (t.kind === 'wood') { const b = c.boxes[t.i]; return { x: (b.minx + b.maxx) / 2 + 0.2 * (h32(w.id, t.i) - 0.5), y: b.maxy + T.wasp.radius + 0.008, z: (b.minz + b.maxz) / 2 }; }
     if (t.sub === 'fly') return (st.caughtFly[t.i] || 0) > this.tick ? null : flyPos(c.flies[t.i], this.tick);
     if (t.sub === 'cat') return st.caughtCat[t.i] ? null : c.caterpillars[t.i];

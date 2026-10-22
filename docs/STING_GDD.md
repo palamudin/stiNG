@@ -882,7 +882,7 @@ On Main the entity count is dominated by AI wasps: one player's colony can hold 
 | Q-14 | Can a colony line move between worlds? | No; a line belongs to its world |
 | Q-15 | What happens to an offline player's colony on Main | Cell server runs it at the abstract tier (11.12) |
 | Q-10 | Do lineage colonies count toward keeping the line alive? | Yes; implemented as sister nests in the PoC |
-| Q-11 | Art scope for thousands of distinct humans | Open; modular bodies and clothing driven by traits |
+| Q-11 | Art scope for thousands of distinct humans | Open; modular bodies and clothing driven by traits. For the Unity port, consider licensed low-poly modular human packs (assets, not code; check licenses) over the PoC's capsule figures |
 | Q-16 | Humans outside a peer's interest | Settled (18.9): committed interest windows; humans simulated over the union |
 | Q-17 | Should the colony economy balance stores late in the season (sugar piles up)? | Settled (18.11): stores are capped at a few days of need |
 
@@ -940,6 +940,9 @@ Driven and AI wasps share flight, collision, contact, stinging, feeding, carryin
 | 2 | 8 | Cans covered, citronella on tables (crop drains faster within 1.5 m), panic gain ×1.3 |
 | 3 | 15 | People with high escalation trait spray; sugar-bottle traps hang from tables and drown feeding wasps |
 | 4 | 25 | Within one chunk of the nest: the exterminator is booked |
+| 5 | 40 | Municipal pest control: the 3×3 chunks around the hot chunk are baited for 3 days, then the area's points halve and it cannot be baited again for 4 days |
+
+**Level 5 as built.** Bait stations hang on tree trunks at chest height (three per chunk, picked by hash). Each holds poisoned meat: a wasp that takes it carries a full protein load, and depositing it kills 8% of larvae and 3% of adults per unit instead of feeding anyone. Abstract foragers in a baited nest area bring poison home at 18% of the inside adults per day, scaled by the protein share of the colony's foraging allocation, so switching to sugar or building during a campaign is the counter-play. The campaign reads only shared state (chunk escalation and the clock), so every peer starts and ends it on the same tick; the lab confirms it on a bad link with humans agreeing at every check.
 
 Points: sting 1, full sting +1, wasp killed by a human 0.3, swat at a hovering wasp 0.15. Points decay 25% per day. The exterminator wears a bee suit: every zone is thick except the collar on his first visit. Stinging under his collar until his panic reaches 0.8 makes him give up for the day. He returns the next morning with the collar taped. The booking is cancelled if the nest area calms below level 3.
 

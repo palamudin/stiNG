@@ -115,6 +115,23 @@ for (const name of ['lan', 'good', 'bad', 'awful']) {
   ok(raided && hunted >= 1 && grappled >= 1, 'a raid by another player sends the rival guards after that player, and they catch it');
 }
 
+// Level 5 across peers: the campaign reads only shared state, so both peers start and end it on the same tick
+{
+  const lab = new NetLab({ seed: 1234 }, 'bad');
+  const botA = stingBot({ plan: 'jab', rest: 200 });
+  const starts = { a: 0, b: 0 }, ends = { a: 0, b: 0 };
+  for (let i = 0; i < 26000; i++) {
+    if (i === 600) { lab.a.cs('0,0').esc = 45; lab.b.cs('0,0').esc = 45; } // as if the same committed stings landed on both
+    lab.step(botA(lab.a));
+    for (const e of lab.a.drainEvents()) { if (e.type === 'muniStart') starts.a = lab.a.tick; if (e.type === 'muniEnd') ends.a = lab.a.tick; }
+    for (const e of lab.bEvents || []) { if (e.type === 'muniStart') starts.b = lab.b.tick; if (e.type === 'muniEnd') ends.b = lab.b.tick; }
+    if (i % 60 === 0) lab.check();
+  }
+  const c = lab.checks;
+  console.log(`  municipal campaign: started A ${starts.a} B ${starts.b}, ended A ${ends.a} B ${ends.b}; humans ${c.agreed}/${c.compared}`);
+  ok(starts.a && starts.a === starts.b && ends.a && ends.a === ends.b && c.agreed === c.compared, 'both peers run the municipal campaign on the same ticks and still agree on every human');
+}
+
 // Wire format: quantization error and bandwidth (GDD 11.12)
 {
   const m = { mk: 'state', peer: 1, tick: 123456, wasps: [
