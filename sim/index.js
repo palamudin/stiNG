@@ -5,3 +5,5 @@ export * from './body.js';
 export * from './world.js';
 export * from './colony.js';
 export * from './sim.js';
+export * from './bots.js';
+export * from './net.js';

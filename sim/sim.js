@@ -19,9 +19,21 @@ const dist2 = (a, b) => { const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z; 
 const byId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 const byHumanId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
+// Events that change shared world state. Most commit at the end of the consequence window so every
+// peer applies them on the same tick (GDD 11.5); a few cosmetic or owner-decided ones apply on receipt.
+const IMMEDIATE = new Set(['caught', 'beeAlarm', 'died']);
+
 export class Sim {
-  constructor(settings = {}) {
+  constructor(settings = {}, opts = {}) {
     this.settings = { ...DEFAULT_SETTINGS, ...settings };
+    this.peer = opts.peer | 0;
+    this.net = !!opts.net;
+    this.noAI = !!opts.noAI;
+    this.outbox = [];
+    this.pending = [];
+    this.evSeq = 0;
+    this.remote = new Map();
+    this.netStats = { sent: 0, recv: 0, late: 0, lateMax: 0 };
     this.seed = u64(this.settings.seed ?? 1234);
     this.tpm = ticksPerMinute(this.settings);
     this.dayTicks = this.tpm * 1440;
@@ -40,9 +52,9 @@ export class Sim {
     this.hiveAlarms = new Map();
     this.colony = newColony();
     this.stung = new Set();
-    this.stats = { stings: 0, aiStings: 0, full: 0, deaths: 0, causes: {}, caught: 0, deposits: 0 };
+    this.stats = { stings: 0, aiStings: 0, remoteStings: 0, full: 0, deaths: 0, causes: {}, caught: 0, deposits: 0 };
     this.wasps = [];
-    this.nextWaspId = 1;
+    this.nextWaspId = this.peer * 1000000 + 1;
     this.ext = { visit: 0, state: 'none', arriveMinute: 0, hm: null };
     this.prevAct = 0;
     this.pressUsed = false;
@@ -73,7 +85,7 @@ export class Sim {
   humanByHex(hex) { return this.humans.get(hex) || (this.ext.hm && this.ext.hm.hex === hex ? this.ext.hm : undefined); }
   cs(key) {
     let s = this.chunkState.get(key);
-    if (!s) { s = { esc: 0, caughtFly: {}, caughtCat: {}, beeLost: {}, chewed: 0 }; this.chunkState.set(key, s); }
+    if (!s) { s = { esc: 0, caughtFly: {}, caughtCat: {}, beeLost: {}, chewed: 0, lastSting: null }; this.chunkState.set(key, s); }
     return s;
   }
   escLevel(key) {
@@ -190,6 +202,8 @@ export class Sim {
     this.tick++;
     const m = clockMinutes(this.tick + this.clockOffset, this.settings);
     if (m !== this.minute) this._minute(m);
+    this._applyPending();
+    if (this.remote.size) this._extrapolateRemote();
 
     const act = cmd.act | 0, edge = act & ~this.prevAct;
     this.prevAct = act;
@@ -218,6 +232,184 @@ export class Sim {
     // 5. respawn of the driven wasp
     if (!this._driven() && !this.extinct && this.tick >= this.respawnAt) this._respawn();
     this._updateChunks();
+    if (this.net && this.tick % T.net.stateEvery === 0) this._sendState();
+  }
+
+  // ---------------------------------------------------------------- networking (GDD 11)
+
+  // Every change to shared world state is an event. Its immediate part (swats, sprays) runs as soon as a
+  // peer has it; its human-state part (panic, flight, counters, alert points) commits on one agreed tick,
+  // T.net.commitTicks after it happened, so every peer applies it identically (GDD 11.5).
+  _publish(ev) {
+    ev.mk = 'ev'; ev.peer = this.peer; ev.seq = ++this.evSeq; ev.tick = this.tick;
+    ev.commit = this.tick + T.net.commitTicks;
+    if (this.net) { this.outbox.push(ev); this.netStats.sent++; }
+    this._applyImmediate(ev);
+    if (!IMMEDIATE.has(ev.type)) this._schedule(ev);
+  }
+
+  _schedule(ev) {
+    const before = (a, b) => a.commit !== b.commit ? a.commit < b.commit : a.peer !== b.peer ? a.peer < b.peer : a.seq < b.seq;
+    let i = this.pending.length;
+    while (i > 0 && before(ev, this.pending[i - 1])) i--;
+    this.pending.splice(i, 0, ev);
+  }
+
+  receive(msgs) {
+    for (const m of msgs) {
+      this.netStats.recv++;
+      if (m.mk === 'state') { this._remoteState(m); continue; }
+      this._applyImmediate(m);
+      if (IMMEDIATE.has(m.type)) continue;
+      if (m.commit < this.tick) { this.netStats.late++; this.netStats.lateMax = Math.max(this.netStats.lateMax, this.tick - m.commit); this.emit('lateEvent', { type: m.type, by: this.tick - m.commit }); }
+      this._schedule(m);
+    }
+  }
+
+  _applyPending() {
+    while (this.pending.length && this.pending[0].commit <= this.tick) this._applyCommit(this.pending.shift());
+  }
+
+  _sendState() {
+    const wasps = this.wasps.map((w) => ({
+      id: w.id, caste: w.caste, x: w.x, y: w.y, z: w.z, vx: w.vx, vy: w.vy, vz: w.vz, state: w.state,
+      carry: w.carry ? w.carry.what : null, under: w.under ? w.under.hex : null,
+    }));
+    this.outbox.push({ mk: 'state', peer: this.peer, tick: this.tick, wasps });
+  }
+
+  _remoteState(m) {
+    const ids = new Set();
+    for (const r of m.wasps) {
+      ids.add(r.id);
+      const e = this.remote.get(r.id) || {};
+      Object.assign(e, r, { peer: m.peer, stamp: m.tick, px: r.x, py: r.y, pz: r.z, seen: this.tick });
+      this.remote.set(r.id, e);
+    }
+    for (const [id, e] of this.remote) if (e.peer === m.peer && !ids.has(id) && e.stamp < m.tick) this.remote.delete(id);
+  }
+
+  // Remote wasps are drawn where they probably are now: last state plus velocity (GDD 11.4)
+  _extrapolateRemote() {
+    for (const [id, e] of this.remote) {
+      if (this.tick - e.seen > T.net.remoteTimeout) { this.remote.delete(id); continue; }
+      const dt = (this.tick - e.stamp) / 60;
+      const moving = e.state === 'fly' || e.state === 'stunned';
+      e.x = e.px + (moving ? e.vx * dt : 0); e.y = Math.max(T.wasp.radius, e.py + (moving ? e.vy * dt : 0)); e.z = e.pz + (moving ? e.vz * dt : 0);
+    }
+  }
+
+  _anyWasp(id) { return this.waspById(id) || this.remote.get(id) || null; }
+
+  _applyImmediate(ev) {
+    const mine = ev.peer === this.peer;
+    switch (ev.type) {
+      case 'sting': {
+        const hm = this.humanByHex(ev.humanHex);
+        if (!hm) break;
+        for (const s of ev.swats) this.swats.push({ ...s, frameHex: hm.hex, stungHex: hm.hex, contactTick: ev.tick, hits: [], underOnly: ev.under ? ev.waspId : 0, byWasp: ev.waspId });
+        if (!mine) this.emit('remoteSting', { waspId: ev.waspId, humanHex: hm.hex, zone: ev.zone, contactTick: ev.tick, under: ev.under, swats: ev.swats });
+        break;
+      }
+      case 'preSwat': {
+        const hm = this.humanByHex(ev.humanHex);
+        if (!hm) break;
+        this.swats.push({
+          actorId: hm.id, actorHex: hm.hex, frameHex: hm.hex, stungHex: hm.hex, kind: ev.kind, start: ev.start, window: ev.window,
+          center: ev.center, radius: ev.radius, kills: ev.kills, contactTick: ev.tick, hits: [], pre: true, targetId: ev.waspId, underOnly: 0,
+        });
+        if (mine) hm.cooldown = Math.max(hm.cooldown, ev.tick + T.esc.cooldownTicks);
+        this.emit('preSwat', { humanHex: hm.hex, waspId: ev.waspId, kind: ev.kind, start: ev.start, window: ev.window, center: ev.center, why: ev.why, contactTick: ev.tick });
+        break;
+      }
+      case 'press': {
+        const hm = this.humanByHex(ev.humanHex);
+        if (!hm) break;
+        for (const s of ev.swats) this.swats.push({ ...s, actorHex: hm.hex, frameHex: hm.hex, stungHex: hm.hex, contactTick: ev.tick, hits: [], underOnly: ev.waspId, byWasp: ev.waspId });
+        this.emit('press', { humanHex: hm.hex, start: ev.swats[0].start, center: ev.swats[0].center, contactTick: ev.tick });
+        break;
+      }
+      case 'spray':
+        this.sprays.push({ hex: ev.humanHex, start: ev.start, end: ev.end });
+        this.emit('spray', { humanHex: ev.humanHex });
+        break;
+      case 'caught': {
+        if (mine) break;
+        const st = this.cs(ev.key);
+        if (ev.what === 'fly') st.caughtFly[ev.i] = ev.tick + T.prey.flyRespawnTicks;
+        else if (ev.what === 'caterpillar') st.caughtCat[ev.i] = 1;
+        else (st.beeLost[ev.hive] || (st.beeLost[ev.hive] = {}))[ev.i] = 1;
+        break;
+      }
+      case 'beeAlarm': {
+        if (mine || !this.records.get(ev.key)) break;
+        const t = this.remote.get(ev.target);
+        if (t) this._alarmHive(ev.key, ev.h, t, ev.radius, true);
+        break;
+      }
+      case 'died':
+        if (!mine) { this.remote.delete(ev.waspId); this.emit('remoteDied', { waspId: ev.waspId, cause: ev.cause, x: ev.x, y: ev.y, z: ev.z }); }
+        break;
+    }
+  }
+
+  _applyCommit(ev) {
+    const mine = ev.peer === this.peer;
+    switch (ev.type) {
+      case 'sting': {
+        const hm = this.humanByHex(ev.humanHex);
+        if (!hm) break;
+        hm.panic = Math.min(1, hm.panic + ev.panicGain);
+        hm.stungCount++;
+        const first = !this.stung.has(hm.hex);
+        this.stung.add(hm.hex);
+        if (!mine) this.stats.remoteStings++; else if (ev.driven) this.stats.stings++; else this.stats.aiStings++;
+        this.addEsc(hm.x, hm.z, T.esc.sting);
+        this.cs(hm.chunk).lastSting = { x: ev.sx, z: ev.sz };
+        this.emit('sting', { waspId: ev.waspId, remote: !mine, driven: mine && ev.driven, humanHex: hm.hex, zone: ev.zone, first, under: ev.under });
+        if (ev.flee && hm.state === 'idle') this._startFlee(hm, { x: ev.sx, z: ev.sz });
+        break;
+      }
+      case 'deepen': {
+        const hm = this.humanByHex(ev.humanHex);
+        if (!hm) break;
+        hm.panic = Math.min(1, hm.panic + ev.extra);
+        this.addEsc(hm.x, hm.z, T.esc.full);
+        this.emit('deepen', { humanHex: hm.hex, zone: ev.zone });
+        if (hm.panic >= T.resolve.fleePanic && hm.state === 'idle') this._startFlee(hm, { x: ev.sx, z: ev.sz });
+        break;
+      }
+      case 'preSwat': {
+        const hm = this.humanByHex(ev.humanHex);
+        if (hm) this.addEsc(hm.x, hm.z, T.esc.nuisance);
+        break;
+      }
+      case 'rip': {
+        const hm = this.humanByHex(ev.humanHex);
+        if (!hm || hm.clothing.topOff) break;
+        hm.clothing = { ...hm.clothing, topOff: true, stiffness: 0 };
+        this.emit('rip', { humanHex: hm.hex });
+        if (hm.state === 'idle') this._startFlee(hm, { x: ev.sx, z: ev.sz });
+        break;
+      }
+      case 'killed': {
+        const hm = this.humanByHex(ev.byHex);
+        if (hm) this.addEsc(hm.x, hm.z, T.esc.death);
+        break;
+      }
+    }
+  }
+
+  // Agreement check between peers: everything about the shared humans
+  humanHash() {
+    const buf = new Float64Array(1), bytes = new Uint8Array(buf.buffer);
+    let h = 0x811c9dc5;
+    const f = (v) => { buf[0] = v; for (let i = 0; i < 8; i++) { h ^= bytes[i]; h = Math.imul(h, 0x01000193); } };
+    const states = ['away', 'arrive', 'idle', 'flee', 'return', 'leave', 'treat'];
+    for (const hm of this.active) { f(hm.x); f(hm.z); f(hm.panic); f(states.indexOf(hm.state)); f(hm.stungCount); f(hm.clothing.topOff ? 1 : 0); }
+    for (const s of this.chunkState.values()) f(s.esc);
+    f(this.stung.size);
+    return (h >>> 0).toString(16).padStart(8, '0');
   }
 
   _record(cmd) {
@@ -238,7 +430,9 @@ export class Sim {
     if (newDay !== this.day) {
       const days = newDay - this.day;
       this.day = newDay;
-      for (const s of this.chunkState.values()) { s.esc *= Math.pow(1 - T.esc.decayPerDay, days); s.beeLost = {}; s.caughtCat = {}; }
+      let k = 1;
+      for (let i = 0; i < days; i++) k *= 1 - T.esc.decayPerDay;
+      for (const s of this.chunkState.values()) { s.esc *= k; s.beeLost = {}; s.caughtCat = {}; }
       this.emit('newDay', { day: newDay });
     }
   }
@@ -263,6 +457,7 @@ export class Sim {
   }
 
   _rest() {
+    if (this.net) { this.emit('cantRest', { why: 'net' }); return; }
     const d = this._driven();
     if (!d || dist2(d, NEST_ENTRANCE) > 0.4 * 0.4) { this.emit('cantRest', { why: 'away' }); return; }
     const md = minuteOfDay(this.minute);
@@ -497,7 +692,8 @@ export class Sim {
     return true;
   }
 
-  // Shared by stings outside and under clothing
+  // Shared by stings outside and under clothing. The stinger's peer resolves the plan at contact and
+  // publishes it; every peer (this one too) applies the human side at the commit tick (GDD 11.5).
   _applySting(w, hm, zone, pointBody, mode, under) {
     const driven = w.id === this.drivenId;
     const ev = { contactTick: this.tick, humanHex: hm.hex, zone, contactPointBody: { ...pointBody }, mode, under };
@@ -507,22 +703,9 @@ export class Sim {
       clothingStiffness: hm.clothing.stiffness, panic: hm.panic, companions: comps, panicMul: lvl >= 2 ? 1.3 : 1,
     });
     const actorHex = (id) => (id === hm.id ? hm.hex : comps.find((x) => x.id === id).hex);
-    const swats = plan.swats.map((s) => ({
-      ...s, actorHex: actorHex(s.actorId), frameHex: hm.hex, stungHex: hm.hex, contactTick: this.tick, hits: [],
-      underOnly: under ? w.id : 0, byWasp: w.id,
-    }));
-    for (const s of swats) this.swats.push(s);
-    hm.panic = Math.min(1, hm.panic + plan.panicGain);
-    hm.stungCount++;
-    const first = !this.stung.has(hm.hex);
-    this.stung.add(hm.hex);
-    if (driven) this.stats.stings++; else this.stats.aiStings++;
-    this.addEsc(hm.x, hm.z, T.esc.sting);
-    this.emit('sting', {
-      waspId: w.id, driven, humanHex: hm.hex, zone, contactPointBody: pointBody, first, under, panicGain: plan.panicGain,
-      swats: swats.map((s) => ({ actorHex: s.actorHex, kind: s.kind, start: s.start, window: s.window, radius: s.radius, kills: s.kills, center: s.center })),
-    });
-    if (plan.flee && hm.state === 'idle') this._startFlee(hm, w);
+    const swats = plan.swats.map((s) => ({ actorHex: actorHex(s.actorId), kind: s.kind, start: s.start, window: s.window, radius: s.radius, kills: s.kills, center: { ...s.center } }));
+    this.emit('stingContact', { waspId: w.id, driven, humanHex: hm.hex, zone, first: !this.stung.has(hm.hex), under, swats, contactTick: this.tick });
+    this._publish({ type: 'sting', waspId: w.id, driven, humanHex: hm.hex, zone, under, swats, panicGain: plan.panicGain, flee: plan.flee, sx: w.x, sz: w.z });
   }
 
   _attached(w, cmd, driven) {
@@ -536,11 +719,8 @@ export class Sim {
       a.deepened = true;
       const extra = (T.resolve.fullPain - T.resolve.jabPain) * ZONES[a.zone].sens * hm.tr.panicSusceptibility;
       w.venom = Math.max(0, w.venom - T.venom.deepen);
-      hm.panic = Math.min(1, hm.panic + extra);
       this.stats.full++;
-      this.addEsc(hm.x, hm.z, T.esc.full);
-      this.emit('deepen', { waspId: w.id, humanHex: hm.hex, zone: a.zone, panicGain: extra });
-      if (hm.panic >= T.resolve.fleePanic && hm.state === 'idle') this._startFlee(hm, w);
+      this._publish({ type: 'deepen', humanHex: hm.hex, zone: a.zone, extra, sx: w.x, sz: w.z });
     }
     if ((!holding && held >= T.sting.jabTicks) || a.deepened) this._detach(w, null);
   }
@@ -610,6 +790,7 @@ export class Sim {
       this._alarmHive(p.key, p.hive, w, T.bees.catchAlarmRadius * 3);
     }
     w.carry = { kind: 'protein', amount: p.protein, what: p.kind };
+    this._publish({ type: 'caught', key: p.key, what: p.kind, i: p.i, hive: p.hive });
     this.stats.caught++;
     this.emit('caught', { id: w.id, kind: p.kind });
   }
@@ -767,16 +948,14 @@ export class Sim {
     if (this.tick >= u.nextPress) {
       const point = this._underPoint(u, nodes);
       const plan = resolveSting({ contactTick: this.tick, zone: here.zone, contactPointBody: point, mode: 'jab', under: true }, hm.tr, ZONES[here.zone], { clothingStiffness: 0, panic: hm.panic, companions: [] });
-      for (const s of plan.swats) this.swats.push({ ...s, actorHex: hm.hex, frameHex: hm.hex, stungHex: hm.hex, contactTick: this.tick, hits: [], underOnly: w.id, byWasp: w.id });
-      this.emit('press', { humanHex: hm.hex, key: u.key, start: plan.swats[0].start, center: point });
+      const swats = plan.swats.map((s) => ({ kind: s.kind, start: Math.max(s.start, this.tick + T.net.commitTicks), window: s.window, radius: s.radius, kills: s.kills, center: { ...point } }));
+      this._publish({ type: 'press', humanHex: hm.hex, waspId: w.id, swats });
       u.nextPress = this.tick + hm.tr.reactionTicks + T.under.compressEvery;
     }
     // Panic high enough: the shirt comes off and the wasp with it
     if (hm.panic >= T.under.ripPanic && hm.clothing.top !== Top.Suit && !hm.clothing.topOff && here.zone !== Zone.Thighs && here.zone !== Zone.Shins && here.zone !== Zone.Groin && here.zone !== Zone.Buttocks) {
-      hm.clothing = { ...hm.clothing, topOff: true, stiffness: 0 };
-      this.emit('rip', { humanHex: hm.hex });
+      this._publish({ type: 'rip', humanHex: hm.hex, sx: w.x, sz: w.z });
       this._exitUnder(w, true);
-      if (hm.state === 'idle') this._startFlee(hm, w);
     }
   }
 
@@ -867,11 +1046,11 @@ export class Sim {
     this.stats.deaths++;
     this.stats.causes[cause] = (this.stats.causes[cause] || 0) + 1;
     if (byHex) {
-      const hm = this.humanByHex(byHex);
-      if (hm) this.addEsc(hm.x, hm.z, T.esc.death);
+      this._publish({ type: 'killed', byHex });
       this.alarms.push({ x: w.x, y: w.y, z: w.z, until: this.tick + T.alarm.ticks, killerHex: byHex });
       this.emit('alarm', { x: w.x, y: w.y, z: w.z, killerHex: byHex });
     }
+    this._publish({ type: 'died', waspId: w.id, cause, x: w.x, y: w.y, z: w.z });
     this._releaseBees(w.id);
     this.emit('waspDied', { id: w.id, driven, cause, byHex, x: w.x, y: w.y, z: w.z, adultsLeft: Math.floor(this.colony.adults) });
     if (driven) {
@@ -882,6 +1061,7 @@ export class Sim {
 
   _despawn(w) {
     this.wasps = this.wasps.filter((x) => x !== w);
+    this._publish({ type: 'died', waspId: w.id, cause: 'home', x: w.x, y: w.y, z: w.z });
     this._releaseBees(w.id);
     this.emit('waspDespawn', { id: w.id });
   }
@@ -944,7 +1124,9 @@ export class Sim {
 
   // ---------------- humans (GDD 8.2, 8.9, 8.10)
 
-  _startFlee(hm, w) {
+  // p: where the threat came from ({x, z}); null flees backwards. Never a live wasp position, so peers agree.
+  _startFlee(hm, p) {
+    const w = p;
     let dx = hm.x - (w ? w.x : hm.x - hm.fx), dz = hm.z - (w ? w.z : hm.z - hm.fz);
     let d = Math.sqrt(dx * dx + dz * dz);
     if (d < 1e-6) { dx = -hm.fx; dz = -hm.fz; d = 1; }
@@ -996,12 +1178,12 @@ export class Sim {
         if (dx * dx + dz * dz <= r2) gain += P.contagionRate * old[j] * hm.tr.sociability * hm.tr.panicSusceptibility;
       }
       hm.panic = Math.min(1, old[i] * P.decayPerStep + gain);
-      if (hm.state === 'idle' && hm.panic >= T.resolve.fleePanic) this._startFlee(hm, this._nearestWasp(hm));
+      if (hm.state === 'idle' && hm.panic >= T.resolve.fleePanic) this._startFlee(hm, this.cs(hm.chunk).lastSting || null);
       if (hm.state === 'flee') {
         hm.x += hm.dirX * P.fleeSpeed * 3 * DT; hm.z += hm.dirZ * P.fleeSpeed * 3 * DT;
         if (--hm.fleeSteps <= 0) hm.state = 'return';
       } else if (hm.state === 'return') {
-        if (hm.panic >= T.resolve.fleePanic) { this._startFlee(hm, this._nearestWasp(hm)); continue; }
+        if (hm.panic >= T.resolve.fleePanic) { this._startFlee(hm, this.cs(hm.chunk).lastSting || null); continue; }
         if (this._walkTo(hm, hm.home.x, hm.home.z, P.walkSpeed)) { this._seat(hm); this.emit('settled', { humanHex: hm.hex }); }
       } else if (hm.state === 'idle') this._annoyance(hm);
     }
@@ -1038,22 +1220,18 @@ export class Sim {
     if (hm.annoy < need) return;
     hm.annoy = 0;
     hm.cooldown = this.tick + E.cooldownTicks;
+    const start = this.tick + T.net.commitTicks + 1;
     if (why === 'spray') {
-      this.sprays.push({ hex: hm.hex, start: this.tick + 8, end: this.tick + 8 + E.sprayTicks });
-      this.emit('spray', { humanHex: hm.hex });
+      this._publish({ type: 'spray', humanHex: hm.hex, start, end: start + E.sprayTicks });
       return;
     }
     const lp = toLocal(hm, target);
     const slap = lvl >= 1;
     const kind = slap ? SwatKind.Slap : SwatKind.Brush;
-    const s = {
-      actorId: hm.id, actorHex: hm.hex, frameHex: hm.hex, stungHex: hm.hex, kind, start: this.tick + 6, window: windowFor(kind),
-      center: { x: lp.x, y: lp.y, z: lp.z }, radius: slap ? (hm.tr.style === Style.Precise ? 0.05 : 0.09) : T.resolve.brushRadius,
-      kills: slap, contactTick: this.tick, hits: [], pre: true, targetId: target.id, underOnly: 0,
-    };
-    this.swats.push(s);
-    this.addEsc(hm.x, hm.z, E.nuisance);
-    this.emit('preSwat', { humanHex: hm.hex, waspId: target.id, kind, start: s.start, window: s.window, center: s.center, why });
+    this._publish({
+      type: 'preSwat', humanHex: hm.hex, waspId: target.id, kind, start, window: windowFor(kind), why,
+      center: { x: lp.x, y: lp.y, z: lp.z }, radius: slap ? (hm.tr.style === Style.Precise ? 0.05 : 0.09) : T.resolve.brushRadius, kills: slap,
+    });
   }
 
   // ---------------- the exterminator (GDD 8.10 level 4)
@@ -1106,7 +1284,7 @@ export class Sim {
       else if (this._walkTo(hm, hm.home.ax, hm.home.az, T.ext.speed)) this._extGone(false);
       return;
     }
-    if (hm.panic >= T.ext.minPanicAbort) { this._startFlee(hm, this._nearestWasp(hm)); this.emit('extAbort', { visit: e.visit }); return; }
+    if (hm.panic >= T.ext.minPanicAbort) { this._startFlee(hm, this.cs('0,0').lastSting || null); this.emit('extAbort', { visit: e.visit }); return; }
     if (hm.state === 'arrive') {
       if (this._walkTo(hm, hm.home.x, hm.home.z, T.ext.speed)) { hm.state = 'treat'; hm.fx = 0; hm.fz = -1; hm.treat = 0; this.emit('extTreat', {}); }
     } else if (hm.state === 'treat') {
@@ -1137,10 +1315,11 @@ export class Sim {
 
   // ---------------- bees (GDD 9.2)
 
-  _alarmHive(key, h, w, radius) {
+  _alarmHive(key, h, w, radius, fromRemote = false) {
     const rec = this.records.get(key), hv = rec.content.hives[h];
     const k = key + '#' + h;
     let al = this.hiveAlarms.get(k);
+    if (!fromRemote && (!al || al.target !== w.id)) this._publish({ type: 'beeAlarm', key, h, target: w.id, radius });
     if (!al) { al = { key, h, target: w.id, until: 0, phys: {} }; this.hiveAlarms.set(k, al); this.emit('beeAlarm', { key, h, waspId: w.id }); }
     al.target = w.id;
     al.until = this.tick + T.bees.alarmTicks;
@@ -1170,7 +1349,7 @@ export class Sim {
     const attached = new Map();
     for (const [k, al] of this.hiveAlarms) {
       const rec = this.records.get(al.key), hv = rec.content.hives[al.h];
-      const target = this.waspById(al.target);
+      const target = this._anyWasp(al.target);
       if (target && dist2(target, { x: hv.ex, y: hv.ey, z: hv.ez }) < 15 * 15 && target.state !== 'dead') al.until = Math.max(al.until, this.tick + 60);
       const ending = this.tick > al.until || !target;
       let any = false;
@@ -1179,7 +1358,7 @@ export class Sim {
         any = true;
         if (p.stun > 0) { p.stun--; p.vy -= 3 * DT; p.x += p.vx * DT; p.y = Math.max(0.01, p.y + p.vy * DT); p.z += p.vz * DT; continue; }
         if (p.mode === 'ball') {
-          if (!target || target.state !== 'balled' || ending) { p.mode = 'return'; continue; }
+          if (!target || ending || (this.waspById(target.id) && target.state !== 'balled')) { p.mode = 'return'; continue; }
           p.x = target.x; p.y = target.y; p.z = target.z;
           attached.set(target.id, (attached.get(target.id) || 0) + 1);
           continue;
@@ -1261,7 +1440,7 @@ export class Sim {
     const inside = col.adults - this.wasps.length;
     const ai = this.wasps.length - (this._driven() ? 1 : 0);
     const cap = Math.min(T.ai.maxPhysical, Math.floor(col.adults * 0.4));
-    if (daylight && col.nestAlive && inside >= 1 && ai < cap && this.tick % T.ai.launchEvery < 60) this._spawnWasp(false);
+    if (!this.noAI && daylight && col.nestAlive && inside >= 1 && ai < cap && this.tick % T.ai.launchEvery < 60) this._spawnWasp(false);
   }
 
   // ---------------------------------------------------------------- AI brain (one decision per tick per AI wasp)

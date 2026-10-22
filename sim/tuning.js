@@ -91,6 +91,9 @@ export const T = {
     winterSurvival: 0.03, lineageSurvival: 0.3, winterShare: 0.5,
   },
   queen: { speedMul: 0.8, venomMul: 1.5 },
+
+  // Networking (GDD 11): human-side effects of events commit at the end of the consequence window
+  net: { commitTicks: 30, stateEvery: 3, remoteTimeout: 45 },
 };
 
 export const DEFAULT_SETTINGS = { dayMinutes: 2, humanDensity: 1, beeAggression: 1, seasonDays: 40 };
