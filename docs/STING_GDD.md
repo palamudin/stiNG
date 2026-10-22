@@ -968,6 +968,10 @@ A seated human who starts to flee rolls once (60%) to knock over the nearest dri
 
 A check that drops a shared event must give the same verdict on every honest peer, or the peers diverge. So event checks read only the event and shared human state: the commit tick must equal the event tick plus the window; sequence numbers must rise; no event from more than 2 s in the future; at most four swats, each starting between the consequence window and 4 s after contact; panic gain within 0–1; the stinger within 1.6 m of the stung human, plus 3 m/s of drift for the event's age; at most six stings per wasp in 2 s. Margins are generous so honest traffic always passes; in the lab no honest event was rejected on any link. Three strikes quarantine a peer: everything from it is dropped and its wasps disappear. Live wasp positions are checked only to decide what to draw (an impossible jump is not drawn, and after four in a row the new position is accepted), which can never cause a divergence. Open: quarantine is still each peer's own decision; on Offshoot and Main the host or cell server should adjudicate and tell everyone.
 
+### 18.14 World modifiers as built (4.8)
+
+Modifiers live in the world's settings: day length, season length, people density, human reaction speed (scales every trait's reaction ticks, never below the consequence window), escalation rate (scales alert points), bee aggression, and switches for exterminators, pest control, birds and rival colonies. The rules hash is FNV-32 over the generator version and those settings in a fixed order, independent of the seed; the lab shows both peers' hashes side by side. The tag lists only what differs from the standard rules, so an unmodified world reads "Standard rules" and others read like "slow humans · bees ×1.5 · no exterminators". Human traits are rebuilt through the same modifier path on load, so a modified world restores exactly.
+
 ---
 
 ## Appendix A — Protocode

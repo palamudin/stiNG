@@ -5,7 +5,7 @@ import {
   Sim, Act, T, DT, ZONES, ZoneName, SwatKind, SwatKindName, StyleName, TopName, BottomName, Top, Bottom,
   toWorld, toLocal, chunkKey, chunkOf, hash, Domain, rangeInt, resolveSting, zoneCover, segClosest, classify, predictedKind,
   NEST, NEST_ENTRANCE, flyPos, beePos, fmtClock, minuteOfDay, isLowerZone, broodTotal, sugarCap, proteinCap, garmentGraph, dayWeather,
-  NetLab, LINKS, birdPos, snapshot, restore, replayFrom,
+  NetLab, LINKS, birdPos, snapshot, restore, replayFrom, worldTag, rulesHash,
 } from './sim/index.js';
 
 const $ = (id) => document.getElementById(id);
@@ -1001,7 +1001,7 @@ document.addEventListener('pointerlockchange', () => {
   if (!locked && pointerLockWorked && $('winterScreen').hidden && $('extinctScreen').hidden) setPaused(true);
   if (locked) { pointerLockWorked = true; setPaused(false); }
 });
-function setPaused(p) { paused = p; input.free.held = false; $('pauseScreen').hidden = !p; input.lmb = false; input.keys.clear(); if (p) { $('saveNote').textContent = ''; saveWorld(false); } }
+function setPaused(p) { paused = p; if (p && sim) $('pauseTag').textContent = `${tagText(sim.settings)} · rules ${rulesHash(sim.settings)}`; input.free.held = false; $('pauseScreen').hidden = !p; input.lmb = false; input.keys.clear(); if (p) { $('saveNote').textContent = ''; saveWorld(false); } }
 $('bResume').addEventListener('click', () => { setPaused(false); lock(); });
 function showOpts() {
   $('optVol').value = Math.round(opts.volume * 100); $('optVolOut').textContent = Math.round(opts.volume * 100) + '%';
@@ -1131,6 +1131,7 @@ function updateLab() {
       ['Commit window', `${T.net.commitTicks} ticks · ${ms(T.net.commitTicks)} ms`],
       ['Player 2', lab.b ? (lab.joined ? `joined after ${Math.round(lab.joined / 60)} s from a ${(lab.joinBytes / 1024).toFixed(0)} KB snapshot` : 'in from the start') : `joins in ${Math.ceil((lab.joinAt - sim.tick) / 60)} s`],
       ['Events sent / received', `${sim.netStats.sent} / ${sim.netStats.recv}`], ['Late events', `${sim.netStats.late + (lab.b ? lab.b.netStats.late : 0)}${sim.netStats.lateMax ? ` (max ${sim.netStats.lateMax} ticks)` : ''}`],
+      ['Rules hash', lab.b ? `${rulesHash(sim.settings)} / ${rulesHash(lab.b.settings)}${rulesHash(sim.settings) === rulesHash(lab.b.settings) ? ' · same' : ' · DIFFERENT'}` : rulesHash(sim.settings)],
       ['Rejected by checks', `${sim.netStats.rejected}${sim.plaus.quarantined.length ? ' · player 2 quarantined' : ''}`],
       ['Humans agree', c.compared ? `${c.agreed}/${c.compared} checks${c.agreed === c.compared ? '' : ' · diverged at tick ' + c.firstDiverge}` : '-'],
       ['Player 2 drawn off by', err === null ? '-' : `${(err * 100).toFixed(1)} cm`],
@@ -1632,8 +1633,16 @@ function readSettings() {
   const raw = $('seed').value.trim();
   let seed;
   try { seed = BigInt.asUintN(64, BigInt(raw || '0')); } catch { seed = BigInt(Array.from(raw).reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7)); }
-  return { seed, dayMinutes: +$('dayLen').value, humanDensity: +$('density').value, beeAggression: +$('bees').value, seasonDays: +$('seasonLen').value, net: $('netMode').value };
+  return {
+    seed, dayMinutes: +$('dayLen').value, humanDensity: +$('density').value, beeAggression: +$('bees').value, seasonDays: +$('seasonLen').value, net: $('netMode').value,
+    reaction: +$('reaction').value, escalation: +$('escRate').value,
+    exterminator: $('sysExt').checked, pestControl: $('sysMuni').checked, birds: $('sysBirds').checked, rivals: $('sysRivals').checked,
+  };
 }
+const tagText = (st) => worldTag(st) || 'Standard rules';
+function showTag() { $('worldTag').textContent = 'World: ' + tagText(readSettings()); }
+for (const id of ['dayLen', 'density', 'seasonLen', 'bees', 'reaction', 'escRate', 'sysExt', 'sysMuni', 'sysBirds', 'sysRivals']) $(id).addEventListener('change', showTag);
+showTag();
 
 function applyDisplaySettings() {
   const low = $('gfx').value === 'low';
@@ -1654,7 +1663,7 @@ function saveWorld(manual) {
   try {
     const json = snapshot(sim);
     localStorage.setItem('sting.save', json);
-    localStorage.setItem('sting.saveMeta', JSON.stringify({ day: sim.day + 1, season: sim.season.n, phase: sim.season.phase, stung: sim.stung.size, seed: String(settings.seed), at: Date.now() }));
+    localStorage.setItem('sting.saveMeta', JSON.stringify({ day: sim.day + 1, season: sim.season.n, phase: sim.season.phase, stung: sim.stung.size, seed: String(settings.seed), tag: worldTag(sim.settings), at: Date.now() }));
     if (manual) $('saveNote').textContent = `Saved · day ${sim.day + 1}, ${(json.length / 1024).toFixed(0)} KB in this browser`;
     showContinue();
   } catch (err) { if (manual) $('saveNote').textContent = 'This browser would not store the save.'; }
@@ -1663,7 +1672,7 @@ function showContinue() {
   let meta = null;
   try { meta = JSON.parse(localStorage.getItem('sting.saveMeta') || 'null'); } catch { /* optional */ }
   $('bContinue').hidden = !meta;
-  if (meta) $('bContinue').textContent = `Continue · day ${meta.day}, season ${meta.season}`;
+  if (meta) $('bContinue').textContent = `Continue · day ${meta.day}, season ${meta.season}${meta.tag ? ' · ' + meta.tag : ''}`;
 }
 $('bSave').addEventListener('click', () => saveWorld(true));
 $('bContinue').addEventListener('click', () => {

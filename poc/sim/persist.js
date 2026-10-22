@@ -66,7 +66,7 @@ export function restore(json) {
       const hex = id.toString(16).padStart(16, '0');
       const saved = byHex.get(hex);
       if (!saved) return;
-      const tr = humanTraits(sim.seed, id);
+      const tr = sim.traitsFor(id);
       const ax = hs.x + T.panic.approachDist * dcos(hs.exit), az = hs.z + T.panic.approachDist * dsin(hs.exit);
       const home = { x: hs.x, z: hs.z, fx: hs.fx, fz: hs.fz, posture: hs.posture, ax, az };
       const hm = { id, hex, short: hex.slice(0, 4), tr, chunk: rec.cx + ',' + rec.cz, parts: { sit: bodyParts(tr, 'sit'), stand: bodyParts(tr, 'stand') }, home };

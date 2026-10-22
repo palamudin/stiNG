@@ -90,6 +90,13 @@ export class Sim {
   _driven() { for (const w of this.wasps) if (w.id === this.drivenId) return w; return null; }
   waspById(id) { for (const w of this.wasps) if (w.id === id) return w; return null; }
   humanByHex(hex) { return this.humans.get(hex) || (this.ext.hm && this.ext.hm.hex === hex ? this.ext.hm : undefined); }
+  // Human traits with the world's modifiers applied (GDD 4.8). The resolver still enforces the consequence window.
+  traitsFor(id) {
+    const tr = humanTraits(this.seed, id), r = this.settings.reaction;
+    if (r !== 1) tr.reactionTicks = Math.max(T.resolve.minConsequenceTicks, Math.round(tr.reactionTicks * r));
+    return tr;
+  }
+
   cs(key) {
     let s = this.chunkState.get(key);
     if (!s) { s = { esc: 0, caughtFly: {}, caughtCat: {}, beeLost: {}, chewed: 0, lastSting: null }; this.chunkState.set(key, s); }
@@ -104,7 +111,7 @@ export class Sim {
     return lv;
   }
   escAt(x, z) { return this.escLevel(chunkKey(chunkOf(x), chunkOf(z))); }
-  addEsc(x, z, pts) { const k = chunkKey(chunkOf(x), chunkOf(z)); const before = this.escLevel(k); this.cs(k).esc += pts; const after = this.escLevel(k); if (after !== before) this.emit('escalation', { key: k, level: after }); }
+  addEsc(x, z, pts) { const k = chunkKey(chunkOf(x), chunkOf(z)); const before = this.escLevel(k); this.cs(k).esc += pts * this.settings.escalation; const after = this.escLevel(k); if (after !== before) this.emit('escalation', { key: k, level: after }); }
   get temperature() { return tempAt(this.seed, this.minute); }
   get raining() { return isRaining(this.seed, this.minute); }
   get physicalCount() { return this._own().length; }
@@ -168,7 +175,7 @@ export class Sim {
         const hex = hex64(id);
         let hm = this.humans.get(hex);
         if (!hm) {
-          const tr = humanTraits(this.seed, id);
+          const tr = this.traitsFor(id);
           const ax = hs.x + T.panic.approachDist * dcos(hs.exit), az = hs.z + T.panic.approachDist * dsin(hs.exit);
           hm = {
             id, hex, short: hex.slice(0, 4), tr, clothing: humanClothing(this.seed, id, this.day), chunk: k,
@@ -1440,6 +1447,7 @@ export class Sim {
   // ---------------- the exterminator (GDD 8.10 level 4)
 
   _extCheck() {
+    if (!this.settings.exterminator) return;
     const e = this.ext, col = this.colony;
     if (!col.nestAlive) return;
     if (e.state === 'none' || e.state === 'cancelled') {
@@ -1783,6 +1791,7 @@ export class Sim {
   }
 
   _birds() {
+    if (!this.settings.birds) return;
     const B = T.bird;
     for (const rec of this.activeChunks) {
       const key = chunkKey(rec.cx, rec.cz);
@@ -1882,6 +1891,7 @@ export class Sim {
   // Runs first in every colony tick on every peer. It reads only shared state (chunk escalation and the clock),
   // so every peer starts and ends a campaign on the same tick.
   _muniTick() {
+    if (!this.settings.pestControl) return;
     const M = T.muni, m = this.muni || (this.muni = { n: 0, active: null, cooldownUntil: 0 });
     if (m.active) {
       if (this.minute >= m.active.until) {
@@ -1988,6 +1998,7 @@ export class Sim {
   // Rival workers come and go only around their own nest, and only on the world-authority peer
   _rivals(daylight) {
     if (this.net && this.peer !== 0) return;
+    if (!this.settings.rivals) { for (const w of this.wasps.slice()) if (w.colony !== 'own') this._despawn(w); return; }
     const activeKeys = new Set(this.activeChunks.map((r) => chunkKey(r.cx, r.cz)));
     for (const w of this.wasps.slice()) if (w.colony !== 'own' && !activeKeys.has(w.colony)) this._despawn(w);
     if (!daylight) return;

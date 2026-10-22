@@ -15,7 +15,7 @@ The tier-0 slice of the GDD, built in the browser so it can move to Unity. Same 
 | `sim/bots.js` | Scripted pilots that produce ordinary input commands | test harness |
 | `game.js` | three.js rendering, animation, camera, input, HUD, sound | Unity scene, Animator, UI |
 | `index.html` | Page shell, HUD markup and styles | UI Toolkit |
-| `test/sim.test.mjs` | 82 headless sim checks | `Sting.Core.Tests` |
+| `test/sim.test.mjs` | 88 headless sim checks | `Sting.Core.Tests` |
 | `test/net.test.mjs` | 29 network checks | `Sting.Net.Tests` |
 
 Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 18+, no packages). Play locally with `node serve.mjs`.
@@ -76,6 +76,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 50 | Escalation level 5, municipal pest control: a chunk at 40 points baits the 3×3 area for 3 days. Stations on the trees hold poisoned meat; carried home it kills larvae and workers, and abstract foragers bring poison in proportion to how hard the colony hunts protein. Afterwards the area's escalation halves | 8.10 | 12 |
 | 51 | Panic feeds the wasps: a sitter who jumps up may knock their drink over; the can lies empty and the puddle is a rich sugar source for four hours. Lidded drinks (level 2+) never spill. Part of the shared human state, so peers agree | 8.9 | 12 |
 | 52 | Plausibility checks on received traffic: commit ticks, order, future ticks, swat count and timing, panic range, sting reach from the human, sting rate. Three strikes quarantine the peer. A peer that delays the slaps aimed at its wasps is cut off within a minute; honest traffic on every link is never rejected | 11.8 | 12 |
+| 53 | World modifiers: humans react fast/normal/slow, neighborhoods easygoing/normal/touchy, and exterminators, pest control, birds and rival colonies switchable. A short tag names the world ("slow humans · bees ×1.5 · no exterminators") and a rules hash lets peers confirm they play the same world; both survive saves | 4.8 | 12 |
 
 ## Verified
 

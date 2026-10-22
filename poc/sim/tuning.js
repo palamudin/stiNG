@@ -115,4 +115,35 @@ export const T = {
     maxSpeed: 12, strikes: 3 },
 };
 
-export const DEFAULT_SETTINGS = { dayMinutes: 2, humanDensity: 1, beeAggression: 1, seasonDays: 40 };
+export const DEFAULT_SETTINGS = {
+  dayMinutes: 2, humanDensity: 1, beeAggression: 1, seasonDays: 40,
+  // World modifiers (GDD 4.8): data, not code
+  reaction: 1, escalation: 1, exterminator: true, birds: true, rivals: true, pestControl: true,
+};
+
+// The settings that change the rules, in a fixed order. Their hash is the world's rules hash: peers compare it.
+const RULE_KEYS = ['dayMinutes', 'humanDensity', 'beeAggression', 'seasonDays', 'reaction', 'escalation', 'exterminator', 'birds', 'rivals', 'pestControl'];
+export function rulesHash(settings) {
+  const s = { ...DEFAULT_SETTINGS, ...settings };
+  let h = 0x811c9dc5;
+  const str = 'gen' + GEN_VERSION + '|' + RULE_KEYS.map((k) => k + '=' + s[k]).join('|');
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return (h >>> 0).toString(16).padStart(8, '0');
+}
+
+// A short tag that tells this world apart at a glance (GDD 4.8). Empty means the standard rules.
+export function worldTag(settings) {
+  const s = { ...DEFAULT_SETTINGS, ...settings }, d = DEFAULT_SETTINGS, t = [];
+  const x = (v) => '×' + (+v.toFixed(2));
+  if (s.dayMinutes !== d.dayMinutes) t.push(`${s.dayMinutes}-min days`);
+  if (s.seasonDays !== d.seasonDays) t.push(s.seasonDays > d.seasonDays ? `long seasons (${s.seasonDays} d)` : `short seasons (${s.seasonDays} d)`);
+  if (s.humanDensity !== d.humanDensity) t.push(`people ${x(s.humanDensity)}`);
+  if (s.reaction !== d.reaction) t.push(s.reaction > 1 ? 'slow humans' : 'fast humans');
+  if (s.escalation !== d.escalation) t.push(s.escalation > 1 ? 'touchy neighborhoods' : 'easygoing neighborhoods');
+  if (s.beeAggression !== d.beeAggression) t.push(`bees ${x(s.beeAggression)}`);
+  if (!s.exterminator) t.push('no exterminators');
+  if (!s.pestControl) t.push('no pest control');
+  if (!s.birds) t.push('no birds');
+  if (!s.rivals) t.push('no rival colonies');
+  return t.join(' · ');
+}

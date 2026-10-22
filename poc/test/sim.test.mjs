@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, NEST, chunkKey, beePos, flyPos, snapshot, restore, replayFrom, stingBot,
+  garmentGraph, Top, NEST_ENTRANCE, NEST, chunkKey, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash,
 } from '../sim/index.js';
 
 let failures = 0;
@@ -511,6 +511,24 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   // the campaign ends after its days, and the area calms
   ev = run(s, (m.until - s.minute) * s.tpm + 120);
   ok(count(ev, 'muniEnd') === 1 && !s.muni.active && s.cs('0,0').esc < 25 && s.muniBaits().length === 0, `after ${T.muni.days} days the stations come down and the area calms (escalation ${s.cs('0,0').esc.toFixed(1)})`);
+}
+
+// 21. World modifiers (GDD 4.8)
+{
+  ok(worldTag({}) === '' && worldTag({ beeAggression: 1.5, exterminator: false, reaction: 1.4 }) === 'slow humans · bees ×1.5 · no exterminators', `a world's modifiers read as a short tag ("${worldTag({ beeAggression: 1.5, exterminator: false, reaction: 1.4 })}")`);
+  ok(rulesHash({ seed: 1 }) === rulesHash({ seed: 2 }) && rulesHash({}) !== rulesHash({ birds: false }) && rulesHash({}) !== rulesHash({ escalation: 1.6 }), 'the rules hash changes with every modifier and not with the seed');
+  const base = new Sim({ seed: 1234 }), slow = new Sim({ seed: 1234, reaction: 1.4 }), fast = new Sim({ seed: 1234, reaction: 0.3 });
+  const hb = base.active[0], hs = slow.humanByHex(hb.hex), hf = fast.humanByHex(hb.hex);
+  ok(hs.tr.reactionTicks === Math.round(hb.tr.reactionTicks * 1.4) && hf.tr.reactionTicks >= T.resolve.minConsequenceTicks, `slow humans react later (${hb.tr.reactionTicks} → ${hs.tr.reactionTicks} ticks); fast ones never inside the consequence window (${hf.tr.reactionTicks})`);
+  const r = restore(snapshot(slow));
+  ok(r.humanHash() === slow.humanHash() && r.humanByHex(hb.hex).tr.reactionTicks === hs.tr.reactionTicks, 'modifiers survive save and restore');
+  const touchy = new Sim({ seed: 1234, escalation: 2 });
+  touchy.addEsc(0, 0, 3); base.addEsc(0, 0, 3);
+  ok(touchy.cs('0,0').esc === 2 * base.cs('0,0').esc, 'touchy neighborhoods escalate twice as fast');
+  const quiet = new Sim({ seed: 1234, pestControl: false, exterminator: false, birds: false });
+  quiet.cs('0,0').esc = 45;
+  const ev = run(quiet, 3000);
+  ok(!count(ev, 'muniStart') && !count(ev, 'extScheduled') && !quiet.birdState.size, 'systems switched off stay off: no pest control, no exterminator, no birds');
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');

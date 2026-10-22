@@ -123,6 +123,11 @@
   .opts output { font: 500 12px var(--mono); color: var(--fg); }
   .opts input[type=range] { width: 100%; accent-color: var(--yellow); margin: 0 0 6px; }
   .opts input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--yellow); margin: 0; }
+  .systems { flex-basis: 100%; box-sizing: border-box; border: 1px solid rgba(243,238,226,.3); padding: 6px 10px 8px; margin: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--fg); }
+  .systems legend { padding: 0 4px; }
+  .start .systems label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .start .systems input { width: auto; padding: 0; accent-color: var(--yellow); margin: 0; }
+  #worldTag { color: var(--yellow); }
   .stripe { height: 10px; background: repeating-linear-gradient(-45deg, var(--yellow) 0 12px, var(--ink) 12px 24px); }
 
   #pauseScreen { z-index: 5; }
@@ -267,12 +272,21 @@
       <label class="label" for="density">People<select id="density"><option value="0.7">Fewer</option><option value="1" selected>Normal</option><option value="1.15">Busy</option></select></label>
       <label class="label" for="seasonLen">Season<select id="seasonLen"><option value="20">20 days</option><option value="40" selected>40 days</option><option value="80">80 days</option><option value="200">200 days (real)</option></select></label>
       <label class="label" for="bees">Bees<select id="bees"><option value="0.7">Calm</option><option value="1" selected>Normal</option><option value="1.5">Vicious</option></select></label>
+      <label class="label" for="reaction">Humans react<select id="reaction"><option value="0.7">Fast</option><option value="1" selected>Normal</option><option value="1.4">Slow</option></select></label>
+      <label class="label" for="escRate">Neighborhood<select id="escRate"><option value="0.6">Easygoing</option><option value="1" selected>Normal</option><option value="1.6">Touchy</option></select></label>
       <label class="label" for="gfx">Graphics<select id="gfx"><option value="high" selected>High</option><option value="low">Low (no shadows)</option></select></label>
       <label class="label" for="hudMode">HUD<select id="hudMode"><option value="full" selected>Full</option><option value="hardcore">Hardcore</option></select></label>
       <label class="label" for="netMode">Second player<select id="netMode"><option value="off" selected>Off</option><option value="lan">Bot over LAN</option><option value="good">Bot over good internet</option><option value="bad">Bot over bad internet</option><option value="awful">Bot past the window</option><option value="good+late">Bot joins after 1 min</option></select></label>
+      <fieldset class="systems"><legend class="label">Threats</legend>
+        <label><input type="checkbox" id="sysExt" checked>Exterminators</label>
+        <label><input type="checkbox" id="sysMuni" checked>Pest control</label>
+        <label><input type="checkbox" id="sysBirds" checked>Birds</label>
+        <label><input type="checkbox" id="sysRivals" checked>Rival colonies</label>
+      </fieldset>
       <button id="bStart">Fly</button>
       <button class="ghost" id="bContinue" hidden>Continue</button>
     </div>
+    <p class="label" id="worldTag">Standard rules</p>
     <p class="label" id="startNote">Personal world. Built for keyboard and mouse.</p>
   </div>
 </div>
@@ -280,6 +294,7 @@
 <div class="screen" id="pauseScreen" hidden>
   <div class="card" style="text-align:center;justify-items:center">
     <p class="sub">Paused</p>
+    <p class="label" id="pauseTag"></p>
     <div class="opts">
       <label for="optVol"><span class="label">Volume</span><output id="optVolOut" for="optVol">70%</output></label>
       <input type="range" id="optVol" min="0" max="100" step="1" value="70">
