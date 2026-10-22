@@ -88,6 +88,7 @@
   #lab { top: 0; right: 0; bottom: 0; width: min(360px, 92vw); border-left: 1px solid var(--line); padding: calc(14px + env(safe-area-inset-top, 0px)) calc(16px + env(safe-area-inset-right, 0px)) 14px 16px; }
   #nest { top: calc(150px + env(safe-area-inset-top, 0px)); left: calc(16px + env(safe-area-inset-left, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); width: min(330px, calc(100vw - 32px)); border: 1px solid var(--line); padding: 14px 16px; }
   body.nest-open #map, body.nest-open #mapcap { display: none; }
+  @media (min-width: 900px) { body.nest-open #vitals { left: calc(50% + 180px); width: min(420px, calc(100vw - 400px)); } }
   .swatline { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 3px 0; border-top: 1px solid rgba(243,238,226,.08); }
   .log { font-size: 11px; color: var(--muted); display: grid; gap: 1px; }
   .log b { color: var(--fg); font-weight: 500; }
@@ -132,6 +133,10 @@
   .start .systems label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
   .start .systems input { width: auto; padding: 0; accent-color: var(--yellow); margin: 0; }
   #worldTag { color: var(--yellow); }
+  .workers { display: grid; gap: 4px; }
+  .workers .wk { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; font-size: 11px; }
+  .workers .wk .n { font: 500 11px var(--mono); color: var(--muted); }
+  .workers .wk button { padding: 3px 8px; font-size: 10px; }
   .stripe { height: 10px; background: repeating-linear-gradient(-45deg, var(--yellow) 0 12px, var(--ink) 12px 24px); }
 
   #pauseScreen { z-index: 5; }
@@ -200,6 +205,11 @@
   <section>
     <h3>Next generation</h3>
     <dl id="nRepro"></dl>
+  </section>
+  <section>
+    <h3>Workers out</h3>
+    <div id="nWorkers" class="workers"></div>
+    <p class="label" style="margin:8px 0 0">Drive is instant within 30 m; farther, the colony relays you in 4 s.</p>
   </section>
   <section>
     <h3>Foraging</h3>

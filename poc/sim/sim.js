@@ -12,7 +12,7 @@ import {
 } from './world.js';
 import { newColony, colonyStep, destroyNest, colonyFinished, seasonPhase } from './colony.js';
 
-const CMD_FIELDS = 9; // mx, my, mz, burst, sting, yawQ, pitchQ, act, alloc
+export const CMD_FIELDS = 10; // mx, my, mz, burst, sting, yawQ, pitchQ, act, alloc, pick (a wasp id to switch to, from the colony view)
 export const Act = { Interact: 1, Switch: 2, Rest: 4 };
 
 const dist2 = (a, b) => { const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z; return dx * dx + dy * dy + dz * dz; };
@@ -243,6 +243,7 @@ export class Sim {
     this.prevAct = act;
     if (cmd.alloc > 0 && cmd.alloc <= T.alloc.length && this.colony.alloc !== cmd.alloc - 1) { this.colony.alloc = cmd.alloc - 1; this.emit('alloc', { preset: this.colony.alloc }); }
     if (edge & Act.Switch) this._possessNearest();
+    else if (cmd.pick > 0 && cmd.pick !== this.drivenId) this._possessNearest(cmd.pick);
     this._pendingSwitchTick();
     if (edge & Act.Rest) this._rest();
     if (!cmd.sting) this.pressUsed = false;
@@ -568,12 +569,12 @@ export class Sim {
     if (this.logLen + CMD_FIELDS > this.log.length) { const n = new Int32Array(this.log.length * 2); n.set(this.log); this.log = n; }
     const L = this.log, i = this.logLen;
     L[i] = cmd.mx | 0; L[i + 1] = cmd.my | 0; L[i + 2] = cmd.mz | 0; L[i + 3] = cmd.burst ? 1 : 0; L[i + 4] = cmd.sting ? 1 : 0;
-    L[i + 5] = cmd.yawQ | 0; L[i + 6] = cmd.pitchQ | 0; L[i + 7] = cmd.act | 0; L[i + 8] = cmd.alloc | 0;
+    L[i + 5] = cmd.yawQ | 0; L[i + 6] = cmd.pitchQ | 0; L[i + 7] = cmd.act | 0; L[i + 8] = cmd.alloc | 0; L[i + 9] = cmd.pick | 0;
     this.logLen += CMD_FIELDS;
   }
   static cmdAt(log, t) {
     const i = t * CMD_FIELDS;
-    return { mx: log[i], my: log[i + 1], mz: log[i + 2], burst: log[i + 3], sting: log[i + 4], yawQ: log[i + 5], pitchQ: log[i + 6], act: log[i + 7], alloc: log[i + 8] };
+    return { mx: log[i], my: log[i + 1], mz: log[i + 2], burst: log[i + 3], sting: log[i + 4], yawQ: log[i + 5], pitchQ: log[i + 6], act: log[i + 7], alloc: log[i + 8], pick: log[i + 9] };
   }
 
   _minute(m) {
@@ -593,12 +594,17 @@ export class Sim {
 
   // Q-03 settled: any worker within 30 m is free to take. Beyond that the colony relays you, after a delay, to the
   // nearest worker anywhere, or to a worker inside the nest who comes out.
-  _possessNearest() {
+  _possessNearest(pick = 0) {
     const d = this._driven();
     if (!d || d.state === 'under' || d.state === 'balled') return;
-    if (this.pendingSwitch) { this.pendingSwitch = null; this.emit('switchCancelled'); return; }
+    if (this.pendingSwitch) { const same = pick && this.pendingSwitch.target === pick; this.pendingSwitch = null; this.emit('switchCancelled'); if (!pick || same) return; }
     let best = null, bd = Infinity;
-    for (const w of this.wasps) {
+    if (pick) {
+      // the colony view asked for this one
+      const w = this.waspById(pick);
+      if (!w || w.colony !== 'own' || w === d) return;
+      best = w; bd = dist2(w, d);
+    } else for (const w of this.wasps) {
       if (w === d || w.state === 'dead' || w.colony !== 'own') continue;
       const q = dist2(w, d);
       if (q < bd) { bd = q; best = w; }

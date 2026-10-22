@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, NEST, chunkKey, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos,
+  garmentGraph, Top, NEST_ENTRANCE, NEST, chunkKey, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, CMD_FIELDS,
 } from '../sim/index.js';
 
 let failures = 0;
@@ -437,7 +437,7 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   run(a, 6000, (sim) => { const c = bot(sim); cmds.push(c); return c; });
   run(b, 6000, (sim, i) => cmds[i]);
   ok(b.stateHash() === a.stateHash(), `after 6000 more ticks of the same input the restored world is identical (${b.stateHash()})`);
-  ok(replayFrom(snap, a.log.slice(9 * 9000), 6000) === a.stateHash(), 'replaying the input recorded after a snapshot reproduces the world');
+  ok(replayFrom(snap, a.log.slice(CMD_FIELDS * 9000), 6000) === a.stateHash(), 'replaying the input recorded after a snapshot reproduces the world');
   console.log(`  snapshot size ${(snap.length / 1024).toFixed(0)} KB for ${a.records.size} chunks, ${a.humans.size} humans, ${a.wasps.length} wasps`);
 }
 
@@ -597,6 +597,18 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   ok(pend && s.drivenId === d.id, `far from every worker, switching is relayed with a delay (${pend && pend.seconds} s)`);
   ev = run(s, T.possess.relayTicks + 5, () => { place(d, { x: s.nest.x + 80, y: 2, z: s.nest.z }); return idle(); });
   ok(count(ev, 'possess') === 1 && s.drivenId !== d.id, 'after the delay you drive another worker');
+  // the colony view picks a specific worker: near ones at once, far ones through the relay
+  const me = s._driven();
+  const near = s.wasps.find((x) => x !== me && x.colony === 'own');
+  place(me, { x: near.x + 2, y: near.y, z: near.z });
+  ev = run(s, 1, () => idle({ pick: near.id }));
+  ok(count(ev, 'possess') === 1 && s.drivenId === near.id, `picking a worker in the colony view drives it (worker ${near.id})`);
+  const far = s.wasps.find((x) => x !== near && x.colony === 'own');
+  place(near, { x: far.x + 60, y: 2, z: far.z });
+  ev = run(s, 1, () => idle({ pick: far.id }));
+  // wait on the ground: hovering in the open, a bird or dragonfly would take it before the relay comes
+  ev.push(...run(s, T.possess.relayTicks + 2, () => { if (s.drivenId === near.id) { place(near, { x: far.x + 60, y: T.wasp.radius + 0.001, z: far.z }); near.state = 'landed'; } return idle(); }));
+  ok(count(ev, 'switchPending') === 1 && count(ev, 'possess') === 1 && s.drivenId !== near.id, `a far worker picked in the colony view is reached through the relay (now driving ${s.drivenId === far.id ? 'that worker' : 'a sister from the nest: it had gone home'})`);
 }
 
 // 25. Dragonflies hunt low; sheds give wall and attic nest sites (GDD 9.3, 6.6)

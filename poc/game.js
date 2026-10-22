@@ -99,7 +99,7 @@ function pick(seed, id, k, arr) { return arr[rangeInt(hash(seed, Domain.Cosmetic
 let lab = null; // two-peer network lab when a second player is on
 let sim = null, settings = { seed: 1234, dayMinutes: 2, humanDensity: 1, beeAggression: 1, seasonDays: 40 };
 let running = false, paused = false;
-const input = { keys: new Set(), lmb: false, yaw: 0, pitch: 0, alloc: 1, autopilot: null, free: { yaw: 0, pitch: 0, held: false } };
+const input = { pick: 0, keys: new Set(), lmb: false, yaw: 0, pitch: 0, alloc: 1, autopilot: null, free: { yaw: 0, pitch: 0, held: false } };
 // Player options from the Esc menu, kept per browser
 const opts = { volume: 0.7, sens: 1, invert: false };
 try { Object.assign(opts, JSON.parse(localStorage.getItem('sting.options') || '{}')); } catch { /* optional */ }
@@ -1074,8 +1074,10 @@ function buildCmd() {
     yawQ: Math.round(input.yaw * 1e4), pitchQ: Math.round(input.pitch * 1e4),
     act: (k.has('KeyE') || (gp && gp.b(0)) ? Act.Interact : 0) | (k.has('KeyQ') || (gp && gp.b(3)) ? Act.Switch : 0) | (k.has('KeyR') || (gp && gp.b(2)) ? Act.Rest : 0),
     alloc: input.alloc,
+    pick: input.pick ? (input.pick = 0, pickOnce) : 0,
   };
 }
+let pickOnce = 0; // a colony-view pick goes out in exactly one command
 
 addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
@@ -1179,7 +1181,28 @@ function logEvent(text) {
   ui.log.length = Math.min(ui.log.length, 16);
 }
 
+// Colony view (GDD 10.3): the workers that are out, nearest first, each one a button to drive her
+const ROLE_NAME = { sugar: 'sugar forager', protein: 'hunter', pulp: 'pulp forager' };
+const MODE_NAME = { pick: 'choosing', outbound: 'flying out', collect: 'collecting', return: 'flying home', attack: 'attacking', evade: 'getting away', guard: 'guarding', hunt: 'chasing' };
+$('nWorkers').addEventListener('pointerdown', (e) => {
+  const b = e.target.closest('button[data-id]');
+  if (!b) return;
+  pickOnce = +b.dataset.id; input.pick = 1;
+});
+function updateWorkers() {
+  const me = sim._driven();
+  const list = sim.wasps.filter((x) => x.colony === 'own' && x !== me)
+    .map((x) => ({ x, d: me ? Math.hypot(x.x - me.x, x.z - me.z) : 0 }))
+    .sort((a, b) => a.d - b.d).slice(0, 10);
+  $('nWorkers').innerHTML = list.length ? list.map(({ x, d }) => {
+    const what = x.state === 'fly' ? (MODE_NAME[x.ai.mode] || x.ai.mode) : x.state;
+    const carry = x.carry ? ` · carrying ${x.carry.what}` : '';
+    return `<div class="wk"><span>${x.caste === 'queen' ? 'Queen' : 'Worker ' + x.id} · ${ROLE_NAME[x.role] || x.role} · ${what}${carry}</span><span class="n">${d < 1 ? '<1' : Math.round(d)} m</span><button class="ghost" data-id="${x.id}">${d <= T.possess.freeRange ? 'Drive' : 'Relay'}</button></div>`;
+  }).join('') : '<p class="label">Nobody is out. Workers leave the nest when you are near it in daylight.</p>';
+}
+
 function updateNest() {
+  updateWorkers();
   const c = sim.colony, out = sim.wasps.length;
   $('nStores').innerHTML = [
     ['Queen', c.queenAlive ? 'laying' : c.nestAlive ? 'dead' : 'nest destroyed'],
