@@ -15,7 +15,7 @@ The tier-0 slice of the GDD, built in the browser so it can move to Unity. Same 
 | `sim/bots.js` | Scripted pilots that produce ordinary input commands | test harness |
 | `game.js` | three.js rendering, animation, camera, input, HUD, sound | Unity scene, Animator, UI |
 | `index.html` | Page shell, HUD markup and styles | UI Toolkit |
-| `test/sim.test.mjs` | 97 headless sim checks | `Sting.Core.Tests` |
+| `test/sim.test.mjs` | 99 headless sim checks | `Sting.Core.Tests` |
 | `test/net.test.mjs` | 29 network checks | `Sting.Net.Tests` |
 
 Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 18+, no packages). Play locally with `node serve.mjs`.
@@ -80,6 +80,8 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 54 | Nest sites: a founding queen picks a trunk (up to 3,500 cells), an old burrow in the grass (5,000 cells, floods in rain, people notice it 1.6× faster) or a branch in the canopy (1,800 cells, twice as cold in rain, half as noticeable). Burrows are always visible; branch points show while choosing | 6.6 | 12 |
 | 55 | Windfall fruit: about a third of trees are fruit trees; from 55% of the season their fruit drops into the grass on hashed days and lies for six days, feeding wasps and drawing sugar foragers away from the picnic | 9.4 | 12 |
 | 56 | Scent cues: three small markers around the crosshair point toward the nearest sugar (yellow), prey (orange) and alarm (red: crushed nestmates, alarmed hives), brighter when closer; hidden in hardcore and in the eye view | 10.2 | 12 |
+| 57 | Switching limits (Q-03): any worker within 30 m is instant; otherwise the colony relays you in 4 s to the nearest worker anywhere, or to a worker coming out of the nest. Q again cancels | 7.7 | 12 |
+| 58 | Old age: the worker you drive lives as long as her sisters (about 22 bio-days, scaled to the season, ±20%), shown as an age bar; the queen does not age out | 7.5 | 12 |
 
 ## Verified
 

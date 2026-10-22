@@ -870,7 +870,7 @@ On Main the entity count is dominated by AI wasps: one player's colony can hold 
 |---|---|---|
 | Q-01 | Shared universe or instanced worlds? | Settled by D-13 |
 | Q-02 | Real minutes per in-game day? What do players do during winter in multiplayer? | Day and season length are world modifiers (PoC: 2/6/12 min days, 20–200 day seasons). Winter in multiplayer still open |
-| Q-03 | Limits on switching which wasp you drive | Free within 30 m or in the nest, delayed otherwise |
+| Q-03 | Limits on switching which wasp you drive | Settled in the PoC: free within 30 m; otherwise a 4 s relay to the nearest worker anywhere, or to a worker coming out of the nest |
 | Q-04 | Who decides whether a swat hit a wasp? | Settled by D-19: the wasp's owner; peers audit |
 | Q-05 | Own UDP vs a relay-backed platform transport | Both behind an interface; relay for release (11.13) |
 | Q-06 | Setting: generic temperate, American suburbia, or real places imported from map data | Open |

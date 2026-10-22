@@ -85,6 +85,8 @@ export const T = {
     branch: { name: 'hanging from a branch', maxCells: 1800, flood: 0, exposure: 2, discovery: 0.5 },
     rainMortality: 0.06, holesPerChunk: 2,
   },
+  // Switching wasps (GDD 7.7, Q-03): free within 30 m, otherwise the colony relays you after a delay
+  possess: { freeRange: 30, relayTicks: 240 },
   // Fallen fruit (GDD 9.4). bio: windfall apples and plums are a major late-summer sugar source for Vespula.
   fruit: { treeShare: 0.3, startFrac: 0.55, perTree: 6, rate: 0.8, spread: 1.6, rotDays: 6 },
   // Level 5: municipal pest control (GDD 8.10). Poisoned protein bait stations across the area for a few days.

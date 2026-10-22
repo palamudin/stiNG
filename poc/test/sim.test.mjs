@@ -586,5 +586,18 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   ok(JSON.stringify(r.activeChunks.flatMap((c) => r.fruitIn(c))) === JSON.stringify(s.activeChunks.flatMap((c) => s.fruitIn(c))), 'the same fruit lies in the same places after a restore');
 }
 
+// 24. Switching limits (GDD 7.7, Q-03)
+{
+  const s = new Sim({ seed: 1234 });
+  run(s, 600);
+  const d = s.wasp;
+  place(d, { x: s.nest.x + 80, y: 2, z: s.nest.z });
+  let ev = run(s, 2, (sim, i) => idle({ act: i === 1 ? Act.Switch : 0 }));
+  const pend = ev.find((e) => e.type === 'switchPending');
+  ok(pend && s.drivenId === d.id, `far from every worker, switching is relayed with a delay (${pend && pend.seconds} s)`);
+  ev = run(s, T.possess.relayTicks + 5, () => { place(d, { x: s.nest.x + 80, y: 2, z: s.nest.z }); return idle(); });
+  ok(count(ev, 'possess') === 1 && s.drivenId !== d.id, 'after the delay you drive another worker');
+}
+
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');
 process.exit(failures ? 1 : 0);

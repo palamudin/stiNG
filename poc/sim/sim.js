@@ -124,7 +124,7 @@ export class Sim {
     const id = this.nextWaspId++;
     const w = {
       id, caste, x: this.nest.spawn.x, y: this.nest.spawn.y, z: this.nest.spawn.z, vx: 0, vy: 0, vz: 0, yaw: this.nest.spawn.yaw, pitch: 0,
-      energy: 1, venom: 1, state: 'fly', stateTicks: 0, attach: null, under: null, ball: null,
+      energy: 1, venom: 1, state: 'fly', stateTicks: 0, attach: null, under: null, ball: null, born: this.minute,
       carry: null, groundTicks: 0, chew: 0, role: 'sugar', colony: 'own', web: null, fight: null,
       ai: { mode: 'pick', target: null, timer: 0, humanHex: null, stings: 0, stingHold: 0 },
     };
@@ -242,6 +242,7 @@ export class Sim {
     this.prevAct = act;
     if (cmd.alloc > 0 && cmd.alloc <= T.alloc.length && this.colony.alloc !== cmd.alloc - 1) { this.colony.alloc = cmd.alloc - 1; this.emit('alloc', { preset: this.colony.alloc }); }
     if (edge & Act.Switch) this._possessNearest();
+    this._pendingSwitchTick();
     if (edge & Act.Rest) this._rest();
     if (!cmd.sting) this.pressUsed = false;
 
@@ -588,21 +589,46 @@ export class Sim {
 
   // ---------------------------------------------------------------- possession and rest (GDD 7.7)
 
+  // Q-03 settled: any worker within 30 m is free to take. Beyond that the colony relays you, after a delay, to the
+  // nearest worker anywhere, or to a worker inside the nest who comes out.
   _possessNearest() {
     const d = this._driven();
     if (!d || d.state === 'under' || d.state === 'balled') return;
-    let best = null, bd = 30 * 30;
+    if (this.pendingSwitch) { this.pendingSwitch = null; this.emit('switchCancelled'); return; }
+    let best = null, bd = Infinity;
     for (const w of this.wasps) {
       if (w === d || w.state === 'dead' || w.colony !== 'own') continue;
       const q = dist2(w, d);
       if (q < bd) { bd = q; best = w; }
     }
-    if (!best) { this.emit('noSwitch'); return; }
+    const P = T.possess;
+    if (best && bd <= P.freeRange * P.freeRange) { this._possess(d, best); return; }
+    const inside = this.colony.nestAlive && this.colony.sited !== false && this.colony.adults - this._own().filter((x) => x.caste !== 'queen').length >= 1;
+    if (!best && !inside) { this.emit('noSwitch'); return; }
+    this.pendingSwitch = { at: this.tick + P.relayTicks, target: best ? best.id : 0 };
+    this.emit('switchPending', { seconds: P.relayTicks / 60, toNest: !best });
+  }
+
+  _possess(d, best) {
     d.ai = { mode: 'pick', target: null, timer: 0, humanHex: null, stings: 0, stingHold: 0 };
     if (d.state === 'attached') this._detach(d, null);
     this.drivenId = best.id;
     if (best.state === 'attached') this._detach(best, null);
     this.emit('possess', { id: best.id, from: d.id });
+  }
+
+  _pendingSwitchTick() {
+    const ps = this.pendingSwitch;
+    if (!ps || this.tick < ps.at) return;
+    this.pendingSwitch = null;
+    const d = this._driven();
+    if (!d) return;
+    let to = ps.target ? this.waspById(ps.target) : null;
+    if (!to) {
+      if (!(this.colony.nestAlive && this.colony.adults - this._own().filter((x) => x.caste !== 'queen').length >= 1)) { this.emit('noSwitch'); return; }
+      to = this._spawnWasp(true); // a worker from inside the nest
+    }
+    this._possess(d, to);
   }
 
   _rest() {
@@ -627,7 +653,14 @@ export class Sim {
 
   // ---------------------------------------------------------------- one wasp per tick
 
+  // A worker's span is that of her sisters (GDD 7.5): 1/adultMortality days, scaled to the season, ±20% by hash.
+  lifespanMinutes(w) { return (1 / T.colony.adultMortality) * this.bio * 1440 * (0.8 + 0.4 * h32(w.id, 7)); }
+
   _stepWasp(w, cmd, edge, driven) {
+    if (driven && w.caste !== 'queen' && w.colony === 'own' && this.minute - (w.born ?? this.minute) > this.lifespanMinutes(w) && (w.state === 'fly' || w.state === 'landed')) {
+      this._die(w, 'old age', null);
+      return;
+    }
     const armed = driven ? cmd.sting && !this.pressUsed : cmd.sting;
     switch (w.state) {
       case 'fly':

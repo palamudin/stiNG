@@ -1222,6 +1222,7 @@ function updateHud() {
   document.querySelectorAll('#alert i').forEach((el, i) => { el.className = i < lv ? (lv >= 3 ? 'on hot' : 'on') : ''; });
   if (!w) return;
   $('venomBar').style.width = (w.venom * 100).toFixed(1) + '%';
+  { const life = w.caste === 'queen' ? 0 : Math.min(1, (sim.minute - (w.born ?? sim.minute)) / sim.lifespanMinutes(w)); $('ageRow').hidden = $('ageWrap').hidden = w.caste === 'queen'; $('ageBar').style.width = (life * 100).toFixed(1) + '%'; }
   $('cropBar').style.width = (w.energy * 100).toFixed(1) + '%';
   $('cropBar').style.background = w.energy < 0.2 ? 'var(--red)' : '';
   $('ball').hidden = w.state !== 'balled';
@@ -1345,6 +1346,7 @@ function deathWhy(e) {
   if (e.cause === 'cooked by bees') return 'Bees ball an intruder and heat it. Mash Shift before it reaches 46 °C.';
   if (e.cause === 'drowned in a trap') return 'Sweet-smelling bottles at alert level 3 are traps.';
   if (e.cause === 'insecticide') return 'Some people carry spray once the area is alert. Stay out of the cone in front of them.';
+  if (e.cause === 'old age') return 'Workers live a few weeks. Take over a younger sister with Q.';
   if (e.cause === 'starved') return 'Your crop ran empty. Feed at flowers, cans or plates before it does.';
   if (e.cause.startsWith('killed by a rival')) return 'Rival wasps defend their nest. Mash sting to win a fight.';
   if (!d.own && d.why !== undefined) return 'You were caught in a swat aimed at another wasp.';
@@ -1359,7 +1361,7 @@ function deathWhy(e) {
     default: return '';
   }
 }
-const DEATH_TITLE = { 'eaten by a spider': 'EATEN', 'taken by a bird': 'TAKEN', 'killed by a rival wasp': 'KILLED', slap: 'SWATTED', cover: 'SMOTHERED', 'crushed under clothing': 'CRUSHED', insecticide: 'SPRAYED', 'drowned in a trap': 'DROWNED', 'cooked by bees': 'COOKED', starved: 'STARVED' };
+const DEATH_TITLE = { 'eaten by a spider': 'EATEN', 'taken by a bird': 'TAKEN', 'killed by a rival wasp': 'KILLED', slap: 'SWATTED', cover: 'SMOTHERED', 'crushed under clothing': 'CRUSHED', insecticide: 'SPRAYED', 'drowned in a trap': 'DROWNED', 'cooked by bees': 'COOKED', starved: 'STARVED', 'old age': 'SPENT' };
 
 function pushSwatAnims(list, frameHex, contactTick) {
   const frame = sim.humanByHex(frameHex);
@@ -1433,7 +1435,9 @@ function handleEvents(events) {
       case 'extCancelled': toast('Exterminator cancelled', 'var(--yellow)', 2.4); break;
       case 'nestDestroyed': toast('The nest is destroyed', 'var(--red)', 4); logEvent(`nest destroyed · ${e.died} inside died`); break;
       case 'possess': waspSwitched(e.id); logEvent(`now driving worker ${e.id}`); break;
-      case 'noSwitch': toast('No worker within 30 m', 'var(--muted)', 1.4); break;
+      case 'noSwitch': toast('No worker to take over', 'var(--muted)', 1.4); break;
+      case 'switchPending': toast(`Relaying through the colony · ${e.seconds} s · Q cancels`, 'var(--muted)', 2.2); break;
+      case 'switchCancelled': toast('Switch cancelled', 'var(--muted)', 1.2); break;
       case 'cantRest': toast(e.why === 'day' ? 'Rest only at night' : e.why === 'net' ? 'No resting with a second player' : 'Rest at the nest entrance', 'var(--muted)', 1.6); break;
       case 'rested': toast('Morning', 'var(--yellow)', 1.6); break;
       case 'newDay': logEvent(`day ${e.day + 1}`); saveWorld(false); break;
