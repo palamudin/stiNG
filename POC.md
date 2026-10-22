@@ -1,65 +1,79 @@
 # STING — three.js proof of concept
 
-Tier-0 slice of the GDD (v0.2), built to be moved to Unity. Two layers, same split as the GDD:
+The tier-0 slice of the GDD, built in the browser so it can move to Unity. Same split as the GDD: a simulation core that owns every outcome, and a presentation layer that only draws.
 
-| File | Role | Unity counterpart |
+| Path | Role | Unity counterpart |
 |---|---|---|
-| `sim.js` | Simulation core. No three.js, no DOM, no wall clock. Owns every outcome. | `Sting.Core` (C#, Fix64) |
-| `game.js` | Presentation: rendering, animation, camera, input, HUD, lab overlay. Reads sim state and events only. | Unity scene, Animator/IK, UI |
-| `index.html` | Page shell and HUD markup | UI Toolkit / Canvas |
-| `test/sim.test.mjs` | Headless tests (`node test/sim.test.mjs`) | `Sting.Core.Tests` |
+| `sim/rng.js` | Counter-based RNG (bit-identical to the C# protocode), own sin/cos, hashes | `Sting.Core/Rng.cs`, `Fix64.cs` |
+| `sim/tuning.js` | Every tuning number, with biology notes | data files (GDD 13) |
+| `sim/body.js` | Traits, clothing, body capsules, 17 zones, reach, `resolveSting`, garment graphs | `Sting.Core/Humans/*` |
+| `sim/world.js` | Chunk generation, clock, weather, schedules, pure motion of flies and bees | `Sting.Core/World/*` |
+| `sim/colony.js` | Colony economy and the yearly cycle | `Sting.Core/Colony/*` |
+| `sim/sim.js` | The sim: wasps, humans, swats, bees, escalation, exterminator, networking | `Sting.Core/Sim.cs` |
+| `sim/net.js` | Simulated link and the two-peer lab | `Sting.Net` + transport |
+| `sim/bots.js` | Scripted pilots that produce ordinary input commands | test harness |
+| `game.js` | three.js rendering, animation, camera, input, HUD, sound | Unity scene, Animator, UI |
+| `index.html` | Page shell, HUD markup and styles | UI Toolkit |
+| `test/sim.test.mjs` | 45 headless sim checks | `Sting.Core.Tests` |
+| `test/net.test.mjs` | 16 two-peer agreement checks | `Sting.Net.Tests` |
 
-## Tier-0 features (iteration 1)
+Run the tests with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 18+, no packages).
 
-| # | Feature | GDD | Status |
+## Feature list
+
+| # | Feature | GDD | Iteration |
 |---|---|---|---|
-| 1 | Fixed 60 Hz tick, humans at 20 Hz, deterministic iteration order | 3.2, 3.3 | done |
-| 2 | Counter-based RNG, bit-identical to the C# protocode | 3.5, A.2 | done, tested against C# |
-| 3 | Own polynomial sin/cos so sim math is identical across browsers | 3.4, R-04 | done |
-| 4 | Chunks generated on demand from seed, frozen on discovery (records keep the content and a hash) | 4.3, 4.4 | done |
-| 5 | Park world: trees, picnic tables with seated people, standing groups, flowers, soda cans, nest | 4.3 | done |
-| 6 | Humans: traits from ID (same as C# HumanFactory), clothing per day, two postures | 8.1, 8.8 | done |
-| 7 | Body = capsules in body frame; renderer draws exactly the sim capsules | 8.3, 12 | done |
-| 8 | 17 zones classified from contact point and surface normal, including the acnestis | 8.3 | done |
-| 9 | Reach formula, response policies, `resolveSting` pure function, helper swats | 8.4–8.6, A.5–A.6 | done |
-| 10 | Swat check: sphere in the stung human's body frame, active window, kill or stun | 8.7, A.7 | done |
-| 11 | Thick clothing blocks stings | 8.8 | done |
-| 12 | Panic gain, contagion, flee, walk back, sit down | 8.9 | done |
-| 13 | Wasp flight: steered kinematic, accel-limited, burst, climb, gravity when crop is empty, swept-ish collision (3 substeps) | 7.2 | done |
-| 14 | Hold to sting, release to pull out; jab vs full | 7.4 | done (see deviations) |
-| 15 | Venom and crop; feeding on flowers and soda | 6.2, 7.1 | done |
-| 16 | Worker death, respawn at nest, line extinct, restart | 2.3, 6.7 | done (worker counter only) |
-| 17 | Counter: unique humans stung / 8,200,000,000 | 8.11 | done |
-| 18 | Swat animations: two-bone IK lands the hand on the impact point at the impact tick; contort, brush, flail, freeze, flinch, run cycle | 12 | done, cosmetic only |
-| 19 | Lab overlay: state hash, contact zone, reach, predicted swats with timings, nearest human's traits, event log | 14 | done |
-| 20 | Body zone map: every vertex colored by what that person does if stung there | 8.3–8.5 | done |
-| 21 | Determinism check: replays all recorded input from a fresh sim and compares state hash | 14 | done |
-| 22 | Minimap of discovered and active chunks | 10.3 | done |
+| 1 | Fixed 60 Hz tick; humans at 20 Hz; colony at 1 Hz; deterministic order | 3.2, 3.3 | 1 |
+| 2 | Counter-based RNG bit-identical to the C# protocode; own polynomial sin/cos | 3.4, 3.5 | 1 |
+| 3 | Chunks generated from seed on demand, frozen on discovery | 4.3, 4.4 | 1 |
+| 4 | Park world: trees, picnic tables, groups, flowers, cans, nest, beehives | 4.3 | 1–2 |
+| 5 | Humans: traits from ID, clothing per day, sit and stand, body = capsules | 8.1, 8.3 | 1 |
+| 6 | 17 zones from contact point and normal, reach formula, response policies | 8.3–8.5 | 1 |
+| 7 | `resolveSting`: own swat, helpers from companions, panic, flight | 8.6 | 1 |
+| 8 | Swat volumes in the stung body's frame, active window, kill or stun | 8.7 | 1 |
+| 9 | Hold to sting; release to pull out; full sting after 0.5 s | 7.4 | 1 |
+| 10 | Every wasp, driven or AI, runs the same flight, contact, sting and swat code | 7, 7.7 | 2 |
+| 11 | Possession: Q takes over the nearest worker within 30 m | 7.7 | 2 |
+| 12 | Colony economy: protein, sugar, pulp, cells, brood pipeline, sugar deficit, foraging presets | 6.2–6.5, A.4 | 2 |
+| 13 | AI workers: forage sugar, catch prey, chew pulp, deposit, go home at dusk | 6.5 | 2 |
+| 14 | Prey: flies on deterministic paths, caterpillars on flowers, bees as protein | 9.4 | 2 |
+| 15 | Escalation ladder per chunk: swatting, covered food and citronella, sprays and sugar traps, exterminator | 8.10 | 2 |
+| 16 | Alarm pheromone: a worker killed by a human sends nearby workers after that human | 7.6 | 2 |
+| 17 | Under clothing: openings, garment graph, crawl between nodes, compression, shirt torn off | 8.8 | 2 |
+| 18 | Exterminator: booked at level 4, walks to the nest, treats it; stopped only by stings under his collar | 8.10 | 2 |
+| 19 | Beehives: guards and foragers on pure paths, alarm and pursuit, heat ball, mash to escape | 9.1, 9.2 | 2 |
+| 20 | Day and night, temperature, rain days, human arrival and departure schedules, rest until morning | 5, 8.2 | 2 |
+| 21 | Yearly cycle: queen cells, young queens mate and leave, autumn collapse, winter survival, sister nests | 2.2, 5.2, 6.7 | 3 |
+| 22 | Spring founding: you drive the queen, build cells from pulp, feed the first brood alone | 6.1, 6.7 | 3 |
+| 23 | World modifiers on the start screen: day length, season length, people, bees | 4.8 | 2–3 |
+| 24 | Procedural sound: wings, other wasps, bees, slaps, yelps, birds, crickets, rain, spray | — | 3 |
+| 25 | Networking: committed world events, owner authority, remote dead reckoning, simulated link | 11 | 4 |
+| 26 | Network lab: a bot second player over a chosen link; live agreement check on every human | 11.5 | 4 |
+| 27 | Lab overlay: state hash, replay check, predicted swats, body zone map, traits, event log | 14 | 1–4 |
 
 ## Verified
 
-- `node test/sim.test.mjs`: trait and hash parity with the compiled C# protocode, trig accuracy (max error 6.6e-10), consequence-window invariant over 3,000 humans × 17 zones, two runs and a replay give identical hashes, a full-sting-and-linger bot dies and respawns, a jab-and-run bot survives, discovered chunks stay frozen.
-- Headless Chromium render: start screen, flight, a sting on a forearm, the slap landing at 467 ms, death screen, lab and zone map. The in-page determinism check matches on unmodified play and correctly reports a mismatch when the test harness teleports the wasp outside the input path.
+- **Sim:** traits and hash match the compiled C# protocode; trig error 6.6e-10; no swat or press lands inside the consequence window; fed colonies grow and starved larvae die; the yearly cycle raises and mates young queens and collapses in autumn; winter and spring hand the line to a founding queen; two runs and a replay give the same hash; lingering kills, jab-and-run survives; AI workers launch and deposit; covered food, traps, preemptive slaps, compression under a shirt, crawling to the acnestis, bee balls and escape, the exterminator destroying an unguarded nest and aborting when stung under his collar, the day cycle, possession, and frozen chunks.
+- **Network:** two peers sting the same humans over four links, from LAN up to 16±6 ticks one-way with 10% loss. Human state is identical on both peers at every check (300/300 per link) and no event arrives after its commit tick.
+- **Rendering:** headless Chromium screenshots of every system. The software renderer runs at under 1 fps, so frame rate on real GPUs is not measured.
 
-## Deviations from the GDD (to fold back in)
+## Design changes found by building (fold into the GDD)
 
-1. **Sting mode.** GDD 7.4 picks jab or full at contact. The PoC uses hold-to-sting: the `Sting` event fires at contact as a jab, and a `Deepen` event at 30 ticks adds the full-sting pain. Swat timing still starts at contact, so the consequence window is unchanged.
-2. **Numbers are doubles, not Fix64.** Determinism holds within JS because the sim only uses IEEE-exact operations and its own trig. The Unity port switches to Fix64 with the same structure.
-3. **Panic contagion** is scaled by both sociability and panic susceptibility.
-4. **Helpers** must be idle (not fleeing) to swat.
-5. **Posture change while attached** knocks the wasp off.
-6. **Colony** is a worker counter only. Economy, brood and castes are a later tier.
+1. **Hold to sting.** The press arms the stinger, first contact stings, release pulls out. Swat timing still starts at contact.
+2. **Two-part events.** A sting's swats run as soon as a peer has the event; its effect on the human (panic, flight, counters, alert points) commits 30 ticks (500 ms) after contact on every peer. This replaces "fast-forward the plan when late" (GDD 11.5) and holds up to roughly 370 ms one-way.
+3. **Owner decides about its own wasps.** Preemptive swats, sprays, presses under clothing and bee alarms are decided by the peer that owns the wasp and published as events. Swat volumes are checked only against the checker's own wasps.
+4. **No live wasp positions in shared decisions.** Fleeing humans run from the stinger's position recorded in the event, not from wherever a wasp is now.
+5. **Biological time scales with season length.** `bio = seasonDays / 200`. A 40-day season runs brood development and worker lifespans five times faster than nature, so a season fits in about an hour of play.
+6. **Founding queens build their own cells** directly from pulp they deliver.
+7. **Doubles in the PoC, Fix64 in Unity.** The JS sim is deterministic because it uses only IEEE-exact operations and its own trig. The C# core switches to Fix64 with the same structure.
+
+## Known limits
+
+- Humans are simulated only in chunks near a local wasp. Two peers in different areas would disagree about humans neither shares. The fix is to step humans over the union of peers' interest or make their state a pure function of seed, time and events.
+- The colony economy is balanced loosely; sugar stores grow large late in the season.
+- Wasps cannot land and walk yet.
+- No birds, spiders or rival colonies yet.
 
 ## Controls
 
-Mouse look · WASD fly · Space / C up and down · Shift burst · hold LMB or F to sting, release to pull out · Tab lab · Arrows look without a mouse · Esc pause.
-
-## Next tier-0 candidates
-
-- Under-clothing entry and trapped-wasp compression (GDD 8.8)
-- Escalation levels per neighborhood with covered food and sprays (8.10)
-- Alarm pheromone near the nest (7.6)
-- Colony economy step and nest view (6.2–6.4, A.4)
-- Bees and a hive with balling (9.2)
-- Day and weather (5.3)
-- Landing and gripping on surfaces (7.2)
+Mouse look · WASD fly · Space / C up and down · Shift burst, mash to break free · hold LMB or F to sting · E catch, chew, crawl under clothes · Q take over nearest worker · R rest at night · N nest panel · Tab lab · M sound · Arrows look · Esc pause.
