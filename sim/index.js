@@ -7,3 +7,4 @@ export * from './colony.js';
 export * from './sim.js';
 export * from './bots.js';
 export * from './net.js';
+export * from './persist.js';

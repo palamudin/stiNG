@@ -46,6 +46,7 @@ export function decodeState(buf, underHex = null) {
   return { mk: 'state', peer: v.getUint8(0), tick: v.getUint32(1), wasps };
 }
 import { stingBot } from './bots.js';
+import { snapshot, joinFrom } from './persist.js';
 
 export const LINKS = {
   lan: { name: 'LAN', latency: 1, jitter: 1, loss: 0 },
@@ -87,11 +88,13 @@ export class Link {
 
 // Peer A is the player; peer B is a scripted second player stinging the same humans.
 export class NetLab {
-  constructor(settings, linkName = 'good', botOpts = {}) {
+  constructor(settings, linkName = 'good', botOpts = {}, joinAt = 0) {
     const L = LINKS[linkName] || LINKS.good;
     this.linkName = linkName;
     this.a = new Sim(settings, { peer: 0, net: true, peers: [0, 1] });
-    this.b = new Sim(settings, { peer: 1, net: true, noAI: true, peers: [0, 1] });
+    this.joinAt = joinAt;
+    // a late joiner is built from a snapshot of A's world when the time comes (GDD 11.10)
+    this.b = joinAt ? null : new Sim(settings, { peer: 1, net: true, noAI: true, peers: [0, 1] });
     this.ab = new Link({ ...L, seed: 11 });
     this.ba = new Link({ ...L, seed: 22 });
     this.botB = stingBot({ plan: 'jab', rest: 240, ...botOpts });
@@ -117,6 +120,12 @@ export class NetLab {
   bandwidth() { const secs = Math.max(1, this.a.tick) / 60; return { total: this.bytes.ab / secs, state: this.bytes.abState / secs, events: this.bytes.abEvents / secs }; }
   step(cmdA, cmdB) {
     const t = this.a.tick + 1;
+    if (!this.b) {
+      this.a.step(cmdA);
+      this.a.outbox.length = 0; // nobody to send to yet
+      if (this.a.tick >= this.joinAt) { this.b = joinFrom(snapshot(this.a), 1, { noAI: true }); this.joined = this.a.tick; }
+      return;
+    }
     this.a.receive(this._in(this.ba.poll(t)));
     this.b.receive(this._in(this.ab.poll(t)));
     this.a.step(cmdA);
@@ -127,6 +136,7 @@ export class NetLab {
   }
   // Compare the shared humans: both peers simulate the same union of interest, so they must agree everywhere.
   check() {
+    if (!this.b) { this.checks.skipped++; return null; }
     this.checks.compared++;
     const same = this.a.humanHash() === this.b.humanHash();
     if (same) this.checks.agreed++; else if (!this.checks.firstDiverge) this.checks.firstDiverge = this.a.tick;
@@ -134,6 +144,7 @@ export class NetLab {
   }
   // How far A's picture of B's wasp is from where B's wasp really is (GDD 11.4)
   remoteError() {
+    if (!this.b) return null;
     const bw = this.b._driven();
     if (!bw) return null;
     const r = this.a.remote.get(bw.id);

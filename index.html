@@ -259,6 +259,7 @@
       <label class="label" for="hudMode">HUD<select id="hudMode"><option value="full" selected>Full</option><option value="hardcore">Hardcore</option></select></label>
       <label class="label" for="netMode">Second player<select id="netMode"><option value="off" selected>Off</option><option value="lan">Bot over LAN</option><option value="good">Bot over good internet</option><option value="bad">Bot over bad internet</option><option value="awful">Bot past the window</option></select></label>
       <button id="bStart">Fly</button>
+      <button class="ghost" id="bContinue" hidden>Continue</button>
     </div>
     <p class="label" id="startNote">Personal world. Built for keyboard and mouse.</p>
   </div>
@@ -267,7 +268,11 @@
 <div class="screen" id="pauseScreen" hidden>
   <div class="card" style="text-align:center;justify-items:center">
     <p class="sub">Paused</p>
-    <button id="bResume">Click to resume</button>
+    <div class="row" style="justify-content:center">
+      <button id="bResume">Click to resume</button>
+      <button class="ghost" id="bSave">Save world</button>
+    </div>
+    <p class="label" id="saveNote"></p>
   </div>
 </div>
 

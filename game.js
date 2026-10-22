@@ -5,7 +5,7 @@ import {
   Sim, Act, T, DT, ZONES, ZoneName, SwatKind, SwatKindName, StyleName, TopName, BottomName, Top, Bottom,
   toWorld, toLocal, chunkKey, chunkOf, hash, Domain, rangeInt, resolveSting, zoneCover, segClosest, classify, predictedKind,
   NEST, NEST_ENTRANCE, flyPos, beePos, fmtClock, minuteOfDay, isLowerZone, broodTotal, garmentGraph, dayWeather,
-  NetLab, LINKS, birdPos,
+  NetLab, LINKS, birdPos, snapshot, restore, replayFrom,
 } from './sim/index.js';
 
 const $ = (id) => document.getElementById(id);
@@ -929,7 +929,7 @@ document.addEventListener('pointerlockchange', () => {
   if (!locked && pointerLockWorked && $('winterScreen').hidden && $('extinctScreen').hidden) setPaused(true);
   if (locked) { pointerLockWorked = true; setPaused(false); }
 });
-function setPaused(p) { paused = p; $('pauseScreen').hidden = !p; input.lmb = false; input.keys.clear(); }
+function setPaused(p) { paused = p; $('pauseScreen').hidden = !p; input.lmb = false; input.keys.clear(); if (p) { $('saveNote').textContent = ''; saveWorld(false); } }
 $('bResume').addEventListener('click', () => { setPaused(false); lock(); });
 
 // ------------------------------------------------------------------ panels
@@ -945,8 +945,9 @@ $('bZones').addEventListener('click', (e) => { ui.zones = !ui.zones; e.currentTa
 $('bSwats').addEventListener('click', (e) => { ui.swats = !ui.swats; e.currentTarget.setAttribute('aria-pressed', ui.swats); });
 $('bVerify').addEventListener('click', () => {
   if (lab) { $('verifyOut').textContent = 'Replay check is for solo worlds. With a second player, the Network section checks agreement instead.'; return; }
-  const ticks = sim.tick, live = sim.stateHash(), t0 = performance.now();
-  const replayed = Sim.replay(settings, sim.log, ticks);
+  const live = sim.stateHash(), t0 = performance.now();
+  const ticks = loadSnap ? sim.tick - sim.logStartTick : sim.tick;
+  const replayed = loadSnap ? replayFrom(loadSnap, sim.log, ticks) : Sim.replay(settings, sim.log, ticks);
   const took = Math.round(performance.now() - t0);
   $('verifyOut').innerHTML = replayed === live
     ? `<span class="ok">Match</span> · replayed ${fmt(ticks)} ticks in ${took} ms · ${replayed}`
@@ -1242,7 +1243,7 @@ function handleEvents(events) {
       case 'noSwitch': toast('No worker within 30 m', 'var(--muted)', 1.4); break;
       case 'cantRest': toast(e.why === 'day' ? 'Rest only at night' : e.why === 'net' ? 'No resting with a second player' : 'Rest at the nest entrance', 'var(--muted)', 1.6); break;
       case 'rested': toast('Morning', 'var(--yellow)', 1.6); break;
-      case 'newDay': logEvent(`day ${e.day + 1}`); break;
+      case 'newDay': logEvent(`day ${e.day + 1}`); saveWorld(false); break;
       case 'season': {
         const msg = { Growth: 'The first workers are out. Growth season.', Peak: 'Peak season. The queen starts laying queen cells.', Collapse: 'Autumn. The colony is dying off. Young queens are leaving to mate.' }[e.phase];
         if (msg) toast(msg, 'var(--yellow)', 3.5);
@@ -1300,6 +1301,7 @@ function handleEvents(events) {
         break;
       case 'waitingBrood': toast('The nest is empty. Waiting for brood to emerge.', 'var(--muted)', 3); break;
       case 'lineExtinct':
+        try { if (!lab) { localStorage.removeItem('sting.save'); localStorage.removeItem('sting.saveMeta'); showContinue(); } } catch { /* optional */ }
         $('dead').hidden = true;
         $('extinctStats').textContent = `No young queen survived the winter and no sister nest is left. ${sim.season.n} season${sim.season.n === 1 ? '' : 's'}, ${sim.day + 1} days. ${fmt(sim.stung.size)} humans stung (${fmt(sim.stats.stings)} by you, ${fmt(sim.stats.aiStings)} by workers). ${fmt(sim.stats.deaths)} wasps lost. ${fmt(sim.records.size)} chunks discovered.`;
         $('extinctScreen').hidden = false;
@@ -1417,7 +1419,8 @@ function frame(now) {
 
 // ------------------------------------------------------------------ boot
 
-function newWorld(s) {
+let loadSnap = null; // the snapshot a restored world started from, for the replay check
+function newWorld(s, restored = null) {
   for (const g of chunkViews.values()) scene.remove(g);
   for (const v of humanViews.values()) scene.remove(v.group);
   for (const g of waspViews.values()) scene.remove(g);
@@ -1425,9 +1428,13 @@ function newWorld(s) {
   if (nestView) scene.remove(nestView);
   for (const o of oldNestViews) if (o) scene.remove(o);
   nestView = null; nestSig = ''; oldNestViews.length = 0;
-  settings = s;
-  lab = s.net && s.net !== 'off' ? new NetLab(settings, s.net) : null;
-  sim = lab ? lab.a : new Sim(settings);
+  if (restored) { sim = restored.sim; loadSnap = restored.json; lab = null; settings = sim.settings; }
+  else {
+    loadSnap = null;
+    settings = s;
+    lab = s.net && s.net !== 'off' ? new NetLab(settings, s.net) : null;
+    sim = lab ? lab.a : new Sim(settings);
+  }
   sim.drainEvents();
   syncChunks();
   syncNests();
@@ -1457,6 +1464,38 @@ function applyDisplaySettings() {
 }
 try { const d = JSON.parse(localStorage.getItem('sting.display') || 'null'); if (d) { $('gfx').value = d.gfx; $('hudMode').value = d.hud; } } catch { /* optional */ }
 
+// ------------------------------------------------------------------ save and continue (personal worlds)
+
+function saveWorld(manual) {
+  if (!sim || lab || sim.extinct) { if (manual) $('saveNote').textContent = 'Only solo worlds can be saved.'; return; }
+  try {
+    const json = snapshot(sim);
+    localStorage.setItem('sting.save', json);
+    localStorage.setItem('sting.saveMeta', JSON.stringify({ day: sim.day + 1, season: sim.season.n, phase: sim.season.phase, stung: sim.stung.size, seed: String(settings.seed), at: Date.now() }));
+    if (manual) $('saveNote').textContent = `Saved · day ${sim.day + 1}, ${(json.length / 1024).toFixed(0)} KB in this browser`;
+    showContinue();
+  } catch (err) { if (manual) $('saveNote').textContent = 'This browser would not store the save.'; }
+}
+function showContinue() {
+  let meta = null;
+  try { meta = JSON.parse(localStorage.getItem('sting.saveMeta') || 'null'); } catch { /* optional */ }
+  $('bContinue').hidden = !meta;
+  if (meta) $('bContinue').textContent = `Continue · day ${meta.day}, season ${meta.season}`;
+}
+$('bSave').addEventListener('click', () => saveWorld(true));
+$('bContinue').addEventListener('click', () => {
+  let json = null;
+  try { json = localStorage.getItem('sting.save'); } catch { /* optional */ }
+  if (!json) return;
+  try {
+    initAudio(); applyDisplaySettings();
+    newWorld(null, { sim: restore(json), json });
+    $('startScreen').hidden = true; running = true; lock();
+    toast(`Day ${sim.day + 1} · season ${sim.season.n}`, 'var(--yellow)', 2);
+  } catch (err) { $('startNote').textContent = `That save could not be loaded: ${err.message}`; }
+});
+showContinue();
+
 $('bStart').addEventListener('click', () => { initAudio(); applyDisplaySettings(); newWorld(readSettings()); $('startScreen').hidden = true; running = true; lock(); });
 $('bSpring').addEventListener('click', () => { $('winterScreen').hidden = true; setPaused(false); lock(); toast('Spring. Pick a tree and press E at the trunk to found the nest.', 'var(--yellow)', 4); });
 $('bNewLine').addEventListener('click', () => { $('extinctScreen').hidden = true; newWorld(settings); running = true; lock(); });
@@ -1467,7 +1506,7 @@ newWorld({ seed: 1234n, dayMinutes: 2, humanDensity: 1, beeAggression: 1, season
 requestAnimationFrame(frame);
 
 // test hook for automated checks
-window.__sting = { get sim() { return sim; }, get lab() { return lab; }, input, start: () => $('bStart').click(), humanViews, toggleNest, toggleLab };
+window.__sting = { get sim() { return sim; }, get lab() { return lab; }, input, start: () => $("bStart").click(), humanViews, toggleNest, toggleLab, saveWorld };
 window.__garment = (hm) => garmentGraph(hm.tr, hm.clothing, hm.posture, hm.parts[hm.posture]);
 window.__toWorld = toWorld;
 window.__weather = dayWeather;

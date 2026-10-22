@@ -731,7 +731,7 @@ A joining peer receives:
 1. world record (seed, `genVersion`, tuning hash, epoch, population figure)
 2. discovered chunk records and delta logs for its interest area
 3. current rows of owned entities nearby
-4. events from the last few minutes for humans nearby, to rebuild short-term state such as panic (long-term memory is already in the chunk deltas)
+4. the live rows of humans nearby, pending committed events and committed interest windows (revised by the PoC, 18.10: this replaces rebuilding panic from recent events)
 
 ### 11.11 Network topology by world tier **[D] D-13, [P] D-15**
 
@@ -934,6 +934,12 @@ Points: sting 1, full sting +1, wasp killed by a human 0.3, swat at a hovering w
 ### 18.9 Humans over the union of interest (Q-16 settled)
 
 Each peer's interest window (the 3×3 chunks around its wasp) is itself a committed event. Every peer simulates the humans in the union of all committed windows, adds and removes them on the same tick, and freezes humans outside the union identically. In the lab, two peers working picnics two chunks apart agreed on all 63 shared humans at every check (300 of 300). Humans that leave every window stop on every peer; when a window reaches them again they catch up to their schedule deterministically.
+
+### 18.10 Saves and joining use the same snapshot (11.10 revised)
+
+A snapshot holds the world record, the chunk records (seed, `genVersion`, content hash) and their deltas, every live human row, the escalation state per chunk, the pending committed events, the committed interest windows and the colony. Chunk content is not stored: it is regenerated from the seed on load and checked against the stored content hash, so a generator change is caught instead of silently producing a different world. In the PoC a full save is 34 KB, and a restored world stays bit-identical to the original for 6000 more ticks of the same input.
+
+Joining a world in progress uses the same snapshot instead of the event replay listed in 11.10 item 4. Sending the live human rows is smaller and exact, while rebuilding panic from recent events depends on events that may already have been trimmed. The joiner takes the shared part of the snapshot and starts its own colony. In the lab a peer that joined 50 s in agreed on every human at every check after joining (200 of 200). On Main the cell server sends the rows for the joiner's interest area only.
 
 ---
 

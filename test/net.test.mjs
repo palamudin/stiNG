@@ -48,6 +48,16 @@ for (const name of ['lan', 'good', 'bad', 'awful']) {
   ok(c.agreed === c.compared, `apart: human state identical on both peers (${c.agreed}/${c.compared})`);
 }
 
+// Late join: B arrives after 50 s and builds its world from A's snapshot (GDD 11.10)
+{
+  const lab = new NetLab({ seed: 1234 }, 'good', {}, 3000);
+  const botA = stingBot({ plan: 'jab', rest: 200 });
+  for (let i = 0; i < 15000; i++) { lab.step(botA(lab.a)); lab.a.drainEvents(); if (i % 60 === 0) lab.check(); }
+  const c = lab.checks;
+  console.log(`  late join at tick ${lab.joined}: ${c.agreed}/${c.compared} checks agree after joining; A stung ${lab.a.stats.stings + lab.a.stats.aiStings} before and after, B ${lab.b.stats.stings}`);
+  ok(lab.joined === 3000 && c.compared > 150 && c.agreed === c.compared, `a peer joining mid-game agrees on every human from its first tick (${c.agreed}/${c.compared})`);
+}
+
 // Wire format: quantization error and bandwidth (GDD 11.12)
 {
   const m = { mk: 'state', peer: 1, tick: 123456, wasps: [

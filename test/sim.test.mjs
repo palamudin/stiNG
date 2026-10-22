@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, NEST, chunkKey, beePos, flyPos,
+  garmentGraph, Top, NEST_ENTRANCE, NEST, chunkKey, beePos, flyPos, snapshot, restore, replayFrom, stingBot,
 } from '../sim/index.js';
 
 let failures = 0;
@@ -394,7 +394,24 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   ok(plan(3).panicGain > plan(0).panicGain, 'and each sting hurts more');
 }
 
-// 16. Frozen chunks
+// 16. Save and restore: a restored world continues bit for bit (GDD 4.6, 11.10)
+{
+  const a = new Sim({ seed: 1234 });
+  const bot = stingBot({ plan: 'full', rest: 150 });
+  run(a, 9000, (sim) => bot(sim));
+  a.cs('0,0').esc = 9.5; // something to carry over
+  const snap = snapshot(a);
+  const b = restore(snap);
+  ok(b.stateHash() === a.stateHash() && b.humanHash() === a.humanHash(), `restored world hashes match the original (${a.stateHash()})`);
+  const cmds = [];
+  run(a, 6000, (sim) => { const c = bot(sim); cmds.push(c); return c; });
+  run(b, 6000, (sim, i) => cmds[i]);
+  ok(b.stateHash() === a.stateHash(), `after 6000 more ticks of the same input the restored world is identical (${b.stateHash()})`);
+  ok(replayFrom(snap, a.log.slice(9 * 9000), 6000) === a.stateHash(), 'replaying the input recorded after a snapshot reproduces the world');
+  console.log(`  snapshot size ${(snap.length / 1024).toFixed(0)} KB for ${a.records.size} chunks, ${a.humans.size} humans, ${a.wasps.length} wasps`);
+}
+
+// 17. Frozen chunks
 {
   const s = new Sim({ seed: 5 });
   const rec = s.records.get('0,0'), before = rec.contentHash;

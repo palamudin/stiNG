@@ -11,11 +11,12 @@ The tier-0 slice of the GDD, built in the browser so it can move to Unity. Same 
 | `sim/colony.js` | Colony economy and the yearly cycle | `Sting.Core/Colony/*` |
 | `sim/sim.js` | The sim: wasps, humans, swats, bees, escalation, exterminator, networking | `Sting.Core/Sim.cs` |
 | `sim/net.js` | Simulated link and the two-peer lab | `Sting.Net` + transport |
+| `sim/persist.js` | Exact snapshot and restore, replay from a snapshot, joining a world in progress | `Sting.Core/Persistence` |
 | `sim/bots.js` | Scripted pilots that produce ordinary input commands | test harness |
 | `game.js` | three.js rendering, animation, camera, input, HUD, sound | Unity scene, Animator, UI |
 | `index.html` | Page shell, HUD markup and styles | UI Toolkit |
-| `test/sim.test.mjs` | 63 headless sim checks | `Sting.Core.Tests` |
-| `test/net.test.mjs` | 20 network checks | `Sting.Net.Tests` |
+| `test/sim.test.mjs` | 66 headless sim checks | `Sting.Core.Tests` |
+| `test/net.test.mjs` | 21 network checks | `Sting.Net.Tests` |
 
 Run the tests with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 18+, no packages).
 
@@ -61,11 +62,13 @@ Run the tests with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 1
 | 36 | Binary state packets: chunk-relative 16-bit positions, 19 bytes per wasp; bandwidth shown in the lab | 11.12 | 6 |
 | 37 | Perch on people and crawl over their body (camera-relative, look up or down to climb); a tickle meter fills by zone and clothing, then they or a friend swat where they feel you | 7.2, 8.3 | 7 |
 | 38 | Jumpy humans: each sting a person has had makes their swats faster and their panic sharper | 8.10 | 7 |
+| 39 | Save and continue a personal world: exact snapshot (34 KB), chunks regenerated from the seed and checked against their content hash, autosave each dawn and on pause | 4.3, 12.4 | 8 |
+| 40 | Late join: a second peer builds its world from a snapshot of the first and agrees on every human from its first tick | 11.10 | 8 |
 
 ## Verified
 
-- **Sim:** traits and hash match the compiled C# protocode; trig error 6.6e-10; no swat or press lands inside the consequence window; fed colonies grow and starved larvae die; the yearly cycle raises and mates young queens and collapses in autumn; winter and spring hand the line to a founding queen; two runs and a replay give the same hash; lingering kills, jab-and-run survives; AI workers launch and deposit; covered food, traps, preemptive slaps, compression under a shirt, crawling to the acnestis, bee balls and escape, the exterminator destroying an unguarded nest and aborting when stung under his collar, the day cycle, possession, and frozen chunks.
-- **Network:** two peers sting the same humans over four links, from LAN up to 16±6 ticks one-way with 10% loss. Human state is identical on both peers at every check (300/300 per link) and no event arrives after its commit tick. With the peers two chunks apart, all 63 shared humans still agree at every check. State packets round-trip within 0.4 mm; a colony with 22 wasps out sends about 4.8 KB/s upstream.
+- **Sim:** traits and hash match the compiled C# protocode; trig error 6.6e-10; no swat or press lands inside the consequence window; fed colonies grow and starved larvae die; the yearly cycle raises and mates young queens and collapses in autumn; winter and spring hand the line to a founding queen; two runs and a replay give the same hash; lingering kills, jab-and-run survives; AI workers launch and deposit; covered food, traps, preemptive slaps, compression under a shirt, crawling to the acnestis, bee balls and escape, the exterminator destroying an unguarded nest and aborting when stung under his collar, the day cycle, possession, frozen chunks, and a restored snapshot that stays bit-identical to the original for 6000 more ticks and replays the input recorded after it.
+- **Network:** two peers sting the same humans over four links, from LAN up to 16±6 ticks one-way with 10% loss. Human state is identical on both peers at every check (300/300 per link) and no event arrives after its commit tick. With the peers two chunks apart, all 63 shared humans still agree at every check. A peer that joins 50 s in from a snapshot agrees on every check after joining (200/200). State packets round-trip within 0.4 mm; a colony with 22 wasps out sends about 4.8 KB/s upstream.
 - **Rendering:** headless Chromium screenshots of every system. The software renderer runs at under 1 fps, so frame rate on real GPUs is not measured.
 
 ## Design changes found by building (fold into the GDD)
@@ -86,4 +89,4 @@ Run the tests with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 1
 
 ## Controls
 
-Mouse look · WASD fly · Space / C up and down · Shift burst, mash to break free · hold LMB or F to sting · E catch, chew, crawl under clothes · Q take over nearest worker · R rest at night · N nest panel · Tab lab · M sound · Arrows look · Esc pause.
+Mouse look · WASD fly · Space / C up and down · Shift burst, mash to break free · hold LMB or F to sting · E catch, chew, crawl under clothes · Q take over nearest worker · R rest at night · N nest panel · Tab lab · M sound · Arrows look · Esc pause (Save world is on the pause screen; Continue appears on the start screen once a save exists).
