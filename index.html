@@ -48,6 +48,7 @@
   #colony { top: calc(14px + env(safe-area-inset-top, 0px)); right: calc(16px + env(safe-area-inset-right, 0px)); text-align: right; display: grid; gap: 2px; }
   #colony .v { font-family: var(--display); font-weight: 800; font-size: 26px; line-height: 1; }
   body.lab-open #colony { right: calc(min(360px, 92vw) + 16px); }
+  body.lab-open #clock { left: calc((100% - min(360px, 92vw)) / 2); }
 
   #vitals { bottom: calc(18px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); display: grid; gap: 8px; justify-items: center; width: min(420px, 80vw); }
   .bars { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; width: 100%; }
@@ -206,6 +207,10 @@
       <span style="--c:var(--red)">slap</span><span style="--c:var(--orange)">cover</span><span style="--c:var(--yellow)">brush</span><span style="--c:var(--green)">contort</span><span style="--c:var(--slate)">blocked</span><span style="--c:var(--lilac)">freezes</span>
     </div>
   </section>
+  <section id="lNetSec" hidden>
+    <h3>Network</h3>
+    <dl id="lNet"></dl>
+  </section>
   <section>
     <h3>Contact</h3>
     <div id="lContact" class="label">Fly within 2 cm of a person.</div>
@@ -247,6 +252,7 @@
       <label class="label" for="density">People<select id="density"><option value="0.7">Fewer</option><option value="1" selected>Normal</option><option value="1.15">Busy</option></select></label>
       <label class="label" for="seasonLen">Season<select id="seasonLen"><option value="20">20 days</option><option value="40" selected>40 days</option><option value="80">80 days</option><option value="200">200 days (real)</option></select></label>
       <label class="label" for="bees">Bees<select id="bees"><option value="0.7">Calm</option><option value="1" selected>Normal</option><option value="1.5">Vicious</option></select></label>
+      <label class="label" for="netMode">Second player<select id="netMode"><option value="off" selected>Off</option><option value="lan">Bot over LAN</option><option value="good">Bot over good internet</option><option value="bad">Bot over bad internet</option><option value="awful">Bot past the window</option></select></label>
       <button id="bStart">Fly</button>
     </div>
     <p class="label" id="startNote">Personal world. Built for keyboard and mouse.</p>

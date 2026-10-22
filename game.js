@@ -5,6 +5,7 @@ import {
   Sim, Act, T, DT, ZONES, ZoneName, SwatKind, SwatKindName, StyleName, TopName, BottomName, Top, Bottom,
   toWorld, toLocal, chunkKey, chunkOf, hash, Domain, rangeInt, resolveSting, zoneCover, segClosest, classify, predictedKind,
   NEST, NEST_ENTRANCE, flyPos, beePos, fmtClock, minuteOfDay, isLowerZone, broodTotal, garmentGraph, dayWeather,
+  NetLab, LINKS,
 } from './sim/index.js';
 
 const $ = (id) => document.getElementById(id);
@@ -95,6 +96,7 @@ function pick(seed, id, k, arr) { return arr[rangeInt(hash(seed, Domain.Cosmetic
 
 // ------------------------------------------------------------------ state
 
+let lab = null; // two-peer network lab when a second player is on
 let sim = null, settings = { seed: 1234, dayMinutes: 2, humanDensity: 1, beeAggression: 1, seasonDays: 40 };
 let running = false, paused = false;
 const input = { keys: new Set(), lmb: false, yaw: 0, pitch: 0, alloc: 1, autopilot: null };
@@ -489,8 +491,13 @@ function applyZoneColors(view, on) {
 
 // ------------------------------------------------------------------ wasps
 
-function buildWasp() {
+function buildWasp(remote = false) {
   const g = new THREE.Group();
+  if (remote) {
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.009, 0.0009, 6, 24), new THREE.MeshBasicMaterial({ color: '#4fd1ff' }));
+    ring.rotation.x = Math.PI / 2; ring.position.y = 0.007;
+    g.add(ring);
+  }
   const black = mat('#15120c'), yellow = mat('#f2c200');
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.0021, 12, 10), yellow); head.position.z = 0.0058; head.scale.set(1.15, 1, 0.9);
   const eyes = new THREE.Mesh(new THREE.SphereGeometry(0.0013, 8, 6), black); eyes.scale.set(2.0, 1.1, 0.8); eyes.position.set(0, 0.0004, 0.0062);
@@ -508,7 +515,7 @@ function buildWasp() {
   const carry = new THREE.Mesh(new THREE.SphereGeometry(0.0035, 8, 6), mat('#1b1a17')); carry.position.set(0, -0.004, 0.004); carry.visible = false;
   g.add(head, eyes, thorax, abdomen, wl, wr, carry);
   g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
-  g.userData = { abdomen, wl, wr, carry, yaw: 0 };
+  Object.assign(g.userData, { abdomen, wl, wr, carry, yaw: 0 });
   scene.add(g);
   return g;
 }
@@ -553,6 +560,23 @@ function renderWasps(alpha, t, dt) {
       bulge.position.copy(p);
       if (hv) bulge.material = isLowerZone(garmentZone(w)) ? hv.colors.bottom : hv.colors.top;
     }
+  }
+  // remote wasps: drawn where the sim extrapolates them, eased so corrections don't snap (GDD 11.4)
+  for (const [id, r] of sim.remote) {
+    seen.add(id);
+    let g = waspViews.get(id);
+    if (!g) { g = buildWasp(true); waspViews.set(id, g); g.position.set(r.x, r.y, r.z); }
+    const tgt = new THREE.Vector3(r.x, r.y, r.z);
+    if (g.position.distanceTo(tgt) > 0.5) g.position.copy(tgt); else g.position.lerp(tgt, 1 - Math.exp(-dt * 25));
+    g.visible = r.state !== 'under';
+    g.scale.setScalar(r.caste === 'queen' ? 1.3 : 1);
+    const sp = Math.hypot(r.vx, r.vz);
+    if (sp > 0.05) { let d = Math.atan2(r.vx, r.vz) - g.userData.yaw; d = Math.atan2(Math.sin(d), Math.cos(d)); g.userData.yaw += d * Math.min(1, dt * 10); }
+    g.rotation.order = 'YXZ'; g.rotation.y = g.userData.yaw; g.rotation.x = 0; g.rotation.z = 0;
+    const flap = r.state === 'attached' ? 0.15 : Math.sin(performance.now() * 0.9 + id) * 0.9;
+    g.userData.wl.rotation.z = flap; g.userData.wr.rotation.z = -flap;
+    g.userData.abdomen.rotation.x = r.state === 'attached' ? 0.5 : 0;
+    g.userData.carry.visible = !!r.carry;
   }
   for (const [id, g] of waspViews) if (!seen.has(id)) { scene.remove(g); waspViews.delete(id); pos.delete(id); }
   return drivenPos;
@@ -790,6 +814,7 @@ function toggleNest() { ui.nest = !ui.nest; $('nest').hidden = !ui.nest; documen
 $('bZones').addEventListener('click', (e) => { ui.zones = !ui.zones; e.currentTarget.setAttribute('aria-pressed', ui.zones); });
 $('bSwats').addEventListener('click', (e) => { ui.swats = !ui.swats; e.currentTarget.setAttribute('aria-pressed', ui.swats); });
 $('bVerify').addEventListener('click', () => {
+  if (lab) { $('verifyOut').textContent = 'Replay check is for solo worlds. With a second player, the Network section checks agreement instead.'; return; }
   const ticks = sim.tick, live = sim.stateHash(), t0 = performance.now();
   const replayed = Sim.replay(settings, sim.log, ticks);
   const took = Math.round(performance.now() - t0);
@@ -869,6 +894,18 @@ function updateLab() {
     ['In the park', near.win ? `${fmtClock(near.win.arrive)}–${fmtClock(near.win.leave)}` : near.special ? 'on the job' : 'not today'],
   ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('') : '';
   $('lLog').innerHTML = ui.log.map((l) => `<div>${l}</div>`).join('');
+  $('lNetSec').hidden = !lab;
+  if (lab) {
+    const L = LINKS[lab.linkName], c = lab.checks, err = lab.remoteError();
+    $('lNet').innerHTML = [
+      ['Link', `${L.name}`], ['One-way delay', `${ms(L.latency)}–${ms(L.latency + L.jitter)} ms`], ['Loss', `${Math.round(L.loss * 100)}%`],
+      ['Commit window', `${T.net.commitTicks} ticks · ${ms(T.net.commitTicks)} ms`],
+      ['Events sent / received', `${sim.netStats.sent} / ${sim.netStats.recv}`], ['Late events', `${sim.netStats.late + lab.b.netStats.late}${sim.netStats.lateMax ? ` (max ${sim.netStats.lateMax} ticks)` : ''}`],
+      ['Humans agree', c.compared ? `${c.agreed}/${c.compared} checks${c.agreed === c.compared ? '' : ' · diverged at tick ' + c.firstDiverge}` : '-'],
+      ['Player 2 drawn off by', err === null ? '-' : `${(err * 100).toFixed(1)} cm`],
+      ['Player 2 stings', `${lab.b.stats.stings}`],
+    ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+  }
 }
 
 // ------------------------------------------------------------------ HUD
@@ -1007,21 +1044,27 @@ function handleEvents(events) {
   for (const e of events) {
     switch (e.type) {
       case 'chunksActive': syncChunks(); break;
-      case 'sting': {
+      case 'stingContact':
+      case 'remoteSting': {
         const v = humanViews.get(e.humanHex);
         if (v) v.flinch = 1;
         { const hm = sim.humanByHex(e.humanHex); if (hm && near(hm, 6)) yelp(hm.tr.height); }
-        pushSwatAnims(e.swats, e.humanHex, e.t);
-        if (e.first && e.driven) { const b = $('bump'); b.textContent = '+1 · ' + zoneLabel(e.zone); b.style.opacity = 1; bumpTimer = 1.6; }
-        logEvent(`${e.driven ? 'you stung' : 'a worker stung'} #${e.humanHex.slice(0, 4)} · ${zoneLabel(e.zone)}${e.under ? ' (under clothes)' : ''}`);
+        pushSwatAnims(e.swats, e.humanHex, e.contactTick);
+        if (e.type === 'stingContact' && e.first && e.driven) { const b = $('bump'); b.textContent = '+1 · ' + zoneLabel(e.zone); b.style.opacity = 1; bumpTimer = 1.6; }
+        if (e.type === 'remoteSting') logEvent(`player 2 stung #${e.humanHex.slice(0, 4)} · ${zoneLabel(e.zone)}`);
         break;
       }
+      case 'sting':
+        if (!e.remote) logEvent(`${e.driven ? 'you stung' : 'a worker stung'} #${e.humanHex.slice(0, 4)} · ${zoneLabel(e.zone)}${e.under ? ' (under clothes)' : ''}`);
+        break;
+      case 'remoteDied': logEvent(`player 2's wasp died · ${e.cause}`); break;
+      case 'lateEvent': logEvent(`late ${e.type} event (${e.by} ticks)`); break;
       case 'preSwat':
-        pushSwatAnims([{ actorHex: e.humanHex, kind: e.kind, start: e.start, window: e.window, center: e.center }], e.humanHex, e.t);
+        pushSwatAnims([{ actorHex: e.humanHex, kind: e.kind, start: e.start, window: e.window, center: e.center }], e.humanHex, e.contactTick ?? e.t);
         if (e.waspId === sim.drivenId) logEvent(`#${e.humanHex.slice(0, 4)} swats at you (${e.why})`);
         break;
       case 'press':
-        pushSwatAnims([{ actorHex: e.humanHex, kind: SwatKind.Slap, start: e.start, window: 8, center: e.center }], e.humanHex, e.t);
+        pushSwatAnims([{ actorHex: e.humanHex, kind: SwatKind.Slap, start: e.start, window: 8, center: e.center }], e.humanHex, e.contactTick ?? e.t);
         break;
       case 'deepen': logEvent(`full sting #${e.humanHex.slice(0, 4)}`); break;
       case 'blocked': toast(`${zoneLabel(e.zone)} is covered. Can't sting through.`, 'var(--muted)', 1.6); break;
@@ -1051,7 +1094,7 @@ function handleEvents(events) {
       case 'nestDestroyed': toast('The nest is destroyed', 'var(--red)', 4); logEvent(`nest destroyed · ${e.died} inside died`); break;
       case 'possess': waspSwitched(e.id); logEvent(`now driving worker ${e.id}`); break;
       case 'noSwitch': toast('No worker within 30 m', 'var(--muted)', 1.4); break;
-      case 'cantRest': toast(e.why === 'day' ? 'Rest only at night' : 'Rest at the nest entrance', 'var(--muted)', 1.6); break;
+      case 'cantRest': toast(e.why === 'day' ? 'Rest only at night' : e.why === 'net' ? 'No resting with a second player' : 'Rest at the nest entrance', 'var(--muted)', 1.6); break;
       case 'rested': toast('Morning', 'var(--yellow)', 1.6); break;
       case 'newDay': logEvent(`day ${e.day + 1}`); break;
       case 'season': {
@@ -1154,7 +1197,7 @@ function frame(now) {
     let n = 0;
     while (acc >= DT && n < 8) {
       for (const w of sim.wasps) { const e = pos.get(w.id); if (e) e.p.copy(e.c); }
-      sim.step(buildCmd());
+      if (lab) { lab.step(buildCmd()); if (sim.tick % 30 === 0) lab.check(); } else sim.step(buildCmd());
       for (const w of sim.wasps) { const e = pos.get(w.id); if (e) e.c.set(w.x, w.y, w.z); else pos.set(w.id, { p: V(w), c: V(w) }); }
       handleEvents(sim.drainEvents());
       acc -= DT; n++;
@@ -1207,7 +1250,8 @@ function newWorld(s) {
   for (const g of waspViews.values()) scene.remove(g);
   chunkViews.clear(); humanViews.clear(); waspViews.clear(); pos.clear(); anims.length = 0; ui.log.length = 0;
   settings = s;
-  sim = new Sim(settings);
+  lab = s.net && s.net !== 'off' ? new NetLab(settings, s.net) : null;
+  sim = lab ? lab.a : new Sim(settings);
   sim.drainEvents();
   syncChunks();
   const w = sim.wasp;
@@ -1221,7 +1265,7 @@ function readSettings() {
   const raw = $('seed').value.trim();
   let seed;
   try { seed = BigInt.asUintN(64, BigInt(raw || '0')); } catch { seed = BigInt(Array.from(raw).reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7)); }
-  return { seed, dayMinutes: +$('dayLen').value, humanDensity: +$('density').value, beeAggression: +$('bees').value, seasonDays: +$('seasonLen').value };
+  return { seed, dayMinutes: +$('dayLen').value, humanDensity: +$('density').value, beeAggression: +$('bees').value, seasonDays: +$('seasonLen').value, net: $('netMode').value };
 }
 
 $('bStart').addEventListener('click', () => { initAudio(); newWorld(readSettings()); $('startScreen').hidden = true; running = true; lock(); });
@@ -1234,7 +1278,7 @@ newWorld({ seed: 1234n, dayMinutes: 2, humanDensity: 1, beeAggression: 1, season
 requestAnimationFrame(frame);
 
 // test hook for automated checks
-window.__sting = { get sim() { return sim; }, input, start: () => $('bStart').click(), humanViews, toggleNest, toggleLab };
+window.__sting = { get sim() { return sim; }, get lab() { return lab; }, input, start: () => $('bStart').click(), humanViews, toggleNest, toggleLab };
 window.__garment = (hm) => garmentGraph(hm.tr, hm.clothing, hm.posture, hm.parts[hm.posture]);
 window.__toWorld = toWorld;
 window.__weather = dayWeather;
