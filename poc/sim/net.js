@@ -152,3 +152,36 @@ export class NetLab {
     return Math.hypot(r.x - bw.x, r.y - bw.y, r.z - bw.z);
   }
 }
+
+// N peers over a full mesh of simulated links (GDD 11.11, personal worlds with friends). Peer 0 is the player and the
+// host; the others are scripted. `tamper(from, msg)` lets a test turn one peer into a cheater.
+export class MeshLab {
+  constructor(settings, n = 3, linkName = 'good', botOpts = {}) {
+    const L = LINKS[linkName] || LINKS.good, peers = [...Array(n).keys()];
+    this.sims = peers.map((p) => new Sim(settings, { peer: p, net: true, noAI: p > 0, peers }));
+    this.links = peers.map((i) => peers.map((j) => (i === j ? null : new Link({ ...L, seed: 100 + i * 10 + j }))));
+    this.bots = peers.map((p) => (p ? stingBot({ plan: 'jab', rest: 240 + p * 37, ...botOpts }) : null));
+    this.tamper = null;
+    this.checks = { compared: 0, agreed: 0 };
+  }
+  step(cmd0) {
+    const t = this.sims[0].tick + 1, n = this.sims.length;
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) if (i !== j) this.sims[j].receive(this.links[i][j].poll(t).map((m) => (m.mk === 'bin' ? decodeState(m.bin) : m)));
+    this.sims.forEach((s, i) => s.step(i ? this.bots[i](s) : cmd0));
+    this.sims.forEach((s, i) => {
+      for (const m of s.outbox) {
+        if (this.tamper) this.tamper(i, m, s);
+        for (let j = 0; j < n; j++) if (j !== i) this.links[i][j].send(m.mk === 'state' ? { mk: 'state', bin: encodeState(m) } : m, s.tick);
+      }
+      s.outbox.length = 0;
+    });
+  }
+  // do these peers agree on every shared human?
+  agree(peers) {
+    this.checks.compared++;
+    const h = peers.map((p) => this.sims[p].humanHash());
+    const same = h.every((x) => x === h[0]);
+    if (same) this.checks.agreed++;
+    return same;
+  }
+}

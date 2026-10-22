@@ -10,13 +10,13 @@ The tier-0 slice of the GDD, built in the browser so it can move to Unity. Same 
 | `sim/world.js` | Chunk generation, clock, weather, schedules, pure motion of flies and bees | `Sting.Core/World/*` |
 | `sim/colony.js` | Colony economy and the yearly cycle | `Sting.Core/Colony/*` |
 | `sim/sim.js` | The sim: wasps, humans, swats, bees, escalation, exterminator, networking | `Sting.Core/Sim.cs` |
-| `sim/net.js` | Simulated link and the two-peer lab | `Sting.Net` + transport |
+| `sim/net.js` | Simulated link, the two-peer lab and an N-peer mesh lab | `Sting.Net` + transport |
 | `sim/persist.js` | Exact snapshot and restore, replay from a snapshot, joining a world in progress | `Sting.Core/Persistence` |
 | `sim/bots.js` | Scripted pilots that produce ordinary input commands | test harness |
 | `game.js` | three.js rendering, animation, camera, input, HUD, sound | Unity scene, Animator, UI |
 | `index.html` | Page shell, HUD markup and styles | UI Toolkit |
 | `test/sim.test.mjs` | 106 headless sim checks | `Sting.Core.Tests` |
-| `test/net.test.mjs` | 29 network checks | `Sting.Net.Tests` |
+| `test/net.test.mjs` | 31 network checks | `Sting.Net.Tests` |
 
 Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 18+, no packages). Play locally with `node serve.mjs`.
 
@@ -85,6 +85,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 59 | Dragonflies patrol low over open ground and dart at wasps flying under 2.5 m; faster than a burst but worse at turning, so break hard, land or get under a tree. Birds and dragonflies share one hunter code path | 9.3 | 13 |
 | 60 | Garden sheds (about a third of chunks): solid wood to chew and land on, and two nest sites, a crack in a wall (4,000 cells) and a gap under the eaves (6,000 cells, best shelter). World generator 3; older saves are refused with a message | 6.6 | 13 |
 | 61 | Colony view workers list: the nest panel lists the workers that are out, nearest first, with role, what she is doing, what she carries and how far; Drive switches to her (instant within 30 m, relayed beyond). The pick travels as a recorded command, so replays stay exact | 10.3 | 13 |
+| 62 | Host rulings: every peer drops implausible events, but only the host quarantines, as a committed event; all honest peers cut the cheater off on the same tick, purge its uncommitted events and drop its interest window. Proven with a three-peer mesh lab (host, honest, cheater) on a bad link | 11.8, 11.11 | 13 |
 
 ## Verified
 

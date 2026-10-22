@@ -1,5 +1,5 @@
 // Two peers over a simulated link must agree on every shared human (GDD 11.5). Run: node test/net.test.mjs
-import { NetLab, Sim, stingBot, idleCmd, encodeState, decodeState, BYTES_PER_WASP } from '../sim/index.js';
+import { NetLab, MeshLab, Sim, stingBot, idleCmd, encodeState, decodeState, BYTES_PER_WASP } from '../sim/index.js';
 
 let failures = 0;
 const ok = (cond, msg) => { console.log((cond ? 'PASS ' : 'FAIL ') + msg); if (!cond) failures++; };
@@ -152,6 +152,25 @@ for (const name of ['lan', 'good', 'bad', 'awful']) {
   const st = lab.a.netStats;
   console.log(`  cheater: A rejected ${st.rejected} events (${[...whys].join(', ')}), quarantined B at tick ${quarantinedAt}, then dropped ${st.dropped} messages`);
   ok(whys.has('swat timing') && quarantinedAt > 1200 && lab.a.plaus.quarantined.includes(1) && lab.a.remote.size === 0, 'a peer that delays the slaps aimed at its wasps is rejected and quarantined');
+}
+
+// Three peers (GDD 11.8, 11.11): host A, honest B, cheater C. Only the host rules; both honest peers cut C off on the
+// same tick, purge the same pending events, and keep agreeing on every human.
+{
+  const lab = new MeshLab({ seed: 1234 }, 3, 'bad');
+  lab.tamper = (from, m, sim) => { if (from === 2 && sim.tick > 1500 && m.type === 'sting') for (const sw of m.swats) sw.start += 1000; };
+  const botA = stingBot({ plan: 'jab', rest: 200 });
+  const cut = [0, 0, 0];
+  let disagreeAfter = 0;
+  for (let i = 0; i < 20000; i++) {
+    lab.step(botA(lab.sims[0]));
+    lab.sims.forEach((s, p) => { for (const e of s.drainEvents()) if (e.type === 'quarantine' && e.peer === 2 && !cut[p]) cut[p] = s.tick; });
+    if (i % 60 === 0 && !lab.agree([0, 1]) && cut[0]) disagreeAfter++;
+  }
+  const [A, B] = lab.sims, c = lab.checks;
+  console.log(`  three peers: host cut C off at tick ${cut[0]}, B at ${cut[1]}; A and B agree ${c.agreed}/${c.compared}; B's own strike count ${B.plaus.strikes[2] || 0}`);
+  ok(cut[0] > 1500 && cut[0] === cut[1] && A.plaus.quarantined.includes(2) && B.plaus.quarantined.includes(2), 'the host rules on the cheater and both honest peers cut it off on the same tick');
+  ok(c.agreed === c.compared, `the honest peers agree on every human before and after the cut (${c.agreed}/${c.compared})`);
 }
 
 // Wire format: quantization error and bandwidth (GDD 11.12)

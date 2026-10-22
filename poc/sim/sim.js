@@ -38,6 +38,7 @@ export class Sim {
     // Which chunks each peer is near. Humans are simulated over the union, changes commit like any event (Q-16)
     this.interest = new Map();
     for (const p of opts.peers || [this.peer]) this.interest.set(p, chunkKey(chunkOf(SPAWN.x), chunkOf(SPAWN.z)));
+    this.host = Math.min(...(opts.peers || [this.peer])); // rules on cheaters for everyone (GDD 11.8)
     this.seed = u64(this.settings.seed ?? 1234);
     this.tpm = ticksPerMinute(this.settings);
     this.dayTicks = this.tpm * 1440;
@@ -327,6 +328,7 @@ export class Sim {
     if (ev.seq <= last) return 'replayed or out of order';
     this.plaus.lastSeq[ev.peer] = ev.seq;
     if (ev.tick > this.tick + P.futureTicks) return 'from the future';
+    if (ev.type === 'quarantine' && ev.peer !== this.host) return 'only the host rules on peers';
     if (ev.type === 'sting' || ev.type === 'notice' || ev.type === 'press' || ev.type === 'preSwat') {
       const hm = this.humanByHex(ev.humanHex);
       const swats = ev.swats || (ev.type === 'preSwat' ? [{ start: ev.start }] : []);
@@ -346,16 +348,28 @@ export class Sim {
     return null;
   }
 
+  // Every peer drops implausible events the same way, but only the host rules on a peer: it publishes the verdict as
+  // a committed event, so every peer cuts the cheater off on the same tick and purges the same pending events.
   _strike(peer, type, why) {
     this.netStats.rejected++;
     const n = (this.plaus.strikes[peer] || 0) + 1;
     this.plaus.strikes[peer] = n;
     this.emit('implausible', { peer, evType: type, why, strikes: n });
-    if (n >= T.plaus.strikes && !this.plaus.quarantined.includes(peer)) {
-      this.plaus.quarantined.push(peer);
-      for (const [id, r] of this.remote) if (r.peer === peer) this.remote.delete(id);
-      this.emit('quarantine', { peer });
-    }
+    if (n < T.plaus.strikes || this.plaus.quarantined.includes(peer) || (this.plaus.ruled || []).includes(peer)) return;
+    if (!this.net) { this._quarantine(peer); return; }
+    if (this.peer !== this.host) return;
+    (this.plaus.ruled || (this.plaus.ruled = [])).push(peer);
+    this._publish({ type: 'quarantine', target: peer, why });
+  }
+
+  _quarantine(peer) {
+    if (this.plaus.quarantined.includes(peer)) return;
+    this.plaus.quarantined.push(peer);
+    for (const [id, r] of this.remote) if (r.peer === peer) this.remote.delete(id);
+    // whatever it sent that has not committed yet is void on every peer alike
+    this.pending = this.pending.filter((e) => e.peer !== peer);
+    this.interest.delete(peer);
+    this.emit('quarantine', { peer, me: peer === this.peer });
   }
 
   _remoteState(m) {
@@ -494,6 +508,9 @@ export class Sim {
   _applyCommit(ev) {
     const mine = ev.peer === this.peer;
     switch (ev.type) {
+      case 'quarantine':
+        if (ev.peer === this.host) this._quarantine(ev.target);
+        break;
       case 'sting': {
         const hm = this.humanByHex(ev.humanHex);
         if (!hm) break;
