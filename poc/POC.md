@@ -65,7 +65,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 39 | Save and continue a personal world: exact snapshot (34 KB), chunks regenerated from the seed and checked against their content hash, autosave each dawn and on pause | 4.3, 12.4 | 8 |
 | 40 | Late join: a second peer builds its world from a snapshot of the first and agrees on every human from its first tick | 11.10 | 8 |
 | 41 | Walk on surfaces: camera-relative on tables, benches and the ground; trunks block, edges drop you into flight, walking into a person climbs onto them; six legs with a tripod gait | 7.2 | 9 |
-| 42 | Sugar store capped at a few days of adult need, so stores drain in autumn instead of piling up | 6.3 | 9 |
+| 42 | Sugar and protein stores capped at a few days of need (adults' sugar, larvae's protein), so stores drain in autumn and protein runs short when queen larvae arrive | 6.3 | 9 |
 | 43 | Death screen says why: lingered after a sting, felt crawling, hovered at a face, caught in a swat meant for another wasp, bird, web, ball, trap, spray | 8.2 | 9 |
 | 44 | Rival fights across peers: the rival's owner starts the fight (or the other peer asks, when its wasp touches a rival on its own screen); each peer decides only its own wasp from the same published scores | 9.3, 11.6 | 10 |
 | 45 | Late join in the lab: "Bot joins after 1 min" builds player 2 from a snapshot mid-game | 11.10 | 10 |
@@ -90,7 +90,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 
 ## Known limits
 
-- The colony economy is balanced loosely: protein piles up mid-season before queen larvae eat it down.
+- The colony economy is tuned against one simulated season with an idle player; it needs real play data.
 - Walking is on horizontal surfaces only; tree trunks and walls are obstacles, not surfaces.
 - Two players' colonies never fight each other: whether players are co-op, rivals or both is still open (Q-07).
 

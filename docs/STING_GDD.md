@@ -884,7 +884,7 @@ On Main the entity count is dominated by AI wasps: one player's colony can hold 
 | Q-10 | Do lineage colonies count toward keeping the line alive? | Yes; implemented as sister nests in the PoC |
 | Q-11 | Art scope for thousands of distinct humans | Open; modular bodies and clothing driven by traits |
 | Q-16 | Humans outside a peer's interest | Settled (18.9): committed interest windows; humans simulated over the union |
-| Q-17 | Should the colony economy balance stores late in the season (sugar piles up)? | Tune with real play data |
+| Q-17 | Should the colony economy balance stores late in the season (sugar piles up)? | Settled (18.11): stores are capped at a few days of need |
 
 ---
 
@@ -952,6 +952,10 @@ Each peer's interest window (the 3×3 chunks around its wasp) is itself a commit
 A snapshot holds the world record, the chunk records (seed, `genVersion`, content hash) and their deltas, every live human row, the escalation state per chunk, the pending committed events, the committed interest windows and the colony. Chunk content is not stored: it is regenerated from the seed on load and checked against the stored content hash, so a generator change is caught instead of silently producing a different world. In the PoC a full save is 34 KB, and a restored world stays bit-identical to the original for 6000 more ticks of the same input.
 
 Joining a world in progress uses the same snapshot instead of the event replay listed in 11.10 item 4. Sending the live human rows is smaller and exact, while rebuilding panic from recent events depends on events that may already have been trimmed. The joiner takes the shared part of the snapshot and starts its own colony. In the lab a peer that joined 50 s in agreed on every human at every check after joining (200 of 200). On Main the cell server sends the rows for the joiner's interest area only.
+
+### 18.11 Stores are capped (Q-17 settled)
+
+Vespula keep little in the nest: sugar goes to adults and prey goes straight to larvae. Uncapped, a simulated season ended with 444 units of sugar banked. The stores are now capped: sugar at 2.5 days of adult need, protein at 2 days of larval need (queen larvae count at their higher rate), each plus a small base. Anything over the cap is not collected. In the same idle season, protein now runs out when queen larvae arrive (about 70% of the season), which is when the player's hunting matters most, and the colony still raised and mated about 190 young queens.
 
 ---
 

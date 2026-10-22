@@ -48,7 +48,7 @@ export const T = {
     cellsPerPulp: 8, buildPerDay: 1.5,
     forageShare: 0.55, income: { sugar: 0.3, protein: 0.35, pulp: 0.15 },
     deficitSmoothing: 0.1, queenStarveDays: 1,
-    sugarCapBase: 6, sugarCapDays: 2.5,                            // bio: Vespula keep little sugar; a store of a few days of adult need
+    sugarCapBase: 6, sugarCapDays: 2.5, proteinCapBase: 6, proteinCapDays: 2, // bio: prey goes straight to larvae; little is held                            // bio: Vespula keep little sugar; a store of a few days of adult need
   },
   alloc: [
     { name: 'Balanced', sugar: 1, protein: 1, pulp: 1 },

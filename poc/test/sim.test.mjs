@@ -47,9 +47,11 @@ const place = (w, p) => { w.x = p.x; w.y = p.y; w.z = p.z; w.vx = w.vy = w.vz = 
 // 3. Colony economy (GDD 6, A.4)
 {
   const fed = newColony(), starved = newColony();
-  fed.protein = 1e6; fed.sugar = 1e6;
-  starved.protein = 0; starved.sugar = 1e6;
-  for (let i = 0; i < 120 * 10; i++) { colonyStep(fed, 1 / 120, 0, false); colonyStep(starved, 1 / 120, 0, false); }
+  // stores are capped (a few days of need), so "fed" means topped up every step
+  for (let i = 0; i < 120 * 10; i++) {
+    fed.protein = 1e6; fed.sugar = 1e6; starved.protein = 0; starved.sugar = 1e6;
+    colonyStep(fed, 1 / 120, 0, false); colonyStep(starved, 1 / 120, 0, false);
+  }
   ok(fed.adults > 30 && fed.stats.emerged > 10, `fed colony grows over 10 days (${fed.adults.toFixed(1)} adults)`);
   ok(starved.stats.starvedLarvae > 10 && starved.larvae < fed.larvae, `protein-starved larvae die (${starved.stats.starvedLarvae.toFixed(1)} lost)`);
   ok(starved.deficit > fed.deficit, `sugar deficit rises when larvae go hungry (${starved.deficit.toFixed(2)} vs ${fed.deficit.toFixed(2)})`);
