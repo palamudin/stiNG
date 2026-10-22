@@ -1546,6 +1546,41 @@ function updateStare(dt) {
 // Holding RMB switches to the wasp's own eyes: a free first-person look all the way round. Letting go blends back
 // out to the chase view behind the direction of travel.
 const camOff = new THREE.Vector3(0, 0.03, -0.1);
+// Scent cues (GDD 10.2): which way the nearest sugar, prey and alarm lie, as small markers around the crosshair.
+// Strength fades with distance; the wasp smells, it does not see, so walls and trees do not block it.
+const SCENT_RANGE = { sugar: 14, protein: 10, alarm: 18 };
+function nearestScents(w) {
+  const best = { sugar: null, protein: null, alarm: null }, d2 = { sugar: Infinity, protein: Infinity, alarm: Infinity };
+  const take = (k, p) => { const d = (p.x - w.x) ** 2 + (p.z - w.z) ** 2; if (d < d2[k] && d > 0.04) { d2[k] = d; best[k] = p; } };
+  for (const rec of sim.activeChunks) {
+    const c = rec.content, key = chunkKey(rec.cx, rec.cz), st = sim.cs(key), lv = sim.escLevel(key);
+    c.sugar.forEach((sg, i) => { if (sg.kind === 'can' && (lv >= 2 || sim.canSpilled(key, i))) return; take('sugar', sg); });
+    for (const sp of sim.spillsIn(key)) take('sugar', sp);
+    for (const f of sim.fruitIn(rec)) take('sugar', f);
+    c.flies.forEach((f, i) => { if ((st.caughtFly[i] || 0) <= sim.tick) take('protein', flyPos(f, sim.tick)); });
+    c.caterpillars.forEach((f, i) => { if (!st.caughtCat[i]) take('protein', f); });
+  }
+  for (const a of sim.alarms) take('alarm', a);
+  for (const al of sim.hiveAlarms.values()) { const rec = sim.records.get(al.key); const hv = rec && rec.content.hives[al.h]; if (hv) take('alarm', hv); }
+  return { best, d2 };
+}
+let scentTimer = 0, scentCache = null;
+function updateScents(dt) {
+  const w = sim._driven();
+  const show = w && running && !paused && eyeBlend < 0.5;
+  if ((scentTimer -= dt) <= 0 && w) { scentCache = nearestScents(w); scentTimer = 0.25; }
+  for (const [k, id] of [['sugar', 'scentSugar'], ['protein', 'scentProtein'], ['alarm', 'scentAlarm']]) {
+    const el = $(id), p = scentCache && scentCache.best[k];
+    if (!show || !p) { el.style.opacity = 0; continue; }
+    const d = Math.sqrt(scentCache.d2[k]), strength = Math.max(0, 1 - d / SCENT_RANGE[k]);
+    if (strength <= 0) { el.style.opacity = 0; continue; }
+    const ang = Math.atan2(p.x - w.x, p.z - w.z) - input.yaw; // 0 = straight ahead
+    const r = 34 + (k === 'alarm' ? 10 : k === 'protein' ? 5 : 0);
+    el.style.transform = `translate(${(-Math.sin(ang) * r - 6).toFixed(1)}px, ${(-Math.cos(ang) * r - 5).toFixed(1)}px) rotate(${(-ang).toFixed(3)}rad)`;
+    el.style.opacity = (0.25 + 0.75 * strength).toFixed(2);
+  }
+}
+
 function updateCamera(p, dt) {
   const w = sim.wasp;
   const dead = !sim._driven();
@@ -1630,6 +1665,7 @@ function frame(now) {
     const p = renderWasps(alpha, t, dt);
     const focus = updateCamera(p, dt);
     updateStare(dt);
+    updateScents(dt);
     if (tm) { tm('wasps+cam', t0); t0 = performance.now(); }
     renderCritters(t);
     renderBaits();
