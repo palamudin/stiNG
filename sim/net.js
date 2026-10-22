@@ -48,8 +48,8 @@ export class NetLab {
   constructor(settings, linkName = 'good', botOpts = {}) {
     const L = LINKS[linkName] || LINKS.good;
     this.linkName = linkName;
-    this.a = new Sim(settings, { peer: 0, net: true });
-    this.b = new Sim(settings, { peer: 1, net: true, noAI: true });
+    this.a = new Sim(settings, { peer: 0, net: true, peers: [0, 1] });
+    this.b = new Sim(settings, { peer: 1, net: true, noAI: true, peers: [0, 1] });
     this.ab = new Link({ ...L, seed: 11 });
     this.ba = new Link({ ...L, seed: 22 });
     this.botB = stingBot({ plan: 'jab', rest: 240, ...botOpts });
@@ -66,9 +66,8 @@ export class NetLab {
     this.a.outbox.length = 0; this.b.outbox.length = 0;
     this.b.drainEvents();
   }
-  // Compare the shared humans. Only meaningful while both peers simulate the same chunks.
+  // Compare the shared humans: both peers simulate the same union of interest, so they must agree everywhere.
   check() {
-    if (this.a.activeKey !== this.b.activeKey) { this.checks.skipped++; return null; }
     this.checks.compared++;
     const same = this.a.humanHash() === this.b.humanHash();
     if (same) this.checks.agreed++; else if (!this.checks.firstDiverge) this.checks.firstDiverge = this.a.tick;

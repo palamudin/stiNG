@@ -14,8 +14,8 @@ The tier-0 slice of the GDD, built in the browser so it can move to Unity. Same 
 | `sim/bots.js` | Scripted pilots that produce ordinary input commands | test harness |
 | `game.js` | three.js rendering, animation, camera, input, HUD, sound | Unity scene, Animator, UI |
 | `index.html` | Page shell, HUD markup and styles | UI Toolkit |
-| `test/sim.test.mjs` | 45 headless sim checks | `Sting.Core.Tests` |
-| `test/net.test.mjs` | 16 two-peer agreement checks | `Sting.Net.Tests` |
+| `test/sim.test.mjs` | 56 headless sim checks | `Sting.Core.Tests` |
+| `test/net.test.mjs` | 18 two-peer agreement checks | `Sting.Net.Tests` |
 
 Run the tests with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 18+, no packages).
 
@@ -50,11 +50,16 @@ Run the tests with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 1
 | 25 | Networking: committed world events, owner authority, remote dead reckoning, simulated link | 11 | 4 |
 | 26 | Network lab: a bot second player over a chosen link; live agreement check on every human | 11.5 | 4 |
 | 27 | Lab overlay: state hash, replay check, predicted swats, body zone map, traits, event log | 14 | 1–4 |
+| 28 | Spider webs by trees: stuck wasps are eaten unless they mash free | 9.3 | 5 |
+| 29 | Birds on patrol dive at wasps in open air; low flight and tree cover save you | 9.3 | 5 |
+| 30 | Landing: a still wasp rests on ground or wood at no sugar cost; people swat wasps resting by their food | 7.2 | 5 |
+| 31 | Rival colonies: their workers forage, guard and hunt raiders; touching wasps grapple and one dies; raid their nest for larvae | 9.3 | 5 |
+| 32 | Interest windows commit like events; humans are simulated over the union of all peers' windows | 11, Q-16 | 5 |
 
 ## Verified
 
 - **Sim:** traits and hash match the compiled C# protocode; trig error 6.6e-10; no swat or press lands inside the consequence window; fed colonies grow and starved larvae die; the yearly cycle raises and mates young queens and collapses in autumn; winter and spring hand the line to a founding queen; two runs and a replay give the same hash; lingering kills, jab-and-run survives; AI workers launch and deposit; covered food, traps, preemptive slaps, compression under a shirt, crawling to the acnestis, bee balls and escape, the exterminator destroying an unguarded nest and aborting when stung under his collar, the day cycle, possession, and frozen chunks.
-- **Network:** two peers sting the same humans over four links, from LAN up to 16±6 ticks one-way with 10% loss. Human state is identical on both peers at every check (300/300 per link) and no event arrives after its commit tick.
+- **Network:** two peers sting the same humans over four links, from LAN up to 16±6 ticks one-way with 10% loss. Human state is identical on both peers at every check (300/300 per link) and no event arrives after its commit tick. With the peers two chunks apart, all 63 shared humans still agree at every check.
 - **Rendering:** headless Chromium screenshots of every system. The software renderer runs at under 1 fps, so frame rate on real GPUs is not measured.
 
 ## Design changes found by building (fold into the GDD)
@@ -69,10 +74,9 @@ Run the tests with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 1
 
 ## Known limits
 
-- Humans are simulated only in chunks near a local wasp. Two peers in different areas would disagree about humans neither shares. The fix is to step humans over the union of peers' interest or make their state a pure function of seed, time and events.
 - The colony economy is balanced loosely; sugar stores grow large late in the season.
-- Wasps cannot land and walk yet.
-- No birds, spiders or rival colonies yet.
+- Wasps land and rest but cannot walk on surfaces.
+- Fights between a remote player's wasp and local rivals are not networked yet; rivals live on the first peer only.
 
 ## Controls
 

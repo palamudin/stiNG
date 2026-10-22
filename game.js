@@ -1137,7 +1137,8 @@ function pushSwatAnims(list, frameHex, contactTick) {
 function handleEvents(events) {
   for (const e of events) {
     switch (e.type) {
-      case 'chunksActive': syncChunks(); break;
+      case 'chunksActive':
+      case 'humansActive': syncChunks(); break;
       case 'stingContact':
       case 'remoteSting': {
         const v = humanViews.get(e.humanHex);

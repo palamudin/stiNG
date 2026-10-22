@@ -34,6 +34,9 @@ export class Sim {
     this.evSeq = 0;
     this.remote = new Map();
     this.netStats = { sent: 0, recv: 0, late: 0, lateMax: 0 };
+    // Which chunks each peer is near. Humans are simulated over the union, changes commit like any event (Q-16)
+    this.interest = new Map();
+    for (const p of opts.peers || [this.peer]) this.interest.set(p, chunkKey(chunkOf(SPAWN.x), chunkOf(SPAWN.z)));
     this.seed = u64(this.settings.seed ?? 1234);
     this.tpm = ticksPerMinute(this.settings);
     this.dayTicks = this.tpm * 1440;
@@ -132,14 +135,31 @@ export class Sim {
     const ccx = chunkOf(w.x), ccz = chunkOf(w.z);
     const key = chunkKey(ccx, ccz);
     if (key === this.activeKey && !force) return;
+    const changed = key !== this.activeKey;
     this.activeKey = key;
     const D = T.chunk.discoverRadius, A = T.chunk.activeRadius;
     for (let dz = -D; dz <= D; dz++) for (let dx = -D; dx <= D; dx++) this._discover(ccx + dx, ccz + dz);
     const act = [];
     for (let dz = -A; dz <= A; dz++) for (let dx = -A; dx <= A; dx++) act.push(this.records.get(chunkKey(ccx + dx, ccz + dz)));
     this.activeChunks = act;
+    this.emit('chunksActive', { key });
+    if (changed && this.interest.get(this.peer) !== key) this._publish({ type: 'interest', key });
+    if (force) this._rebuildHumans();
+  }
+
+  // The humans every peer simulates: those in the 3x3 window around any peer's committed interest
+  _rebuildHumans() {
+    const A = T.chunk.activeRadius, keys = new Set();
+    for (const k of this.interest.values()) {
+      const [cx, cz] = k.split(',').map(Number);
+      for (let dz = -A; dz <= A; dz++) for (let dx = -A; dx <= A; dx++) keys.add(chunkKey(cx + dx, cz + dz));
+    }
+    const before = new Set(this.active);
     const list = [];
-    for (const rec of act) {
+    for (const k of [...keys].sort()) {
+      const [cx, cz] = k.split(',').map(Number);
+      this._discover(cx, cz);
+      const rec = this.records.get(k);
       for (const hs of rec.content.humans) {
         const id = hash(this.seed, Domain.WorldGen, u64(rec.cx), u64(rec.cz), BigInt(hs.slot));
         const hex = hex64(id);
@@ -148,7 +168,7 @@ export class Sim {
           const tr = humanTraits(this.seed, id);
           const ax = hs.x + T.panic.approachDist * dcos(hs.exit), az = hs.z + T.panic.approachDist * dsin(hs.exit);
           hm = {
-            id, hex, short: hex.slice(0, 4), tr, clothing: humanClothing(this.seed, id, this.day), chunk: chunkKey(rec.cx, rec.cz),
+            id, hex, short: hex.slice(0, 4), tr, clothing: humanClothing(this.seed, id, this.day), chunk: k,
             home: { x: hs.x, z: hs.z, fx: hs.fx, fz: hs.fz, posture: hs.posture, ax, az },
             x: hs.x, z: hs.z, fx: hs.fx, fz: hs.fz, posture: hs.posture,
             state: 'idle', panic: 0, fleeSteps: 0, dirX: 0, dirZ: 0, stungCount: 0, winDay: -1, win: null,
@@ -157,14 +177,14 @@ export class Sim {
           };
           this.humans.set(hex, hm);
         }
-        this._catchUpHuman(hm);
+        if (!before.has(hm)) this._catchUpHuman(hm);
         list.push(hm);
       }
     }
     if (this.ext.hm) list.push(this.ext.hm);
     list.sort(byHumanId);
     this.active = list;
-    this.emit('chunksActive', { key });
+    this.emit('humansActive', { count: list.length });
   }
 
   _window(hm) {
@@ -401,6 +421,10 @@ export class Sim {
         if (hm) this.addEsc(hm.x, hm.z, T.esc.death);
         break;
       }
+      case 'interest':
+        this.interest.set(ev.peer, ev.key);
+        this._rebuildHumans();
+        break;
     }
   }
 
@@ -411,7 +435,8 @@ export class Sim {
     const f = (v) => { buf[0] = v; for (let i = 0; i < 8; i++) { h ^= bytes[i]; h = Math.imul(h, 0x01000193); } };
     const states = ['away', 'arrive', 'idle', 'flee', 'return', 'leave', 'treat'];
     for (const hm of this.active) { f(hm.x); f(hm.z); f(hm.panic); f(states.indexOf(hm.state)); f(hm.stungCount); f(hm.clothing.topOff ? 1 : 0); }
-    for (const s of this.chunkState.values()) f(s.esc);
+    // alert points, in key order; chunks a peer never touched count as zero on both sides
+    for (const [k, st] of [...this.chunkState].filter(([, x]) => x.esc > 0).sort((a, b) => (a[0] < b[0] ? -1 : 1))) { f(k.length); f(st.esc); }
     f(this.stung.size);
     return (h >>> 0).toString(16).padStart(8, '0');
   }

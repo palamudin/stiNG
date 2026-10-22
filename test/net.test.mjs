@@ -29,5 +29,24 @@ for (const name of ['lan', 'good', 'bad', 'awful']) {
   ok(r.lab.a.netStats.late === 0 && r.lab.b.netStats.late === 0, `${name}: no event arrived after its commit tick`);
 }
 
+// Peers far apart: B works a picnic two chunks east while A stays home. Humans still agree everywhere (Q-16).
+{
+  const lab = new NetLab({ seed: 1234 }, 'good', { pick: (h) => h.chunk === '2,0' });
+  const botA = stingBot({ plan: 'jab', rest: 200 });
+  // B flies east first
+  for (let i = 0; i < 18000; i++) {
+    const bw = lab.b._driven();
+    const cmdB = bw && bw.x < 100 && !lab.b.active.some((h) => h.chunk === '2,0' && h.state === 'idle' && h.posture === 'sit' && Math.hypot(h.x - bw.x, h.z - bw.z) < 40)
+      ? { mx: 0, my: 0, mz: 100, burst: 1, sting: 0, yawQ: Math.round(Math.PI / 2 * 1e4), pitchQ: bw.y < 2 ? 2000 : 0, act: 0, alloc: 0 } : undefined;
+    lab.step(botA(lab.a), cmdB);
+    lab.a.drainEvents();
+    if (i % 60 === 0) lab.check();
+  }
+  const c = lab.checks;
+  console.log(`  apart: A at ${lab.a.activeKey}, B at ${lab.b.activeKey}; ${c.agreed}/${c.compared} agree; A simulates ${lab.a.active.length} humans, B ${lab.b.active.length}; B stings ${lab.b.stats.stings}`);
+  ok(lab.a.activeKey !== lab.b.activeKey && lab.b.stats.stings > 0, 'apart: the peers work different chunks');
+  ok(c.agreed === c.compared, `apart: human state identical on both peers (${c.agreed}/${c.compared})`);
+}
+
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');
 process.exit(failures ? 1 : 0);

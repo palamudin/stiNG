@@ -871,7 +871,7 @@ On Main the entity count is dominated by AI wasps: one player's colony can hold 
 | Q-15 | What happens to an offline player's colony on Main | Cell server runs it at the abstract tier (11.12) |
 | Q-10 | Do lineage colonies count toward keeping the line alive? | Yes; implemented as sister nests in the PoC |
 | Q-11 | Art scope for thousands of distinct humans | Open; modular bodies and clothing driven by traits |
-| Q-16 | Humans outside a peer's interest: step them over the union of interest, or make them a pure function of seed, time and events? | Pure function preferred; needs a design pass (18.9) |
+| Q-16 | Humans outside a peer's interest | Settled (18.9): committed interest windows; humans simulated over the union |
 | Q-17 | Should the colony economy balance stores late in the season (sugar piles up)? | Tune with real play data |
 
 ---
@@ -931,9 +931,9 @@ Driven and AI wasps share flight, collision, contact, stinging, feeding, carryin
 
 Points: sting 1, full sting +1, wasp killed by a human 0.3, swat at a hovering wasp 0.15. Points decay 25% per day. The exterminator wears a bee suit: every zone is thick except the collar on his first visit. Stinging under his collar until his panic reaches 0.8 makes him give up for the day. He returns the next morning with the collar taped. The booking is cancelled if the nest area calms below level 3.
 
-### 18.9 Known limit: humans outside interest
+### 18.9 Humans over the union of interest (Q-16 settled)
 
-Peers simulate humans only in chunks near their own wasps. Two peers in different areas would disagree about humans neither shares. Two fixes are open (Q-16): step humans over the union of all peers' interest, or make a human's state a pure function of seed, time and the events that touched them. The second fits Section 8.2 and is preferred.
+Each peer's interest window (the 3×3 chunks around its wasp) is itself a committed event. Every peer simulates the humans in the union of all committed windows, adds and removes them on the same tick, and freezes humans outside the union identically. In the lab, two peers working picnics two chunks apart agreed on all 63 shared humans at every check (300 of 300). Humans that leave every window stop on every peer; when a window reaches them again they catch up to their schedule deterministically.
 
 ---
 
