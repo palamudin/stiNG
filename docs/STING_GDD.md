@@ -37,6 +37,7 @@
 15. Technical constraints
 16. Decisions log
 17. Open questions
+18. Findings from the proof of concept
 - Appendix A — Protocode
 - Appendix B — Glossary
 - Appendix C — Biology reference
