@@ -702,13 +702,16 @@ function poseHuman(view, t, dt) {
     const amp = hm.state === 'flee' ? 0.7 : 0.4;
     for (const [side, ph] of [['L', 0], ['R', Math.PI]]) {
       const s = Math.sin(view.walk + ph) * amp;
+      // take each bone's vector before moving its end: copy() runs before the argument of add() is built
       const th = P['Thigh' + side], sh = P['Shin' + side];
-      th.b.copy(th.a).add(th.b.clone().sub(th.a).applyAxisAngle(X, s));
+      const thv = th.b.clone().sub(th.a).applyAxisAngle(X, s);
       const shv = sh.b.clone().sub(sh.a).applyAxisAngle(X, s - Math.max(0, -s) * 0.8);
+      th.b.copy(th.a).add(thv);
       sh.a.copy(th.b); sh.b.copy(th.b).add(shv);
       const ua = P['UpperArm' + side], fa = P['Forearm' + side];
-      ua.b.copy(ua.a).add(ua.b.clone().sub(ua.a).applyAxisAngle(X, -s * 0.8));
+      const uav = ua.b.clone().sub(ua.a).applyAxisAngle(X, -s * 0.8);
       const fav = fa.b.clone().sub(fa.a).applyAxisAngle(X, -s * 0.8 - 0.5);
+      ua.b.copy(ua.a).add(uav);
       fa.a.copy(ua.b); fa.b.copy(ua.b).add(fav);
     }
   }
