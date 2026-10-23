@@ -288,7 +288,7 @@ Rules:
 ### 5.1 Clock **[T0] [T1]** (time acceleration)
 
 - World time = ticks since the world epoch.
-- In-game day length: 12 real minutes *(tune)* **[Q] Q-02**. A season of about 200 active days is then about 40 real hours.
+- In-game day length: 2 real minutes by default, chosen when the world is created (2, 6 or 12) *(tune)* **[Q] Q-02 settled for day length**. Seasons are 20–200 days, also chosen at creation; the default 40-day season is about 80 minutes of play.
 - Solo play MAY accelerate time in colony view. A multiplayer world clock MUST NOT accelerate.
 
 ### 5.2 Season phases *(tune, bio)* **[T0]**
@@ -871,7 +871,7 @@ On Main the entity count is dominated by AI wasps: one player's colony can hold 
 | ID | Question | Proposal |
 |---|---|---|
 | Q-01 | Shared universe or instanced worlds? | Settled by D-13 |
-| Q-02 | Real minutes per in-game day? What do players do during winter in multiplayer? | Day and season length are world modifiers (PoC: 2/6/12 min days, 20–200 day seasons). Winter in multiplayer still open |
+| Q-02 | Real minutes per in-game day? What do players do during winter in multiplayer? | Day length settled 2026-10-23: 2-minute days by default, selectable at world creation (2/6/12), like season length (20–200 days). Winter in multiplayer still open |
 | Q-03 | Limits on switching which wasp you drive | Settled in the PoC: free within 30 m; otherwise a 4 s relay to the nearest worker anywhere, or to a worker coming out of the nest |
 | Q-04 | Who decides whether a swat hit a wasp? | Settled by D-19: the wasp's owner; peers audit |
 | Q-05 | Own UDP vs a relay-backed platform transport | Both behind an interface; relay for release (11.13) |
@@ -1086,7 +1086,7 @@ Water as a resource (6.2); extreme weather; town centers and beer gardens; linea
 
 - **Q-06 setting**, settled: American suburbia. T1-11 and T1-12 build lawns, fenced backyards, cul-de-sacs, park strips and a strip-mall edge.
 - **Q-07 players**, settled: rivals by default, co-op opt-in. Guards (T1-13) attack other players' wasps; friends can share a colony in a personal world.
-- **Q-02 default day length** affects every timing that players feel; the PoC default is 2-minute days, the GDD says 12.
+- **Q-02 default day length**, settled: 2-minute days by default, chosen at world creation.
 
 ---
 
