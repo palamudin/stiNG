@@ -57,7 +57,7 @@ namespace Sting.Core
             public static class start { public static readonly Num adults = 30, eggs = 30, larvae = 45, pupae = 30, cells = 160, protein = 6, sugar = 8, pulp = 2; }
             public static readonly Num adultSugar = 0.10, larvaProtein = 0.12, larvaSecretion = 0.06, eggDays = 5, larvaDays = 13, pupaDays = 12,
                 larvaStarve = 0.25, adultMortality = 1.0 / 22, layBase = 20, layPerAdult = 0.8, layMax = 250, cellsPerPulp = 8, buildPerDay = 1.5,
-                forageShare = 0.55, deficitSmoothing = 0.1, queenStarveDays = 1,
+                forageShare = 0.55, deficitSmoothing = 0.1, queenStarveDays = 1, youngDays = 4,
                 sugarCapBase = 6, sugarCapDays = 2.5, proteinCapBase = 6, proteinCapDays = 2;
             public static class income { public static readonly Num sugar = 0.3, protein = 0.35, pulp = 0.15; }
         }
@@ -68,6 +68,8 @@ namespace Sting.Core
             new AllocPreset { name = "Build", sugar = 0.7, protein = 0.7, pulp = 1.6 },
             new AllocPreset { name = "Lie low", sugar = 1, protein = 1, pulp = 1, traffic = 0.35 }, // T1-7
         };
+        /// the oldest workers guard the entrance against other colonies' wasps and the exterminator (T1-13)
+        public static class guard { public const int count = 2, huntTicks = 300; public static readonly Num minAdults = 25, radius = 0.6, chase = 2.5, ring = 0.09, humanRadius = 1.5; }
         public static class ai { public const int maxPhysical = 12, launchEvery = 90, collectTicks = 150, attackTicks = 600, evadeTicks = 50; public static readonly Num arrive = 0.05, canDeficit = 0.35; }
         public static class prey
         {

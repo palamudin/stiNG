@@ -57,6 +57,7 @@ export function restore(json) {
   }
   // plain state
   for (const k of Object.keys(d)) if (!['v', 'gen', 'opts', 'records', 'humans', 'active', 'ext'].includes(k)) sim[k] = d[k];
+  if (sim.colony.young === undefined) sim.colony.young = 0; // saves from before worker ages (T1-13)
   // saves from before body temperature (T1-2): wasps come out warm
   for (const w of [...sim.wasps, ...(sim.ghost ? [sim.ghost] : [])]) if (w.bodyT === undefined) { w.bodyT = T.cold.nestTemp; w.chill = 0; }
   // humans: fixed parts come from the world, mutable parts from the save

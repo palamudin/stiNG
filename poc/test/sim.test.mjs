@@ -843,5 +843,39 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   ok(seen >= r20 + T.ext.physPerSec * 0.999, `and our wasp flying in sight adds a line (${seen.toFixed(3)})`);
 }
 
+// 32. Worker ages and guards (T1-13): new workers stay in a few days before they forage; the oldest guard the
+// entrance, chase off other colonies' wasps and sting the exterminator at the nest
+{
+  const forage = (young) => { const c = newColony(); c.adults = 100; c.young = young; c.eggs = c.larvae = c.pupae = 0; const s0 = c.sugar; colonyStep(c, 0.01, 0, true, 0.3, 1); return c.sugar - s0; };
+  ok(forage(100) < forage(0), `young workers do not forage (sugar ${forage(100).toFixed(3)} with all young, ${forage(0).toFixed(3)} with none)`);
+  const c = newColony(); c.adults = 100; c.young = 0; c.eggs = 0; c.larvae = 0; c.pupae = 50; c.sugar = 50;
+  for (let i = 0; i < 20; i++) colonyStep(c, 0.05, 0, false, 0.3, 1);
+  const em = c.stats.emerged, y1 = c.young;
+  c.pupae = 0; c.young = 50;
+  for (let i = 0; i < 80; i++) colonyStep(c, 0.05, 0, false, 0.3, 1);
+  ok(y1 > em * 0.8 && c.young > 50 * 0.3 && c.young < 50 * 0.45, `emerging workers count as young (${y1.toFixed(1)} of ${em.toFixed(1)} after a day) and grow out of it (50 young, ${c.young.toFixed(1)} after ${T.colony.youngDays} days)`);
+
+  const s = new Sim({ seed: 1234 });
+  s.colony.adults = 120;
+  const ev = run(s, 900);
+  const guards = s._own().filter((w) => w.role === 'guard');
+  const e = s.nest.entrance;
+  ok(count(ev, 'guardOut') === T.guard.count && guards.length === T.guard.count && guards.every((g) => Math.hypot(g.x - e.x, g.y - e.y, g.z - e.z) < 0.3),
+    `${guards.length} guards circle the entrance (${guards.map((g) => Math.hypot(g.x - e.x, g.y - e.y, g.z - e.z).toFixed(2)).join(', ')} m)`);
+  const rec = s.activeChunks.find((r) => r.content.rival);
+  const rv = s._spawnWasp(false); rv.colony = chunkKey(rec.cx, rec.cz); rv.role = 'sugar'; rv.ai.mode = 'pick';
+  place(rv, { x: e.x + 0.3, y: e.y, z: e.z + 0.2 });
+  const ev2 = run(s, 600);
+  ok(count(ev2, 'guardHunt') >= 1 && count(ev2, 'fight') >= 1 && ev2.some((x) => x.type === 'fightOver'), `a rival wasp at the entrance is chased and grappled (${count(ev2, 'fight')} fights)`);
+
+  const x = new Sim({ seed: 1234 });
+  x.colony.adults = 120;
+  x.cs(chunkKey(0, 0)).esc = 30;
+  x.ext.lead = { x: x.nest.x, z: x.nest.z, nx: x.nest.x, nz: x.nest.z };
+  const ev3 = run(x, 9000);
+  const hex = (x.ext.hm || {}).hex || ev3.filter((q) => q.type === 'aiAttack').map((q) => q.humanHex)[0];
+  ok(ev3.some((q) => q.type === 'aiAttack' && q.humanHex && q.humanHex === hex) && count(ev3, 'extTreat') === 1, 'guards go for the exterminator at the nest');
+}
+
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');
 process.exit(failures ? 1 : 0);

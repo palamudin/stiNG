@@ -201,7 +201,7 @@ namespace Sting.Core
 
         static int ById(Wasp a, Wasp b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 
-        Wasp SpawnWasp(bool driven, string caste = "worker")
+        internal Wasp SpawnWasp(bool driven, string caste = "worker")
         {
             int id = nextWaspId++;
             var w = new Wasp

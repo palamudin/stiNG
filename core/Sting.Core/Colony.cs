@@ -16,6 +16,8 @@ namespace Sting.Core
         public bool queenAlive = true, nestAlive = true, sited = true;
         public Num adults, eggs, larvae, pupae, cells, protein, sugar, pulp;
         public Num rEggs, rLarvae, rPupae, gynes, males, mated;
+        /// new workers who nurse and build inside before they forage (T1-13)
+        public Num young;
         public Num deficit, fed = 1, sugarlessDays;
         public int alloc;
         public Num maxCells = Num.MaxValue;
@@ -57,7 +59,7 @@ namespace Sting.Core
             if (foraging)
             {
                 var a = T.alloc[c.alloc]; Num wsum = (a.sugar + a.protein + a.pulp) / 3;
-                Num f = inside * T.colony.forageShare * a.traffic * dtDay; // 'Lie low' sends fewer out (T1-7)
+                Num f = Max(0, inside - c.young) * T.colony.forageShare * a.traffic * dtDay; // 'Lie low' sends fewer out (T1-7); the young stay in (T1-13)
                 c.sugar += f * T.colony.income.sugar * a.sugar / wsum;
                 c.protein += f * T.colony.income.protein * a.protein / wsum;
                 c.pulp += f * T.colony.income.pulp * a.pulp / wsum;
@@ -104,6 +106,8 @@ namespace Sting.Core
             Num newWorkers = Pipe(ref c.eggs, ref c.larvae, ref c.pupae);
             Num newRepro = Pipe(ref c.rEggs, ref c.rLarvae, ref c.rPupae);
             c.adults += newWorkers; c.stats.emerged += newWorkers;
+            // new workers stay in a few days before they forage (T1-13)
+            c.young += newWorkers - c.young / (T.colony.youngDays * bio) * dtDay;
             c.gynes += newRepro * T.season.gyneShare; c.males += newRepro * (1 - T.season.gyneShare); c.stats.gynesRaised += newRepro * T.season.gyneShare;
 
             if (foraging && c.gynes > 0) { Num m = c.gynes * T.season.matePerDay * dtDay; c.gynes -= m; c.mated += m * T.season.mateSuccess; }
@@ -125,11 +129,12 @@ namespace Sting.Core
                 c.eggs += lay * (1 - r); c.rEggs += lay * r; c.stats.laid += lay;
             }
             if (c.adults < 0) c.adults = 0;
+            if (c.young > c.adults) c.young = c.adults;
         }
 
         public static void DestroyNest(ColonyState c)
         {
-            c.nestAlive = false; c.queenAlive = false;
+            c.nestAlive = false; c.queenAlive = false; c.young = 0;
             c.eggs = 0; c.larvae = 0; c.pupae = 0; c.rEggs = 0; c.rLarvae = 0; c.rPupae = 0; c.gynes = 0;
             c.protein = 0; c.sugar = 0; c.pulp = 0;
         }

@@ -1254,6 +1254,7 @@ function updateNest() {
     ['Queen', c.queenAlive ? 'laying' : c.nestAlive ? 'dead' : 'nest destroyed'],
     ...(c.sited !== false ? [['Site', `${T.sites[sim.nest.site || 'trunk'].name} · up to ${fmt(c.maxCells || T.sites.trunk.maxCells)} cells`]] : []),
     ['Adults inside / out', `${fmt(Math.max(0, c.adults - out))} / ${out}`],
+    ['Young · guards out', `${fmt(c.young || 0)} still nursing · ${sim._own().filter((w) => w.role === 'guard' && w.id !== sim.drivenId).length} at the door`], // T1-13
     ['Protein', `${c.protein.toFixed(1)} / ${proteinCap(c).toFixed(0)}`], ['Sugar', `${c.sugar.toFixed(1)} / ${sugarCap(c).toFixed(0)}`], ['Pulp', c.pulp.toFixed(1)],
     ['Cells used', `${fmt(broodTotal(c))} / ${fmt(c.cells)}`], ['Larvae fed', Math.round(c.fed * 100) + '%'],
     ...(c.sited !== false ? [['Brood speed', (() => { const v = sim.broodSpeed(); return `${Math.round(v * 100)}%${v < 0.98 ? (sim.temperature < T.thermal.coldFrom ? ' · too cold' : ' · too hot') : ''}`; })()]] : []),
@@ -1593,6 +1594,8 @@ function handleEvents(events) {
       case 'extLine': logEvent(`exterminator follows a flight line (${e.lines})`); break;
       case 'extFound': toast('The exterminator has spotted the nest', 'var(--red)', 3); logEvent('exterminator found the nest'); break;
       case 'extGiveUp': toast('The exterminator calls it a day. He will be back.', 'var(--yellow)', 3); logEvent(`exterminator gave up for today after ${e.lines} line${e.lines === 1 ? '' : 's'}`); break;
+      case 'guardHunt': logEvent(`a guard chases off ${e.player ? "another player's wasp" : 'a rival wasp'}`); break;
+      case 'guardOut': logEvent('a guard takes up post at the entrance'); break;
       case 'fetchSpray': logEvent(`#${e.humanHex.slice(0, 4)} goes for a can of spray`); break;
       case 'armed': logEvent(`#${e.humanHex.slice(0, 4)} is back with spray`); break;
       case 'extAbort': toast('The exterminator gives up for today', 'var(--yellow)', 3); break;

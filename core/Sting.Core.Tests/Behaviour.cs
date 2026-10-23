@@ -364,6 +364,39 @@ namespace Sting.Core.Tests
                 Num seen = s.ExtSightings(n.x + 20, n.z);
                 Ok(seen >= r20 + T.ext.physPerSec * 0.999, $"and our wasp flying in sight adds a line ({D(seen):0.000})");
             }
+            // 32. worker ages and guards (T1-13)
+            {
+                Num Forage(Num young) { var c = Colony.New(); c.adults = 100; c.young = young; c.eggs = c.larvae = c.pupae = 0; Num s0 = c.sugar; Colony.Step(c, 0.01, 0, true, 0.3, 1); return c.sugar - s0; }
+                Ok(Forage(100) < Forage(0), $"young workers do not forage (sugar {D(Forage(100)):0.000} with all young, {D(Forage(0)):0.000} with none)");
+                var cc = Colony.New(); cc.adults = 100; cc.young = 0; cc.eggs = 0; cc.larvae = 0; cc.pupae = 50; cc.sugar = 50;
+                for (int i = 0; i < 20; i++) Colony.Step(cc, 0.05, 0, false, 0.3, 1);
+                Num em = cc.stats.emerged, y1 = cc.young;
+                cc.pupae = 0; cc.young = 50;
+                for (int i = 0; i < 80; i++) Colony.Step(cc, 0.05, 0, false, 0.3, 1);
+                Ok(y1 > em * 0.8 && cc.young > 50 * 0.3 && cc.young < 50 * 0.45, $"emerging workers count as young ({D(y1):0.0} of {D(em):0.0} after a day) and grow out of it (50 young, {D(cc.young):0.0} after {D(T.colony.youngDays)} days)");
+
+                var s = new Sim(new Settings { seed = 1234 });
+                s.colony.adults = 120;
+                var ev = RunS(s, 900);
+                var e = s.nest.entrance;
+                var guards = s.wasps.Where(w => w.colony == "own" && w.role == "guard").ToList();
+                double Dist(Wasp g) => Math.Sqrt(D(Sq(g.x - e.x) + Sq(g.y - e.y) + Sq(g.z - e.z)));
+                Ok(Count(ev, "guardOut") == T.guard.count && guards.Count == T.guard.count && guards.All(g => Dist(g) < 0.3),
+                    $"{guards.Count} guards circle the entrance ({string.Join(", ", guards.Select(g => Dist(g).ToString("0.00")))} m)");
+                var rec = s.activeChunks.First(r => r.content.rival != null);
+                var rv = s.SpawnWasp(false); rv.colony = rec.key; rv.role = "sugar"; rv.ai.mode = "pick";
+                Place(rv, P(e.x + 0.3, e.y, e.z + 0.2));
+                var ev2 = RunS(s, 600);
+                Ok(Count(ev2, "guardHunt") >= 1 && Count(ev2, "fight") >= 1 && ev2.Any(x => x.type == "fightOver"), $"a rival wasp at the entrance is chased and grappled ({Count(ev2, "fight")} fights)");
+
+                var xs = new Sim(new Settings { seed = 1234 });
+                xs.colony.adults = 120;
+                xs.CS("0,0").esc = 30;
+                xs.ext.lead = new Lead { x = xs.nest.x, z = xs.nest.z, nx = xs.nest.x, nz = xs.nest.z };
+                var ev3 = RunS(xs, 9000);
+                string hex = xs.ext.hm?.hex ?? ev3.Where(q => q.type == "aiAttack").Select(q => (string)q["humanHex"]).FirstOrDefault();
+                Ok(ev3.Any(q => q.type == "aiAttack" && hex != null && (string)q["humanHex"] == hex) && Count(ev3, "extTreat") == 1, "guards go for the exterminator at the nest");
+            }
         }
 
         // 26. Tier 1, batch 1: wind, cold, drowning, clothes by the weather, shaking and flailing

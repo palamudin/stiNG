@@ -61,6 +61,7 @@ export const T = {
     cellsPerPulp: 8, buildPerDay: 1.5,
     forageShare: 0.55, income: { sugar: 0.3, protein: 0.35, pulp: 0.15 },
     deficitSmoothing: 0.1, queenStarveDays: 1,
+    youngDays: 4, // bio: a new worker nurses and builds inside for her first days before she forages (T1-13)
     sugarCapBase: 6, sugarCapDays: 2.5, proteinCapBase: 6, proteinCapDays: 2, // bio: prey goes straight to larvae; little is held                            // bio: Vespula keep little sugar; a store of a few days of adult need
   },
   alloc: [
@@ -71,6 +72,9 @@ export const T = {
     { name: 'Build', sugar: 0.7, protein: 0.7, pulp: 1.6, traffic: 1 },
     { name: 'Lie low', sugar: 1, protein: 1, pulp: 1, traffic: 0.35 },
   ],
+
+  // the oldest workers guard the entrance against other colonies' wasps and the exterminator (T1-13)
+  guard: { minAdults: 25, count: 2, radius: 0.6, chase: 2.5, huntTicks: 300, ring: 0.09, humanRadius: 1.5 },
 
   ai: { maxPhysical: 12, launchEvery: 90, arrive: 0.05, collectTicks: 150, attackTicks: 600, evadeTicks: 50, canDeficit: 0.35 },
 

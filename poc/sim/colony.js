@@ -11,7 +11,7 @@ export function newColony(founding = false) {
     queenAlive: true, nestAlive: true, sited: true,
     adults: founding ? 0 : s.adults, eggs: founding ? 0 : s.eggs, larvae: founding ? 0 : s.larvae, pupae: founding ? 0 : s.pupae,
     cells: founding ? 0 : s.cells, protein: founding ? 0 : s.protein, sugar: founding ? 0.5 : s.sugar, pulp: founding ? 0 : s.pulp,
-    rEggs: 0, rLarvae: 0, rPupae: 0, gynes: 0, males: 0, mated: 0,
+    rEggs: 0, rLarvae: 0, rPupae: 0, gynes: 0, males: 0, mated: 0, young: 0,
     deficit: 0, fed: 1, alloc: 0, sugarlessDays: 0,
     stats: { emerged: 0, laid: 0, starvedLarvae: 0, died: 0, gynesRaised: 0, deposited: { sugar: 0, protein: 0, pulp: 0 } },
   };
@@ -42,7 +42,7 @@ export function colonyStep(c, dtDay, physical, foraging, frac = 0.3, bio = 1, th
 
   if (foraging) {
     const a = T.alloc[c.alloc], wsum = (a.sugar + a.protein + a.pulp) / 3;
-    const f = inside * C.forageShare * a.traffic * dtDay; // 'Lie low' sends fewer out (T1-7)
+    const f = Math.max(0, inside - c.young) * C.forageShare * a.traffic * dtDay; // 'Lie low' sends fewer out (T1-7); the young stay in (T1-13)
     c.sugar += f * C.income.sugar * a.sugar / wsum;
     c.protein += f * C.income.protein * a.protein / wsum;
     c.pulp += f * C.income.pulp * a.pulp / wsum;
@@ -89,6 +89,8 @@ export function colonyStep(c, dtDay, physical, foraging, frac = 0.3, bio = 1, th
   const newWorkers = step('eggs', 'larvae', 'pupae');
   const newRepro = step('rEggs', 'rLarvae', 'rPupae');
   c.adults += newWorkers; c.stats.emerged += newWorkers;
+  // new workers stay in a few days before they forage (T1-13)
+  c.young += newWorkers - c.young / (C.youngDays * bio) * dtDay;
   c.gynes += newRepro * S.gyneShare; c.males += newRepro * (1 - S.gyneShare); c.stats.gynesRaised += newRepro * S.gyneShare;
 
   // Gynes fly out to mate on fair days (GDD 6.7)
@@ -111,10 +113,11 @@ export function colonyStep(c, dtDay, physical, foraging, frac = 0.3, bio = 1, th
     c.eggs += lay * (1 - r); c.rEggs += lay * r; c.stats.laid += lay;
   }
   if (c.adults < 0) c.adults = 0;
+  if (c.young > c.adults) c.young = c.adults;
 }
 
 export function destroyNest(c) {
-  c.nestAlive = false; c.queenAlive = false;
+  c.nestAlive = false; c.queenAlive = false; c.young = 0;
   c.eggs = 0; c.larvae = 0; c.pupae = 0; c.rEggs = 0; c.rLarvae = 0; c.rPupae = 0; c.gynes = 0;
   c.protein = 0; c.sugar = 0; c.pulp = 0;
 }

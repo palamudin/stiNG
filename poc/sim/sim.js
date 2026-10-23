@@ -1771,7 +1771,7 @@ export class Sim {
     const X = T.ext, col = this.colony, n = this.nest;
     let rate = 0;
     if (col.nestAlive && isDaylight(this.minute) && !this.raining && this.canFly()) {
-      const foragers = Math.max(0, col.adults - this._own().length) * T.colony.forageShare * T.alloc[col.alloc].traffic;
+      const foragers = Math.max(0, col.adults - col.young - this._own().length) * T.colony.forageShare * T.alloc[col.alloc].traffic;
       const d = Math.sqrt(sq(hm.x - n.x) + sq(hm.z - n.z));
       rate = X.linesPerSec * Math.min(1, foragers / X.trafficFull) * Math.min(1, X.sightR / Math.max(d, 0.5)) * T.sites[n.site || 'trunk'].discovery;
     }
@@ -2503,9 +2503,19 @@ export class Sim {
         break;
       }
     }
-    // My rivals against other peers' wasps: I own the rivals, so I start these fights
+    // My guards against other players' wasps near my nest (T1-13): I own the guards, so I start these fights.
+    // Their rivals are left to the fightReq path above.
     const busy = new Set();
     for (const w of this.wasps) if (w.state === 'fighting' && w.fight.remote) busy.add(w.fight.other);
+    for (const g of free) {
+      if (g.colony !== 'own' || g.role !== 'guard' || g.ai.mode !== 'hunt' || g.id === this.drivenId || g.state === 'fighting') continue;
+      const r = this.remote.get(g.ai.huntId);
+      if (!r || r.rival || busy.has(g.ai.huntId) || !(r.state === 'fly' || r.state === 'landed' || r.state === 'chewing')) continue;
+      if (dist2(g, r) > R.remoteFightRange * R.remoteFightRange) continue;
+      this._startRemoteFight(g, g.ai.huntId, r.peer);
+      busy.add(g.ai.huntId);
+    }
+    // My rivals against other peers' wasps: I own the rivals, so I start these fights
     const rr = R.remoteFightRange * R.remoteFightRange;
     for (const a of free) {
       if (a.colony === 'own' || a.state === 'fighting') continue;
@@ -2558,9 +2568,18 @@ export class Sim {
     }
     const own = this._own().length;
     const inside = col.adults - own;
-    const ai = own - (this._driven() ? 1 : 0);
-    const cap = Math.min(T.ai.maxPhysical, Math.floor(col.adults * 0.4 * T.alloc[col.alloc].traffic));
-    if (!this.noAI && daylight && col.nestAlive && inside >= 1 && ai < cap && this.tick % T.ai.launchEvery < 60) this._spawnWasp(false);
+    const d = this._driven();
+    const guards = this._own().filter((w) => w.role === 'guard' && w !== d).length;
+    const ai = own - (d ? 1 : 0) - guards;
+    // the oldest workers guard the entrance first (T1-13); the rest of the cap is foragers, and the young stay in
+    const mature = col.adults - col.young;
+    const cap = Math.min(T.ai.maxPhysical, Math.floor(mature * 0.4 * T.alloc[col.alloc].traffic));
+    if (this.noAI || !daylight || !col.nestAlive || inside - col.young < 1 || this.tick % T.ai.launchEvery >= 60) return;
+    if (guards < (mature >= T.guard.minAdults ? T.guard.count : 0)) {
+      const w = this._spawnWasp(false);
+      w.role = 'guard'; w.ai.mode = 'guard';
+      this.emit('guardOut', { id: w.id });
+    } else if (ai < cap) this._spawnWasp(false);
   }
 
   // ---------------------------------------------------------------- AI brain (one decision per tick per AI wasp)
@@ -2586,6 +2605,7 @@ export class Sim {
     const daylight = isDaylight(this.minute) && !this.raining;
     if ((!daylight || w.caste === 'queen') && ai.mode !== 'home') { ai.mode = 'home'; ai.target = null; }
     if (w.energy < 0.2 && ai.mode !== 'home' && ai.mode !== 'collect') { ai.mode = 'return'; ai.target = null; }
+    if (w.role === 'guard' && (ai.mode === 'guard' || ai.mode === 'hunt' || ai.mode === 'pick')) return this._thinkGuard(w, cmd);
     switch (ai.mode) {
       case 'pick': this._aiPick(w); break;
       case 'outbound': {
@@ -2634,6 +2654,30 @@ export class Sim {
         break;
       }
     }
+    return cmd;
+  }
+
+  // A guard (T1-13) circles just outside the entrance. Another colony's wasp near it (a rival, or another player's)
+  // gets chased and grappled; the exterminator close to the nest gets stung.
+  _thinkGuard(w, cmd) {
+    const ai = w.ai, G = T.guard, n = this.nest, e = n.entrance;
+    const ox = e.x - n.x, oz = e.z - n.z, od = Math.sqrt(ox * ox + oz * oz);
+    const post = od > 0.01 ? { x: e.x + ox / od * 0.08, y: e.y, z: e.z + oz / od * 0.08 } : { x: e.x, y: e.y - 0.08, z: e.z };
+    const live = (t) => t && (t.state === 'fly' || t.state === 'landed' || t.state === 'chewing');
+    if (ai.mode === 'hunt') {
+      const t = this.waspById(ai.huntId) || this.remote.get(ai.huntId);
+      if (!live(t) || (t.colony === 'own') || this.tick > ai.timer || dist2(t, post) > G.chase * G.chase) ai.mode = 'guard';
+      else { this._steer(w, t, cmd); cmd.throttle = 1; cmd.burst = 1; return cmd; }
+    }
+    ai.mode = 'guard';
+    const r2 = G.radius * G.radius;
+    let t = this.wasps.find((x) => x.colony !== 'own' && live(x) && dist2(x, post) < r2);
+    if (!t) for (const [id, r] of this.remote) if (live(r) && dist2(r, post) < r2) { t = { id, remote: !r.rival }; break; }
+    if (t) { ai.mode = 'hunt'; ai.huntId = t.id; ai.timer = this.tick + G.huntTicks; this.emit('guardHunt', { id: w.id, target: t.id, player: !!t.remote }); return cmd; }
+    const x = this.ext.hm;
+    if (x && x.state !== 'flee' && x.state !== 'leave' && sq(x.x - e.x) + sq(x.z - e.z) < G.humanRadius * G.humanRadius) { this._aiAttack(w, x.hex); return cmd; }
+    const a = this.tick / 40 + w.id;
+    this._steer(w, { x: post.x + G.ring * dcos(a), y: post.y + 0.03, z: post.z + G.ring * dsin(a) }, cmd);
     return cmd;
   }
 

@@ -83,6 +83,24 @@ namespace Sting.Core.Tests
                 }
                 Okn(raided && hunted >= 1 && grappled >= 1, $"a raid by another player sends the rival guards after that player, and they catch it (hunted {hunted}, grappled {grappled})");
             }
+            // guards against another player (T1-13): B's wasp at A's entrance is chased and grappled; both peers agree
+            {
+                var lab = new NetLab(new Settings { seed = 1234 }, "good");
+                lab.a.colony.adults = 120;
+                var e = lab.a.nest.entrance; var n = lab.a.nest; Num od = Sqrt(Sq(e.x - n.x) + Sq(e.z - n.z)); if (od == 0) od = 1;
+                var spot = P(e.x + (e.x - n.x) / od * 0.35, e.y, e.z + (e.z - n.z) / od * 0.35);
+                int hunts = 0, fightsB = 0; var overA = new List<string>(); var overB = new List<string>();
+                for (int i = 0; i < 3000; i++)
+                {
+                    var bw = lab.b.Driven();
+                    if (i > 900 && bw != null && bw.state == "fly") Place(bw, spot);
+                    lab.Step(Idle(), Idle());
+                    foreach (var ev in lab.a.DrainEvents()) { if (ev.type == "guardHunt" && ev["player"] is bool pl && pl) hunts++; if (ev.type == "fightOver") overA.Add(ev["winner"] + ">" + ev["loser"]); }
+                    foreach (var ev in lab.bEvents) { if (ev.type == "fight" && ev.d.ContainsKey("remote")) fightsB++; if (ev.type == "fightOver") overB.Add(ev["winner"] + ">" + ev["loser"]); }
+                }
+                int agree = overB.Count(f => overA.Contains(f));
+                Okn(hunts >= 1 && fightsB >= 1 && overB.Count >= 1 && agree == overB.Count, $"another player's wasp at the entrance is chased and grappled by the guards, and both peers agree on the winner (hunts {hunts}, grappled {fightsB}, {agree}/{overB.Count})");
+            }
             // level 5 across peers: both start and end the campaign on the same tick and still agree on every human
             {
                 var lab = new NetLab(new Settings { seed = 1234 }, "bad");

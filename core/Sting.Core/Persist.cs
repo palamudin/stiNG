@@ -86,7 +86,7 @@ namespace Sting.Core
 
     public static class Persist
     {
-        public const int SAVE_VERSION = 5; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search
+        public const int SAVE_VERSION = 6; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers
         const uint MAGIC = 0x474E4953; // "SING"
 
         // ---------------------------------------------------------------- one Io per type
@@ -192,7 +192,7 @@ namespace Sting.Core
         {
             a.B(ref c.queenAlive); a.B(ref c.nestAlive); a.B(ref c.sited);
             a.D(ref c.adults); a.D(ref c.eggs); a.D(ref c.larvae); a.D(ref c.pupae); a.D(ref c.cells); a.D(ref c.protein); a.D(ref c.sugar); a.D(ref c.pulp);
-            a.D(ref c.rEggs); a.D(ref c.rLarvae); a.D(ref c.rPupae); a.D(ref c.gynes); a.D(ref c.males); a.D(ref c.mated);
+            a.D(ref c.rEggs); a.D(ref c.rLarvae); a.D(ref c.rPupae); a.D(ref c.gynes); a.D(ref c.males); a.D(ref c.mated); a.D(ref c.young);
             a.D(ref c.deficit); a.D(ref c.fed); a.D(ref c.sugarlessDays); a.I(ref c.alloc); a.D(ref c.maxCells);
             var s = c.stats;
             a.D(ref s.emerged); a.D(ref s.laid); a.D(ref s.starvedLarvae); a.D(ref s.died); a.D(ref s.gynesRaised); a.D(ref s.sugarSpilled); a.D(ref s.proteinSpilled); a.D(ref s.poisoned);

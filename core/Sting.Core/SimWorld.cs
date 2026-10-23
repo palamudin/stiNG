@@ -366,7 +366,7 @@ namespace Sting.Core
             Num rate = 0;
             if (col.nestAlive && IsDaylight(minute) && !Raining && CanFly())
             {
-                Num foragers = Max(0, col.adults - Own().Count) * T.colony.forageShare * T.alloc[col.alloc].traffic;
+                Num foragers = Max(0, col.adults - col.young - Own().Count) * T.colony.forageShare * T.alloc[col.alloc].traffic;
                 Num d = Sqrt(Sq(hx - n.x) + Sq(hz - n.z));
                 rate = T.ext.linesPerSec * Min(1, foragers / T.ext.trafficFull) * Min(1, T.ext.sightR / Max(d, 0.5)) * T.sites.Of(n.site ?? "trunk").discovery;
             }
@@ -1224,9 +1224,20 @@ namespace Sting.Core
                     break;
                 }
             }
-            // My rivals against other peers' wasps: I own the rivals, so I start these fights
+            // My guards against other players' wasps near my nest (T1-13): I own the guards, so I start these fights.
+            // Their rivals are left to the fightReq path above.
             var busy = new HashSet<int>();
             foreach (var w in wasps) if (w.state == "fighting" && w.fight.remote) busy.Add(w.fight.other);
+            foreach (var g in free)
+            {
+                if (g.colony != "own" || g.role != "guard" || g.ai.mode != "hunt" || g.id == drivenId || g.state == "fighting") continue;
+                var r = remote.Get(g.ai.huntId);
+                if (r == null || r.rival || busy.Contains(g.ai.huntId) || !Free3(r.state)) continue;
+                if (D2(g, r) > T.rival.remoteFightRange * T.rival.remoteFightRange) continue;
+                StartRemoteFight(g, g.ai.huntId, r.peer);
+                busy.Add(g.ai.huntId);
+            }
+            // My rivals against other peers' wasps: I own the rivals, so I start these fights
             Num rr = T.rival.remoteFightRange * T.rival.remoteFightRange;
             foreach (var a in free)
             {
@@ -1287,9 +1298,20 @@ namespace Sting.Core
             }
             int own = Own().Count;
             Num inside2 = col.adults - own;
-            int ai = own - (Driven() != null ? 1 : 0);
-            Num cap = Min(T.ai.maxPhysical, Floor(col.adults * 0.4 * T.alloc[col.alloc].traffic));
-            if (!noAI && daylight && col.nestAlive && inside2 >= 1 && ai < cap && tick % T.ai.launchEvery < 60) SpawnWasp(false);
+            var d = Driven();
+            int guards = 0; foreach (var w in Own()) if (w.role == "guard" && w != d) guards++;
+            int ai = own - (d != null ? 1 : 0) - guards;
+            // the oldest workers guard the entrance first (T1-13); the rest of the cap is foragers, and the young stay in
+            Num mature = col.adults - col.young;
+            Num cap = Min(T.ai.maxPhysical, Floor(mature * 0.4 * T.alloc[col.alloc].traffic));
+            if (noAI || !daylight || !col.nestAlive || inside2 - col.young < 1 || tick % T.ai.launchEvery >= 60) return;
+            if (guards < (mature >= T.guard.minAdults ? T.guard.count : 0))
+            {
+                var g = SpawnWasp(false);
+                g.role = "guard"; g.ai.mode = "guard";
+                Emit("guardOut", ("id", g.id));
+            }
+            else if (ai < cap) SpawnWasp(false);
         }
     }
 }

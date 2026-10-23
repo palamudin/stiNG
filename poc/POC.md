@@ -99,6 +99,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 71 | Solo time (T1-23): the colony view runs time at 1×, 4× or 16× (T cycles), dropping to 1× when anything comes for your wasp; Reflex slows the clock to a quarter for a moment when a hand is coming (pause menu option). Presentation only: replays and saves are unaffected | 5.1, 7.8 | 14 |
 | 72 | Fetching spray (T1-6): at level 3 nobody has a can on them. A stung person with it in them goes indoors for one and comes back with six sprays, a green can in hand | 8.6, 8.10 | 14 |
 | 73 | The exterminator searches (T1-7): he parks where people were stung and walks the flight lines he sees toward the nest; traffic, the site and distance set how fast. He gives up at dusk and resumes from his last line. A new foraging preset, Lie low, sends out a third of the foragers to buy time | 8.10 | 14 |
+| 74 | Worker ages and guards (T1-13): new workers stay in a few days before they forage; once the colony has 25 mature workers, two guards circle the entrance, chase off rival wasps and other players' wasps (fights across the link), and sting the exterminator at the nest. The colony view shows the young and the guards | 6.5 | 14 |
 
 ## Verified
 

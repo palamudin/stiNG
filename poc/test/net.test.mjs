@@ -116,6 +116,28 @@ for (const name of ['lan', 'good', 'bad', 'awful']) {
   ok(raided && hunted >= 1 && grappled >= 1, 'a raid by another player sends the rival guards after that player, and they catch it');
 }
 
+// Guards against another player (T1-13, Q-07 rivals by default): B's wasp hovering at A's entrance is chased by A's
+// guards and grappled across the link; both peers resolve the fight the same way
+{
+  const lab = new NetLab({ seed: 1234 }, 'good');
+  lab.a.colony.adults = 120;
+  const hold = (w, p) => Object.assign(w, { x: p.x, y: p.y, z: p.z, vx: 0, vy: 0, vz: 0 });
+  const e = lab.a.nest.entrance, n = lab.a.nest, od = Math.hypot(e.x - n.x, e.z - n.z) || 1;
+  const spot = { x: e.x + (e.x - n.x) / od * 0.35, y: e.y, z: e.z + (e.z - n.z) / od * 0.35 };
+  let hunts = 0, fightsB = 0;
+  const over = { a: [], b: [] };
+  for (let i = 0; i < 3000; i++) {
+    const bw = lab.b._driven();
+    if (i > 900 && bw && bw.state === 'fly') hold(bw, spot);
+    lab.step(idleCmd(), idleCmd());
+    for (const ev of lab.a.drainEvents()) { if (ev.type === 'guardHunt' && ev.player) hunts++; if (ev.type === 'fightOver') over.a.push(ev.winner + '>' + ev.loser); }
+    for (const ev of lab.bEvents || []) { if (ev.type === 'fight' && ev.remote) fightsB++; if (ev.type === 'fightOver') over.b.push(ev.winner + '>' + ev.loser); }
+  }
+  const agree = over.b.filter((f) => over.a.includes(f)).length;
+  console.log(`  guards vs a player: A's guards went after B ${hunts} times, B grappled ${fightsB} times, ${over.b.length} resolved on B, ${agree} the same on A`);
+  ok(hunts >= 1 && fightsB >= 1 && over.b.length >= 1 && agree === over.b.length, "another player's wasp at the entrance is chased and grappled by the guards, and both peers agree on the winner");
+}
+
 // Level 5 across peers: the campaign reads only shared state, so both peers start and end it on the same tick
 {
   const lab = new NetLab({ seed: 1234 }, 'bad');

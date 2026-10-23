@@ -357,7 +357,7 @@ Economy step in Appendix A.4.
 - Larvae with insufficient protein develop more slowly; starved larvae die.
 - Cell type decides caste: worker cells all season, queen cells late season.
 
-### 6.5 Castes and roles **[T0] [T1]** (age roles, guards)
+### 6.5 Castes and roles **[T0]**
 
 | Caste | Notes |
 |---|---|
@@ -1048,6 +1048,12 @@ All five are in the C# core with parity: the 22 JS digests still match in the do
 
 **The exterminator is one colony's business.** His search reads that colony's traffic and wasps, so peers sharing a neighbourhood can see different exterminators doing different things. The lab therefore leaves him out of the agreement check on shared humans, his panic does not spread to shared humans, and the human step runs over a snapshot of the list so his leaving mid-step cannot shift anyone else's step. A shared exterminator, called by the neighbourhood and searching for every colony in it, is a question for the multiplayer design (Q-07).
 
+### 18.23 Worker ages and guards as built (T1-13)
+
+**Young workers.** The colony keeps a count of young workers: every worker that emerges joins it, and it drains at one part in four days (bio-scaled), so a new worker spends her first days inside nursing and building. Only workers past that age forage, in the abstract economy and as physical AI foragers. A burst of emergence therefore shows up as foraging income a few days later, and an exterminator counting flight lines sees the mature foragers only.
+
+**Guards.** Once a colony has at least 25 mature workers, the first two physical wasps it sends out while the player is near the nest are guards. They circle a few centimetres outside the entrance, refuel there, and go in at night like the others. A rival wasp, or another player's wasp, within 0.6 m of the entrance is chased (up to 2.5 m out, for 5 s) and grappled on contact with the existing fight rules: a rival on the same peer fights locally; another player's wasp fights through the remote fight exchange, which the guard's peer starts and both peers resolve identically. Guards also go for the exterminator when he comes within 1.5 m of the entrance, stinging him with the same attack AI as alarm pheromone. Guards do not count against the cap on physical foragers. Other players' wasps are fair game because Q-07 makes separate colonies rivals by default; co-op colonies (opt-in) will exempt each other when co-op exists.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1056,7 +1062,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (73 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (74 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -1074,7 +1080,7 @@ Everything in `POC.md` (73 features) and its C# port (18.18), including the Tier
 | T1-10 | Barbecues: grills as human anchors with meat, a protein source at people's tables and a new kind of conflict | 4.3, 6.2 | M | T1-11 helps |
 | T1-11 | Human days: walk and lie postures, people strolling on paths, sunbathers lying on the grass, gardeners; the schedule picks the activity by weather and traits | 8.2, 8.3 | L | Q-06 for the paths |
 | T1-12 | Regions: an 8×8 chunk layout pass (park, gardens, houses with fences, farmland, forest edge) under the chunk pass, with pulp from fences that runs out (a chunk delta) | 4.2, 4.3, 4.5 | L | Q-06 |
-| T1-13 | Worker ages and guards: young workers stay in, older ones forage, the oldest guard the entrance and attack intruders (rivals, raiders, other players' wasps) | 6.5 | M | Q-07 for players |
+| T1-13 | **Built (18.23).** Worker ages and guards: young workers stay in, older ones forage, the oldest guard the entrance and attack intruders (rivals, raiders, other players' wasps) | 6.5 | M | Q-07 for players |
 | T1-14 | **Built (18.21).** Hollow-tree nest site and nest thermals: site insulation sets how cold snaps and heat slow the brood | 6.6 | S | |
 | T1-15 | Winter with choices: gynes pick hibernation sites whose quality sets winter survival; in spring the player chooses which surviving queen to continue | 6.7 | M | |
 | T1-16 | Senses for AI wasps: scent fields (sugar, protein, alarm) as decaying point sources and a vision cone, replacing the AI's perfect knowledge of every food source | 7.3 | M | |
@@ -1086,7 +1092,7 @@ Everything in `POC.md` (73 features) and its C# port (18.18), including the Tier
 | T1-22 | Tuning as data: the tuning tables as versioned plain-text files read by own parsers in JS and C#, and the tuning hash in the world record | 13 | M | |
 | T1-23 | **Built (18.21).** Solo time: accelerate time in the colony view, and the Reflex slowdown as a solo option | 5.1, 7.8 | S | |
 
-Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, then the other S items: T1-14, T1-17, T1-18, T1-23, all done; T1-20 waits on regions), then the M items (T1-6 and T1-7 done); each batch is built in the PoC and then ported to the core with parity.
+Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, then the other S items: T1-14, T1-17, T1-18, T1-23, all done; T1-20 waits on regions), then the M items (T1-6, T1-7 and T1-13 done); each batch is built in the PoC and then ported to the core with parity.
 
 ### 19.3 Tier 2: later
 

@@ -13,6 +13,32 @@ namespace Sting.Core
             Emit("aiAttack", ("id", w.id), ("humanHex", humanHex));
         }
 
+        /// A guard (T1-13) circles just outside the entrance. Another colony's wasp near it (a rival, or another
+        /// player's) gets chased and grappled; the exterminator close to the nest gets stung.
+        Cmd ThinkGuard(Wasp w, Cmd cmd)
+        {
+            var ai = w.ai; var n = nest; var e = n.entrance;
+            Num ox = e.x - n.x, oz = e.z - n.z, od = Sqrt(ox * ox + oz * oz);
+            var post = od > 0.01 ? new V3(e.x + ox / od * 0.08, e.y, e.z + oz / od * 0.08) : new V3(e.x, e.y - 0.08, e.z);
+            if (ai.mode == "hunt")
+            {
+                WaspBase t = (WaspBase)WaspById(ai.huntId) ?? remote.Get(ai.huntId);
+                if (t == null || !Free3(t.state) || (t is Wasp tw && tw.colony == "own") || tick > ai.timer || D2(t, post) > T.guard.chase * T.guard.chase) ai.mode = "guard";
+                else { Steer(w, t.P, cmd); cmd.throttle = 1; cmd.burst = 1; return cmd; }
+            }
+            ai.mode = "guard";
+            Num r2 = T.guard.radius * T.guard.radius;
+            int tid = 0; bool found = false, player = false;
+            foreach (var x in wasps) if (x.colony != "own" && Free3(x.state) && D2(x, post) < r2) { tid = x.id; found = true; break; }
+            if (!found) foreach (var kv in remote) if (Free3(kv.Value.state) && D2(kv.Value, post) < r2) { tid = kv.Key; found = true; player = !kv.Value.rival; break; }
+            if (found) { ai.mode = "hunt"; ai.huntId = tid; ai.timer = tick + T.guard.huntTicks; Emit("guardHunt", ("id", w.id), ("target", tid), ("player", player)); return cmd; }
+            var xh = ext.hm;
+            if (xh != null && xh.state != "flee" && xh.state != "leave" && Sq(xh.x - e.x) + Sq(xh.z - e.z) < T.guard.humanRadius * T.guard.humanRadius) { AiAttack(w, xh.hex); return cmd; }
+            Num a = (Num)tick / 40 + w.id;
+            Steer(w, new V3(post.x + T.guard.ring * DCos(a), post.y + 0.03, post.z + T.guard.ring * DSin(a)), cmd);
+            return cmd;
+        }
+
         Cmd Think(Wasp w)
         {
             var ai = w.ai;
@@ -32,6 +58,7 @@ namespace Sting.Core
             bool daylight = IsDaylight(minute) && !Raining;
             if ((!daylight || w.caste == "queen") && ai.mode != "home") { ai.mode = "home"; ai.target = null; }
             if (w.energy < 0.2 && ai.mode != "home" && ai.mode != "collect") { ai.mode = "return"; ai.target = null; }
+            if (w.role == "guard" && (ai.mode == "guard" || ai.mode == "hunt" || ai.mode == "pick")) return ThinkGuard(w, cmd);
             switch (ai.mode)
             {
                 case "pick": AiPick(w); break;
