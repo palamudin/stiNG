@@ -526,6 +526,12 @@ namespace Sting.Core
                     Stable.Sort(ks, (a, b) => Ordinal(a.ToString(), b.ToString()));
                     foreach (var i in ks) { f.F(i); f.F(kv.Value.spilled[i]); }
                 }
+                if (kv.Value.cover != null)
+                {
+                    var ks = new List<int>(kv.Value.cover.Keys);
+                    Stable.Sort(ks, (a, b) => Ordinal(a.ToString(), b.ToString()));
+                    foreach (var i in ks) { f.F(i); f.F(kv.Value.cover[i]); }
+                }
             }
             f.F(stung.Count);
             return f.Hex;

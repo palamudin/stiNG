@@ -86,7 +86,7 @@ namespace Sting.Core
 
     public static class Persist
     {
-        public const int SAVE_VERSION = 8; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface
+        public const int SAVE_VERSION = 9; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups
         const uint MAGIC = 0x474E4953; // "SING"
 
         // ---------------------------------------------------------------- one Io per type
@@ -141,7 +141,7 @@ namespace Sting.Core
             if (a.Opt(ref w.carry)) { var c = w.carry; a.S(ref c.kind); a.S(ref c.what); a.D(ref c.amount); a.B(ref c.poison); }
             a.I(ref w.groundTicks); a.I(ref w.chew); a.S(ref w.role); a.S(ref w.colony);
             if (a.Opt(ref w.web)) { var b = w.web; a.S(ref b.key); a.I(ref b.i); a.D(ref b.progress); a.D(ref b.prevBurst); a.I(ref b.start); a.D(ref b.spiderAt); }
-            if (a.Opt(ref w.drown)) { var d = w.drown; a.S(ref d.key); a.I(ref d.until); a.D(ref d.progress); a.D(ref d.prevBurst); }
+            if (a.Opt(ref w.drown)) { var d = w.drown; a.S(ref d.key); a.I(ref d.until); a.I(ref d.i); a.D(ref d.progress); a.D(ref d.prevBurst); }
             if (a.Opt(ref w.fight))
             {
                 var f = w.fight; a.I(ref f.other); a.B(ref f.remote); a.B(ref f.starter); a.I(ref f.peer);
@@ -159,8 +159,8 @@ namespace Sting.Core
                 a.D(ref p.tickle); a.D(ref p.need); a.D(ref p.quietUntil);
             }
             a.B(ref w.walking); a.D(ref w.fightReqUntil);
-            if (a.Opt(ref w.land)) { a.D(ref w.land.nx); a.D(ref w.land.ny); a.D(ref w.land.nz); a.S(ref w.land.kind); }
-            a.I(ref w.noLandUntil);
+            if (a.Opt(ref w.land)) { a.D(ref w.land.nx); a.D(ref w.land.ny); a.D(ref w.land.nz); a.S(ref w.land.kind); a.B(ref w.land.hasH); a.D(ref w.land.hx); a.D(ref w.land.hy); a.D(ref w.land.hz); a.I(ref w.land.yawQ); }
+            a.I(ref w.noLandUntil); a.S(ref w.trapCause);
             return w;
         }
 
@@ -210,6 +210,7 @@ namespace Sting.Core
             if (a.Opt(ref s.lastSting)) { a.D(ref s.lastSting.x); a.D(ref s.lastSting.z); }
             a.Dict(ref s.webTorn, () => 0L, v => { a.L(ref v); return v; });
             a.Dict(ref s.spilled, () => (Num)0, v => { a.D(ref v); return v; });
+            a.Dict(ref s.cover, () => 0, v => { a.I(ref v); return v; });
             return s;
         }
 

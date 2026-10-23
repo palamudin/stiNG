@@ -572,6 +572,13 @@ export class Sim {
         if (hm) this.addEsc(hm.x, hm.z, T.esc.nuisance);
         break;
       }
+      case 'cover': {
+        // a hand goes over the cup on the agreed tick; whoever is inside is shut in (GDD 7.5)
+        const st = this.cs(ev.key), cv = st.cover || (st.cover = {});
+        cv[ev.i] = Math.max(cv[ev.i] || 0, ev.end);
+        this.emit('cover', { humanHex: ev.humanHex, key: ev.key, i: ev.i });
+        break;
+      }
       case 'spray': {
         // the can empties on the agreed tick, so every peer counts the same sprays (T1-6)
         const hm = this.humanByHex(ev.humanHex);
@@ -617,6 +624,7 @@ export class Sim {
     for (const [k, st] of [...this.chunkState].filter(([, x]) => x.esc > 0).sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
       f(k.length); f(st.esc);
       if (st.spilled) for (const i of Object.keys(st.spilled).sort()) { f(+i); f(st.spilled[i]); }
+      if (st.cover) for (const i of Object.keys(st.cover).sort()) { f(+i); f(st.cover[i]); }
     }
     f(this.stung.size);
     return (h >>> 0).toString(16).padStart(8, '0');
@@ -758,9 +766,11 @@ export class Sim {
         }
         if (edge & Act.Interact) { this._interact(w); if (w.state !== 'landed') break; }
         this._nestTouch(w); // landed at the entrance: in with the load
+        this._turn(w, cmd);
         w.walking = false;
         if (cmd.mx || cmd.mz) this._walk(w, cmd);
         if (w.state !== 'landed') break;
+        if (this._cupCheck(w)) break;
         this._feed(w, driven);
         if (w.state !== 'landed') break;
         this._hints(w);
@@ -774,7 +784,7 @@ export class Sim {
       case 'under': this._underStep(w, cmd, edge, armed); break;
       case 'chewing': this._chewStep(w, cmd, driven); break;
       case 'trapped':
-        if (--w.stateTicks <= 0) this._die(w, 'drowned in a trap', null);
+        if (--w.stateTicks <= 0) this._die(w, w.trapCause || 'drowned in a trap', null);
         break;
       case 'balled':
         if (driven) { this._ballEscape(w, cmd.burst && !w.ball.prevBurst); if (w.ball) w.ball.prevBurst = cmd.burst; }
@@ -861,6 +871,7 @@ export class Sim {
       this._collide(w);
     }
     this._webCheck(w, p0);
+    this._cupCheck(w);
     // grounded without fuel: starvation clock
     if (w.energy <= 0 && w.y <= W.radius + 1e-6) {
       if (++w.groundTicks > W.starveTicks) this._die(w, 'starved', null);
@@ -901,6 +912,25 @@ export class Sim {
         else if (k === 3) { w.y = b.maxy + R; if (w.vy < 0) w.vy = 0; }
         else if (k === 4) { w.z = b.minz - R; if (w.vz > 0) w.vz = 0; }
         else { w.z = b.maxz + R; if (w.vz < 0) w.vz = 0; }
+      }
+      // hollow cups: thin walls, open at the top unless covered (GDD 7.5)
+      const ck = chunkKey(rec.cx, rec.cz), C = T.cup, rIn = C.r - C.wall, mid = (rIn + C.r) / 2;
+      for (const cp of this.cupsIn(rec)) {
+        const hx = w.x - cp.x, hz = w.z - cp.z, hd = Math.sqrt(hx * hx + hz * hz);
+        if (hd > C.r + R || w.y > C.rim + R || w.y < C.base || this.canSpilled(ck, cp.i)) continue;
+        const cov = this.cupCovered(ck, cp.i);
+        if (w.y > C.rim) { // on the rim, or on a lid
+          if (cov || hd > rIn - R) { w.y = C.rim + R; if (w.vy < 0) w.vy = 0; }
+          continue;
+        }
+        if (hd === 0) continue;
+        const ux = hx / hd, uz = hz / hd;
+        if (hd >= mid) { // outside the wall
+          if (hd < C.r + R) { w.x = cp.x + ux * (C.r + R); w.z = cp.z + uz * (C.r + R); const vn = w.vx * ux + w.vz * uz; if (vn < 0) { w.vx -= vn * ux; w.vz -= vn * uz; } }
+        } else { // inside
+          if (hd > rIn - R) { w.x = cp.x + ux * (rIn - R); w.z = cp.z + uz * (rIn - R); const vn = w.vx * ux + w.vz * uz; if (vn > 0) { w.vx -= vn * ux; w.vz -= vn * uz; } }
+          if (cov && w.y > C.rim - R) { w.y = C.rim - R; if (w.vy > 0) w.vy = 0; }
+        }
       }
       for (const cy of c.cylinders) {
         if (w.y > cy.h) continue;
@@ -1169,16 +1199,27 @@ export class Sim {
         }
       }
       if (w.energy >= 1 && !(w.ai.mode === 'collect' && w.role === 'sugar')) continue;
+      // a drink is reached at its surface, inside the cup (GDD 7.5)
+      for (const cp of this.cupsIn(rec)) {
+        if (this.canSpilled(key, cp.i) || this.cupCovered(key, cp.i)) continue; // knocked over, or covered (GDD 8.10)
+        if (dist2(w, { x: cp.x, y: cp.level, z: cp.z }) > d2max) continue;
+        const add = T.energy.refuelPerSec * DT;
+        if (w.energy < 1) w.energy = Math.min(1, w.energy + add);
+        else if (!driven) w.ai.cargo = Math.min(1, (w.ai.cargo || 0) + add);
+        if (driven) this.feeding = true;
+        w.ai.atFood = 'can';
+        // an open drink is a trap of its own: a feeding wasp may slip in (GDD 7.5, T1-3)
+        if (h32(w.id, this.tick, 53) < T.drown.chancePerSec * DT) this._fallIn(w, cp, key, driven);
+        return;
+      }
       for (const s of c.sugar.concat(this.spillsIn(key), this.fruitIn(rec))) {
-        if (s.kind === 'can' && (lvl >= 2 || this.canSpilled(key, c.sugar.indexOf(s)))) continue; // food covered (GDD 8.10) or knocked over
+        if (s.kind === 'can') continue; // cups are handled above
         if (dist2(w, s) <= d2max) {
           const add = T.energy.refuelPerSec * s.rate * DT;
           if (w.energy < 1) w.energy = Math.min(1, w.energy + add);
           else if (!driven) w.ai.cargo = Math.min(1, (w.ai.cargo || 0) + add);
           if (driven) this.feeding = true;
           w.ai.atFood = s.kind;
-          // an open can is a trap of its own: a feeding wasp may slip in (GDD 7.5, T1-3)
-          if (s.kind === 'can' && h32(w.id, this.tick, 53) < T.drown.chancePerSec * DT) this._fallIn(w, s, key, driven);
           return;
         }
       }
@@ -1186,11 +1227,53 @@ export class Sim {
     w.ai.atFood = null;
   }
 
-  _fallIn(w, can, key, driven) {
-    w.state = 'drowning'; w.vx = w.vy = w.vz = 0;
-    w.x = can.x; w.y = can.y - 0.03; w.z = can.z;
-    w.drown = { key, until: this.tick + T.drown.ticks, progress: 0, prevBurst: 1 };
+  _fallIn(w, cup, key, driven) {
+    w.state = 'drowning'; w.vx = w.vy = w.vz = 0; w.land = null;
+    w.x = cup.x; w.y = cup.level; w.z = cup.z;
+    w.drown = { key, i: cup.i, until: this.tick + T.drown.ticks, progress: 0, prevBurst: 1 };
     this.emit('fellIn', { id: w.id, driven });
+  }
+
+  // Cups (GDD 7.5): one per can on a table, a pure function of the seed and the chunk, cached on the chunk record
+  // (never saved). The drink level is set by hash; the rim and walls are the same for every cup.
+  cupsIn(rec) {
+    if (rec._cups) return rec._cups;
+    const C = T.cup, sd = Number(this.seed & 0xffffffffn), lo = C.base + 0.006, span = C.rim - lo;
+    rec._cups = rec.content.cans.map((cn, i) => ({ x: cn.x, z: cn.z, i, level: lo + (C.fillMin + C.fillSpan * hseq(sd, rec.cx, rec.cz, i, 961)) * span }));
+    return rec._cups;
+  }
+  // a hand over it (a person who saw a wasp go in) or a lid (level 2)
+  cupCovered(key, i) {
+    if (this.escLevel(key) >= 2) return true;
+    const st = this.chunkState.get(key);
+    return !!(st && st.cover && (st.cover[i] || 0) > this.tick);
+  }
+  // the cup a point is inside (below the rim, within the wall), if any
+  _inCup(p) {
+    const C = T.cup, rIn = C.r - C.wall;
+    if (p.y >= C.rim || p.y <= C.base) return null;
+    for (const rec of this.activeChunks) {
+      const key = chunkKey(rec.cx, rec.cz);
+      for (const cp of this.cupsIn(rec)) {
+        if (sq(p.x - cp.x) + sq(p.z - cp.z) >= rIn * rIn || this.canSpilled(key, cp.i)) continue;
+        return { key, cup: cp };
+      }
+    }
+    return null;
+  }
+  // Inside a cup: touching the drink pulls a wasp in; a covered cup shuts it in to drown. Returns true if it did.
+  _cupCheck(w) {
+    if (w.state !== 'fly' && w.state !== 'stunned' && w.state !== 'landed') return false;
+    const k = this._inCup(w);
+    if (!k) return false;
+    const driven = w.id === this.drivenId;
+    if (this.cupCovered(k.key, k.cup.i)) {
+      w.state = 'trapped'; w.stateTicks = T.cup.drownTicks; w.trapCause = 'drowned under a lid'; w.vx = w.vy = w.vz = 0; w.land = null;
+      this.emit('coveredIn', { id: w.id, driven, key: k.key, i: k.cup.i });
+      return true;
+    }
+    if (w.y - T.wasp.radius < k.cup.level) { this._fallIn(w, k.cup, k.key, driven); return true; }
+    return false;
   }
 
   // Mash burst to climb out before the drink takes you; AI wasps get a small chance each tick
@@ -1199,7 +1282,10 @@ export class Sim {
     if (driven) { if (cmd.burst && !d.prevBurst) d.progress += D.escapePerPress; d.prevBurst = cmd.burst; }
     else if (h32(w.id, this.tick, 57) < D.aiEscape) d.progress = 1;
     if (d.progress >= 1) {
-      w.drown = null; w.state = 'stunned'; w.stateTicks = 30; w.vy = 0.6; w.y += 0.04;
+      // out over the rim (GDD 7.5)
+      const rec = this.records.get(d.key), cp = rec && d.i !== undefined ? this.cupsIn(rec)[d.i] : null;
+      w.drown = null; w.state = 'stunned'; w.stateTicks = 30; w.vy = 0.6;
+      if (cp) { w.x = cp.x; w.y = T.cup.rim + 0.02; w.z = cp.z; } else w.y += 0.04;
       w.energy = Math.min(1, w.energy + 0.1); // a sticky, sugary escape
       this.emit('climbedOut', { id: w.id });
       return;
@@ -1726,13 +1812,16 @@ export class Sim {
     if (hm.cooldown > this.tick) return;
     const lvl = this.escAt(hm.x, hm.z), E = T.esc;
     const head = hm.parts[hm.posture][0];
-    let target = null, why = null;
+    let target = null, why = null, cupHit = null;
     for (const w of this.wasps) {
       if (!(w.state === 'fly' || w.state === 'chewing' || w.state === 'landed')) continue;
       const dx = w.x - hm.x, dz = w.z - hm.z;
       if (dx * dx + dz * dz > 4) continue;
       const lp = toLocal(hm, w);
       const hd2 = dist2(lp, head.a);
+      // a wasp gone into a drink in front of them: a hand over the cup (GDD 7.5)
+      const ic = dx * dx + dz * dz < T.cup.noticeDist * T.cup.noticeDist ? this._inCup(w) : null;
+      if (ic && !this.cupCovered(ic.key, ic.cup.i)) { target = w; why = 'cup'; cupHit = ic; break; }
       if (hd2 < E.faceRadius * E.faceRadius) { target = w; why = 'face'; break; }
       if (lvl >= 1 && hd2 < E.headRadius * E.headRadius) { target = w; why = 'head'; break; }
       if (lvl >= 1 && (w.ai.atFood === 'can' || (w.state === 'landed' && this._nearCan(w))) && dx * dx + dz * dz < 1.5) { target = w; why = 'food'; break; }
@@ -1741,11 +1830,15 @@ export class Sim {
     if (!target) { hm.annoy = 0; hm.annoyId = 0; return; }
     if (hm.annoyId !== target.id) { hm.annoyId = target.id; hm.annoy = 0; }
     hm.annoy += 3;
-    const need = hm.tr.reactionTicks * (why === 'face' ? 3 : E.noticeMul) + (why === 'spray' ? 20 : 0);
+    const need = hm.tr.reactionTicks * (why === 'face' ? 3 : why === 'cup' ? T.cup.noticeMul : E.noticeMul) + (why === 'spray' ? 20 : 0);
     if (hm.annoy < need) return;
     hm.annoy = 0;
     hm.cooldown = this.tick + E.cooldownTicks;
     const start = this.tick + T.net.commitTicks + 1;
+    if (why === 'cup') {
+      this._publish({ type: 'cover', humanHex: hm.hex, key: cupHit.key, i: cupHit.cup.i, end: start + T.cup.coverTicks });
+      return;
+    }
     if (why === 'spray') {
       this._publish({ type: 'spray', humanHex: hm.hex, start, end: start + E.sprayTicks });
       return;
@@ -2358,6 +2451,26 @@ export class Sim {
         capsule(f.x, f.y, f.z, f.x, f.y, f.z, L.headR, 'flower');
       }
       for (const k of c.capsules || []) capsule(k.ax, k.ay, k.az, k.bx, k.by, k.bz, k.r, k.kind || 'branch');
+      // cups: the outer and inner wall, the rim, and the lid or hand over a covered one
+      const ck = chunkKey(rec.cx, rec.cz), C = T.cup, rIn = C.r - C.wall;
+      for (const cp of this.cupsIn(rec)) {
+        const hx = p.x - cp.x, hz = p.z - cp.z, hd = Math.sqrt(hx * hx + hz * hz);
+        if (hd > C.r + lim || p.y > C.rim + lim || p.y < C.base || this.canSpilled(ck, cp.i)) continue;
+        const cov = this.cupCovered(ck, cp.i);
+        if (p.y >= C.rim) {
+          if (hd === 0) { if (cov) take(p.x, C.rim, p.z, 0, 1, 0, p.y - C.rim, 'cup'); continue; }
+          const qr = cov ? Math.min(hd, C.r) : clamp(hd, rIn, C.r), qx = cp.x + hx / hd * qr, qz = cp.z + hz / hd * qr;
+          const ex = p.x - qx, ey = p.y - C.rim, ez = p.z - qz, d = Math.sqrt(ex * ex + ey * ey + ez * ez);
+          if (d > 0) take(qx, C.rim, qz, ex / d, ey / d, ez / d, d, 'cup');
+          continue;
+        }
+        if (hd === 0) continue;
+        if (hd >= (rIn + C.r) / 2) take(cp.x + hx / hd * C.r, p.y, cp.z + hz / hd * C.r, hx / hd, 0, hz / hd, Math.max(0, hd - C.r), 'cup');
+        else {
+          take(cp.x + hx / hd * rIn, p.y, cp.z + hz / hd * rIn, -hx / hd, 0, -hz / hd, Math.max(0, rIn - hd), 'cup');
+          if (cov) take(p.x, C.rim, p.z, 0, -1, 0, C.rim - p.y, 'cup');
+        }
+      }
     }
     // our own paper nest, where it hangs in the open
     const n = this.nest;
@@ -2367,10 +2480,52 @@ export class Sim {
     return best;
   }
 
-  _settle(w, s) {
-    const R = T.wasp.radius;
+  // Put the wasp on surface s and keep its heading: a tangent direction that turns with the mouse around the
+  // surface normal, as yaw does on flat ground. Moving onto a surface at another angle (round an edge, up a trunk)
+  // carries the heading over by the smallest rotation from the old normal to the new one. Landing from flight takes
+  // the camera's direction, laid on the surface.
+  _settle(w, s, cmd) {
+    const R = T.wasp.radius, L = w.land;
     w.x = s.x + s.nx * R; w.y = s.y + s.ny * R; w.z = s.z + s.nz * R;
-    w.land = { nx: s.nx, ny: s.ny, nz: s.nz, kind: s.kind };
+    let h = null;
+    if (L && L.hx !== undefined) {
+      let hx = L.hx, hy = L.hy, hz = L.hz;
+      const c = L.nx * s.nx + L.ny * s.ny + L.nz * s.nz;
+      if (c < 0.999999 && c > -0.999999) {
+        const kx = L.ny * s.nz - L.nz * s.ny, ky = L.nz * s.nx - L.nx * s.nz, kz = L.nx * s.ny - L.ny * s.nx;
+        const kv = (kx * hx + ky * hy + kz * hz) / (1 + c);
+        const rx = hx * c + (ky * hz - kz * hy) + kx * kv, ry = hy * c + (kz * hx - kx * hz) + ky * kv, rz = hz * c + (kx * hy - ky * hx) + kz * kv;
+        hx = rx; hy = ry; hz = rz;
+      }
+      h = this._onPlane(s, hx, hy, hz);
+    }
+    if (!h) h = this._camHeading(s, cmd);
+    w.land = { nx: s.nx, ny: s.ny, nz: s.nz, kind: s.kind, hx: h[0], hy: h[1], hz: h[2], yawQ: L ? L.yawQ : cmd.yawQ | 0 };
+  }
+  // v laid on the plane with normal n, unit length; null if v points (almost) along n
+  _onPlane(n, x, y, z) {
+    const k = x * n.nx + y * n.ny + z * n.nz;
+    x -= k * n.nx; y -= k * n.ny; z -= k * n.nz;
+    const l = Math.sqrt(x * x + y * y + z * z);
+    return l < 1e-3 ? null : [x / l, y / l, z / l];
+  }
+  // the camera's forward laid on the surface; looking straight at it, the camera's up; failing both, any tangent
+  _camHeading(n, cmd) {
+    const yaw = cmd.yawQ * 1e-4, pitch = cmd.pitchQ * 1e-4, sy = dsin(yaw), cy = dcos(yaw), sp = dsin(pitch), cp = dcos(pitch);
+    return this._onPlane(n, sy * cp, sp, cy * cp) || this._onPlane(n, -sy * sp, cp, -cy * sp) || this._onPlane(n, 1, 0, 0) || this._onPlane(n, 0, 0, 1);
+  }
+  // mouse left/right turns a landed wasp about the surface normal, exactly as yaw turns it on flat ground
+  _turn(w, cmd) {
+    const L = w.land;
+    if (!L) return;
+    if (L.hx === undefined) { const h = this._camHeading(L, cmd); L.hx = h[0]; L.hy = h[1]; L.hz = h[2]; L.yawQ = cmd.yawQ | 0; }
+    const d = ((cmd.yawQ | 0) - L.yawQ) * 1e-4;
+    L.yawQ = cmd.yawQ | 0;
+    if (d === 0) return;
+    const c = dcos(d), s = dsin(d);
+    const ex = L.ny * L.hz - L.nz * L.hy, ey = L.nz * L.hx - L.nx * L.hz, ez = L.nx * L.hy - L.ny * L.hx; // n x h
+    const h = this._onPlane(L, L.hx * c + ex * s, L.hy * c + ey * s, L.hz * c + ez * s);
+    if (h) { L.hx = h[0]; L.hy = h[1]; L.hz = h[2]; }
   }
 
   _maybeLand(w, cmd) {
@@ -2380,39 +2535,37 @@ export class Sim {
     const s = this._staticSurface(w, T.land.reach);
     if (!s) return;
     w.state = 'landed'; w.vx = w.vy = w.vz = 0;
-    this._settle(w, s);
+    w.land = null;
+    this._settle(w, s, cmd);
     this.emit('landed', { id: w.id, surface: s.kind });
   }
 
   // push off along the surface normal: up from the ground, sideways off a trunk, down from under a table
   _takeoff(w) {
     const n = w.land || { nx: 0, ny: 1, nz: 0 };
-    w.state = 'fly'; w.vx = n.nx * 0.5; w.vy = n.ny * 0.5 + 0.1; w.vz = n.nz * 0.5; w.walking = false; w.land = null;
+    w.state = 'fly'; w.vx = n.nx * 0.5; w.vy = n.ny * 0.5 + 0.1; w.vz = n.nz * 0.5; w.walking = false;
     w.noLandUntil = this.tick + T.land.afterTakeoff; // clear of the surface before it can settle again
-    this.emit('takeoff', { id: w.id });
+    // the camera picks up the heading the wasp had on the surface
+    this.emit('takeoff', { id: w.id, hx: w.land && w.land.hx, hy: w.land && w.land.hy, hz: w.land && w.land.hz });
+    w.land = null;
   }
 
-  // Walk camera-relative along whatever the wasp stands on, at any angle. The wish (forward and strafe from the
-  // camera) is projected onto the surface; looking straight at the surface, forward means up the screen. After each
-  // step the wasp is put back on the nearest surface, so it follows round edges, up trunks and under table tops,
-  // and never falls off: only Space or Shift take off.
+  // Walk along whatever the wasp stands on, at any angle: forward along its heading, strafe across it, as on flat
+  // ground. After each step the wasp is put back on the nearest surface, so it follows round edges, up trunks and
+  // under table tops, and never falls off: only Space or Shift take off.
   _walk(w, cmd) {
-    const n = w.land || { nx: 0, ny: 1, nz: 0 };
-    const yaw = cmd.yawQ * 1e-4, pitch = cmd.pitchQ * 1e-4, sy = dsin(yaw), cy = dcos(yaw), sp = dsin(pitch), cp = dcos(pitch);
+    const L = w.land;
+    if (!L || L.hx === undefined) return;
     const mz = cmd.mz / 100, mx = cmd.mx / 100;
-    const onPlane = (x, y, z) => { const k = x * n.nx + y * n.ny + z * n.nz; return [x - k * n.nx, y - k * n.ny, z - k * n.nz]; };
-    let [dx, dy, dz] = onPlane(sy * cp * mz - cy * mx, sp * mz, cy * cp * mz + sy * mx);
-    let len = Math.sqrt(dx * dx + dy * dy + dz * dz);
-    if (len < 0.25 * Math.sqrt(mz * mz + mx * mx)) {
-      [dx, dy, dz] = onPlane(-sy * sp * mz - cy * mx, cp * mz, -cy * sp * mz + sy * mx); // camera up instead of forward
-      len = Math.sqrt(dx * dx + dy * dy + dz * dz);
-    }
+    const rx = L.hy * L.nz - L.hz * L.ny, ry = L.hz * L.nx - L.hx * L.nz, rz = L.hx * L.ny - L.hy * L.nx; // h x n: to the right
+    const dx = L.hx * mz + rx * mx, dy = L.hy * mz + ry * mx, dz = L.hz * mz + rz * mx;
+    const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
     if (len < 1e-6) return;
-    const step = T.land.walkSpeed * DT * Math.min(1, Math.sqrt(mz * mz + mx * mx)) / len;
+    const step = T.land.walkSpeed * DT * Math.min(1, len) / len;
     const s = this._staticSurface({ x: w.x + dx * step, y: w.y + dy * step, z: w.z + dz * step }, T.land.stick);
     if (!s) return; // nothing to hold on to that way
-    this._settle(w, s);
-    w.yaw = yaw; w.walking = true;
+    this._settle(w, s, cmd);
+    w.walking = true;
     // walking into a person climbs onto them (an arm on the table, a leg on the grass)
     this._contactQuery(w);
     if (w.contact && !w.contact.blockedPerch) { w.walking = false; w.land = null; this._perch(w, w.contact); return; }
@@ -2872,7 +3025,15 @@ export class Sim {
     const rec = this.records.get(t.key);
     if (!rec || !this.activeChunks.includes(rec)) return null;
     const c = rec.content, st = this.cs(t.key);
-    if (t.kind === 'sugar') { const s = c.sugar[t.i]; return { x: s.x, y: s.y + 0.012, z: s.z }; }
+    if (t.kind === 'sugar') {
+      const s = c.sugar[t.i];
+      if (s.kind === 'can') {
+        // into the cup: above the opening first, then down to just over the drink (GDD 7.5)
+        const cp = this.cupsIn(rec).find((q) => q.x === s.x && q.z === s.z), rIn = T.cup.r - T.cup.wall;
+        if (cp) return sq(w.x - cp.x) + sq(w.z - cp.z) > sq(rIn * 0.5) && w.y < T.cup.rim + 0.01 ? { x: cp.x, y: T.cup.rim + 0.03, z: cp.z } : { x: cp.x, y: cp.level + 0.016, z: cp.z };
+      }
+      return { x: s.x, y: s.y + 0.012, z: s.z };
+    }
     if (t.kind === 'trap') return c.traps[t.i];
     if (t.kind === 'fruit') { const f = this.fruitIn(rec).find((x) => x.i === t.i); return f ? { x: f.x, y: f.y + 0.015, z: f.z } : null; }
     if (t.kind === 'spill') { const sp = this.spillsIn(t.key).find((x) => x.i === t.i); return sp ? { x: sp.x, y: sp.y + 0.012, z: sp.z } : null; }

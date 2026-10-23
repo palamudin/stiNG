@@ -102,6 +102,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 74 | Worker ages and guards (T1-13): new workers stay in a few days before they forage; once the colony has 25 mature workers, two guards circle the entrance, chase off rival wasps and other players' wasps (fights across the link), and sting the exterminator at the nest. The colony view shows the young and the guards | 6.5 | 14 |
 | 75 | Winter with choices (T1-15): in late season a worker can scout a winter site (E at a shed wall, a hollow tree, loose bark or the leaf litter); most gynes winter there and shelter sets how many wake. At the season's end you choose which queen to wake as; she starts the next season at her site, with reserves by how well she wintered | 6.7 | 14 |
 | 76 | Landing on any surface: hover still near a trunk, a flower stalk, the side of a box or under a table and the wasp grips it, belly to the surface. Walking follows the surface round edges and up trunks; only Space or Shift take off; a sting from a surface reaches someone within 4 cm | 7.2 | 14 |
+| 77 | Hollow cups: the walls keep you out from the side; in over the rim to reach the drink, which you must not touch. Someone who sees you go in covers the cup with a hand and you drown inside; lids at level 2 do the same. On a surface, the mouse turns you about it as on the ground | 7.2, 7.5 | 14 |
 
 ## Verified
 

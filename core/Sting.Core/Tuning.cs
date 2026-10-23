@@ -26,6 +26,8 @@ namespace Sting.Core
         }
         /// Drowning in a drink (GDD 7.5, T1-3)
         public static class drown { public static readonly Num chancePerSec = 0.03, escapePerPress = 0.3, aiEscape = 0.006; public const int ticks = 240; }
+        /// hollow cups (GDD 7.5): an open top, a thin wall, a drink a third to nearly full
+        public static class cup { public static readonly Num r = 0.033, wall = 0.003, @base = 0.75, rim = 0.87, fillMin = 0.3, fillSpan = 0.6, noticeMul = 2, noticeDist = 1; public const int coverTicks = 600, drownTicks = 300; }
         public static class wasp
         {
             public static readonly Num radius = 0.007, cruise = 3.0, burst = 6.0, accel = 14, burstAccel = 24, climb = 1.6, contactGap = 0.02,

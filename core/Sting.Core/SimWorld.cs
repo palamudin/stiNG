@@ -208,7 +208,7 @@ namespace Sting.Core
             if (hm.cooldown > tick) return;
             int lvl = EscAt(hm.x, hm.z);
             var head = hm.PartsNow[0];
-            Wasp target = null; string why = null;
+            Wasp target = null; string why = null; (string key, Cup cup)? cupHit = null;
             foreach (var w in wasps)
             {
                 if (!(w.state == "fly" || w.state == "chewing" || w.state == "landed")) continue;
@@ -216,6 +216,9 @@ namespace Sting.Core
                 if (dx * dx + dz * dz > 4) continue;
                 var lp = Body.ToLocal(hm.F, w.P);
                 Num hd2 = D2(lp, head.a);
+                // a wasp gone into a drink in front of them: a hand over the cup (GDD 7.5)
+                var ic = dx * dx + dz * dz < T.cup.noticeDist * T.cup.noticeDist ? InCup(w.P) : null;
+                if (ic != null && !CupCovered(ic.Value.key, ic.Value.cup.i)) { target = w; why = "cup"; cupHit = ic; break; }
                 if (hd2 < T.esc.faceRadius * T.esc.faceRadius) { target = w; why = "face"; break; }
                 if (lvl >= 1 && hd2 < T.esc.headRadius * T.esc.headRadius) { target = w; why = "head"; break; }
                 if (lvl >= 1 && (w.ai.atFood == "can" || (w.state == "landed" && NearCan(w))) && dx * dx + dz * dz < 1.5) { target = w; why = "food"; break; }
@@ -224,11 +227,16 @@ namespace Sting.Core
             if (target == null) { hm.annoy = 0; hm.annoyId = 0; return; }
             if (hm.annoyId != target.id) { hm.annoyId = target.id; hm.annoy = 0; }
             hm.annoy += 3;
-            Num need = hm.tr.reactionTicks * (why == "face" ? 3 : T.esc.noticeMul) + (why == "spray" ? 20 : 0);
+            Num need = hm.tr.reactionTicks * (why == "face" ? 3 : why == "cup" ? T.cup.noticeMul : T.esc.noticeMul) + (why == "spray" ? 20 : 0);
             if (hm.annoy < need) return;
             hm.annoy = 0;
             hm.cooldown = tick + T.esc.cooldownTicks;
             int start = tick + T.net.commitTicks + 1;
+            if (why == "cup")
+            {
+                Publish(new NetEv { type = "cover", humanHex = hm.hex, key = cupHit.Value.key, i = cupHit.Value.cup.i, end = start + T.cup.coverTicks });
+                return;
+            }
             if (why == "spray")
             {
                 Publish(new NetEv { type = "spray", humanHex = hm.hex, start = start, end = start + T.esc.sprayTicks });
@@ -943,6 +951,31 @@ namespace Sting.Core
                     Capsule(f.x, 0, f.z, f.x, f.y - T.land.headR, f.z, T.land.stalkR, "stalk");
                     Capsule(f.x, f.y, f.z, f.x, f.y, f.z, T.land.headR, "flower");
                 }
+                // cups: the outer and inner wall, the rim, and the lid or hand over a covered one
+                {
+                    string ck = rec.key; Num rIn = T.cup.r - T.cup.wall;
+                    foreach (var cp in CupsIn(rec))
+                    {
+                        Num hx = p.x - cp.x, hz = p.z - cp.z, hd = Sqrt(hx * hx + hz * hz);
+                        if (hd > T.cup.r + lim || p.y > T.cup.rim + lim || p.y < T.cup.@base || CanSpilled(ck, cp.i)) continue;
+                        bool cov = CupCovered(ck, cp.i);
+                        if (p.y >= T.cup.rim)
+                        {
+                            if (hd == 0) { if (cov) Take(p.x, T.cup.rim, p.z, 0, 1, 0, p.y - T.cup.rim, "cup"); continue; }
+                            Num qr = cov ? Min(hd, T.cup.r) : Clamp(hd, rIn, T.cup.r), qx = cp.x + hx / hd * qr, qz = cp.z + hz / hd * qr;
+                            Num ex = p.x - qx, ey = p.y - T.cup.rim, ez = p.z - qz, d = Sqrt(ex * ex + ey * ey + ez * ez);
+                            if (d > 0) Take(qx, T.cup.rim, qz, ex / d, ey / d, ez / d, d, "cup");
+                            continue;
+                        }
+                        if (hd == 0) continue;
+                        if (hd >= (rIn + T.cup.r) / 2) Take(cp.x + hx / hd * T.cup.r, p.y, cp.z + hz / hd * T.cup.r, hx / hd, 0, hz / hd, Max(0, hd - T.cup.r), "cup");
+                        else
+                        {
+                            Take(cp.x + hx / hd * rIn, p.y, cp.z + hz / hd * rIn, -hx / hd, 0, -hz / hd, Max(0, rIn - hd), "cup");
+                            if (cov) Take(p.x, T.cup.rim, p.z, 0, -1, 0, T.cup.rim - p.y, "cup");
+                        }
+                    }
+                }
             }
             // our own paper nest, where it hangs in the open
             var n = nest;
@@ -952,11 +985,56 @@ namespace Sting.Core
             return best;
         }
 
-        void Settle(Wasp w, Surf s)
+        /// Put the wasp on surface s and keep its heading: a tangent that turns with the mouse about the surface normal,
+        /// as yaw does on flat ground. Onto a surface at another angle the heading is carried over by the smallest
+        /// rotation from the old normal to the new one; landing from flight takes the camera's direction.
+        void Settle(Wasp w, Surf s, Cmd cmd)
         {
-            Num R = T.wasp.radius;
+            Num R = T.wasp.radius; var L = w.land;
             w.x = s.x + s.nx * R; w.y = s.y + s.ny * R; w.z = s.z + s.nz * R;
-            w.land = new Land { nx = s.nx, ny = s.ny, nz = s.nz, kind = s.kind };
+            (Num, Num, Num)? h = null;
+            if (L != null && L.hasH)
+            {
+                Num hx = L.hx, hy = L.hy, hz = L.hz;
+                Num c = L.nx * s.nx + L.ny * s.ny + L.nz * s.nz;
+                if (c < 0.999999 && c > -0.999999)
+                {
+                    Num kx = L.ny * s.nz - L.nz * s.ny, ky = L.nz * s.nx - L.nx * s.nz, kz = L.nx * s.ny - L.ny * s.nx;
+                    Num kv = (kx * hx + ky * hy + kz * hz) / (1 + c);
+                    Num rx = hx * c + (ky * hz - kz * hy) + kx * kv, ry = hy * c + (kz * hx - kx * hz) + ky * kv, rz = hz * c + (kx * hy - ky * hx) + kz * kv;
+                    hx = rx; hy = ry; hz = rz;
+                }
+                h = OnPlane(s.nx, s.ny, s.nz, hx, hy, hz);
+            }
+            if (h == null) h = CamHeading(s.nx, s.ny, s.nz, cmd);
+            var (fx, fy, fz) = h.Value;
+            w.land = new Land { nx = s.nx, ny = s.ny, nz = s.nz, kind = s.kind, hasH = true, hx = fx, hy = fy, hz = fz, yawQ = L != null ? L.yawQ : cmd.yawQ };
+        }
+        static (Num, Num, Num)? OnPlane(Num nx, Num ny, Num nz, Num x, Num y, Num z)
+        {
+            Num k = x * nx + y * ny + z * nz;
+            x -= k * nx; y -= k * ny; z -= k * nz;
+            Num l = Sqrt(x * x + y * y + z * z);
+            return l < 1e-3 ? ((Num, Num, Num)?)null : (x / l, y / l, z / l);
+        }
+        static (Num, Num, Num) CamHeading(Num nx, Num ny, Num nz, Cmd cmd)
+        {
+            Num yaw = cmd.yawQ * 1e-4, pitch = cmd.pitchQ * 1e-4, sy = DSin(yaw), cy = DCos(yaw), sp = DSin(pitch), cp = DCos(pitch);
+            return OnPlane(nx, ny, nz, sy * cp, sp, cy * cp) ?? OnPlane(nx, ny, nz, -sy * sp, cp, -cy * sp) ?? OnPlane(nx, ny, nz, 1, 0, 0) ?? OnPlane(nx, ny, nz, 0, 0, 1).Value;
+        }
+        /// mouse left/right turns a landed wasp about the surface normal, exactly as yaw turns it on flat ground
+        void Turn(Wasp w, Cmd cmd)
+        {
+            var L = w.land;
+            if (L == null) return;
+            if (!L.hasH) { var (a, b, c) = CamHeading(L.nx, L.ny, L.nz, cmd); L.hx = a; L.hy = b; L.hz = c; L.hasH = true; L.yawQ = cmd.yawQ; }
+            Num d = (cmd.yawQ - L.yawQ) * 1e-4;
+            L.yawQ = cmd.yawQ;
+            if (d == 0) return;
+            Num co = DCos(d), si = DSin(d);
+            Num ex = L.ny * L.hz - L.nz * L.hy, ey = L.nz * L.hx - L.nx * L.hz, ez = L.nx * L.hy - L.ny * L.hx; // n x h
+            var h = OnPlane(L.nx, L.ny, L.nz, L.hx * co + ex * si, L.hy * co + ey * si, L.hz * co + ez * si);
+            if (h != null) { (L.hx, L.hy, L.hz) = h.Value; }
         }
 
         void MaybeLand(Wasp w, Cmd cmd)
@@ -967,7 +1045,8 @@ namespace Sting.Core
             var s = StaticSurface(w.P, T.land.reach);
             if (s == null) return;
             w.state = "landed"; w.vx = w.vy = w.vz = 0;
-            Settle(w, s);
+            w.land = null;
+            Settle(w, s, cmd);
             Emit("landed", ("id", w.id), ("surface", s.kind));
         }
 
@@ -975,33 +1054,30 @@ namespace Sting.Core
         void Takeoff(Wasp w)
         {
             Num nx = w.land != null ? w.land.nx : 0, ny = w.land != null ? w.land.ny : 1, nz = w.land != null ? w.land.nz : 0;
-            w.state = "fly"; w.vx = nx * 0.5; w.vy = ny * 0.5 + 0.1; w.vz = nz * 0.5; w.walking = false; w.land = null;
+            w.state = "fly"; w.vx = nx * 0.5; w.vy = ny * 0.5 + 0.1; w.vz = nz * 0.5; w.walking = false;
             w.noLandUntil = tick + T.land.afterTakeoff; // clear of the surface before it can settle again
-            Emit("takeoff", ("id", w.id));
+            // the camera picks up the heading the wasp had on the surface
+            if (w.land != null && w.land.hasH) Emit("takeoff", ("id", w.id), ("hx", w.land.hx), ("hy", w.land.hy), ("hz", w.land.hz)); else Emit("takeoff", ("id", w.id));
+            w.land = null;
         }
 
-        /// Walk camera-relative along whatever the wasp stands on, at any angle. The wish is projected onto the
-        /// surface; looking straight at the surface, forward means up the screen. After each step the wasp is put back
-        /// on the nearest surface, so it follows round edges, up trunks and under table tops, and never falls off.
+        /// Walk along whatever the wasp stands on, at any angle: forward along its heading, strafe across it, as on flat
+        /// ground. After each step the wasp is put back on the nearest surface, so it follows round edges, up trunks
+        /// and under table tops, and never falls off: only Space or Shift take off.
         void Walk(Wasp w, Cmd cmd)
         {
-            Num nnx = w.land != null ? w.land.nx : 0, nny = w.land != null ? w.land.ny : 1, nnz = w.land != null ? w.land.nz : 0;
-            Num yaw = cmd.yawQ * 1e-4, pitch = cmd.pitchQ * 1e-4, sy = DSin(yaw), cy = DCos(yaw), sp = DSin(pitch), cp = DCos(pitch);
+            var L = w.land;
+            if (L == null || !L.hasH) return;
             Num mz = (Num)cmd.mz / 100, mx = (Num)cmd.mx / 100;
-            (Num, Num, Num) OnPlane(Num x, Num y, Num z) { Num k = x * nnx + y * nny + z * nnz; return (x - k * nnx, y - k * nny, z - k * nnz); }
-            var (dx, dy, dz) = OnPlane(sy * cp * mz - cy * mx, sp * mz, cy * cp * mz + sy * mx);
+            Num rx = L.hy * L.nz - L.hz * L.ny, ry = L.hz * L.nx - L.hx * L.nz, rz = L.hx * L.ny - L.hy * L.nx; // h x n: to the right
+            Num dx = L.hx * mz + rx * mx, dy = L.hy * mz + ry * mx, dz = L.hz * mz + rz * mx;
             Num len = Sqrt(dx * dx + dy * dy + dz * dz);
-            if (len < 0.25 * Sqrt(mz * mz + mx * mx))
-            {
-                (dx, dy, dz) = OnPlane(-sy * sp * mz - cy * mx, cp * mz, -cy * sp * mz + sy * mx); // camera up instead of forward
-                len = Sqrt(dx * dx + dy * dy + dz * dz);
-            }
             if (len < 1e-6) return;
-            Num step = T.land.walkSpeed * T.DT * Min(1, Sqrt(mz * mz + mx * mx)) / len;
+            Num step = T.land.walkSpeed * T.DT * Min(1, len) / len;
             var s = StaticSurface(new V3(w.x + dx * step, w.y + dy * step, w.z + dz * step), T.land.stick);
             if (s == null) return; // nothing to hold on to that way
-            Settle(w, s);
-            w.yaw = yaw; w.walking = true;
+            Settle(w, s, cmd);
+            w.walking = true;
             // walking into a person climbs onto them (an arm on the table, a leg on the grass)
             ContactQuery(w);
             if (w.contact != null) { w.walking = false; w.land = null; var c = w.contact; PerchOn(w, c.humanHex, c.zone, c.surf, c.n, c.part); return; }

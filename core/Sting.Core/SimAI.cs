@@ -172,7 +172,18 @@ namespace Sting.Core
             if (t == null) return null;
             if (!records.TryGet(t.key ?? "", out var rec) || !activeChunks.Contains(rec)) return null;
             var c = rec.content; var st = CS(t.key);
-            if (t.kind == "sugar") { var s = c.sugar[t.i]; return new V3(s.x, s.y + 0.012, s.z); }
+            if (t.kind == "sugar")
+            {
+                var s = c.sugar[t.i];
+                if (s.kind == "can")
+                {
+                    // into the cup: above the opening first, then down to just over the drink (GDD 7.5)
+                    Cup cp = null; foreach (var q in CupsIn(rec)) if (q.x == s.x && q.z == s.z) { cp = q; break; }
+                    Num rIn = T.cup.r - T.cup.wall;
+                    if (cp != null) return Sq(w.x - cp.x) + Sq(w.z - cp.z) > Sq(rIn * 0.5) && w.y < T.cup.rim + 0.01 ? new V3(cp.x, T.cup.rim + 0.03, cp.z) : new V3(cp.x, cp.level + 0.016, cp.z);
+                }
+                return new V3(s.x, s.y + 0.012, s.z);
+            }
             if (t.kind == "trap") { var tr = c.traps[t.i]; return new V3(tr.x, tr.y, tr.z); }
             if (t.kind == "fruit") { foreach (var f in FruitIn(rec)) if (f.i == t.i) return new V3(f.x, f.y + 0.015, f.z); return null; }
             if (t.kind == "spill") { foreach (var sp in SpillsIn(t.key)) if (sp.i == t.i) return new V3(sp.x, sp.y + 0.012, sp.z); return null; }

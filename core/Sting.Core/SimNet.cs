@@ -328,6 +328,15 @@ namespace Sting.Core
                     if (hm != null) AddEsc(hm.x, hm.z, T.esc.nuisance);
                     break;
                 }
+                case "cover":
+                {
+                    // a hand goes over the cup on the agreed tick; whoever is inside is shut in (GDD 7.5)
+                    var cst = CS(ev.key); cst.cover ??= new Dictionary<int, int>();
+                    int until = (int)ev.end;
+                    cst.cover[ev.i] = System.Math.Max(cst.cover.TryGetValue(ev.i, out var cu) ? cu : 0, until);
+                    Emit("cover", ("humanHex", ev.humanHex), ("key", ev.key), ("i", ev.i));
+                    break;
+                }
                 case "spray":
                 {
                     // the can empties on the agreed tick, so every peer counts the same sprays (T1-6)

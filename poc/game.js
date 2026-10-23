@@ -130,7 +130,10 @@ let camDist = 0.1, eyeBlend = 0;
 const geoTrunk = new THREE.CylinderGeometry(0.8, 1, 1, 9);
 const geoBlob = new THREE.IcosahedronGeometry(1, 1);
 const geoBox = new THREE.BoxGeometry(1, 1, 1);
-const geoCan = new THREE.CylinderGeometry(0.033, 0.033, 0.12, 14);
+const geoCan = new THREE.CylinderGeometry(0.033, 0.033, 0.12, 18, 1, true); // hollow: open at the top (GDD 7.5)
+const geoCanIn = new THREE.CylinderGeometry(0.030, 0.030, 0.12, 18, 1, true);
+const geoDrink = new THREE.CircleGeometry(0.030, 18);
+const DRINKS = ['#3a1b0c', '#6b3a12', '#d9c27a', '#9fc23a'];
 const geoStem = new THREE.CylinderGeometry(0.0035, 0.0035, 1, 4);
 const geoHead = new THREE.IcosahedronGeometry(0.022, 1);
 const geoBottle = new THREE.CylinderGeometry(0.035, 0.04, 0.2, 12);
@@ -197,13 +200,20 @@ function buildChunk(rec) {
     candle.add(cup, flame); candle.position.set(t.x, 0.75, t.z); candle.visible = false;
     g.add(candle); dyn.candles.push(candle);
   });
-  for (const can of c.cans) {
-    const m = new THREE.Mesh(geoCan, mat(CANS[can.color])); m.position.set(can.x, 0.81, can.z); m.castShadow = true; g.add(m); dyn.cans.push(m);
+  const cups = sim.cupsIn(rec);
+  c.cans.forEach((can, ci) => {
+    // a hollow cup: painted outside, plain inside, the drink at its level
+    const m = new THREE.Group(); m.position.set(can.x, 0.81, can.z);
+    const outer = new THREE.Mesh(geoCan, new THREE.MeshLambertMaterial({ color: CANS[can.color], side: THREE.FrontSide })); outer.castShadow = true;
+    const inner = new THREE.Mesh(geoCanIn, new THREE.MeshLambertMaterial({ color: '#b9b4a8', side: THREE.BackSide }));
+    const drink = new THREE.Mesh(geoDrink, new THREE.MeshLambertMaterial({ color: DRINKS[can.color] })); drink.rotation.x = -Math.PI / 2; drink.position.y = cups[ci].level - 0.81;
+    m.add(outer, inner, drink); m.userData.drink = drink;
+    g.add(m); dyn.cans.push(m);
     const pud = new THREE.Mesh(new THREE.CircleGeometry(0.075, 18), new THREE.MeshLambertMaterial({ color: '#b07a1e', transparent: true, opacity: 0.75 }));
     pud.rotation.x = -Math.PI / 2; pud.position.set(can.x + 0.06, 0.752, can.z); pud.visible = false; g.add(pud); dyn.puddles.push(pud);
-    const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.006, 14), mat('#d9d4c7')); lid.position.set(can.x, 0.874, can.z); lid.visible = false;
+    const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.006, 14), new THREE.MeshLambertMaterial({ color: '#d9d4c7' })); lid.position.set(can.x, 0.874, can.z); lid.visible = false;
     g.add(lid); dyn.lids.push(lid);
-  }
+  });
   for (const tr of c.traps) {
     const grp = new THREE.Group();
     const bottle = new THREE.Mesh(geoBottle, new THREE.MeshLambertMaterial({ color: '#b9d6c9', transparent: true, opacity: 0.7 }));
@@ -284,10 +294,11 @@ function updateChunkDynamics() {
   for (const [k, g] of chunkViews) {
     const lv = sim.escLevel(k), d = g.userData.dyn, torn = (sim.chunkState.get(k) || {}).webTorn || {};
     d.webs.forEach((l, i) => { l.visible = torn[i] !== sim.day; });
-    d.lids.forEach((l, i) => { l.visible = lv >= 2 && !sim.canSpilled(k, i); });
+    d.lids.forEach((l, i) => { l.visible = sim.cupCovered(k, i) && !sim.canSpilled(k, i); l.material.color.set(lv >= 2 ? '#d9d4c7' : '#c99a7a'); }); // a lid, or a hand over it
     d.cans.forEach((m, i) => {
       const down = sim.canSpilled(k, i);
       m.rotation.z = down ? Math.PI / 2 : 0; m.position.y = down ? 0.785 : 0.81;
+      m.userData.drink.visible = !down;
       d.puddles[i].visible = down;
     });
     for (const c of d.candles) c.visible = lv >= 2;
@@ -874,7 +885,11 @@ function renderWasps(alpha, t, dt) {
     g.rotation.z = w.state === 'stunned' ? t * 0.6 : w.state === 'fighting' ? Math.sin(t * 3 + w.id) * 1.4 : 0;
     // on a surface the body lies along it: belly to the surface, head toward where the camera points (GDD 7.2)
     const sn = surfaceNormal(w);
-    if (sn) {
+    if (sn && w.state === 'landed' && w.land && typeof w.land.hx === 'number') {
+      // landed: the sim keeps the heading, turned by the mouse about the surface
+      const f = new THREE.Vector3(w.land.hx, w.land.hy, w.land.hz);
+      g.quaternion.setFromRotationMatrix(_basis.makeBasis(new THREE.Vector3().crossVectors(sn, f), sn, f));
+    } else if (sn) {
       const f = driven ? new THREE.Vector3(Math.sin(input.yaw) * Math.cos(input.pitch), Math.sin(input.pitch), Math.cos(input.yaw) * Math.cos(input.pitch)) : new THREE.Vector3(Math.sin(g.userData.yaw), 0, Math.cos(g.userData.yaw));
       f.addScaledVector(sn, -f.dot(sn));
       if (f.lengthSq() < 0.04) f.set(-Math.sin(input.yaw) * Math.sin(input.pitch), Math.cos(input.pitch), -Math.cos(input.yaw) * Math.sin(input.pitch)).projectOnPlane(sn); // looking straight at the surface: head up the screen
@@ -1397,7 +1412,7 @@ function updateHud() {
   else if (w.state === 'chewing') status = `Chewing pulp ${Math.round(w.chew / T.pulp.chewTicks * 100)}%`;
   else if (w.state === 'trapped') status = 'Stuck in the trap';
   else if (w.state === 'webbed') status = `Stuck in a web · spider in ${Math.max(0, (w.web.spiderAt - sim.tick) / 60).toFixed(1)} s`;
-  else if (w.state === 'landed') status = 'Resting';
+  else if (w.state === 'landed') status = sim.feeding ? 'Feeding' : 'Resting';
   else if (w.state === 'perched') status = `On #${w.perch.hex.slice(0, 4)} · ${zoneLabel(w.perch.zone)}`;
   else if (w.state === 'fighting') status = 'Fighting a rival wasp';
   else if (w.state === 'drowning') status = `In the drink · ${Math.max(0, (w.drown.until - sim.tick) / 60).toFixed(1)} s`;
@@ -1415,7 +1430,7 @@ function updateHud() {
   else if (w.state === 'webbed') hint = `Mash ${kbd('Shift')} to tear free`;
   else if (w.state === 'drowning') hint = `Mash ${kbd('Shift')} to climb out`;
   else if (w.state === 'fighting') hint = `Mash ${kbd('LMB')} to sting it first`;
-  else if (w.state === 'landed') hint = w.walking ? 'Walking · it follows the surface round edges, up trunks and under tables · look where you want to go' : `Resting costs no sugar in the warmth · ${kbd('W')}${kbd('A')}${kbd('S')}${kbd('D')} walk on any surface · ${kbd('LMB')} sting someone within reach · ${kbd('Space')} or ${kbd('Shift')} take off`;
+  else if (w.state === 'landed') hint = w.walking ? 'Walking · it follows the surface round edges, up trunks and under tables · look where you want to go' : `Resting costs no sugar in the warmth · mouse turns · ${kbd('W')}${kbd('A')}${kbd('S')}${kbd('D')} walk on any surface · ${kbd('LMB')} sting someone within reach · ${kbd('Space')} or ${kbd('Shift')} take off`;
   else if (w.state === 'perched') hint = `${kbd('W')}${kbd('A')}${kbd('S')}${kbd('D')} crawl (look up or down to climb) · ${kbd('LMB')} sting · ${kbd('Space')} take off · ${kbd('E')} crawl under at an opening`;
   else if (h.rival) hint = `${kbd('E')} steal a larva from the rival nest`;
   else if (h.hiber) hint = `${kbd('E')} scout this winter site for the young queens: ${T.hiber.name[h.hiber]}, shelter ${Math.round(T.hiber.q[h.hiber] * 100)}%`;
@@ -1512,7 +1527,8 @@ function deathWhy(e) {
   if (e.cause === 'eaten by a spider') return 'Webs hang between trees. Mash Shift the moment you stick.';
   if (e.cause === 'cooked by bees') return 'Bees ball an intruder and heat it. Mash Shift before it reaches 46 °C.';
   if (e.cause === 'drowned in a trap') return 'Sweet-smelling bottles at alert level 3 are traps.';
-  if (e.cause === 'drowned in a drink') return 'Open cans are deep. Feed at the rim and mash Shift the moment you slip in.';
+  if (e.cause === 'drowned in a drink') return 'Cups are deep. Feed just above the drink without touching it, and mash Shift the moment you slip in.';
+  if (e.cause === 'drowned under a lid') return 'Someone saw you go into their drink and covered it. Don\'t linger inside a cup in front of people.';
   if (e.cause === 'cold') return 'Below about 8 °C a wasp goes torpid and dies. Get home before cold nights, or warm up on a person.';
   if (e.cause === 'insecticide') return 'Some people carry spray once the area is alert. Stay out of the cone in front of them.';
   if (e.cause === 'old age') return 'Workers live a few weeks. Take over a younger sister with Q.';
@@ -1530,7 +1546,7 @@ function deathWhy(e) {
     default: return '';
   }
 }
-const DEATH_TITLE = { 'eaten by a spider': 'EATEN', 'taken by a bird': 'TAKEN', 'killed by a rival wasp': 'KILLED', slap: 'SWATTED', cover: 'SMOTHERED', 'crushed under clothing': 'CRUSHED', insecticide: 'SPRAYED', 'drowned in a trap': 'DROWNED', 'cooked by bees': 'COOKED', starved: 'STARVED', 'old age': 'SPENT', 'taken by a dragonfly': 'TAKEN', cold: 'CHILLED', 'drowned in a drink': 'DROWNED' };
+const DEATH_TITLE = { 'eaten by a spider': 'EATEN', 'taken by a bird': 'TAKEN', 'killed by a rival wasp': 'KILLED', slap: 'SWATTED', cover: 'SMOTHERED', 'crushed under clothing': 'CRUSHED', insecticide: 'SPRAYED', 'drowned in a trap': 'DROWNED', 'cooked by bees': 'COOKED', starved: 'STARVED', 'old age': 'SPENT', 'taken by a dragonfly': 'TAKEN', cold: 'CHILLED', 'drowned in a drink': 'DROWNED', 'drowned under a lid': 'SHUT IN' };
 
 function pushSwatAnims(list, frameHex, contactTick) {
   const frame = sim.humanByHex(frameHex);
@@ -1641,6 +1657,12 @@ function handleEvents(events) {
       case 'webEscape': if (e.id === sim.drivenId) toast('Tore free', 'var(--yellow)', 1.2); break;
       case 'fellIn': if (e.driven) { toast('Slipped into the drink · mash Shift', 'var(--red)', 2); blip(420, 180, 0.25, 0.05, 'sine'); } break;
       case 'climbedOut': if (e.id === sim.drivenId) toast('Climbed out, sticky', 'var(--yellow)', 1.2); break;
+      case 'cover': logEvent(`#${e.humanHex.slice(0, 4)} covers a drink`); break;
+      case 'coveredIn': if (e.driven) toast('Covered! Shut in the cup', 'var(--red)', 2); break;
+      case 'takeoff':
+        // the camera picks up the heading the wasp had on the surface (GDD 7.2)
+        if (e.id === sim.drivenId && typeof e.hx === 'number') { input.yaw = Math.atan2(e.hx, e.hz); input.pitch = Math.max(-1.2, Math.min(1.2, Math.asin(Math.max(-1, Math.min(1, e.hy))))); }
+        break;
       case 'birdDive': if (e.driven) { toast('A bird is diving at you · get low or under a tree', 'var(--red)', 2.4); blip(2600, 1800, 0.3, 0.06, 'sine'); } break;
       case 'birdMiss': toast('The bird missed', 'var(--yellow)', 1.2); break;
       case 'fight': if (e.driven) toast('Grappling a rival wasp · mash LMB', 'var(--red)', 1.8); break;
@@ -1773,15 +1795,23 @@ function updateScents(dt) {
   }
 }
 
+const camUp = new THREE.Vector3(0, 1, 0);
 function updateCamera(p, dt) {
   const w = sim.wasp;
   const dead = !sim._driven();
   const fl = input.free;
   eyeBlend = fl.held && !dead ? Math.min(1, eyeBlend + dt / 0.12) : Math.max(0, eyeBlend - dt / 0.35);
   if (!fl.held && eyeBlend === 0) { fl.yaw = 0; fl.pitch = 0; }
-  // chase view: always behind the heading
-  const fwd = new THREE.Vector3(Math.sin(input.yaw) * Math.cos(input.pitch), Math.sin(input.pitch), Math.cos(input.yaw) * Math.cos(input.pitch));
-  const want = dead ? 0.9 : w.state === 'attached' || w.state === 'under' || w.state === 'perched' ? 0.17 : w.state === 'balled' ? 0.25 : w.contact ? 0.13 : 0.1;
+  // chase view: always behind the heading. Landed, the heading is the wasp's own along the surface, and the mouse
+  // pitch tilts the view toward or away from the surface, so turning feels the same on a trunk or under a table.
+  const ld = !dead && w && w.state === 'landed' && w.land && typeof w.land.hx === 'number' ? w.land : null;
+  const fwd = ld
+    ? new THREE.Vector3(ld.hx, ld.hy, ld.hz).multiplyScalar(Math.cos(input.pitch)).addScaledVector(new THREE.Vector3(ld.nx, ld.ny, ld.nz), Math.sin(input.pitch))
+    : new THREE.Vector3(Math.sin(input.yaw) * Math.cos(input.pitch), Math.sin(input.pitch), Math.cos(input.yaw) * Math.cos(input.pitch));
+  // the camera's up follows the surface the wasp stands on, and eases back to the sky in flight
+  camUp.lerp(ld ? new THREE.Vector3(ld.nx, ld.ny, ld.nz) : UP, 1 - Math.exp(-dt * 6)).normalize();
+  camera.up.copy(camUp);
+  const want = dead ? 0.9 : sim._inCup(w) || (w.state === 'drowning') ? 0.035 : w.state === 'attached' || w.state === 'under' || w.state === 'perched' ? 0.17 : w.state === 'balled' ? 0.25 : w.contact ? 0.13 : 0.1;
   camDist += (want - camDist) * (1 - Math.exp(-dt * 4));
   const focus = dead && deathSpot ? deathSpot : p || (w ? V(w) : V(sim.nest.spawn)); // no wasp at all in winter (T1-15)
   let off = fwd.clone().multiplyScalar(-camDist).add(new THREE.Vector3(0, camDist * 0.28, 0));
@@ -1790,7 +1820,7 @@ function updateCamera(p, dt) {
   // direction, so the camera never ends up inside a trunk or a table top
   const nw = !dead && w ? surfaceNormal(w) : null;
   const onBody = !!nw;
-  if (nw) off = nw.multiplyScalar(0.75).addScaledVector(fwd, -0.45).normalize().multiplyScalar(camDist).add(new THREE.Vector3(0, camDist * 0.2 * Math.max(0, nw.y), 0));
+  if (nw) off = nw.multiplyScalar(0.75).addScaledVector(fwd, -0.45).normalize().multiplyScalar(camDist);
   camOff.lerp(off, 1 - Math.exp(-dt * (dead ? 2 : 14)));
   const chase = focus.clone().add(camOff);
   if (chase.y < 0.006) chase.y = 0.006;

@@ -24,6 +24,9 @@ export const T = {
   cold: { flightHeat: 12, shiverHeat: 8, shiverMinAir: 8, skinTemp: 31, nestTemp: 30, flyBody: 18, torpor: 8, rate: 1 / 300, lethalTicks: 5400, shiverCost: 0.5 },
   // Drowning in a drink (GDD 7.5, T1-3): feeding at an open can, a wasp may slip in and has a few seconds to climb out
   drown: { chancePerSec: 0.03, ticks: 240, escapePerPress: 0.3, aiEscape: 0.006 },
+  // Cups are hollow (GDD 7.5): an open top, a thin wall, a drink a third to nearly full. A wasp goes in to reach the
+  // drink, falls in if it touches it, and drowns if the cup is covered (a hand, or a lid at level 2) while it is inside.
+  cup: { r: 0.033, wall: 0.003, base: 0.75, rim: 0.87, fillMin: 0.3, fillSpan: 0.6, coverTicks: 600, drownTicks: 300, noticeMul: 2, noticeDist: 1 },
 
   wasp: {
     radius: 0.007, cruise: 3.0, burst: 6.0, accel: 14, burstAccel: 24,

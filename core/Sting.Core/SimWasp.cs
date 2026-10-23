@@ -54,9 +54,11 @@ namespace Sting.Core
                     }
                     if ((edge & Act.Interact) != 0) { Interact(w); if (w.state != "landed") break; }
                     NestTouch(w); // landed at the entrance: in with the load
+                    Turn(w, cmd);
                     w.walking = false;
                     if (cmd.mx != 0 || cmd.mz != 0) Walk(w, cmd);
                     if (w.state != "landed") break;
+                    if (CupCheck(w)) break;
                     Feed(w, driven);
                     if (w.state != "landed") break;
                     Hints(w);
@@ -69,7 +71,7 @@ namespace Sting.Core
                 case "under": UnderStep(w, cmd, edge, armed); break;
                 case "chewing": ChewStep(w, cmd, driven); break;
                 case "trapped":
-                    if (--w.stateTicks <= 0) Die(w, "drowned in a trap", null);
+                    if (--w.stateTicks <= 0) Die(w, w.trapCause ?? "drowned in a trap", null);
                     break;
                 case "balled":
                     if (driven) { BallEscape(w, cmd.burst != 0 && w.ball.prevBurst == 0); if (w.ball != null) w.ball.prevBurst = cmd.burst; }
@@ -168,6 +170,7 @@ namespace Sting.Core
                 Collide(w);
             }
             WebCheck(w, p0);
+            CupCheck(w);
 
             // grounded without fuel: starvation clock
             if (w.energy <= 0 && w.y <= T.wasp.radius + 1e-6)
@@ -219,6 +222,28 @@ namespace Sting.Core
                     else if (k == 3) { w.y = b.maxy + R; if (w.vy < 0) w.vy = 0; }
                     else if (k == 4) { w.z = b.minz - R; if (w.vz > 0) w.vz = 0; }
                     else { w.z = b.maxz + R; if (w.vz < 0) w.vz = 0; }
+                }
+                // hollow cups: thin walls, open at the top unless covered (GDD 7.5)
+                {
+                    string ck = rec.key; Num rIn = T.cup.r - T.cup.wall, mid = (rIn + T.cup.r) / 2;
+                    foreach (var cp in CupsIn(rec))
+                    {
+                        Num hx = w.x - cp.x, hz = w.z - cp.z, hd = Sqrt(hx * hx + hz * hz);
+                        if (hd > T.cup.r + R || w.y > T.cup.rim + R || w.y < T.cup.@base || CanSpilled(ck, cp.i)) continue;
+                        bool cov = CupCovered(ck, cp.i);
+                        if (w.y > T.cup.rim) { if (cov || hd > rIn - R) { w.y = T.cup.rim + R; if (w.vy < 0) w.vy = 0; } continue; }
+                        if (hd == 0) continue;
+                        Num ux = hx / hd, uz = hz / hd;
+                        if (hd >= mid)
+                        {
+                            if (hd < T.cup.r + R) { w.x = cp.x + ux * (T.cup.r + R); w.z = cp.z + uz * (T.cup.r + R); Num vn = w.vx * ux + w.vz * uz; if (vn < 0) { w.vx -= vn * ux; w.vz -= vn * uz; } }
+                        }
+                        else
+                        {
+                            if (hd > rIn - R) { w.x = cp.x + ux * (rIn - R); w.z = cp.z + uz * (rIn - R); Num vn = w.vx * ux + w.vz * uz; if (vn > 0) { w.vx -= vn * ux; w.vz -= vn * uz; } }
+                            if (cov && w.y > T.cup.rim - R) { w.y = T.cup.rim - R; if (w.vy > 0) w.vy = 0; }
+                        }
+                    }
                 }
                 foreach (var cy in c.cylinders)
                 {
@@ -548,10 +573,24 @@ namespace Sting.Core
                     }
                 }
                 if (w.energy >= 1 && !(w.ai.mode == "collect" && w.role == "sugar")) continue;
+                // a drink is reached at its surface, inside the cup (GDD 7.5)
+                foreach (var cp in CupsIn(rec))
+                {
+                    if (CanSpilled(key, cp.i) || CupCovered(key, cp.i)) continue; // knocked over, or covered (GDD 8.10)
+                    if (D2(w, new V3(cp.x, cp.level, cp.z)) > d2max) continue;
+                    Num add = T.energy.refuelPerSec * T.DT;
+                    if (w.energy < 1) w.energy = Min(1, w.energy + add);
+                    else if (!driven) w.ai.cargo = Min(1, w.ai.cargo + add);
+                    if (driven) feeding = true;
+                    w.ai.atFood = "can";
+                    // an open drink is a trap of its own: a feeding wasp may slip in (GDD 7.5, T1-3)
+                    if (H32(w.id, tick, 53) < T.drown.chancePerSec * T.DT) FallIn(w, cp, key, driven);
+                    return;
+                }
                 for (int i = 0; i < c.sugar.Count; i++)
                 {
                     var s = c.sugar[i];
-                    if (s.kind == "can" && (lvl >= 2 || CanSpilled(key, i))) continue; // food covered (GDD 8.10) or knocked over
+                    if (s.kind == "can") continue; // cups are handled above
                     if (FeedAt(w, driven, s.x, s.y, s.z, s.rate, s.kind, d2max, key)) return;
                 }
                 foreach (var s in SpillsIn(key)) if (FeedAt(w, driven, s.x, s.y, s.z, s.rate, s.kind, d2max, key)) return;
@@ -568,17 +607,66 @@ namespace Sting.Core
             else if (!driven) w.ai.cargo = Min(1, w.ai.cargo + add);
             if (driven) feeding = true;
             w.ai.atFood = kind;
-            // an open can is a trap of its own: a feeding wasp may slip in (GDD 7.5, T1-3)
-            if (kind == "can" && H32(w.id, tick, 53) < T.drown.chancePerSec * T.DT) FallIn(w, x, y, z, key, driven);
             return true;
         }
 
-        void FallIn(Wasp w, Num x, Num y, Num z, string key, bool driven)
+        void FallIn(Wasp w, Cup cup, string key, bool driven)
         {
-            w.state = "drowning"; w.vx = w.vy = w.vz = 0;
-            w.x = x; w.y = y - 0.03; w.z = z;
-            w.drown = new Drown { key = key, until = tick + T.drown.ticks, progress = 0, prevBurst = 1 };
+            w.state = "drowning"; w.vx = w.vy = w.vz = 0; w.land = null;
+            w.x = cup.x; w.y = cup.level; w.z = cup.z;
+            w.drown = new Drown { key = key, i = cup.i, until = tick + T.drown.ticks, progress = 0, prevBurst = 1 };
             Emit("fellIn", ("id", w.id), ("driven", driven));
+        }
+
+        /// Cups (GDD 7.5): one per can on a table, a pure function of the seed and the chunk, cached on the chunk
+        /// record (never saved). The drink level is set by hash; the rim and walls are the same for every cup.
+        public List<Cup> CupsIn(ChunkRec rec)
+        {
+            if (rec.cups != null) return rec.cups;
+            long sd = (long)(seed & 0xffffffffUL); Num lo = T.cup.@base + 0.006, span = T.cup.rim - lo;
+            var l = new List<Cup>();
+            for (int i = 0; i < rec.content.cans.Count; i++) { var cn = rec.content.cans[i]; l.Add(new Cup { x = cn.x, z = cn.z, i = i, level = lo + (T.cup.fillMin + T.cup.fillSpan * HSeq(sd, rec.cx, rec.cz, i, 961)) * span }); }
+            rec.cups = l;
+            return l;
+        }
+        /// a hand over it (a person who saw a wasp go in) or a lid (level 2)
+        public bool CupCovered(string key, int i)
+        {
+            if (EscLevel(key) >= 2) return true;
+            return chunkState.TryGet(key, out var st) && st.cover != null && st.cover.TryGetValue(i, out var u) && u > tick;
+        }
+        /// the cup a point is inside (below the rim, within the wall), if any
+        internal (string key, Cup cup)? InCup(V3 p)
+        {
+            Num rIn = T.cup.r - T.cup.wall;
+            if (p.y >= T.cup.rim || p.y <= T.cup.@base) return null;
+            foreach (var rec in activeChunks)
+            {
+                string key = rec.key;
+                foreach (var cp in CupsIn(rec))
+                {
+                    if (Sq(p.x - cp.x) + Sq(p.z - cp.z) >= rIn * rIn || CanSpilled(key, cp.i)) continue;
+                    return (key, cp);
+                }
+            }
+            return null;
+        }
+        /// Inside a cup: touching the drink pulls a wasp in; a covered cup shuts it in to drown. True if it did.
+        bool CupCheck(Wasp w)
+        {
+            if (w.state != "fly" && w.state != "stunned" && w.state != "landed") return false;
+            var k = InCup(w.P);
+            if (k == null) return false;
+            var (key, cup) = k.Value;
+            bool driven = w.id == drivenId;
+            if (CupCovered(key, cup.i))
+            {
+                w.state = "trapped"; w.stateTicks = T.cup.drownTicks; w.trapCause = "drowned under a lid"; w.vx = w.vy = w.vz = 0; w.land = null;
+                Emit("coveredIn", ("id", w.id), ("driven", driven), ("key", key), ("i", cup.i));
+                return true;
+            }
+            if (w.y - T.wasp.radius < cup.level) { FallIn(w, cup, key, driven); return true; }
+            return false;
         }
 
         /// Mash burst to climb out before the drink takes you; AI wasps get a small chance each tick
@@ -589,7 +677,10 @@ namespace Sting.Core
             else if (H32(w.id, tick, 57) < T.drown.aiEscape) d.progress = 1;
             if (d.progress >= 1)
             {
-                w.drown = null; w.state = "stunned"; w.stateTicks = 30; w.vy = 0.6; w.y += 0.04;
+                // out over the rim (GDD 7.5)
+                Cup cp = d.i >= 0 && records.TryGet(d.key, out var drec) ? CupsIn(drec)[d.i] : null;
+                w.drown = null; w.state = "stunned"; w.stateTicks = 30; w.vy = 0.6;
+                if (cp != null) { w.x = cp.x; w.y = T.cup.rim + 0.02; w.z = cp.z; } else w.y += 0.04;
                 w.energy = Min(1, w.energy + 0.1); // a sticky, sugary escape
                 Emit("climbedOut", ("id", w.id));
                 return;

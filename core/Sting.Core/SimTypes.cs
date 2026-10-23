@@ -25,7 +25,8 @@ namespace Sting.Core
     public sealed class UnderMove { public int to, t; }
     public sealed class Under { public string hex, posture, key; public int node, sel, entered; public UnderMove move; public Num nextPress; public bool mxHeld, mzHeld; }
     public sealed class Ball { public Num temp, progress, prevBurst, bees; }
-    public sealed class Drown { public string key; public int until; public Num progress, prevBurst; }
+    public sealed class Drown { public string key; public int until, i = -1; public Num progress, prevBurst; }
+    public sealed class Cup { public Num x, z, level; public int i; }
     public sealed class WebHold { public string key; public int i; public Num progress, prevBurst; public int start; public Num spiderAt; }
     public sealed class Fight
     {
@@ -59,7 +60,7 @@ namespace Sting.Core
         public WebHold web; public Drown drown; public Fight fight; public Ai ai = new Ai(); public Contact contact; public Perch perch;
         public bool walking; public Num fightReqUntil;
         /// the surface a landed wasp holds on to, and a short window after takeoff before it can settle again
-        public Land land; public int noLandUntil;
+        public Land land; public int noLandUntil; public string trapCause;
         public Wasp Ghost() { var g = (Wasp)MemberwiseClone(); g.state = "dead"; return g; }
     }
 
@@ -70,7 +71,7 @@ namespace Sting.Core
     }
 
     public sealed class MemRec { public Num m, x, z; }
-    public sealed class Land { public Num nx, ny, nz; public string kind; }
+    public sealed class Land { public Num nx, ny, nz; public string kind; public bool hasH; public Num hx, hy, hz; public int yawQ; }
     public sealed class Surf { public Num x, y, z, nx, ny, nz, gap; public string kind; }
     public sealed class Home { public Num x, z, fx, fz, ax, az; public string posture; }
     public sealed class Human
@@ -146,6 +147,7 @@ namespace Sting.Core
         // caches of pure functions of the seed, the chunk and the clock (never saved, never hashed)
         internal object sites; internal List<Food> fruit; internal long fruitDay = long.MinValue; internal int fruitSeason;
         internal List<Bait> baits; internal int baitsCampaign = -1;
+        internal List<Cup> cups;
         string[] _sub = new string[0];
         /// "cx,cz#i": the key of the i-th hive or hunter in this chunk
         public string Sub(int i)
@@ -164,6 +166,8 @@ namespace Sting.Core
         public LastSting lastSting;
         public Dictionary<int, long> webTorn;
         public Dictionary<int, Num> spilled;
+        /// a hand over a cup until this tick (GDD 7.5)
+        public Dictionary<int, int> cover;
     }
 
     public sealed class BeePhys { public Num x, y, z, vx, vy, vz, stun; public string mode; }

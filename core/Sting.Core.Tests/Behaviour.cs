@@ -26,6 +26,8 @@ namespace Sting.Core.Tests
         static string Cause(SimEvent e) => e == null ? "none" : (string)e["cause"];
         static void Ok(bool cond, string msg) => Assert("sim: " + msg, cond);
         static double Hypot(Num a, Num b) => Math.Sqrt(D(a) * D(a) + D(b) * D(b));
+        /// nobody swats or covers: every human a freezer
+        static Sim Calm(Sim s) { foreach (var h in s.active) { var c = h.tr.Clone(); c.style = Style.Freezer; h.tr = c; } return s; }
         static Sim Spring(ulong seed = 1234)
         {
             var t = new Sim(new Settings { seed = seed });
@@ -473,15 +475,15 @@ namespace Sting.Core.Tests
 
             (bool fell, List<SimEvent> ev) IntoCan(bool mash)
             {
-                var t = new Sim(new Settings { seed = 1234, birds = false });
-                var can = t.records.Get("0,0").content.sugar.First(x => x.kind == "can");
+                var t = Calm(new Sim(new Settings { seed = 1234, birds = false })); // nobody at the table swats or covers the cup
+                var cup = t.CupsIn(t.records.Get("0,0"))[0];
                 bool fell = false;
                 var e2 = RunS(t, 9000, (sim, i) =>
                 {
                     var w = sim.Driven();
                     if (w == null) return Idle();
                     if (w.state == "drowning") { fell = true; return Idle(c => c.burst = mash ? i % 2 : 0); }
-                    if (!fell && (w.state == "fly" || w.state == "landed")) { Place(w, P(can.x, can.y + 0.01, can.z)); w.energy = 0.3; }
+                    if (!fell && (w.state == "fly" || w.state == "landed")) { Place(w, P(cup.x, cup.level + 0.015, cup.z)); w.energy = 0.3; }
                     return Idle();
                 });
                 return (fell, e2);
@@ -490,6 +492,39 @@ namespace Sting.Core.Tests
             var drowned = a.ev.FirstOrDefault(e => e.type == "waspDied" && (bool)e["driven"]);
             Ok(a.fell && Cause(drowned) == "drowned in a drink", $"a wasp feeding at an open can slips in and drowns ({Cause(drowned)})");
             Ok(b.fell && Count(b.ev, "climbedOut") >= 1, "mashing burst climbs out of the drink");
+            // cups are hollow (GDD 7.5)
+            {
+                var t = Calm(new Sim(new Settings { seed = 1234, birds = false }));
+                var rec = t.records.Get("0,0"); var cup = t.CupsIn(rec)[0]; var w = t.wasp;
+                Ok(cup.level > T.cup.@base && cup.level < T.cup.rim, $"a cup holds its drink below the rim (level {D(cup.level - T.cup.@base) * 100:0.0} cm of {D(T.cup.rim - T.cup.@base) * 100:0})");
+                Place(w, P(cup.x - 0.08, (T.cup.@base + T.cup.rim) / 2, cup.z)); w.vx = 1;
+                RunS(t, 20);
+                Ok(w.x < cup.x - T.cup.r, "from the side the wall keeps it out");
+                w.energy = 0.3;
+                RunS(t, 40, (sim, i) => { if (w.state == "fly") Place(w, P(cup.x, cup.level + 0.015, cup.z)); return Idle(); });
+                Ok(w.energy > 0.3 && t.InCup(w.P) != null, $"inside the cup it feeds at the drink (crop {D(w.energy):0.00})");
+                var wallP = P(cup.x - (T.cup.r - T.cup.wall - T.wasp.radius - 0.004), cup.level + 0.03, cup.z);
+                Place(w, wallP);
+                RunS(t, 40, (sim, i) => { if (w.state == "fly") Place(w, wallP); return Idle(c => c.yawQ = 0); });
+                Ok(w.state == "landed" && w.land.kind == "cup" && w.land.nx > 0.99, $"it grips the inside of the cup ({w.state}, {w.land?.kind})");
+                int quarter = (int)Math.Round(Math.PI / 2 * 1e4);
+                var evd = RunS(t, 120, (sim, i) => Idle(c => { c.yawQ = quarter; c.mz = w.state == "landed" ? 100 : 0; })); // a quarter turn on the wall faces down
+                Ok(Count(evd, "fellIn") == 1 && (w.state == "drowning" || w.state == "dead"), $"walking down into the drink it falls in ({w.state})");
+                var t2 = Calm(new Sim(new Settings { seed = 1234, birds = false })); var w2 = t2.wasp; var cup2 = t2.CupsIn(t2.records.Get("0,0"))[0];
+                t2.CS("0,0").esc = 10;
+                Place(w2, P(cup2.x, T.cup.rim + 0.05, cup2.z)); w2.vy = -1;
+                RunS(t2, 30, (sim, i) => { w2.x = cup2.x; w2.z = cup2.z; return Idle(c => c.my = -100); });
+                Ok(w2.y >= T.cup.rim && t2.InCup(w2.P) == null, $"a lidded cup keeps it out ({D(w2.y - T.cup.rim) * 1000:0} mm above the rim)");
+            }
+            {
+                var t = new Sim(new Settings { seed = 1234, birds = false }); var rec = t.records.Get("0,0"); var w = t.wasp;
+                RunS(t, 3);
+                var cup = t.CupsIn(rec).FirstOrDefault(cp => t.active.Any(h => h.state == "idle" && h.tr.style != Style.Freezer && Hypot(h.x - cp.x, h.z - cp.z) < D(T.cup.noticeDist) * 0.8));
+                Ok(cup != null, "a cup within reach of someone at the table");
+                var evc = RunS(t, 900, (sim, i) => { if (w.state == "fly") Place(w, P(cup.x, cup.level + 0.015, cup.z)); return Idle(); });
+                var died = evc.FirstOrDefault(e => e.type == "waspDied" && (bool)e["driven"]);
+                Ok(Count(evc, "cover") >= 1 && Count(evc, "coveredIn") == 1 && Cause(died) == "drowned under a lid", $"someone covers the cup and the wasp inside drowns ({Cause(died)})");
+            }
 
             (double jacket, double tank) Share(Func<Num, bool> pred)
             {
@@ -612,7 +647,14 @@ namespace Sting.Core.Tests
             RunS(s4, 30, (sim, i) => Idle(c => { c.yawQ = 0; c.mx = -100; }));
             Ok(w4.state == "landed" && w4.x > x0 + 0.02 && Abs(w4.y - (table.maxy + T.wasp.radius)) < 0.01, $"a landed wasp walks across the table ({D(w4.x - x0) * 100:0.0} cm)");
             ev = RunS(s4, 1500, (sim, i) => Idle(c => { c.yawQ = 0; c.mx = -100; }));
-            Ok(Count(ev, "takeoff") == 0 && w4.state == "landed" && w4.land.ny < 0.5 && w4.x >= table.maxx - 0.01, $"walking over the edge of the table it crawls round onto the side ({w4.state}, normal y {D(w4.land.ny):0.00})");
+            Ok(Count(ev, "takeoff") == 0 && w4.state == "landed" && w4.land.ny < -0.99 && w4.y < table.miny, $"walking over the edge of the table it crawls round, down the side and onto the underside ({w4.state}, normal y {D(w4.land.ny):0.00})");
+            {
+                Num h0x = w4.land.hx, h0y = w4.land.hy, h0z = w4.land.hz;
+                RunS(s4, 2, (sim, i) => Idle(c => c.yawQ = (int)Math.Round(Math.PI / 2 * 1e4)));
+                var L = w4.land; Num dot = h0x * L.hx + h0y * L.hy + h0z * L.hz;
+                Ok(Abs(dot) < 1e-4 && Abs(L.hy) < 1e-6, $"upside down, a quarter turn of the mouse turns the heading a quarter turn about the surface (dot {D(dot):0.000000})");
+                RunS(s4, 2, (sim, i) => Idle(c => c.yawQ = 0));
+            }
             ev = RunS(s4, 30, (sim, i) => Idle(c => { c.my = -100; c.sting = i == 3 ? 1 : 0; }));
             Ok(w4.state == "landed" && Count(ev, "takeoff") == 0, "holding down or stinging the air keeps it on the surface");
             ev = RunS(s4, 2, (sim, i) => Idle(c => c.my = i == 0 ? 100 : 0));

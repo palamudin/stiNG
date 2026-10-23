@@ -393,8 +393,16 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   run(s4, 30, () => idle({ yawQ: 0, mx: -100 }));
   ok(w4.state === 'landed' && w4.x > x0 + 0.02 && Math.abs(w4.y - (table.maxy + T.wasp.radius)) < 0.01, `a landed wasp walks across the table (${((w4.x - x0) * 100).toFixed(1)} cm)`);
   ev = run(s4, 1500, () => idle({ yawQ: 0, mx: -100 }));
-  ok(count(ev, 'takeoff') === 0 && w4.state === 'landed' && w4.land.ny < 0.5 && w4.x >= table.maxx - 0.01,
-    `walking over the edge of the table it crawls round onto the side (${w4.state}, normal y ${w4.land.ny.toFixed(2)})`);
+  ok(count(ev, 'takeoff') === 0 && w4.state === 'landed' && w4.land.ny < -0.99 && w4.y < table.miny,
+    `walking over the edge of the table it crawls round, down the side and onto the underside (${w4.state}, normal y ${w4.land.ny.toFixed(2)})`);
+  // on the underside the mouse turns it about the surface as on the ground: a quarter turn of yaw is a quarter turn
+  {
+    const h0 = { x: w4.land.hx, y: w4.land.hy, z: w4.land.hz };
+    run(s4, 2, (sim, i) => idle({ yawQ: Math.round(Math.PI / 2 * 1e4) }));
+    const L = w4.land, dot = h0.x * L.hx + h0.y * L.hy + h0.z * L.hz;
+    ok(Math.abs(dot) < 1e-4 && Math.abs(L.hy) < 1e-6, `upside down, a quarter turn of the mouse turns the heading a quarter turn about the surface (dot ${dot.toFixed(6)})`);
+    run(s4, 2, (sim, i) => idle({ yawQ: 0 }));
+  }
   // only Space or Shift take off: down, sting with nobody near, and E do not
   ev = run(s4, 30, (sim, i) => idle({ my: -100, sting: i === 3 ? 1 : 0 }));
   ok(w4.state === 'landed' && count(ev, 'takeoff') === 0, 'holding down or stinging the air keeps it on the surface');
@@ -777,13 +785,14 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   // drowning in a drink: feed long enough at an open can and you may slip in; mash to climb out
   const intoCan = (mash) => {
     const t = new Sim({ seed: 1234, birds: false });
-    const can = t.records.get('0,0').content.sugar.find((x) => x.kind === 'can');
+    for (const h of t.active) h.tr = { ...h.tr, style: Style.Freezer }; // nobody at the table swats or covers the cup
+    const cup = t.cupsIn(t.records.get('0,0'))[0];
     let fell = false;
     const ev2 = run(t, 9000, (sim, i) => {
       const w = sim._driven();
       if (!w) return idle();
       if (w.state === 'drowning') { fell = true; return idle({ burst: mash ? i % 2 : 0 }); }
-      if (!fell && (w.state === 'fly' || w.state === 'landed')) { place(w, { x: can.x, y: can.y + 0.01, z: can.z }); w.energy = 0.3; }
+      if (!fell && (w.state === 'fly' || w.state === 'landed')) { place(w, { x: cup.x, y: cup.level + 0.015, z: cup.z }); w.energy = 0.3; }
       return idle();
     });
     return { fell, ev: ev2 };
@@ -792,6 +801,45 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   const drowned = a.ev.find((e) => e.type === 'waspDied' && e.driven);
   ok(a.fell && drowned && drowned.cause === 'drowned in a drink', `a wasp feeding at an open can slips in and drowns (${drowned && drowned.cause})`);
   ok(b.fell && count(b.ev, 'climbedOut') >= 1, 'mashing burst climbs out of the drink');
+
+  // cups are hollow (GDD 7.5): in through the top, feed at the drink, fall in if you touch it; a hand or a lid over
+  // the cup shuts you in to drown
+  {
+    const calm = (x) => { for (const h of x.active) h.tr = { ...h.tr, style: Style.Freezer }; return x; }; // nobody swats or covers
+    const t = calm(new Sim({ seed: 1234, birds: false }));
+    const rec = t.records.get('0,0'), cup = t.cupsIn(rec)[0], w = t.wasp, C = T.cup;
+    ok(cup.level > C.base && cup.level < C.rim, `a cup holds its drink below the rim (level ${((cup.level - C.base) * 100).toFixed(1)} cm of ${((C.rim - C.base) * 100).toFixed(0)})`);
+    // from the side the wall stops it
+    place(w, { x: cup.x - 0.08, y: (C.base + C.rim) / 2, z: cup.z }); w.vx = 1;
+    run(t, 20, () => idle());
+    ok(w.x < cup.x - C.r, 'from the side the wall keeps it out');
+    // from above it goes in, and feeds hovering just over the drink
+    w.energy = 0.3;
+    run(t, 40, (sim) => { if (w.state === 'fly') place(w, { x: cup.x, y: cup.level + 0.015, z: cup.z }); return idle(); });
+    ok(w.energy > 0.3 && t._inCup(w), `inside the cup it feeds at the drink (crop ${w.energy.toFixed(2)})`);
+    // land on the inner wall above the drink, then walk down into it
+    place(w, { x: cup.x - (C.r - C.wall - T.wasp.radius - 0.004), y: cup.level + 0.03, z: cup.z });
+    run(t, 40, (sim) => { if (w.state === 'fly') place(w, { x: cup.x - (C.r - C.wall - T.wasp.radius - 0.004), y: cup.level + 0.03, z: cup.z }); return idle({ yawQ: 0 }); });
+    ok(w.state === 'landed' && w.land.kind === 'cup' && w.land.nx > 0.99, `it grips the inside of the cup (${w.state}, ${w.land && w.land.kind})`);
+    const ev = run(t, 120, (sim) => idle({ yawQ: Math.round(Math.PI / 2 * 1e4), mz: w.state === 'landed' ? 100 : 0 })); // a quarter turn on the wall faces down
+    ok(count(ev, 'fellIn') === 1 && (w.state === 'drowning' || w.state === 'dead'), `walking down into the drink it falls in (${w.state})`);
+    // a lid (level 2): nothing gets in from above
+    const t2 = calm(new Sim({ seed: 1234, birds: false })), w2 = t2.wasp, cup2 = t2.cupsIn(t2.records.get('0,0'))[0];
+    t2.cs('0,0').esc = 10;
+    place(w2, { x: cup2.x, y: C.rim + 0.05, z: cup2.z }); w2.vy = -1;
+    run(t2, 30, () => { w2.x = cup2.x; w2.z = cup2.z; return idle({ my: -100 }); }); // pressing down over the middle (the wind would drift it off)
+    ok(w2.y >= C.rim && !t2._inCup(w2), `a lidded cup keeps it out (${(w2.y - C.rim) * 1000 | 0} mm above the rim)`);
+  }
+  {
+    // with people at the table: a wasp seen going into a drink gets a hand over the cup, and drowns under it
+    const t = new Sim({ seed: 1234, birds: false }), rec = t.records.get('0,0'), w = t.wasp;
+    run(t, 3);
+    const cup = t.cupsIn(rec).find((cp) => t.active.some((h) => h.state === 'idle' && h.tr.style !== Style.Freezer && Math.hypot(h.x - cp.x, h.z - cp.z) < T.cup.noticeDist * 0.8));
+    ok(!!cup, 'a cup within reach of someone at the table');
+    const ev = run(t, 900, () => { if (w.state === 'fly') place(w, { x: cup.x, y: cup.level + 0.015, z: cup.z }); return idle(); });
+    const died = ev.find((e) => e.type === 'waspDied' && e.driven);
+    ok(count(ev, 'cover') >= 1 && count(ev, 'coveredIn') === 1 && died && died.cause === 'drowned under a lid', `someone covers the cup and the wasp inside drowns (${died && died.cause})`);
+  }
 
   // clothes follow the weather: more jackets on cool days, more tank tops on hot ones
   const share = (pred) => {
