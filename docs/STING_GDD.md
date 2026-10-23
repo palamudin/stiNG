@@ -191,7 +191,7 @@ Own binary format, little-endian, explicit field order, version byte per record.
 
 ### 4.1 Setting
 
-Temperate world: suburbs with gardens, parks, picnic areas, beer gardens, farmland, forest edge, small town centers. Setting style is **[Q] Q-06**.
+Temperate world: suburbs with gardens, parks, picnic areas, beer gardens, farmland, forest edge, small town centers. Setting style **settled (Q-06): American suburbia**: lawns and fenced backyards, cul-de-sacs, park strips, a strip-mall edge.
 
 ### 4.2 Chunks **[T0] [T1]** (regions)
 
@@ -875,8 +875,8 @@ On Main the entity count is dominated by AI wasps: one player's colony can hold 
 | Q-03 | Limits on switching which wasp you drive | Settled in the PoC: free within 30 m; otherwise a 4 s relay to the nearest worker anywhere, or to a worker coming out of the nest |
 | Q-04 | Who decides whether a swat hit a wasp? | Settled by D-19: the wasp's owner; peers audit |
 | Q-05 | Own UDP vs a relay-backed platform transport | Both behind an interface; relay for release (11.13) |
-| Q-06 | Setting: generic temperate, American suburbia, or real places imported from map data | Open |
-| Q-07 | Multiplayer relationships: co-op inside one colony, rival colonies, or both | Open; affects ownership rules |
+| Q-06 | Setting: generic temperate, American suburbia, or real places imported from map data | Settled 2026-10-23: American suburbia. Lawns, fenced backyards, cul-de-sacs, park strips, a strip-mall edge; fits the yellowjacket meme and the US market |
+| Q-07 | Multiplayer relationships: co-op inside one colony, rival colonies, or both | Settled 2026-10-23: rivals by default (separate colonies that fight over food and nest sites); co-op is opt-in, friends sharing one colony in a personal world |
 | Q-08 | Target maximum players per world | Main: as many as the cell servers carry. Offshoot: host setting. Personal: small group |
 | Q-09 | Counter semantics | Unique humans stung per world, all players combined; only Main's counter is canonical |
 | Q-12 | Scripted code mods | Out of scope until the core is stable; data modifiers only |
@@ -1048,7 +1048,7 @@ Everything in `POC.md` (62 features) and its C# port (18.18). In short: the 60 H
 | T1-22 | Tuning as data: the tuning tables as versioned plain-text files read by own parsers in JS and C#, and the tuning hash in the world record | 13 | M | |
 | T1-23 | Solo time: accelerate time in the colony view, and the Reflex slowdown as a solo option | 5.1, 7.8 | S | |
 
-Sizes: S a day or less, M a few days, L a week or more.
+Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5), then the M items; each batch is built in the PoC and then ported to the core with parity.
 
 ### 19.3 Tier 2: later
 
@@ -1064,8 +1064,8 @@ Water as a resource (6.2); extreme weather; town centers and beer gardens; linea
 
 ### 19.5 Open questions that gate Tier 1
 
-- **Q-06 setting** gates T1-11 (paths) and T1-12 (regions): what the land between parks looks like.
-- **Q-07 players: co-op, rivals or both** gates the player side of T1-13 (whether guards attack other players' wasps) and any colony-against-colony play.
+- **Q-06 setting**, settled: American suburbia. T1-11 and T1-12 build lawns, fenced backyards, cul-de-sacs, park strips and a strip-mall edge.
+- **Q-07 players**, settled: rivals by default, co-op opt-in. Guards (T1-13) attack other players' wasps; friends can share a colony in a personal world.
 - **Q-02 default day length** affects every timing that players feel; the PoC default is 2-minute days, the GDD says 12.
 
 ---
