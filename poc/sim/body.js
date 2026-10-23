@@ -1,6 +1,6 @@
 // Humans as bodies: traits, clothing, capsule parts, zones, reach, sting resolution,
 // and the space under clothing (GDD 8.1-8.8, A.5-A.7, A.10).
-import { Domain, hash, unit, range, rangeInt, clamp01 } from './rng.js';
+import { Domain, hash, unit, range, rangeInt, clamp01, rnd } from './rng.js';
 import { T } from './tuning.js';
 
 export const Zone = {
@@ -242,7 +242,7 @@ export function resolveSting(e, h, z, ctx) {
 
   if (e.under) {
     // Pressing the cloth against the body. Freezers press too: it is a reflex.
-    let delay = Math.round(h.reactionTicks * quick);
+    let delay = rnd(h.reactionTicks * quick);
     if (delay < t.minConsequenceTicks) delay = t.minConsequenceTicks;
     plan.swats.push({
       actorId: h.id, kind: SwatKind.Compress, start: e.contactTick + delay, window: windowFor(SwatKind.Compress),
@@ -253,7 +253,7 @@ export function resolveSting(e, h, z, ctx) {
   if (h.style !== Style.Freezer) {
     const reach = selfReach(z, h, ctx.clothingStiffness);
     const kind = kindFor(z.policy, reach);
-    let delay = Math.round((h.reactionTicks + z.extra + (kind === SwatKind.Contort ? t.contortExtraTicks : 0)) * quick);
+    let delay = rnd((h.reactionTicks + z.extra + (kind === SwatKind.Contort ? t.contortExtraTicks : 0)) * quick);
     if (delay < t.minConsequenceTicks) delay = t.minConsequenceTicks;
     plan.swats.push({
       actorId: h.id, kind, start: e.contactTick + delay, window: windowFor(kind),
@@ -267,7 +267,7 @@ export function resolveSting(e, h, z, ctx) {
       if (c.distance > t.helperRange || c.style === Style.Freezer) continue;
       plan.swats.push({
         actorId: c.id, kind: SwatKind.Slap,
-        start: e.contactTick + Math.max(t.minConsequenceTicks, Math.round((h.reactionTicks + t.helperNoticeTicks + c.reactionTicks) * quick)),
+        start: e.contactTick + Math.max(t.minConsequenceTicks, rnd((h.reactionTicks + t.helperNoticeTicks + c.reactionTicks) * quick)),
         window: windowFor(SwatKind.Slap), center: e.contactPointBody,
         radius: c.style === Style.Precise ? t.preciseRadius : t.flailerRadius,
         kills: true, reach: 1,

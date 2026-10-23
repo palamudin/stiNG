@@ -1,5 +1,5 @@
 // World generation, clock, weather and schedules (GDD 4, 5, 8.2). All pure functions of seed and time.
-import { Domain, hash, unit, range, rangeInt, u64, dsin, dcos, TAU } from './rng.js';
+import { Domain, hash, unit, range, rangeInt, u64, dsin, dcos, TAU, rnd, datan2 } from './rng.js';
 import { T } from './tuning.js';
 
 const CS = T.chunk.size;
@@ -17,13 +17,13 @@ export function makeNest(treeX, treeZ, x, y, z, r = NEST.r, site = 'trunk') {
   const inside = site === 'wall' || site === 'attic';
   const entrance = site === 'ground' ? { x, y: 0.02, z } : inside ? { x, y, z } : { x, y: y - r * 1.25, z };
   let spawn = site === 'ground' ? { x, y: 0.3, z: z + 0.3, yaw: 0.98 } : { x, y: entrance.y - 0.1, z: z + 0.3, yaw: 0.98 };
-  if (inside) { const dx = x - treeX, dz = z - treeZ, d = Math.hypot(dx, dz) || 1; spawn = { x: x + dx / d * 0.3, y, z: z + dz / d * 0.3, yaw: Math.atan2(dx, dz) }; }
+  if (inside) { const dx = x - treeX, dz = z - treeZ, d = Math.sqrt(dx * dx + dz * dz) || 1; spawn = { x: x + dx / d * 0.3, y, z: z + dz / d * 0.3, yaw: datan2(dx, dz) }; }
   return { x, y, z, r, treeX, treeZ, entrance, spawn, site, key: chunkKey(chunkOf(x), chunkOf(z)) };
 }
 
 // ---------------------------------------------------------------- clock and weather (GDD 5)
 
-export const ticksPerMinute = (settings) => Math.round(settings.dayMinutes * 2.5);
+export const ticksPerMinute = (settings) => rnd(settings.dayMinutes * 2.5);
 export function clockMinutes(tickEff, settings) { return T.time.startMinute + Math.floor(tickEff / ticksPerMinute(settings)); }
 export const dayOf = (m) => Math.floor(m / 1440);
 export const minuteOfDay = (m) => m - dayOf(m) * 1440;

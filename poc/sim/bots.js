@@ -1,6 +1,7 @@
 // Scripted pilots. They produce input commands exactly like a player would, so runs stay replayable.
 // Used by tests and by the network lab's second player.
 import { toWorld } from './body.js';
+import { rnd, datan2, PI } from './rng.js';
 import { T } from './tuning.js';
 
 export const idleCmd = (o = {}) => ({ mx: 0, my: 0, mz: 0, burst: 0, sting: 0, yawQ: 9800, pitchQ: 0, act: 0, alloc: 0, ...o });
@@ -11,7 +12,7 @@ export function stingBot({ plan = 'jab', pick = (h) => h.chunk === '0,0', rest =
   let phase = 'approach', target = null, k = 0, idx = 0;
   return (sim) => {
     const w = sim.wasp;
-    const cmd = idleCmd({ yawQ: Math.round((w && w.yaw || 0) * 1e4) });
+    const cmd = idleCmd({ yawQ: rnd((w && w.yaw || 0) * 1e4) });
     if (!w || w.state === 'dead' || !sim._driven()) { phase = 'approach'; target = null; return cmd; }
     if (!target || target.hm.state !== 'idle' || target.hm.posture !== 'sit') {
       const seated = sim.active.filter((h) => h.posture === 'sit' && h.state === 'idle' && !h.special && pick(h));
@@ -22,11 +23,11 @@ export function stingBot({ plan = 'jab', pick = (h) => h.chunk === '0,0', rest =
       phase = 'approach';
     }
     const tp = toWorld(target.hm, target.mid);
-    const dx = tp.x - w.x, dy = tp.y - w.y, dz = tp.z - w.z, d = Math.hypot(dx, dy, dz);
-    const yaw = Math.atan2(dx, dz), pitch = Math.atan2(dy, Math.hypot(dx, dz));
+    const dx = tp.x - w.x, dy = tp.y - w.y, dz = tp.z - w.z, d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    const yaw = datan2(dx, dz), pitch = datan2(dy, Math.sqrt(dx * dx + dz * dz));
     if (phase === 'approach') {
-      cmd.yawQ = Math.round(yaw * 1e4); cmd.pitchQ = Math.round(pitch * 1e4);
-      cmd.mz = Math.max(6, Math.min(100, Math.round(Math.sqrt(2 * T.wasp.accel * d) * 0.7 / T.wasp.cruise * 100)));
+      cmd.yawQ = rnd(yaw * 1e4); cmd.pitchQ = rnd(pitch * 1e4);
+      cmd.mz = Math.max(6, Math.min(100, rnd(Math.sqrt(2 * T.wasp.accel * d) * 0.7 / T.wasp.cruise * 100)));
       if (d < 0.1) cmd.sting = 1;
       if (w.state === 'attached') { phase = 'sting'; k = 0; }
     }
@@ -37,7 +38,7 @@ export function stingBot({ plan = 'jab', pick = (h) => h.chunk === '0,0', rest =
     }
     if (phase === 'linger') { if (++k > 25) { phase = 'escape'; k = 0; } }
     if (phase === 'escape') {
-      cmd.yawQ = Math.round((yaw + Math.PI) * 1e4); cmd.pitchQ = 3000; cmd.mz = 100; cmd.burst = 1;
+      cmd.yawQ = rnd((yaw + PI) * 1e4); cmd.pitchQ = 3000; cmd.mz = 100; cmd.burst = 1;
       if (++k > rest) { phase = 'approach'; target = null; }
     }
     return cmd;

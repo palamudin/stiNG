@@ -1,6 +1,6 @@
 // STING simulation core (iteration 2). Mirrors Sting.Core: no rendering, no wall clock.
 // Every wasp, driven or AI, goes through the same flight, contact, sting and swat code.
-import { Domain, hash, unit, rangeInt, u64, h32, dsin, dcos, clamp, clamp01, fnv32, hex64 } from './rng.js';
+import { Domain, hash, unit, rangeInt, u64, h32, dsin, dcos, clamp, clamp01, fnv32, hex64, rnd, sq, datan2 } from './rng.js';
 import { T, DT, GEN_VERSION, DEFAULT_SETTINGS } from './tuning.js';
 import {
   Zone, ZONES, SwatKind, SwatKindName, Style, humanTraits, humanClothing, suitClothing, zoneCover, bodyParts,
@@ -96,7 +96,7 @@ export class Sim {
   // Human traits with the world's modifiers applied (GDD 4.8). The resolver still enforces the consequence window.
   traitsFor(id) {
     const tr = humanTraits(this.seed, id), r = this.settings.reaction;
-    if (r !== 1) tr.reactionTicks = Math.max(T.resolve.minConsequenceTicks, Math.round(tr.reactionTicks * r));
+    if (r !== 1) tr.reactionTicks = Math.max(T.resolve.minConsequenceTicks, rnd(tr.reactionTicks * r));
     return tr;
   }
 
@@ -338,7 +338,7 @@ export class Sim {
         if (!(ev.panicGain >= 0 && ev.panicGain <= 1)) return 'panic out of range';
         if (hm && typeof ev.sx === 'number') {
           const drift = P.humanDrift * Math.max(0, this.tick - ev.tick) / 60;
-          if (Math.hypot(ev.sx - hm.x, ev.sz - hm.z) > P.stingReach + drift) return 'stung from out of reach';
+          if (Math.sqrt(sq(ev.sx - hm.x) + sq(ev.sz - hm.z)) > P.stingReach + drift) return 'stung from out of reach';
         }
         const k = ev.peer + ':' + ev.waspId, ts = (this.plaus.stingTicks[k] || []).filter((t) => t > ev.tick - P.rateWindow);
         ts.push(ev.tick); this.plaus.stingTicks[k] = ts;
@@ -378,7 +378,7 @@ export class Sim {
       const prev = this.remote.get(r.id);
       // display only: a wasp that moved faster than any wasp can is not drawn there (local, so it cannot desync)
       if (prev && prev.peer === m.peer && m.tick > prev.stamp) {
-        const v = Math.hypot(r.x - prev.px, r.y - prev.py, r.z - prev.pz) / ((m.tick - prev.stamp) / 60);
+        const v = Math.sqrt(sq(r.x - prev.px) + sq(r.y - prev.py) + sq(r.z - prev.pz)) / ((m.tick - prev.stamp) / 60);
         if (v > T.plaus.maxSpeed && (prev.bad = (prev.bad || 0) + 1) < 4) { this.netStats.dropped++; ids.add(r.id); prev.seen = this.tick; continue; }
         prev.bad = 0;
       }
@@ -1339,7 +1339,7 @@ export class Sim {
   _spring(survivors, lineage) {
     // the queen that continues is yours; the rest found lineage colonies (Q-10)
     this.lineage = survivors + lineage - 1;
-    const winterDays = Math.round(this.settings.seasonDays * T.season.winterShare);
+    const winterDays = rnd(this.settings.seasonDays * T.season.winterShare);
     const target = (this.day + 1 + winterDays) * 1440 + T.time.dawn;
     this.clockOffset += (target - this.minute) * this.tpm;
     this._minute(clockMinutes(this.tick + this.clockOffset, this.settings));
@@ -1371,7 +1371,7 @@ export class Sim {
     if (!rec || this.escLevel(key) >= 2) return;
     if (unit(hash(this.seed, Domain.HumanSchedule, hm.id, BigInt(this.tick) * 2n + 1n)) >= P.spillChance) return;
     let best = -1, bd = P.spillReach * P.spillReach;
-    rec.content.cans.forEach((c, i) => { const d = (c.x - hm.x) ** 2 + (c.z - hm.z) ** 2; if (d < bd) { bd = d; best = i; } });
+    rec.content.cans.forEach((c, i) => { const d = sq(c.x - hm.x) + sq(c.z - hm.z); if (d < bd) { bd = d; best = i; } });
     if (best < 0) return;
     const st = this.cs(key), sp = st.spilled || (st.spilled = {});
     if ((sp[best] || 0) > this.minute) return;
@@ -1599,7 +1599,7 @@ export class Sim {
     for (let b = 0; b < hv.bees.length; b++) {
       if (al.phys[b] || lost[b]) continue;
       const p = beePos(hv, b, this.tick);
-      const nearHive = (w.x - hv.ex) ** 2 + (w.z - hv.ez) ** 2 < T.bees.hiveAlarmRadius ** 2;
+      const nearHive = sq(w.x - hv.ex) + sq(w.z - hv.ez) < sq(T.bees.hiveAlarmRadius);
       if (dist2(p, w) < radius * radius || (hv.bees[b].guard && nearHive)) al.phys[b] = { x: p.x, y: p.y, z: p.z, vx: 0, vy: 0, vz: 0, mode: 'pursue', stun: 0 };
     }
   }
@@ -1612,7 +1612,7 @@ export class Sim {
         for (const w of this.wasps) {
           if (w.state !== 'fly' && w.state !== 'chewing' && w.state !== 'landed') continue;
           const dx = w.x - hv.ex, dy = w.y - hv.ey, dz = w.z - hv.ez;
-          if (dx * dx + dy * dy + dz * dz < T.bees.entranceAlarm ** 2) { this._alarmHive(key, h, w, 2); break; }
+          if (dx * dx + dy * dy + dz * dz < sq(T.bees.entranceAlarm)) { this._alarmHive(key, h, w, 2); break; }
         }
       });
     }
@@ -1698,7 +1698,7 @@ export class Sim {
     let k = P.tickleBase * (cover === 2 ? P.thinMul * 1.5 : cover === 1 ? P.thinMul : P.bareMul);
     if (zone === Zone.UpperBack || zone === Zone.Acnestis || zone === Zone.LowerBack || zone === Zone.Buttocks) k *= P.backMul;
     if (zone === Zone.Face || zone === Zone.Ears || zone === Zone.NeckFront) k *= P.faceMul;
-    return Math.max(T.resolve.minConsequenceTicks, Math.round(hm.tr.reactionTicks * k));
+    return Math.max(T.resolve.minConsequenceTicks, rnd(hm.tr.reactionTicks * k));
   }
 
   _perch(w, c) {
@@ -1833,7 +1833,7 @@ export class Sim {
   _siteNear(w) {
     for (const rec of this.activeChunks) {
       const { holes, branches } = this.sitesIn(rec);
-      for (const h of holes) if (w.y < 0.3 && (w.x - h.x) ** 2 + (w.z - h.z) ** 2 < 0.12 * 0.12) return { type: 'ground', x: h.x, z: h.z };
+      for (const h of holes) if (w.y < 0.3 && sq(w.x - h.x) + sq(w.z - h.z) < 0.12 * 0.12) return { type: 'ground', x: h.x, z: h.z };
       for (const b of branches) if (dist2(w, b) < 0.15 * 0.15) return { type: 'branch', x: b.x, y: b.y, z: b.z, t: b.t };
       for (const sh of rec.content.sheds) {
         const ss = shedSites(sh);
@@ -2017,7 +2017,7 @@ export class Sim {
         if (nx < b.minx - R || nx > b.maxx + R || nz < b.minz - R || nz > b.maxz + R) continue;
         if (w.y > b.miny && w.y < b.maxy) return; // blocked by the side
       }
-      for (const t of rec.content.trees) { const dx = nx - t.x, dz = nz - t.z; if (dx * dx + dz * dz < (t.r + R) ** 2) return; }
+      for (const t of rec.content.trees) { const dx = nx - t.x, dz = nz - t.z; if (dx * dx + dz * dz < sq(t.r + R)) return; }
     }
     w.x = nx; w.z = nz; w.yaw = yaw; w.walking = true;
     // walking into a person climbs onto them (an arm on the table, a leg on the grass)
@@ -2120,7 +2120,7 @@ export class Sim {
   _rivalNestNear(w) {
     for (const rec of this.activeChunks) {
       const rv = rec.content.rival;
-      if (rv && (w.x - rv.ex) ** 2 + (w.y - rv.ey) ** 2 + (w.z - rv.ez) ** 2 < 0.08 * 0.08) return { rv, key: chunkKey(rec.cx, rec.cz) };
+      if (rv && sq(w.x - rv.ex) + sq(w.y - rv.ey) + sq(w.z - rv.ez) < 0.08 * 0.08) return { rv, key: chunkKey(rec.cx, rec.cz) };
     }
     return null;
   }
@@ -2162,9 +2162,9 @@ export class Sim {
     const home = { x: rv.ex, y: rv.ey - 0.02, z: rv.ez };
     if (!isDaylight(this.minute) || this.raining) ai.mode = 'home';
     if (ai.mode === 'guard') {
-      let t = this.wasps.find((x) => x.colony === 'own' && (x.state === 'fly' || x.state === 'landed') && dist2(x, home) < T.rival.guardRadius ** 2);
+      let t = this.wasps.find((x) => x.colony === 'own' && (x.state === 'fly' || x.state === 'landed') && dist2(x, home) < sq(T.rival.guardRadius));
       // other players' wasps near the nest count too (rivals live on this peer only)
-      if (!t) for (const r of this.remote.values()) if (!r.rival && (r.state === 'fly' || r.state === 'landed') && dist2(r, home) < T.rival.guardRadius ** 2) { t = r; break; }
+      if (!t) for (const r of this.remote.values()) if (!r.rival && (r.state === 'fly' || r.state === 'landed') && dist2(r, home) < sq(T.rival.guardRadius)) { t = r; break; }
       if (t) { ai.mode = 'hunt'; ai.huntId = t.id; ai.timer = this.tick + T.rival.huntTicks; }
       else { this._steer(w, { x: home.x + 0.12 * dcos(this.tick / 40 + w.id), y: home.y + 0.05, z: home.z + 0.12 * dsin(this.tick / 40 + w.id) }, cmd); return cmd; }
     }

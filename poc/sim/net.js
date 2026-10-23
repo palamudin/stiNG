@@ -1,6 +1,6 @@
 // A simulated network between peers, and a two-peer lab built on it (GDD 11).
 // Deterministic: delays and losses come from the counter hash, so lab runs replay exactly.
-import { h32 } from './rng.js';
+import { h32, rnd, sq } from './rng.js';
 import { T } from './tuning.js';
 import { Sim } from './sim.js';
 import { chunkOf } from './world.js';
@@ -16,8 +16,8 @@ export function encodeState(m) {
   const buf = new ArrayBuffer(6 + m.wasps.length * BYTES_PER_WASP), v = new DataView(buf);
   v.setUint8(0, m.peer); v.setUint32(1, m.tick); v.setUint8(5, m.wasps.length);
   let o = 6;
-  const q16 = (x, lo, hi) => Math.max(0, Math.min(65535, Math.round((x - lo) / (hi - lo) * 65535)));
-  const q8 = (x) => Math.max(-127, Math.min(127, Math.round(x / VMAX * 127)));
+  const q16 = (x, lo, hi) => Math.max(0, Math.min(65535, rnd((x - lo) / (hi - lo) * 65535)));
+  const q8 = (x) => Math.max(-127, Math.min(127, rnd(x / VMAX * 127)));
   for (const w of m.wasps) {
     const cx = chunkOf(w.x), cz = chunkOf(w.z);
     v.setUint32(o, w.id); v.setInt16(o + 4, cx); v.setInt16(o + 6, cz);
@@ -149,7 +149,7 @@ export class NetLab {
     if (!bw) return null;
     const r = this.a.remote.get(bw.id);
     if (!r) return null;
-    return Math.hypot(r.x - bw.x, r.y - bw.y, r.z - bw.z);
+    return Math.sqrt(sq(r.x - bw.x) + sq(r.y - bw.y) + sq(r.z - bw.z));
   }
 }
 

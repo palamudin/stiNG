@@ -55,6 +55,26 @@ export function dsin(x) {
 }
 export const dcos = (x) => dsin(x + HALF_PI);
 
+export const sq = (x) => x * x;
+
+// Round half up. Defined here (not Math.round) so every port rounds identically.
+export const rnd = (x) => Math.floor(x + 0.5);
+
+// atan2 from + - * / only (GDD 3.4): octant reduction and a minimax polynomial, error below 1e-9 rad
+export function datan2(y, x) {
+  if (x === 0 && y === 0) return 0;
+  const ax = x < 0 ? -x : x, ay = y < 0 ? -y : y;
+  const swap = ay > ax, t = swap ? ax / ay : ay / ax; // t in [0, 1]
+  // reduce to |u| <= tan(pi/12) with atan(t) = pi/6 + atan((t*sqrt3 - 1) / (t + sqrt3))
+  const SQ3 = 1.7320508075688772, big = t > 0.2679491924311227;
+  const u = big ? (t * SQ3 - 1) / (t + SQ3) : t, u2 = u * u;
+  let r = u * (1 - u2 * (1 / 3 - u2 * (1 / 5 - u2 * (1 / 7 - u2 * (1 / 9 - u2 * (1 / 11 - u2 * (1 / 13 - u2 / 15)))))));
+  if (big) r += PI / 6;
+  if (swap) r = HALF_PI - r;
+  if (x < 0) r = PI - r;
+  return y < 0 ? -r : r;
+}
+
 export const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 export const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
