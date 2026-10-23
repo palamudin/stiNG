@@ -21,7 +21,7 @@ const byHumanId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 // Events that change shared world state. Most commit at the end of the consequence window so every
 // peer applies them on the same tick (GDD 11.5); a few cosmetic or owner-decided ones apply on receipt.
-const IMMEDIATE = new Set(['caught', 'beeAlarm', 'died', 'fight', 'fightReq', 'fightJoin', 'fightRefuse', 'fightEnd', 'raid']); // wasp-level: never touch humans
+const IMMEDIATE = new Set(['caught', 'sip', 'beeAlarm', 'died', 'fight', 'fightReq', 'fightJoin', 'fightRefuse', 'fightEnd', 'raid']); // wasp-level: never touch humans
 
 export class Sim {
   constructor(settings = {}, opts = {}) {
@@ -519,9 +519,13 @@ export class Sim {
         const st = this.cs(ev.key);
         if (ev.what === 'fly') st.caughtFly[ev.i] = ev.tick + T.prey.flyRespawnTicks;
         else if (ev.what === 'caterpillar') st.caughtCat[ev.i] = 1;
+        else if (ev.what === 'carrion') { const cr = st.carrion || (st.carrion = {}); cr[ev.i] = (cr[ev.i] || 0) + 1; }
         else (st.beeLost[ev.hive] || (st.beeLost[ev.hive] = {}))[ev.i] = 1;
         break;
       }
+      case 'sip': // another player's wasp drank from a flower (T1-8)
+        if (!mine && this.records.get(ev.key)) this._sip(ev.key, ev.i, ev.amount);
+        break;
       case 'beeAlarm': {
         if (mine || !this.records.get(ev.key)) break;
         const t = this.remote.get(ev.target);
@@ -1120,13 +1124,14 @@ export class Sim {
     for (const rec of this.activeChunks) {
       const c = rec.content, key = chunkKey(rec.cx, rec.cz), st = this.cs(key);
       for (let i = 0; i < c.flies.length; i++) {
-        if ((st.caughtFly[i] || 0) > this.tick) continue;
+        if ((st.caughtFly[i] || 0) > this.tick || !this.flyActive(rec, i)) continue;
         if (dist2(w, flyPos(c.flies[i], this.tick)) <= r2) return { kind: 'fly', key, i, protein: T.prey.flyProtein };
       }
       for (let i = 0; i < c.caterpillars.length; i++) {
-        if (st.caughtCat[i]) continue;
+        if (st.caughtCat[i] || !this.catActive(rec, i)) continue;
         if (dist2(w, c.caterpillars[i]) <= r2 * 2) return { kind: 'caterpillar', key, i, protein: T.prey.caterpillarProtein };
       }
+      for (const cr of this.carrionIn(rec)) if (dist2(w, cr) <= T.eco.carrionReach * T.eco.carrionReach) return { kind: 'carrion', key, i: cr.d, protein: T.eco.carrionProtein };
       for (let h = 0; h < c.hives.length; h++) {
         const hv = c.hives[h], lost = st.beeLost[h] || {}, al = this.hiveAlarms.get(key + '#' + h);
         for (let k = T.bees.guards; k < hv.bees.length; k++) {
@@ -1142,6 +1147,7 @@ export class Sim {
     const st = this.cs(p.key);
     if (p.kind === 'fly') st.caughtFly[p.i] = this.tick + T.prey.flyRespawnTicks;
     else if (p.kind === 'caterpillar') st.caughtCat[p.i] = 1;
+    else if (p.kind === 'carrion') { const cr = st.carrion || (st.carrion = {}); cr[p.i] = (cr[p.i] || 0) + 1; }
     else {
       (st.beeLost[p.hive] || (st.beeLost[p.hive] = {}))[p.i] = 1;
       this._alarmHive(p.key, p.hive, w, T.bees.catchAlarmRadius * 3);
@@ -1212,8 +1218,29 @@ export class Sim {
         if (h32(w.id, this.tick, 53) < T.drown.chancePerSec * DT) this._fallIn(w, cp, key, driven);
         return;
       }
+      // flowers in bloom with nectar left (T1-8): a sip draws the flower down
+      for (let i = 0; i < c.flowers.length; i++) {
+        const f = c.flowers[i];
+        if (sq(w.x - f.x) + sq(w.y - f.y - 0.02) + sq(w.z - f.z) > d2max || !this.inBloom(rec, i)) continue;
+        if (this.nectarAt(rec, i) <= 0) continue;
+        const add = T.energy.refuelPerSec * T.eco.flowerRate * DT;
+        if (w.energy < 1) w.energy = Math.min(1, w.energy + add);
+        else if (!driven) w.ai.cargo = Math.min(1, (w.ai.cargo || 0) + add);
+        if (driven) this.feeding = true;
+        w.ai.atFood = 'flower';
+        const take = T.eco.sipPerSec * DT;
+        this._sip(key, i, take);
+        if (this.net) { // tell the other peers in sips of a tenth (T1-8)
+          let sp = w.sipPend;
+          if (sp && (sp.key !== key || sp.i !== i)) { this._publish({ type: 'sip', key: sp.key, i: sp.i, amount: sp.amount }); sp = null; }
+          if (!sp) sp = w.sipPend = { key, i, amount: 0 };
+          sp.amount += take;
+          if (sp.amount >= 0.1) { this._publish({ type: 'sip', key, i, amount: sp.amount }); w.sipPend = null; }
+        }
+        return;
+      }
       for (const s of c.sugar.concat(this.spillsIn(key), this.fruitIn(rec))) {
-        if (s.kind === 'can') continue; // cups are handled above
+        if (s.kind === 'can' || s.kind === 'flower') continue; // cups and flowers are handled above
         if (dist2(w, s) <= d2max) {
           const add = T.energy.refuelPerSec * s.rate * DT;
           if (w.energy < 1) w.energy = Math.min(1, w.energy + add);
@@ -2226,6 +2253,69 @@ export class Sim {
     return out;
   }
 
+  // ---------------- seasonal ecology (GDD 9.4, T1-8): pure functions of the seed, the chunk and the clock, plus the
+  // sips taken (chunk state). The ecology tick of GDD 3.3 is evaluated lazily: a flower's nectar is its level at the
+  // last sip plus regrowth (less what the local bees take) since, so nothing has to run while nobody looks.
+  inBloom(rec, i) {
+    const E = T.eco, f = rec.content.flowers[i], w = E.bloom[f.color % E.bloom.length], frac = this.seasonFrac;
+    const j = (hseq(Number(this.seed & 0xffffffffn), rec.cx, rec.cz, i, 971) - 0.5) * 2 * E.bloomJitter;
+    return frac >= w[0] + j && frac < w[1] + j;
+  }
+  // forager bees working each flower of the chunk (they forage only their own chunk's flowers)
+  _beeLoad(rec) {
+    if (rec._beeLoad) return rec._beeLoad;
+    const c = rec.content;
+    rec._beeLoad = c.flowers.map((f) => { let n = 0; for (const hv of c.hives) for (const b of hv.bees) if (!b.guard && b.tx === f.x && b.tz === f.z) n++; return n; });
+    return rec._beeLoad;
+  }
+  nectarAt(rec, i) {
+    if (!this.inBloom(rec, i)) return 0;
+    const E = T.eco, st = this.chunkState.get(chunkKey(rec.cx, rec.cz)), n = st && st.nectar && st.nectar[i];
+    const net = (E.regenPerDay - E.beeDrawPerDay * this._beeLoad(rec)[i]) / 1440;
+    if (!n) return net >= 0 ? 1 : clamp(1 + net * (this.minute - this.season.startMinute), 0, 1);
+    return clamp(n[0] + net * (this.minute - n[1]), 0, 1);
+  }
+  _sip(key, i, amount) {
+    const rec = this.records.get(key);
+    if (!rec) return;
+    const st = this.cs(key), nt = st.nectar || (st.nectar = {});
+    nt[i] = [Math.max(0, this.nectarAt(rec, i) - amount), this.minute];
+  }
+  // sugar index -> flower index, for the AI's picks (the generator pushes a sugar node right after each flower)
+  _flowerIdx(rec) {
+    if (rec._flowerIdx) return rec._flowerIdx;
+    let k = 0;
+    rec._flowerIdx = rec.content.sugar.map((s) => (s.kind === 'flower' ? k++ : -1));
+    return rec._flowerIdx;
+  }
+  catActive(rec, i) {
+    const E = T.eco, frac = this.seasonFrac;
+    const j = (hseq(Number(this.seed & 0xffffffffn), rec.cx, rec.cz, i, 972) - 0.5) * 2 * E.catJitter;
+    return frac >= E.catFrom + j && frac < E.catTo + j;
+  }
+  flyShare() { const E = T.eco; return clamp(E.flyBase + E.flySlope * clamp(this.seasonFrac, 0, 1), 0, 1); }
+  flyActive(rec, i) { return hseq(Number(this.seed & 0xffffffffn), rec.cx, rec.cz, i, this.day, 973) < this.flyShare(); }
+  // Carrion: some days a dead mouse or bird lies somewhere in a chunk for a few days, good for a few loads of meat
+  carrionIn(rec) {
+    const E = T.eco, sd = Number(this.seed & 0xffffffffn), CS = T.chunk.size, out = [];
+    const st = this.chunkState.get(chunkKey(rec.cx, rec.cz)), taken = (st && st.carrion) || {};
+    for (let d = this.day - E.carrionDays + 1; d <= this.day; d++) {
+      if (d < 0 || hseq(sd, rec.cx, rec.cz, d, 974) >= E.carrionChance) continue;
+      const left = E.carrionLoads - (taken[d] || 0);
+      if (left <= 0) continue;
+      out.push({ x: (rec.cx + (hseq(sd, rec.cx, rec.cz, d, 975) - 0.5) * 0.8) * CS, y: 0.03, z: (rec.cz + (hseq(sd, rec.cx, rec.cz, d, 976) - 0.5) * 0.8) * CS, d, left });
+    }
+    return out;
+  }
+  // what the season offers the abstract foragers: multipliers on sugar and protein income
+  ecoAvail() {
+    const E = T.eco, f = clamp(this.seasonFrac, 0, 1);
+    const bloom = E.bloom.filter((w) => f >= w[0] && f < w[1]).length / E.bloom.length;
+    const sugar = E.sugarBase + E.sugarBloom * bloom + (f >= T.fruit.startFrac ? E.sugarFruit : 0);
+    const protein = E.protBase + (f >= E.catFrom && f < E.catTo ? E.protCat : 0) + E.protFly * this.flyShare();
+    return { sugar, protein };
+  }
+
   // Windfall fruit under fruit trees from mid-season (GDD 9.4). Each fruit falls on a day picked by hash and lies
   // for a few days; a pure function of the seed, the chunk and the clock.
   fruitIn(rec) {
@@ -2850,7 +2940,7 @@ export class Sim {
       this.colony.maxCells = T.sites[this.nest.site].maxCells;
       this.emit('nestFounded', { x: this.nest.x, y: this.nest.y, z: this.nest.z, key: this.nest.key, auto: true });
     }
-    colonyStep(col, 60 / this.dayTicks, this._own().filter((w) => w.caste !== 'queen').length, daylight, frac, this.bio, this.broodSpeed());
+    colonyStep(col, 60 / this.dayTicks, this._own().filter((w) => w.caste !== 'queen').length, daylight, frac, this.bio, this.broodSpeed(), this.ecoAvail());
     if (this.raining && col.nestAlive && col.sited) {
       // the site decides what rain costs: burrows flood, open nests chill (GDD 6.6)
       const st = T.sites[this.nest.site || 'trunk'], dt = 60 / this.dayTicks;
@@ -2997,16 +3087,19 @@ export class Sim {
     for (let ri = 0; ri < this.activeChunks.length; ri++) {
       const rec = this.activeChunks[ri], c = rec.content, key = chunkKey(rec.cx, rec.cz), st = this.cs(key), lvl = this.escLevel(key);
       if (w.role === 'sugar') {
+        const fi = this._flowerIdx(rec);
         c.sugar.forEach((s, i) => {
           if (s.kind === 'can' && (lvl >= 2 || col.deficit < T.ai.canDeficit)) return;
+          if (s.kind === 'flower' && (!this.inBloom(rec, fi[i]) || this.nectarAt(rec, fi[i]) < 0.2)) return; // nothing there (T1-8)
           consider({ kind: 'sugar', key, i, c: ri }, s);
         });
         if (lvl >= 3 && col.deficit >= T.ai.canDeficit) c.traps.forEach((tr, i) => consider({ kind: 'trap', key, i, c: ri + 50 }, tr));
         this.spillsIn(key).forEach((sp) => consider({ kind: 'spill', key, i: sp.i, c: ri + 60 }, sp));
         this.fruitIn(rec).forEach((f) => consider({ kind: 'fruit', key, i: f.i, c: ri + 80 }, f));
       } else if (w.role === 'protein') {
-        c.flies.forEach((f, i) => { if ((st.caughtFly[i] || 0) <= this.tick) consider({ kind: 'prey', sub: 'fly', key, i, c: ri }, flyPos(f, this.tick)); });
-        c.caterpillars.forEach((f, i) => { if (!st.caughtCat[i]) consider({ kind: 'prey', sub: 'cat', key, i, c: ri + 20 }, f); });
+        c.flies.forEach((f, i) => { if ((st.caughtFly[i] || 0) <= this.tick && this.flyActive(rec, i)) consider({ kind: 'prey', sub: 'fly', key, i, c: ri }, flyPos(f, this.tick)); });
+        c.caterpillars.forEach((f, i) => { if (!st.caughtCat[i] && this.catActive(rec, i)) consider({ kind: 'prey', sub: 'cat', key, i, c: ri + 20 }, f); });
+        for (const cr of this.carrionIn(rec)) consider({ kind: 'prey', sub: 'carrion', key, i: cr.d, c: ri + 90 }, cr);
         this._baitsIn(key).forEach((b, i) => {
           // a bait station smells of meat from a long way off
           const s = Math.sqrt(dist2(w, b)) - T.muni.aiLure + h32(w.id, i, ri + 70, this.day) * 12;
@@ -3039,8 +3132,9 @@ export class Sim {
     if (t.kind === 'spill') { const sp = this.spillsIn(t.key).find((x) => x.i === t.i); return sp ? { x: sp.x, y: sp.y + 0.012, z: sp.z } : null; }
     if (t.kind === 'bait') return this._baitsIn(t.key)[t.i] || null;
     if (t.kind === 'wood') { const b = c.boxes[t.i]; return { x: (b.minx + b.maxx) / 2 + 0.2 * (h32(w.id, t.i) - 0.5), y: b.maxy + T.wasp.radius + 0.008, z: (b.minz + b.maxz) / 2 }; }
-    if (t.sub === 'fly') return (st.caughtFly[t.i] || 0) > this.tick ? null : flyPos(c.flies[t.i], this.tick);
-    if (t.sub === 'cat') return st.caughtCat[t.i] ? null : c.caterpillars[t.i];
+    if (t.sub === 'fly') return (st.caughtFly[t.i] || 0) > this.tick || !this.flyActive(rec, t.i) ? null : flyPos(c.flies[t.i], this.tick);
+    if (t.sub === 'cat') return st.caughtCat[t.i] || !this.catActive(rec, t.i) ? null : c.caterpillars[t.i];
+    if (t.sub === 'carrion') return this.carrionIn(rec).find((x) => x.d === t.i) || null;
     return null;
   }
 

@@ -120,6 +120,17 @@ export const T = {
   // Switching wasps (GDD 7.7, Q-03): free within 30 m, otherwise the colony relays you after a delay
   possess: { freeRange: 30, relayTicks: 240 },
   // Fallen fruit (GDD 9.4). bio: windfall apples and plums are a major late-summer sugar source for Vespula.
+  // Seasonal ecology (GDD 9.4, T1-8). Each flower kind (by colour) blooms in its own part of the season; nectar
+  // runs down as wasps sip and as the local bees forage, and regrows over the day. Caterpillars are about early to
+  // mid summer, flies grow commoner through it, carrion turns up now and then. The abstract colony forages on the
+  // same calendar: sugar from blooms (and fruit late), protein from caterpillars and flies.
+  eco: {
+    bloom: [[0.0, 0.45], [0.15, 0.6], [0.3, 0.75], [0.45, 0.88], [0.6, 0.95]], bloomJitter: 0.06,
+    flowerRate: 0.35, sipPerSec: 0.25, regenPerDay: 3, beeDrawPerDay: 1.5,
+    catFrom: 0.15, catTo: 0.7, catJitter: 0.08, flyBase: 0.35, flySlope: 0.65,
+    carrionChance: 0.2, carrionDays: 3, carrionLoads: 4, carrionProtein: 1.5, carrionReach: 0.05,
+    sugarBase: 0.5, sugarBloom: 0.9, sugarFruit: 0.35, protBase: 0.5, protCat: 0.35, protFly: 0.4,
+  },
   fruit: { treeShare: 0.3, startFrac: 0.55, perTree: 6, rate: 0.8, spread: 1.6, rotDays: 6 },
   // Level 5: municipal pest control (GDD 8.10). Poisoned protein bait stations across the area for a few days.
   // bio: real programs use protein baits laced with insecticide; foragers carry them home and poison the brood.

@@ -1417,7 +1417,7 @@ namespace Sting.Core
                 colony.maxCells = T.sites.Of(nest.site).maxCells;
                 Emit("nestFounded", ("x", nest.x), ("y", nest.y), ("z", nest.z), ("key", nest.key), ("auto", true));
             }
-            Colony.Step(col, (Num)60 / dayTicks, OwnWorkers(), daylight, frac, bio, BroodSpeed());
+            Colony.Step(col, (Num)60 / dayTicks, OwnWorkers(), daylight, frac, bio, BroodSpeed(), EcoAvail());
             if (Raining && col.nestAlive && col.sited)
             {
                 // the site decides what rain costs: burrows flood, open nests chill (GDD 6.6)

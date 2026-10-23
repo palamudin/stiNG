@@ -135,10 +135,12 @@ namespace Sting.Core
                 var rec = activeChunks[ri]; var c = rec.content; string key = rec.key; var st = CS(key); int lvl = EscLevel(key);
                 if (w.role == "sugar")
                 {
+                    var fi = FlowerIdx(rec);
                     for (int i = 0; i < c.sugar.Count; i++)
                     {
                         var s = c.sugar[i];
                         if (s.kind == "can" && (lvl >= 2 || col.deficit < T.ai.canDeficit)) continue;
+                        if (s.kind == "flower" && (!InBloom(rec, fi[i]) || NectarAt(rec, fi[i]) < 0.2)) continue; // nothing there (T1-8)
                         Consider(new AiTarget { kind = "sugar", key = key, i = i, c = ri }, new V3(s.x, s.y, s.z));
                     }
                     if (lvl >= 3 && col.deficit >= T.ai.canDeficit) for (int i = 0; i < c.traps.Count; i++) { var tr = c.traps[i]; Consider(new AiTarget { kind = "trap", key = key, i = i, c = ri + 50 }, new V3(tr.x, tr.y, tr.z)); }
@@ -147,8 +149,9 @@ namespace Sting.Core
                 }
                 else if (w.role == "protein")
                 {
-                    for (int i = 0; i < c.flies.Count; i++) if ((st.caughtFly.TryGetValue(i, out var cf) ? cf : 0) <= tick) Consider(new AiTarget { kind = "prey", sub = "fly", key = key, i = i, c = ri }, FlyPos(c.flies[i], tick));
-                    for (int i = 0; i < c.caterpillars.Count; i++) if (!st.caughtCat.ContainsKey(i)) { var f = c.caterpillars[i]; Consider(new AiTarget { kind = "prey", sub = "cat", key = key, i = i, c = ri + 20 }, new V3(f.x, f.y, f.z)); }
+                    for (int i = 0; i < c.flies.Count; i++) if ((st.caughtFly.TryGetValue(i, out var cf) ? cf : 0) <= tick && FlyActive(rec, i)) Consider(new AiTarget { kind = "prey", sub = "fly", key = key, i = i, c = ri }, FlyPos(c.flies[i], tick));
+                    for (int i = 0; i < c.caterpillars.Count; i++) if (!st.caughtCat.ContainsKey(i) && CatActive(rec, i)) { var f = c.caterpillars[i]; Consider(new AiTarget { kind = "prey", sub = "cat", key = key, i = i, c = ri + 20 }, new V3(f.x, f.y, f.z)); }
+                    foreach (var cr in CarrionIn(rec)) Consider(new AiTarget { kind = "prey", sub = "carrion", key = key, i = (int)cr.d, c = ri + 90 }, new V3(cr.x, cr.y, cr.z));
                     var baits = BaitsIn(key);
                     for (int i = 0; i < baits.Count; i++)
                     {
@@ -189,8 +192,9 @@ namespace Sting.Core
             if (t.kind == "spill") { foreach (var sp in SpillsIn(t.key)) if (sp.i == t.i) return new V3(sp.x, sp.y + 0.012, sp.z); return null; }
             if (t.kind == "bait") { var bs = BaitsIn(t.key); return t.i < bs.Count ? new V3(bs[t.i].x, bs[t.i].y, bs[t.i].z) : (V3?)null; }
             if (t.kind == "wood") { var b = c.boxes[t.i]; return new V3((b.minx + b.maxx) / 2 + 0.2 * (H32(w.id, t.i) - 0.5), b.maxy + T.wasp.radius + 0.008, (b.minz + b.maxz) / 2); }
-            if (t.sub == "fly") return (st.caughtFly.TryGetValue(t.i, out var cf) ? cf : 0) > tick ? (V3?)null : FlyPos(c.flies[t.i], tick);
-            if (t.sub == "cat") { if (st.caughtCat.ContainsKey(t.i)) return null; var cp = c.caterpillars[t.i]; return new V3(cp.x, cp.y, cp.z); }
+            if (t.sub == "fly") return (st.caughtFly.TryGetValue(t.i, out var cf) ? cf : 0) > tick || !FlyActive(rec, t.i) ? (V3?)null : FlyPos(c.flies[t.i], tick);
+            if (t.sub == "cat") { if (st.caughtCat.ContainsKey(t.i) || !CatActive(rec, t.i)) return null; var cp = c.caterpillars[t.i]; return new V3(cp.x, cp.y, cp.z); }
+            if (t.sub == "carrion") { foreach (var cr in CarrionIn(rec)) if (cr.d == t.i) return new V3(cr.x, cr.y, cr.z); return null; }
             return null;
         }
 

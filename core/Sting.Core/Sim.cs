@@ -14,7 +14,7 @@ namespace Sting.Core
         static Num D2(V3 a, V3 b) { Num dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z; return dx * dx + dy * dy + dz * dz; }
         static Num D2(WaspBase a, V3 b) => D2(a.P, b);
         static Num D2(WaspBase a, WaspBase b) => D2(a.P, b.P);
-        static readonly HashSet<string> IMMEDIATE = new HashSet<string> { "caught", "beeAlarm", "died", "fight", "fightReq", "fightJoin", "fightRefuse", "fightEnd", "raid" };
+        static readonly HashSet<string> IMMEDIATE = new HashSet<string> { "caught", "sip", "beeAlarm", "died", "fight", "fightReq", "fightJoin", "fightRefuse", "fightEnd", "raid" };
 
         public Settings settings;
         public int peer; public bool net, noAI;

@@ -35,7 +35,8 @@ export function reproShare(frac) { const C = T.season; return clamp01((frac - C.
 // One step of `dtDay` in-game days. `physical` = adults outside as agents.
 // `foraging` = abstract foragers can work now. `frac` = season fraction. `bio` = biological time scale.
 // thermal: brood development speed from the nest's temperature (T1-14), 1 when comfortable
-export function colonyStep(c, dtDay, physical, foraging, frac = 0.3, bio = 1, thermal = 1) {
+// avail: what the season offers foragers (T1-8), { sugar, protein } multipliers, 1 when absent
+export function colonyStep(c, dtDay, physical, foraging, frac = 0.3, bio = 1, thermal = 1, avail = null) {
   const C = T.colony, S = T.season;
   if (!c.nestAlive) return;
   const inside = Math.max(0, c.adults - physical);
@@ -43,8 +44,8 @@ export function colonyStep(c, dtDay, physical, foraging, frac = 0.3, bio = 1, th
   if (foraging) {
     const a = T.alloc[c.alloc], wsum = (a.sugar + a.protein + a.pulp) / 3;
     const f = Math.max(0, inside - c.young) * C.forageShare * a.traffic * dtDay; // 'Lie low' sends fewer out (T1-7); the young stay in (T1-13)
-    c.sugar += f * C.income.sugar * a.sugar / wsum;
-    c.protein += f * C.income.protein * a.protein / wsum;
+    c.sugar += f * C.income.sugar * a.sugar / wsum * (avail ? avail.sugar : 1);
+    c.protein += f * C.income.protein * a.protein / wsum * (avail ? avail.protein : 1);
     c.pulp += f * C.income.pulp * a.pulp / wsum;
   }
 

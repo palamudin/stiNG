@@ -27,6 +27,9 @@ namespace Sting.Core
     public sealed class Ball { public Num temp, progress, prevBurst, bees; }
     public sealed class Drown { public string key; public int until, i = -1; public Num progress, prevBurst; }
     public sealed class Cup { public Num x, z, level; public int i; }
+    public sealed class Nectar { public Num lv; public long m; }
+    public sealed class Carrion { public Num x, y, z; public long d; public int left; }
+    public sealed class SipPend { public string key; public int i; public Num amount; }
     public sealed class WebHold { public string key; public int i; public Num progress, prevBurst; public int start; public Num spiderAt; }
     public sealed class Fight
     {
@@ -61,6 +64,7 @@ namespace Sting.Core
         public bool walking; public Num fightReqUntil;
         /// the surface a landed wasp holds on to, and a short window after takeoff before it can settle again
         public Land land; public int noLandUntil; public string trapCause;
+        internal SipPend sipPend; // net only: sips not yet told to the other peers
         public Wasp Ghost() { var g = (Wasp)MemberwiseClone(); g.state = "dead"; return g; }
     }
 
@@ -105,7 +109,7 @@ namespace Sting.Core
         public Num panicGain; public bool flee; public Num sx, sz; public Num extra;
         public string key; public int i, hive, h, target; public string what; public Num radius;
         public string byHex, cause; public Num x, y, z;
-        public Num start, end, window; public int kind; public V3 center; public bool kills; public string why;
+        public Num start, end, window; public int kind; public V3 center; public bool kills; public string why; public Num amount;
         public int a, b, toPeer; public Num venom, mash; public bool queen; public int id;
         public NetEv() { mk = "ev"; }
         public NetEv Copy()
@@ -147,7 +151,7 @@ namespace Sting.Core
         // caches of pure functions of the seed, the chunk and the clock (never saved, never hashed)
         internal object sites; internal List<Food> fruit; internal long fruitDay = long.MinValue; internal int fruitSeason;
         internal List<Bait> baits; internal int baitsCampaign = -1;
-        internal List<Cup> cups;
+        internal List<Cup> cups; internal int[] beeLoad, flowerIdx;
         string[] _sub = new string[0];
         /// "cx,cz#i": the key of the i-th hive or hunter in this chunk
         public string Sub(int i)
@@ -168,6 +172,8 @@ namespace Sting.Core
         public Dictionary<int, Num> spilled;
         /// a hand over a cup until this tick (GDD 7.5)
         public Dictionary<int, int> cover;
+        /// nectar at the last sip and when (T1-8); carrion loads taken, by the day it appeared
+        public Dictionary<int, Nectar> nectar; public Dictionary<int, int> carrion;
     }
 
     public sealed class BeePhys { public Num x, y, z, vx, vy, vz, stun; public string mode; }

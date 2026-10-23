@@ -269,9 +269,13 @@ namespace Sting.Core
                     var st = CS(ev.key);
                     if (ev.what == "fly") st.caughtFly[ev.i] = ev.tick + T.prey.flyRespawnTicks;
                     else if (ev.what == "caterpillar") st.caughtCat[ev.i] = 1;
+                    else if (ev.what == "carrion") { st.carrion ??= new Dictionary<int, int>(); st.carrion[ev.i] = (st.carrion.TryGetValue(ev.i, out var cn) ? cn : 0) + 1; }
                     else { if (!st.beeLost.TryGetValue(ev.hive, out var l)) st.beeLost[ev.hive] = l = new Dictionary<int, int>(); l[ev.i] = 1; }
                     break;
                 }
+                case "sip": // another player's wasp drank from a flower (T1-8)
+                    if (!mine && records.TryGet(ev.key, out _)) Sip(ev.key, ev.i, ev.amount);
+                    break;
                 case "beeAlarm":
                 {
                     if (mine || !records.Has(ev.key)) break;

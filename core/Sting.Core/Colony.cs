@@ -52,7 +52,9 @@ namespace Sting.Core
         public static void Step(ColonyState c, Num dtDay, Num physical, bool foraging, Num frac) => Step(c, dtDay, physical, foraging, frac, 1);
         public static void Step(ColonyState c, Num dtDay, Num physical, bool foraging, Num frac, Num bio) => Step(c, dtDay, physical, foraging, frac, bio, 1);
         /// thermal: brood development speed from the nest's temperature (T1-14), 1 when comfortable
-        public static void Step(ColonyState c, Num dtDay, Num physical, bool foraging, Num frac, Num bio, Num thermal)
+        public static void Step(ColonyState c, Num dtDay, Num physical, bool foraging, Num frac, Num bio, Num thermal) => Step(c, dtDay, physical, foraging, frac, bio, thermal, null);
+        /// avail: what the season offers foragers (T1-8), sugar and protein multipliers
+        public static void Step(ColonyState c, Num dtDay, Num physical, bool foraging, Num frac, Num bio, Num thermal, (Num sugar, Num protein)? avail)
         {
             if (!c.nestAlive) return;
             Num inside = Max(0, c.adults - physical);
@@ -60,8 +62,8 @@ namespace Sting.Core
             {
                 var a = T.alloc[c.alloc]; Num wsum = (a.sugar + a.protein + a.pulp) / 3;
                 Num f = Max(0, inside - c.young) * T.colony.forageShare * a.traffic * dtDay; // 'Lie low' sends fewer out (T1-7); the young stay in (T1-13)
-                c.sugar += f * T.colony.income.sugar * a.sugar / wsum;
-                c.protein += f * T.colony.income.protein * a.protein / wsum;
+                c.sugar += f * T.colony.income.sugar * a.sugar / wsum * (avail.HasValue ? avail.Value.sugar : 1);
+                c.protein += f * T.colony.income.protein * a.protein / wsum * (avail.HasValue ? avail.Value.protein : 1);
                 c.pulp += f * T.colony.income.pulp * a.pulp / wsum;
             }
             Num cap = SugarCap(c);

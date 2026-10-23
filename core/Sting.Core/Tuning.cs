@@ -113,6 +113,16 @@ namespace Sting.Core
             public static readonly Num coldFrom = 18, coldSpan = 12, hotFrom = 31, hotSpan = 8, hotWeight = 0.7, minSpeed = 0.15;
         }
         public static class possess { public static readonly Num freeRange = 30; public const int relayTicks = 240; }
+        /// seasonal ecology (GDD 9.4, T1-8)
+        public static class eco
+        {
+            public static readonly Num[][] bloom = { new Num[] { 0.0, 0.45 }, new Num[] { 0.15, 0.6 }, new Num[] { 0.3, 0.75 }, new Num[] { 0.45, 0.88 }, new Num[] { 0.6, 0.95 } };
+            public static readonly Num bloomJitter = 0.06, flowerRate = 0.35, sipPerSec = 0.25, regenPerDay = 3, beeDrawPerDay = 1.5,
+                catFrom = 0.15, catTo = 0.7, catJitter = 0.08, flyBase = 0.35, flySlope = 0.65,
+                carrionChance = 0.2, carrionProtein = 1.5, carrionReach = 0.05,
+                sugarBase = 0.5, sugarBloom = 0.9, sugarFruit = 0.35, protBase = 0.5, protCat = 0.35, protFly = 0.4;
+            public const int carrionDays = 3, carrionLoads = 4;
+        }
         public static class fruit { public static readonly Num treeShare = 0.3, startFrac = 0.55, rate = 0.8, spread = 1.6; public const int perTree = 6, rotDays = 6; }
         public static class muni
         {

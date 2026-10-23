@@ -231,6 +231,7 @@ function buildChunk(rec) {
       m4.makeTranslation(f.x, f.y, f.z); heads.setMatrixAt(i, m4); heads.setColorAt(i, col.set(FLOWERS[f.color]));
     });
     g.add(stems, heads);
+    dyn.heads = heads; dyn.bloomKey = -1;
   }
   for (const hv of c.hives) {
     const white = mat('#ece8dc'), roof = mat('#8d8a80');
@@ -302,6 +303,19 @@ function updateChunkDynamics() {
       d.puddles[i].visible = down;
     });
     for (const c of d.candles) c.visible = lv >= 2;
+    // flowers by season (T1-8): a green bud before, the colour in bloom, a brown head after
+    const rec = d.heads && sim.records.get(k), bk = Math.floor(sim.seasonFrac * 200) + sim.season.n * 1000;
+    if (rec && d.bloomKey !== bk) {
+      d.bloomKey = bk;
+      const col = new THREE.Color(), m4 = new THREE.Matrix4();
+      rec.content.flowers.forEach((f, i) => {
+        const on = sim.inBloom(rec, i), w = T.eco.bloom[f.color % T.eco.bloom.length], before = sim.seasonFrac < (w[0] + w[1]) / 2;
+        const sc = on ? 1 : before ? 0.45 : 0.6;
+        m4.makeScale(sc, sc, sc).setPosition(f.x, f.y, f.z); d.heads.setMatrixAt(i, m4);
+        d.heads.setColorAt(i, col.set(on ? FLOWERS[f.color] : before ? '#6f9a3c' : '#7a5c3a'));
+      });
+      d.heads.instanceMatrix.needsUpdate = true; if (d.heads.instanceColor) d.heads.instanceColor.needsUpdate = true;
+    }
     for (const t of d.traps) t.visible = lv >= 3;
 
   }
@@ -383,6 +397,8 @@ const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vec
 const baitPool = [];
 const baitBoxGeo = new THREE.BoxGeometry(0.07, 0.1, 0.05), baitMeatGeo = new THREE.BoxGeometry(0.04, 0.012, 0.01);
 // Windfall fruit in the grass late in the season (apples and plums)
+const carrionMesh = new THREE.InstancedMesh(new THREE.CapsuleGeometry(0.022, 0.06, 4, 8).rotateZ(Math.PI / 2), mat('#4a3a30'), 64);
+carrionMesh.count = 0; carrionMesh.frustumCulled = false; scene.add(carrionMesh);
 const fruitMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.032, 10, 8), new THREE.MeshLambertMaterial({ color: '#ffffff' }), 400);
 fruitMesh.count = 0; fruitMesh.frustumCulled = false; fruitMesh.castShadow = true; scene.add(fruitMesh);
 const FRUIT_COLORS = ['#b8322a', '#c9a227', '#6e2a4a', '#9a3a1e'].map((c) => new THREE.Color(c));
@@ -453,12 +469,12 @@ function renderCritters(t) {
   for (const rec of sim.activeChunks) {
     const c = rec.content, key = chunkKey(rec.cx, rec.cz), st = sim.cs(key);
     c.flies.forEach((f, i) => {
-      if ((st.caughtFly[i] || 0) > sim.tick || nf >= MAXI) return;
+      if ((st.caughtFly[i] || 0) > sim.tick || nf >= MAXI || !sim.flyActive(rec, i)) return;
       const p = flyPos(f, t);
       flyMesh.setMatrixAt(nf++, _m4.makeTranslation(p.x, p.y, p.z));
     });
     c.caterpillars.forEach((cp, i) => {
-      if (st.caughtCat[i] || nc >= MAXI) return;
+      if (st.caughtCat[i] || nc >= MAXI || !sim.catActive(rec, i)) return;
       _q.setFromAxisAngle(new THREE.Vector3(0, 0, 1), 0.2);
       catMesh.setMatrixAt(nc++, _m4.compose(_p.set(cp.x, cp.y, cp.z), _q, _s));
     });
@@ -474,6 +490,14 @@ function renderCritters(t) {
       }
     });
   }
+  // carrion (T1-8): a small dark carcass on the grass
+  let nk = 0;
+  for (const rec of sim.activeChunks) for (const cr of sim.carrionIn(rec)) {
+    if (nk >= 64) break;
+    _q.setFromAxisAngle(UP, cr.d * 1.7);
+    carrionMesh.setMatrixAt(nk++, _m4.compose(_p.set(cr.x, 0.02, cr.z), _q, _s));
+  }
+  carrionMesh.count = nk; carrionMesh.instanceMatrix.needsUpdate = true;
   flyMesh.count = nf; catMesh.count = nc; beeMesh.count = nb;
   flyMesh.instanceMatrix.needsUpdate = catMesh.instanceMatrix.needsUpdate = beeMesh.instanceMatrix.needsUpdate = true;
 }
@@ -1309,6 +1333,7 @@ function updateNest() {
     ['Young · guards out', `${fmt(c.young || 0)} still nursing · ${sim._own().filter((w) => w.role === 'guard' && w.id !== sim.drivenId).length} at the door`], // T1-13
     ['Protein', `${c.protein.toFixed(1)} / ${proteinCap(c).toFixed(0)}`], ['Sugar', `${c.sugar.toFixed(1)} / ${sugarCap(c).toFixed(0)}`], ['Pulp', c.pulp.toFixed(1)],
     ['Cells used', `${fmt(broodTotal(c))} / ${fmt(c.cells)}`], ['Larvae fed', Math.round(c.fed * 100) + '%'],
+    ['Forage this season', (() => { const a = sim.ecoAvail(); return `sugar ${Math.round(a.sugar * 100)}% · protein ${Math.round(a.protein * 100)}%`; })()], // T1-8
     ...(c.sited !== false ? [['Brood speed', (() => { const v = sim.broodSpeed(); return `${Math.round(v * 100)}%${v < 0.98 ? (sim.temperature < T.thermal.coldFrom ? ' · too cold' : ' · too hot') : ''}`; })()]] : []),
     ['Emerged · laid', `${fmt(c.stats.emerged)} · ${fmt(c.stats.laid)}`],
     ...(sim.muni && sim.muni.active ? [['Pest control', `${sim.muni.active.keys.includes(sim.nest.key) ? 'baits around the nest' : 'baits nearby'} · until ${dayLabel(sim.muni.active.until)}`]] : []),
@@ -1460,7 +1485,7 @@ function updateHud() {
     }
   } else if (w.state === 'chewing') hint = `Keep holding ${kbd('E')}`;
   else if (h.opening) hint = `${kbd('E')} crawl in at the ${h.opening}`;
-  else if (h.prey) hint = `${kbd('E')} catch the ${h.prey}`;
+  else if (h.prey) hint = h.prey === 'carrion' ? `${kbd('E')} take a load of meat from the carcass` : `${kbd('E')} catch the ${h.prey}`;
   else if (h.bait) hint = `${kbd('E')} take the meat from the station`;
   else if (h.wood) hint = `Hold ${kbd('E')} to chew pulp`;
   else if (h.nest && (md < T.time.dawn || md >= T.time.dusk)) hint = `${kbd('R')} rest until morning`;

@@ -627,7 +627,7 @@ During each tick of a swat window, the volume is transformed from body frame to 
 
 Birds (perch and hunt flying insects), spiders (static webs), dragonflies, rival wasp colonies (AI and other players) fighting over food and nest sites.
 
-### 9.4 Prey and resources **[T0] [T1]** (seasons, regrowth, carrion)
+### 9.4 Prey and resources **[T0]**
 
 - Prey spawns by biome and season: caterpillars, flies, aphid-tending insects, carrion.
 - Flowers bloom in season. Fruit ripens and falls late summer.
@@ -1072,6 +1072,16 @@ On a surface the wasp keeps its own heading along it. Mouse left and right turn 
 
 Every can on a table is a hollow cup: a 3 mm wall, open at the top, holding a drink between a third and nearly full (by hash, so every peer sees the same levels). The walls stop a wasp from the side; it gets in over the rim. It feeds anywhere within reach of the drink's surface: hovering just above it, or gripping the inner wall nearby. Touching the drink pulls it in (flying too low, or walking down the wall into it), and a feeding wasp can still slip in; mash Shift to climb out over the rim. Someone within a metre who notices a wasp inside their cup puts a hand over it (a committed event, so every peer covers the same cup on the same tick) for ten seconds, and a wasp shut in a covered cup drowns in five. At level 2 the cups are lidded, which keeps wasps out and drowns any already inside. AI foragers go in from above and hover just over the drink. Resting on a flower head feeds as at a cup, and the HUD shows it.
 
+### 18.27 Seasonal ecology as built (T1-8)
+
+**Flowers.** Each of the five flower kinds blooms in its own part of the season (from the first fifth to just before the end, overlapping), each flower a few days either side by hash. Out of bloom a flower gives nothing: a green bud before, a brown head after.
+
+**Nectar.** A flower in bloom starts full, a sip takes a quarter of it per second, and it regrows at three fills a day, less 1.5 a day for each forager bee whose round includes it; flowers near a hive are drained to nothing. The ecology tick of 3.3 is evaluated lazily: a flower's level is the level at its last sip plus the net regrowth since, so nothing runs for flowers nobody visits and every peer computes the same level from the same sips. Sips by another player's wasps arrive as immediate `sip` events in tenths. AI sugar foragers skip flowers out of bloom or nearly dry.
+
+**Prey.** Caterpillars are about from early to mid summer (each a few days either side by hash); flies are fewer early and commoner late, each one present on a given day by hash. Carrion turns up in a chunk on about one day in five, lies three days, and gives four loads of meat (1.5 protein each) to E or to AI hunters.
+
+**The abstract colony.** Abstract foraging income follows the same calendar: sugar ×(0.5 + 0.9 × share of flower kinds in bloom, + 0.35 once fruit falls), protein ×(0.5 + 0.35 while caterpillars are about + 0.4 × the fly share). Averaged over the season both are about 1; late in the season both drop, which is when real colonies turn to people's food. The colony view shows the current multipliers.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1080,7 +1090,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (77 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (78 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -1093,7 +1103,7 @@ Everything in `POC.md` (77 features) and its C# port (18.18), including the Tier
 | T1-5 | **Built (18.19).** Shake and flail: a human stung on the head shakes it (dislodges, no kill); runners swat wildly on the way out | 8.5 | S | |
 | T1-6 | **Built (18.22).** Fetching spray: at level 3 a stung human walks off and comes back armed, instead of having spray on hand | 8.6, 8.10 | M | |
 | T1-7 | **Built (18.22).** The exterminator searches: at level 4 he walks the area watching wasp traffic and finds the nest from flight lines; a colony that keeps traffic low near people buys time | 8.10 | M | |
-| T1-8 | Seasonal ecology: flowers bloom and fade by season, nectar is drawn down by bees and wasps and regrows in an ecology tick (0.2 Hz); prey by season; carrion appears | 9.4, 3.3 | M | |
+| T1-8 | **Built (18.27).** Seasonal ecology: flowers bloom and fade by season, nectar is drawn down by bees and wasps and regrows in an ecology tick (0.2 Hz); prey by season; carrion appears | 9.4, 3.3 | M | |
 | T1-9 | Feral hives and robbing: hives in hollow trees and walls; a wasp that gets inside takes honey (sugar) as well as brood | 9.1 | M | |
 | T1-10 | Barbecues: grills as human anchors with meat, a protein source at people's tables and a new kind of conflict | 4.3, 6.2 | M | T1-11 helps |
 | T1-11 | Human days: walk and lie postures, people strolling on paths, sunbathers lying on the grass, gardeners; the schedule picks the activity by weather and traits | 8.2, 8.3 | L | Q-06 for the paths |
@@ -1110,7 +1120,7 @@ Everything in `POC.md` (77 features) and its C# port (18.18), including the Tier
 | T1-22 | Tuning as data: the tuning tables as versioned plain-text files read by own parsers in JS and C#, and the tuning hash in the world record | 13 | M | |
 | T1-23 | **Built (18.21).** Solo time: accelerate time in the colony view, and the Reflex slowdown as a solo option | 5.1, 7.8 | S | |
 
-Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, then the other S items: T1-14, T1-17, T1-18, T1-23, all done; T1-20 waits on regions), then the M items (T1-6, T1-7, T1-13 and T1-15 done); each batch is built in the PoC and then ported to the core with parity.
+Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, then the other S items: T1-14, T1-17, T1-18, T1-23, all done; T1-20 waits on regions), then the M items (T1-6, T1-7, T1-8, T1-13 and T1-15 done); each batch is built in the PoC and then ported to the core with parity.
 
 ### 19.3 Tier 2: later
 

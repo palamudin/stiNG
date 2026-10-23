@@ -103,6 +103,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 75 | Winter with choices (T1-15): in late season a worker can scout a winter site (E at a shed wall, a hollow tree, loose bark or the leaf litter); most gynes winter there and shelter sets how many wake. At the season's end you choose which queen to wake as; she starts the next season at her site, with reserves by how well she wintered | 6.7 | 14 |
 | 76 | Landing on any surface: hover still near a trunk, a flower stalk, the side of a box or under a table and the wasp grips it, belly to the surface. Walking follows the surface round edges and up trunks; only Space or Shift take off; a sting from a surface reaches someone within 4 cm | 7.2 | 14 |
 | 77 | Hollow cups: the walls keep you out from the side; in over the rim to reach the drink, which you must not touch. Someone who sees you go in covers the cup with a hand and you drown inside; lids at level 2 do the same. On a surface, the mouse turns you about it as on the ground | 7.2, 7.5 | 14 |
+| 78 | Seasonal ecology (T1-8): flowers bloom by kind through the season (bud, bloom, faded); nectar runs down as you and the bees drink and regrows over the day; caterpillars early, flies late; carrion turns up for a few days with loads of meat. The colony's off-screen foraging follows the same calendar | 9.4 | 14 |
 
 ## Verified
 

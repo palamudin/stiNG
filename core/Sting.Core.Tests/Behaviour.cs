@@ -398,6 +398,43 @@ namespace Sting.Core.Tests
                 Ok(Count(ev3, "spring") == 1 && (string)Find(ev3, "spring")["kind"] == first, $"left alone, the queen from the site with most survivors wakes ({first})");
                 Ok(hol.s.colony.sugar > Colony.New(true).sugar, $"a well wintered queen wakes with more in reserve ({D(hol.s.colony.sugar):0.00} sugar)");
             }
+            // 34. seasonal ecology (T1-8)
+            {
+                var s = Calm(new Sim(new Settings { seed = 1234, birds = false }));
+                void At(double frac) { s.season.startMinute = s.minute - frac * D(s.settings.seasonDays) * 1440; }
+                var recs = s.activeChunks.Where(r => r.content.flowers.Count > 0).ToList();
+                int[] Blooming(double frac) { At(frac); var k = new int[5]; foreach (var r in recs) for (int i = 0; i < r.content.flowers.Count; i++) if (s.InBloom(r, i)) k[r.content.flowers[i].color]++; return k; }
+                var early = Blooming(0.1); var late = Blooming(0.85);
+                Ok(early[0] > 0 && early[4] == 0 && late[0] == 0 && late[4] > 0, $"each kind of flower blooms in its own part of the season (early {string.Join("/", early)}, late {string.Join("/", late)})");
+                At(0.5);
+                ChunkRec rec = null; int fi = -1;
+                foreach (var r in recs) { var b = s.BeeLoad(r); for (int i = 0; i < r.content.flowers.Count && fi < 0; i++) if (s.InBloom(r, i) && b[i] == 0) { rec = r; fi = i; } if (fi >= 0) break; }
+                var f = rec.content.flowers[fi]; var w = s.wasp;
+                w.energy = 0.2;
+                Num n0 = s.NectarAt(rec, fi);
+                RunS(s, 600, (sim, i) => { if (w.state == "fly" || w.state == "landed") Place(w, P(f.x, f.y + 0.03, f.z)); w.energy = Min(w.energy, 0.5); return Idle(); });
+                Num n1 = s.NectarAt(rec, fi), e1 = w.energy;
+                RunS(s, 30, (sim, i) => { Place(w, P(f.x, f.y + 0.03, f.z)); return Idle(); });
+                Ok(n0 == 1 && n1 == 0 && w.energy <= e1 + 0.02, $"a wasp drinks a flower dry and gets only the trickle that regrows (nectar {D(n0)} -> {D(n1)}, crop {D(e1):0.000} -> {D(w.energy):0.000})");
+                s.CS(rec.key).nectar[fi].m -= 360;
+                Ok(s.NectarAt(rec, fi) > 0.5, $"the flower refills over the day ({D(s.NectarAt(rec, fi)):0.00} after six hours)");
+                (ChunkRec r, int i, int n)? bee = null;
+                foreach (var r in s.activeChunks) { var b = s.BeeLoad(r); for (int i = 0; i < b.Length; i++) if (bee == null && b[i] * T.eco.beeDrawPerDay > T.eco.regenPerDay && s.InBloom(r, i)) bee = (r, i, b[i]); }
+                Ok(bee == null || s.NectarAt(bee.Value.r, bee.Value.i) < 0.2, $"flowers the bees work stay drained ({(bee == null ? "no such flower here" : $"{bee.Value.n} bees, nectar {D(s.NectarAt(bee.Value.r, bee.Value.i)):0.00}")})");
+                (int cats, int flies) Prey(double frac) { At(frac); int cats = 0, flies = 0; foreach (var r in s.activeChunks) { for (int i = 0; i < r.content.caterpillars.Count; i++) if (s.CatActive(r, i)) cats++; for (int i = 0; i < r.content.flies.Count; i++) if (s.FlyActive(r, i)) flies++; } return (cats, flies); }
+                var p1 = Prey(0.4); var p2 = Prey(0.95);
+                Ok(p1.cats > 0 && p2.cats == 0 && p2.flies > p1.flies, $"caterpillars in early summer, more flies late (caterpillars {p1.cats} -> {p2.cats}, flies {p1.flies} -> {p2.flies})");
+                At(0.5); var a1 = s.EcoAvail(); At(0.97); var a2 = s.EcoAvail();
+                Ok(a2.sugar < a1.sugar && a2.protein < a1.protein, $"the abstract foragers find less late in the season (sugar {D(a1.sugar):0.00} -> {D(a2.sugar):0.00}, protein {D(a1.protein):0.00} -> {D(a2.protein):0.00})");
+                Carrion cr = null; ChunkRec crRec = null;
+                for (int d = 0; d < 30 && cr == null; d++) { s.day = d; foreach (var r in s.activeChunks) { var l = s.CarrionIn(r); if (l.Count > 0) { cr = l[0]; crRec = r; break; } } }
+                Ok(cr != null, $"carrion turns up now and then (day {s.day})");
+                var w2 = s.wasp; w2.carry = null; w2.state = "fly";
+                Place(w2, P(cr.x, cr.y + 0.02, cr.z));
+                RunS(s, 2, (sim, i) => Idle(c => c.act = i == 1 ? Act.Interact : 0));
+                var left = s.CarrionIn(crRec).FirstOrDefault(x => x.d == cr.d);
+                Ok(w2.carry != null && w2.carry.what == "carrion" && (left?.left ?? 0) == cr.left - 1, $"E at the carcass takes a load of meat ({w2.carry?.what}, {left?.left ?? 0} left)");
+            }
             // 32. worker ages and guards (T1-13)
             {
                 Num Forage(Num young) { var c = Colony.New(); c.adults = 100; c.young = young; c.eggs = c.larvae = c.pupae = 0; Num s0 = c.sugar; Colony.Step(c, 0.01, 0, true, 0.3, 1); return c.sugar - s0; }

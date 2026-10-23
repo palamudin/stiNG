@@ -474,15 +474,16 @@ namespace Sting.Core
                 var c = rec.content; string key = rec.key; var st = CS(key);
                 for (int i = 0; i < c.flies.Count; i++)
                 {
-                    if ((st.caughtFly.TryGetValue(i, out var cf) ? cf : 0) > tick) continue;
+                    if ((st.caughtFly.TryGetValue(i, out var cf) ? cf : 0) > tick || !FlyActive(rec, i)) continue;
                     if (D2(w, FlyPos(c.flies[i], tick)) <= r2) return new PreyHit { kind = "fly", key = key, i = i, protein = T.prey.flyProtein };
                 }
                 for (int i = 0; i < c.caterpillars.Count; i++)
                 {
-                    if (st.caughtCat.ContainsKey(i)) continue;
+                    if (st.caughtCat.ContainsKey(i) || !CatActive(rec, i)) continue;
                     var cp = c.caterpillars[i];
                     if (D2(w, new V3(cp.x, cp.y, cp.z)) <= r2 * 2) return new PreyHit { kind = "caterpillar", key = key, i = i, protein = T.prey.caterpillarProtein };
                 }
+                foreach (var cr in CarrionIn(rec)) if (D2(w, new V3(cr.x, cr.y, cr.z)) <= T.eco.carrionReach * T.eco.carrionReach) return new PreyHit { kind = "carrion", key = key, i = (int)cr.d, protein = T.eco.carrionProtein };
                 for (int h = 0; h < c.hives.Count; h++)
                 {
                     var hv = c.hives[h]; st.beeLost.TryGetValue(h, out var lost); var al = hiveAlarms.Get(rec.Sub(h));
@@ -501,6 +502,7 @@ namespace Sting.Core
             var st = CS(p.key);
             if (p.kind == "fly") st.caughtFly[p.i] = tick + T.prey.flyRespawnTicks;
             else if (p.kind == "caterpillar") st.caughtCat[p.i] = 1;
+            else if (p.kind == "carrion") { st.carrion ??= new Dictionary<int, int>(); st.carrion[p.i] = (st.carrion.TryGetValue(p.i, out var cn) ? cn : 0) + 1; }
             else
             {
                 if (!st.beeLost.TryGetValue(p.hive, out var l)) st.beeLost[p.hive] = l = new Dictionary<int, int>();
@@ -587,10 +589,34 @@ namespace Sting.Core
                     if (H32(w.id, tick, 53) < T.drown.chancePerSec * T.DT) FallIn(w, cp, key, driven);
                     return;
                 }
+                // flowers in bloom with nectar left (T1-8): a sip draws the flower down
+                for (int i = 0; i < c.flowers.Count; i++)
+                {
+                    var f = c.flowers[i];
+                    if (Sq(w.x - f.x) + Sq(w.y - f.y - 0.02) + Sq(w.z - f.z) > d2max || !InBloom(rec, i)) continue;
+                    if (NectarAt(rec, i) <= 0) continue;
+                    Num add = T.energy.refuelPerSec * T.eco.flowerRate * T.DT;
+                    if (w.energy < 1) w.energy = Min(1, w.energy + add);
+                    else if (!driven) w.ai.cargo = Min(1, w.ai.cargo + add);
+                    if (driven) feeding = true;
+                    w.ai.atFood = "flower";
+                    Num take = T.eco.sipPerSec * T.DT;
+                    Sip(key, i, take);
+                    if (net)
+                    {
+                        // tell the other peers in sips of a tenth (T1-8)
+                        var sp = w.sipPend;
+                        if (sp != null && (sp.key != key || sp.i != i)) { Publish(new NetEv { type = "sip", key = sp.key, i = sp.i, amount = sp.amount }); sp = null; }
+                        if (sp == null) sp = w.sipPend = new SipPend { key = key, i = i, amount = 0 };
+                        sp.amount += take;
+                        if (sp.amount >= 0.1) { Publish(new NetEv { type = "sip", key = key, i = i, amount = sp.amount }); w.sipPend = null; }
+                    }
+                    return;
+                }
                 for (int i = 0; i < c.sugar.Count; i++)
                 {
                     var s = c.sugar[i];
-                    if (s.kind == "can") continue; // cups are handled above
+                    if (s.kind == "can" || s.kind == "flower") continue; // cups and flowers are handled above
                     if (FeedAt(w, driven, s.x, s.y, s.z, s.rate, s.kind, d2max, key)) return;
                 }
                 foreach (var s in SpillsIn(key)) if (FeedAt(w, driven, s.x, s.y, s.z, s.rate, s.kind, d2max, key)) return;
@@ -608,6 +634,78 @@ namespace Sting.Core
             if (driven) feeding = true;
             w.ai.atFood = kind;
             return true;
+        }
+
+        // ---------------- seasonal ecology (GDD 9.4, T1-8): pure functions of the seed, the chunk and the clock, plus the
+        // sips taken (chunk state). The ecology tick of GDD 3.3 is evaluated lazily from the last sip.
+        public bool InBloom(ChunkRec rec, int i)
+        {
+            var f = rec.content.flowers[i]; var w = T.eco.bloom[f.color % T.eco.bloom.Length]; Num frac = SeasonFrac;
+            Num j = (HSeq((long)(seed & 0xffffffffUL), rec.cx, rec.cz, i, 971) - 0.5) * 2 * T.eco.bloomJitter;
+            return frac >= w[0] + j && frac < w[1] + j;
+        }
+        /// forager bees working each flower of the chunk (they forage only their own chunk's flowers)
+        internal int[] BeeLoad(ChunkRec rec)
+        {
+            if (rec.beeLoad != null) return rec.beeLoad;
+            var c = rec.content; var l = new int[c.flowers.Count];
+            for (int i = 0; i < l.Length; i++) { var f = c.flowers[i]; int n = 0; foreach (var hv in c.hives) foreach (var b in hv.bees) if (!b.guard && b.tx == f.x && b.tz == f.z) n++; l[i] = n; }
+            return rec.beeLoad = l;
+        }
+        public Num NectarAt(ChunkRec rec, int i)
+        {
+            if (!InBloom(rec, i)) return 0;
+            Num net = (T.eco.regenPerDay - T.eco.beeDrawPerDay * BeeLoad(rec)[i]) / 1440;
+            if (!chunkState.TryGet(rec.key, out var st) || st.nectar == null || !st.nectar.TryGetValue(i, out var n))
+                return net >= 0 ? 1 : Clamp(1 + net * (minute - season.startMinute), 0, 1);
+            return Clamp(n.lv + net * (minute - n.m), 0, 1);
+        }
+        internal void Sip(string key, int i, Num amount)
+        {
+            if (!records.TryGet(key, out var rec)) return;
+            Num lv = Max(0, NectarAt(rec, i) - amount);
+            var st = CS(key); st.nectar ??= new Dictionary<int, Nectar>();
+            st.nectar[i] = new Nectar { lv = lv, m = minute };
+        }
+        /// sugar index -> flower index, for the AI's picks (the generator pushes a sugar node right after each flower)
+        internal int[] FlowerIdx(ChunkRec rec)
+        {
+            if (rec.flowerIdx != null) return rec.flowerIdx;
+            var l = new int[rec.content.sugar.Count]; int k = 0;
+            for (int i = 0; i < l.Length; i++) l[i] = rec.content.sugar[i].kind == "flower" ? k++ : -1;
+            return rec.flowerIdx = l;
+        }
+        public bool CatActive(ChunkRec rec, int i)
+        {
+            Num frac = SeasonFrac, j = (HSeq((long)(seed & 0xffffffffUL), rec.cx, rec.cz, i, 972) - 0.5) * 2 * T.eco.catJitter;
+            return frac >= T.eco.catFrom + j && frac < T.eco.catTo + j;
+        }
+        public Num FlyShare() => Clamp(T.eco.flyBase + T.eco.flySlope * Clamp(SeasonFrac, 0, 1), 0, 1);
+        public bool FlyActive(ChunkRec rec, int i) => HSeq((long)(seed & 0xffffffffUL), rec.cx, rec.cz, i, day, 973) < FlyShare();
+        /// carrion: some days a dead mouse or bird lies in a chunk for a few days, good for a few loads of meat
+        public List<Carrion> CarrionIn(ChunkRec rec)
+        {
+            long sd = (long)(seed & 0xffffffffUL); Num CSz = T.chunk.size; var o = new List<Carrion>();
+            chunkState.TryGet(rec.key, out var st);
+            for (long d = day - T.eco.carrionDays + 1; d <= day; d++)
+            {
+                if (d < 0 || HSeq(sd, rec.cx, rec.cz, d, 974) >= T.eco.carrionChance) continue;
+                int taken = st != null && st.carrion != null && st.carrion.TryGetValue((int)d, out var tk) ? tk : 0;
+                int left = T.eco.carrionLoads - taken;
+                if (left <= 0) continue;
+                o.Add(new Carrion { x = (rec.cx + (HSeq(sd, rec.cx, rec.cz, d, 975) - 0.5) * 0.8) * CSz, y = 0.03, z = (rec.cz + (HSeq(sd, rec.cx, rec.cz, d, 976) - 0.5) * 0.8) * CSz, d = d, left = left });
+            }
+            return o;
+        }
+        /// what the season offers the abstract foragers: multipliers on sugar and protein income
+        public (Num sugar, Num protein) EcoAvail()
+        {
+            Num f = Clamp(SeasonFrac, 0, 1); int nb = 0;
+            foreach (var w in T.eco.bloom) if (f >= w[0] && f < w[1]) nb++;
+            Num bloom = (Num)nb / T.eco.bloom.Length;
+            Num sugar = T.eco.sugarBase + T.eco.sugarBloom * bloom + (f >= T.fruit.startFrac ? T.eco.sugarFruit : 0);
+            Num protein = T.eco.protBase + (f >= T.eco.catFrom && f < T.eco.catTo ? T.eco.protCat : 0) + T.eco.protFly * FlyShare();
+            return (sugar, protein);
         }
 
         void FallIn(Wasp w, Cup cup, string key, bool driven)

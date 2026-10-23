@@ -1004,5 +1004,49 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   ok(ev3.some((q) => q.type === 'aiAttack' && q.humanHex && q.humanHex === hex) && count(ev3, 'extTreat') === 1, 'guards go for the exterminator at the nest');
 }
 
+// 34. Seasonal ecology (T1-8): flowers bloom by kind through the season, nectar runs down as wasps sip and as bees
+// forage, and regrows; caterpillars early, flies late, carrion now and then; the abstract colony forages the same
+{
+  const s = new Sim({ seed: 1234, birds: false });
+  const at = (frac) => { s.season.startMinute = s.minute - frac * s.settings.seasonDays * 1440; };
+  const recs = s.activeChunks.filter((r) => r.content.flowers.length);
+  const blooming = (frac) => { at(frac); const k = [0, 0, 0, 0, 0]; for (const r of recs) r.content.flowers.forEach((f, i) => { if (s.inBloom(r, i)) k[f.color]++; }); return k; };
+  const early = blooming(0.1), late = blooming(0.85);
+  ok(early[0] > 0 && early[4] === 0 && late[0] === 0 && late[4] > 0, `each kind of flower blooms in its own part of the season (early ${early.join('/')}, late ${late.join('/')})`);
+  // sip a flower in bloom down to nothing; it regrows
+  at(0.5);
+  let rec = null, fi = -1;
+  for (const r of recs) { const b = s._beeLoad(r); r.content.flowers.forEach((f, i) => { if (fi < 0 && s.inBloom(r, i) && b[i] === 0) { rec = r; fi = i; } }); if (fi >= 0) break; }
+  const f = rec.content.flowers[fi], key = chunkKey(rec.cx, rec.cz), w = s.wasp;
+  for (const h of s.active) h.tr = { ...h.tr, style: Style.Freezer };
+  w.energy = 0.2;
+  const n0 = s.nectarAt(rec, fi);
+  run(s, 600, () => { if (w.state === 'fly' || w.state === 'landed') place(w, { x: f.x, y: f.y + 0.03, z: f.z }); w.energy = Math.min(w.energy, 0.5); return idle(); });
+  const n1 = s.nectarAt(rec, fi), e1 = w.energy;
+  run(s, 30, () => { place(w, { x: f.x, y: f.y + 0.03, z: f.z }); return idle(); });
+  ok(n0 === 1 && n1 === 0 && w.energy <= e1 + 0.02, `a wasp drinks a flower dry and gets only the trickle that regrows (nectar ${n0} -> ${n1}, crop ${e1.toFixed(3)} -> ${w.energy.toFixed(3)})`);
+  s.cs(key).nectar[fi][1] -= 360; // six hours later
+  ok(s.nectarAt(rec, fi) > 0.5, `the flower refills over the day (${s.nectarAt(rec, fi).toFixed(2)} after six hours)`);
+  // a flower the local bees work stays low
+  let bee = null;
+  for (const r of s.activeChunks) { const b = s._beeLoad(r); b.forEach((n, i) => { if (!bee && n * T.eco.beeDrawPerDay > T.eco.regenPerDay && s.inBloom(r, i)) bee = { r, i, n }; }); }
+  ok(!bee || s.nectarAt(bee.r, bee.i) < 0.2, `flowers the bees work stay drained (${bee ? `${bee.n} bees, nectar ${s.nectarAt(bee.r, bee.i).toFixed(2)}` : 'no such flower here'})`);
+  // prey by season
+  const prey = (frac) => { at(frac); let cats = 0, flies = 0; for (const r of s.activeChunks) { r.content.caterpillars.forEach((c, i) => { if (s.catActive(r, i)) cats++; }); r.content.flies.forEach((c, i) => { if (s.flyActive(r, i)) flies++; }); } return { cats, flies }; };
+  const p1 = prey(0.4), p2 = prey(0.95);
+  ok(p1.cats > 0 && p2.cats === 0 && p2.flies > p1.flies, `caterpillars in early summer, more flies late (caterpillars ${p1.cats} -> ${p2.cats}, flies ${p1.flies} -> ${p2.flies})`);
+  const a1 = (at(0.5), s.ecoAvail()), a2 = (at(0.97), s.ecoAvail());
+  ok(a2.sugar < a1.sugar && a2.protein < a1.protein, `the abstract foragers find less late in the season (sugar ${a1.sugar.toFixed(2)} -> ${a2.sugar.toFixed(2)}, protein ${a1.protein.toFixed(2)} -> ${a2.protein.toFixed(2)})`);
+  // carrion
+  let cr = null, crRec = null;
+  for (let d = 0; d < 30 && !cr; d++) { s.day = d; for (const r of s.activeChunks) { const l = s.carrionIn(r); if (l.length) { cr = l[0]; crRec = r; break; } } }
+  ok(!!cr, `carrion turns up now and then (day ${s.day})`);
+  const w2 = s.wasp; w2.carry = null; w2.state = 'fly';
+  place(w2, { x: cr.x, y: cr.y + 0.02, z: cr.z });
+  const ev = run(s, 2, (sim, i) => idle({ act: i === 1 ? Act.Interact : 0 }));
+  const left = s.carrionIn(crRec).find((x) => x.d === cr.d);
+  ok(w2.carry && w2.carry.what === 'carrion' && (left ? left.left : 0) === cr.left - 1, `E at the carcass takes a load of meat (${w2.carry && w2.carry.what}, ${left ? left.left : 0} left)`);
+}
+
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');
 process.exit(failures ? 1 : 0);
