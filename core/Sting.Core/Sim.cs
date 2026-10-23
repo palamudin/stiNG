@@ -136,7 +136,20 @@ namespace Sting.Core
             for (int i = 1; i < L.Length; i++) if (s.esc >= L[i]) lv = i;
             return lv;
         }
-        public int EscAt(Num x, Num z) => EscLevel(ChunkKey(ChunkOf(x), ChunkOf(z)));
+        /// Everything a chunk holds lies within 34 m of its centre (world generation keeps to that; a test checks it).
+        /// Scans for things near a point skip chunks farther than this, which changes no result and saves most of the work.
+        public static readonly Num REACH = 40;
+        static bool Near(ChunkRec rec, Num x, Num z) => Abs(x - rec.cx * World.CS) <= REACH && Abs(z - rec.cz * World.CS) <= REACH;
+
+        public int EscAt(Num x, Num z) => EscLevel(KeyOf(ChunkOf(x), ChunkOf(z)));
+        /// Chunk keys without building a string every call (the sim asks for the same few chunks every tick)
+        readonly Dictionary<long, string> keyCache = new Dictionary<long, string>();
+        public string KeyOf(int cx, int cz)
+        {
+            long k = ((long)cx << 32) ^ (uint)cz;
+            if (!keyCache.TryGetValue(k, out var s)) { if (keyCache.Count > 4096) keyCache.Clear(); keyCache[k] = s = ChunkKey(cx, cz); }
+            return s;
+        }
         public void AddEsc(Num x, Num z, Num pts)
         {
             string k = ChunkKey(ChunkOf(x), ChunkOf(z)); int before = EscLevel(k);
@@ -145,7 +158,9 @@ namespace Sting.Core
             if (after != before) Emit("escalation", ("key", k), ("level", after));
         }
         public Num Temperature => TempAt(seed, minute);
-        public bool Raining => IsRaining(seed, minute);
+        /// Debug and test hook: force rain on (true) or off (false); null follows the weather
+        public bool? rainOverride;
+        public bool Raining => rainOverride ?? IsRaining(seed, minute);
         public int PhysicalCount => Own().Count;
         List<Wasp> Own() { var l = new List<Wasp>(); foreach (var w in wasps) if (w.colony == "own") l.Add(w); return l; }
         int OwnWorkers() { int n = 0; foreach (var w in wasps) if (w.colony == "own" && w.caste != "queen") n++; return n; }
@@ -181,7 +196,7 @@ namespace Sting.Core
             var dw = Driven() ?? ghost;
             if (dw != null) { wx = dw.x; wz = dw.z; } else { wx = nest.spawn.x; wz = nest.spawn.z; }
             int ccx = ChunkOf(wx), ccz = ChunkOf(wz);
-            string key = ChunkKey(ccx, ccz);
+            string key = KeyOf(ccx, ccz);
             if (key == activeKey && !force) return;
             bool changed = key != activeKey;
             activeKey = key;

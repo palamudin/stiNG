@@ -130,7 +130,12 @@ namespace Sting.Core
         public bool exterminator = true, birds = true, rivals = true, pestControl = true;
         public Settings Clone() => (Settings)MemberwiseClone();
 
+#if STING_FIXED
+        // a setting like 1.4 is stored as the nearest Q32.32 value; print it as the number that was set
+        static string N(Num v) => JsNum.ToString(System.Math.Round((double)v, 6));
+#else
         static string N(Num v) => JsNum.ToString((double)v);
+#endif
         static string B(bool v) => v ? "true" : "false";
 
         /// FNV-32 over the rule-changing settings in a fixed order; matches tuning.js rulesHash
@@ -140,6 +145,24 @@ namespace Sting.Core
                 + "|seasonDays=" + N(seasonDays) + "|reaction=" + N(reaction) + "|escalation=" + N(escalation)
                 + "|exterminator=" + B(exterminator) + "|birds=" + B(birds) + "|rivals=" + B(rivals) + "|pestControl=" + B(pestControl);
             return R.Fnv32(str).ToString("x8");
+        }
+
+        /// A short tag that tells this world apart at a glance (GDD 4.8). Empty means the standard rules. (tuning.js worldTag)
+        public string WorldTag()
+        {
+            var d = new Settings(); var t = new System.Collections.Generic.List<string>();
+            string X(Num v) => "×" + JsNum.ToString(System.Math.Round((double)v, 2, System.MidpointRounding.AwayFromZero));
+            if (dayMinutes != d.dayMinutes) t.Add($"{N(dayMinutes)}-min days");
+            if (seasonDays != d.seasonDays) t.Add(seasonDays > d.seasonDays ? $"long seasons ({N(seasonDays)} d)" : $"short seasons ({N(seasonDays)} d)");
+            if (humanDensity != d.humanDensity) t.Add($"people {X(humanDensity)}");
+            if (reaction != d.reaction) t.Add(reaction > 1 ? "slow humans" : "fast humans");
+            if (escalation != d.escalation) t.Add(escalation > 1 ? "touchy neighborhoods" : "easygoing neighborhoods");
+            if (beeAggression != d.beeAggression) t.Add($"bees {X(beeAggression)}");
+            if (!exterminator) t.Add("no exterminators");
+            if (!pestControl) t.Add("no pest control");
+            if (!birds) t.Add("no birds");
+            if (!rivals) t.Add("no rival colonies");
+            return string.Join(" · ", t);
         }
     }
 

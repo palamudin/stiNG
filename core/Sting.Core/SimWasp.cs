@@ -120,6 +120,7 @@ namespace Sting.Core
                 Collide(w);
             }
             WebCheck(w, p0);
+
             // grounded without fuel: starvation clock
             if (w.energy <= 0 && w.y <= T.wasp.radius + 1e-6)
             {
@@ -131,10 +132,10 @@ namespace Sting.Core
         bool NearCitronella(Wasp w)
         {
             if (EscAt(w.x, w.z) < 2) return false;
-            foreach (var rec in activeChunks) foreach (var t in rec.content.tables)
+            foreach (var rec in activeChunks) if (Near(rec, w.x, w.z)) foreach (var t in rec.content.tables)
                 {
                     Num dx = w.x - t.x, dz = w.z - t.z;
-                    if (dx * dx + dz * dz < 2.25 && EscLevel(ChunkKey(rec.cx, rec.cz)) >= 2) return true;
+                    if (dx * dx + dz * dz < 2.25 && EscLevel(rec.key) >= 2) return true;
                 }
             return false;
         }
@@ -147,6 +148,7 @@ namespace Sting.Core
             var pen = new Num[6];
             foreach (var rec in activeChunks)
             {
+                if (!Near(rec, w.x, w.z)) continue;
                 var c = rec.content;
                 foreach (var b in c.boxes)
                 {
@@ -233,7 +235,7 @@ namespace Sting.Core
             var z = Body.ZONES[bZone];
             // nearest garment opening within reach of the wasp (GDD 8.8)
             int opening = -1;
-            var nodes = Body.GarmentGraph(bHm.tr, bHm.clothing, bHm.posture, bHm.PartsNow);
+            var nodes = UnderNodes(bHm);
             Num od = T.under.openingRadius * T.under.openingRadius;
             for (int i = 0; i < nodes.Count; i++)
             {
@@ -379,7 +381,8 @@ namespace Sting.Core
             Num r2 = T.prey.catchDist * T.prey.catchDist;
             foreach (var rec in activeChunks)
             {
-                var c = rec.content; string key = ChunkKey(rec.cx, rec.cz); var st = CS(key);
+                if (!Near(rec, w.x, w.z)) { CS(rec.key); continue; } // the JS creates chunk state here, and the state hash sees it
+                var c = rec.content; string key = rec.key; var st = CS(key);
                 for (int i = 0; i < c.flies.Count; i++)
                 {
                     if ((st.caughtFly.TryGetValue(i, out var cf) ? cf : 0) > tick) continue;
@@ -393,7 +396,7 @@ namespace Sting.Core
                 }
                 for (int h = 0; h < c.hives.Count; h++)
                 {
-                    var hv = c.hives[h]; st.beeLost.TryGetValue(h, out var lost); var al = hiveAlarms.Get(key + "#" + h);
+                    var hv = c.hives[h]; st.beeLost.TryGetValue(h, out var lost); var al = hiveAlarms.Get(rec.Sub(h));
                     for (int k = T.bees.guards; k < hv.bees.Count; k++)
                     {
                         if ((lost != null && lost.ContainsKey(k)) || (al != null && al.phys.ContainsKey(k))) continue;
@@ -426,6 +429,7 @@ namespace Sting.Core
             Num reach = T.pulp.reach + T.wasp.radius;
             foreach (var rec in activeChunks)
             {
+                if (!Near(rec, w.x, w.z)) continue;
                 foreach (var b in rec.content.boxes)
                 {
                     if (!b.wood || b.hive) continue;
@@ -464,7 +468,8 @@ namespace Sting.Core
             if (driven) feeding = false;
             foreach (var rec in activeChunks)
             {
-                string key = ChunkKey(rec.cx, rec.cz); int lvl = EscLevel(key);
+                if (!Near(rec, w.x, w.z)) continue;
+                string key = rec.key; int lvl = EscLevel(key);
                 var c = rec.content;
                 if (lvl >= 3)
                 {
@@ -479,24 +484,27 @@ namespace Sting.Core
                     }
                 }
                 if (w.energy >= 1 && !(w.ai.mode == "collect" && w.role == "sugar")) continue;
-                var foods = new List<Food>();
-                for (int i = 0; i < c.sugar.Count; i++) { var s = c.sugar[i]; foods.Add(new Food { x = s.x, y = s.y, z = s.z, rate = s.rate, kind = s.kind, i = i, node = s }); }
-                foods.AddRange(SpillsIn(key)); foods.AddRange(FruitIn(rec));
-                foreach (var s in foods)
+                for (int i = 0; i < c.sugar.Count; i++)
                 {
-                    if (s.kind == "can" && (lvl >= 2 || CanSpilled(key, s.i))) continue; // food covered (GDD 8.10) or knocked over
-                    if (D2(w, new V3(s.x, s.y, s.z)) <= d2max)
-                    {
-                        Num add = T.energy.refuelPerSec * s.rate * T.DT;
-                        if (w.energy < 1) w.energy = Min(1, w.energy + add);
-                        else if (!driven) w.ai.cargo = Min(1, w.ai.cargo + add);
-                        if (driven) feeding = true;
-                        w.ai.atFood = s.kind;
-                        return;
-                    }
+                    var s = c.sugar[i];
+                    if (s.kind == "can" && (lvl >= 2 || CanSpilled(key, i))) continue; // food covered (GDD 8.10) or knocked over
+                    if (FeedAt(w, driven, s.x, s.y, s.z, s.rate, s.kind, d2max)) return;
                 }
+                foreach (var s in SpillsIn(key)) if (FeedAt(w, driven, s.x, s.y, s.z, s.rate, s.kind, d2max)) return;
+                foreach (var s in FruitIn(rec)) if (FeedAt(w, driven, s.x, s.y, s.z, s.rate, s.kind, d2max)) return;
             }
             w.ai.atFood = null;
+        }
+
+        bool FeedAt(Wasp w, bool driven, Num x, Num y, Num z, Num rate, string kind, Num d2max)
+        {
+            if (D2(w, new V3(x, y, z)) > d2max) return false;
+            Num add = T.energy.refuelPerSec * rate * T.DT;
+            if (w.energy < 1) w.energy = Min(1, w.energy + add);
+            else if (!driven) w.ai.cargo = Min(1, w.ai.cargo + add);
+            if (driven) feeding = true;
+            w.ai.atFood = kind;
+            return true;
         }
 
         void AddDeposited(string kind, Num amt)
@@ -562,7 +570,12 @@ namespace Sting.Core
             Emit("underEnter", ("id", w.id), ("humanHex", hm.hex), ("key", w.under.key));
         }
 
-        List<GNode> UnderNodes(Human hm) => Body.GarmentGraph(hm.tr, hm.clothing, hm.posture, hm.PartsNow);
+        List<GNode> UnderNodes(Human hm)
+        {
+            if (hm.gCache == null || hm.gClothing != hm.clothing || hm.gPosture != hm.posture)
+            { hm.gCache = Body.GarmentGraph(hm.tr, hm.clothing, hm.posture, hm.PartsNow); hm.gClothing = hm.clothing; hm.gPosture = hm.posture; }
+            return hm.gCache;
+        }
 
         static V3 UnderPoint(Under u, List<GNode> nodes)
         {

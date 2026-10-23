@@ -10,6 +10,7 @@
 // converted to Num where they meet a Num: exactly in the double build, by correct rounding in the fixed build.
 // Sim code never does arithmetic on runtime doubles.
 using System;
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Sting.Core.Tests")]
 #pragma warning disable IDE1006
 namespace Sting.Core
 {
@@ -35,7 +36,11 @@ namespace Sting.Core
             double s = d * ONE;
             if (s >= 9.2233720368547758e18) return MaxValue;
             if (s <= -9.2233720368547758e18) return MinValue;
-            return new Num((long)Math.Round(s, MidpointRounding.ToEven));
+            // round half to even, by hand (Math.Round is slower and this is on every literal)
+            double f = Math.Floor(s), frac = s - f;
+            long r = (long)f;
+            if (frac > 0.5 || (frac == 0.5 && (r & 1) != 0)) r++;
+            return new Num(r);
         }
         public static implicit operator Num(int i) => new Num((long)i << FracBits);
         public static implicit operator Num(long l) => l >= (1L << 31) ? MaxValue : l < -(1L << 31) ? MinValue : new Num(l << FracBits);
@@ -62,6 +67,7 @@ namespace Sting.Core
             long x = a.raw, y = b.raw;
             bool neg = (x < 0) ^ (y < 0);
             ulong ux = x < 0 ? (ulong)(-x) : (ulong)x, uy = y < 0 ? (ulong)(-y) : (ulong)y;
+            if (((ux | uy) >> 32) == 0) { ulong p = (ux * uy) >> 32; return new Num(neg ? -(long)p : (long)p); } // both below 1: one multiply
             ulong xl = ux & 0xFFFFFFFFUL, xh = ux >> 32, yl = uy & 0xFFFFFFFFUL, yh = uy >> 32;
             ulong ll = xl * yl, lh = xl * yh, hl = xh * yl, hh = xh * yh;
             ulong mid = (ll >> 32) + (lh & 0xFFFFFFFFUL) + (hl & 0xFFFFFFFFUL);
@@ -78,15 +84,49 @@ namespace Sting.Core
             if (b.raw == 0) return DivZero(a);
             bool neg = (a.raw < 0) ^ (b.raw < 0);
             ulong n = a.raw < 0 ? (ulong)(-a.raw) : (ulong)a.raw, d = b.raw < 0 ? (ulong)(-b.raw) : (ulong)b.raw;
+            if ((n >> 32) == 0)
+            {
+                // a below 1: (n << 32) fits, one division
+                ulong q1 = (n << 32) / d;
+                if (q1 >= (1UL << 63)) return neg ? MinValue : MaxValue;
+                return new Num(neg ? -(long)q1 : (long)q1);
+            }
             ulong q = n / d, rem = n % d;
             if (q >= (1UL << 31)) return neg ? MinValue : MaxValue;
-            for (int i = 0; i < FracBits; i++)
+            // the 32 fraction bits of floor((n << 32) / d), as many per hardware division as the remainder has room for
+            int left = FracBits;
+            while (left > 0)
             {
-                bool carry = (rem >> 63) != 0;
-                rem <<= 1; q <<= 1;
-                if (carry || rem >= d) { rem -= d; q |= 1; }
+                int room = Lz(rem) - 1; // bits rem can shift without overflow, keeping it below 2^63
+                int k = room < left ? room : left;
+                if (k <= 0)
+                {
+                    // rem is at least 2^62: one bit by hand
+                    bool carry = (rem >> 63) != 0;
+                    rem <<= 1; q <<= 1;
+                    if (carry || rem >= d) { rem -= d; q |= 1; }
+                    left--;
+                    continue;
+                }
+                rem <<= k;
+                q = (q << k) | (rem / d);
+                rem %= d;
+                left -= k;
             }
             return new Num(neg ? -(long)q : (long)q);
+        }
+        /// Leading zero bits of a 64-bit value (BitOperations is not in netstandard2.1)
+        static int Lz(ulong x)
+        {
+            if (x == 0) return 64;
+            int n = 0;
+            if ((x >> 32) == 0) { n += 32; x <<= 32; }
+            if ((x >> 48) == 0) { n += 16; x <<= 16; }
+            if ((x >> 56) == 0) { n += 8; x <<= 8; }
+            if ((x >> 60) == 0) { n += 4; x <<= 4; }
+            if ((x >> 62) == 0) { n += 2; x <<= 2; }
+            if ((x >> 63) == 0) n += 1;
+            return n;
         }
         static Num DivZero(Num a) => a.raw > 0 ? MaxValue : a.raw < 0 ? MinValue : Zero;
 
@@ -103,13 +143,16 @@ namespace Sting.Core
         public static Num Min(Num a, Num b) => a.raw < b.raw ? a : b;
         public static Num Max(Num a, Num b) => a.raw > b.raw ? a : b;
 
-        /// Square root: isqrt of the 96-bit value raw << 32, two bits per step
+        /// Square root: isqrt of the 96-bit value raw << 32, two bits per step, skipping the leading zero pairs
         public static Num Sqrt(Num a)
         {
             if (a.raw <= 0) return Zero;
             ulong nHi = (ulong)a.raw >> 32, nLo = (ulong)a.raw << 32; // the 128-bit radicand, high and low words
+            int skip = (nHi != 0 ? Lz(nHi) : 64 + Lz(nLo)) / 2, sh = 2 * skip;
+            if (sh >= 64) { nHi = nLo << (sh - 64); nLo = 0; }
+            else if (sh > 0) { nHi = (nHi << sh) | (nLo >> (64 - sh)); nLo <<= sh; }
             ulong rem = 0, root = 0;
-            for (int i = 0; i < 64; i++)
+            for (int i = skip; i < 64; i++)
             {
                 // bring down the next two bits of the radicand
                 ulong top = nHi >> 62;

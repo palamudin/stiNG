@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using Sting.Core;
 using static Sting.Core.R;
 
@@ -24,6 +25,27 @@ namespace Sting.Core.Tests
 
         static int Main(string[] args)
         {
+            if (args.Length >= 1 && args[0] == "--opbench")
+            {
+                Num acc = 0.5, x = 1.2345, y = 0.987; int n = 5000000;
+                void Time(string what, Func<Num> f) { var t0 = System.Diagnostics.Stopwatch.StartNew(); for (int i = 0; i < n; i++) acc += f(); Console.WriteLine($"{what,-12} {t0.Elapsed.TotalMilliseconds * 1e6 / n:0.0} ns"); }
+                Time("mul", () => x * y); Time("div", () => x / y); Time("sqrt", () => Sqrt(x)); Time("literal", () => 0.97); Time("dsin", () => DSin(x)); Time("add", () => x + y);
+                Console.WriteLine(acc);
+                return 0;
+            }
+            if (args.Length >= 1 && args[0] == "--bench")
+            {
+                // time per tick of a busy world: AI foragers out, the player stinging, humans reacting
+                foreach (var (name, set) in new[] { ("jab", new Settings { seed = 1234 }), ("hot", new Settings { seed = 1234, escalation = 6, reaction = 1.5 }) })
+                {
+                    var sim = new Sim(set); var bot = Bots.StingBot("full", h => true, 40);
+                    for (int t = 0; t < 3000; t++) { sim.Step(bot(sim)); sim.DrainEvents(); }
+                    var sw0 = System.Diagnostics.Stopwatch.StartNew(); int n = 12000, wasps = 0;
+                    for (int t = 0; t < n; t++) { sim.Step(bot(sim)); sim.DrainEvents(); wasps += sim.wasps.Count; }
+                    Console.WriteLine($"{name}: {sw0.Elapsed.TotalMilliseconds * 1000 / n:0.0} µs per tick, {(double)wasps / n:0.0} wasps out on average, {sim.active.Count} humans");
+                }
+                return 0;
+            }
             if (args.Length >= 2 && args[0] == "--events")
             {
                 // print every event of the jab scenario up to a tick, to see where the two builds part

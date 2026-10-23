@@ -74,6 +74,8 @@ namespace Sting.Core
         public Num panic, fleeSteps, dirX, dirZ, stungCount; public long winDay = -1; public HumanWin win;
         public int annoyId; public Num annoy, cooldown, sprayCount, treat; public long clothesDay; public bool special;
         public List<Part> sit, stand;
+        // the garment graph is a pure function of traits, clothing and posture; clothing is replaced, never edited
+        internal List<GNode> gCache; internal Clothing gClothing; internal string gPosture;
         public List<Part> Parts(string posture) => posture == "sit" ? sit : stand;
         public List<Part> PartsNow => posture == "sit" ? sit : stand;
         public Frame F => new Frame(x, z, fx, fz);
@@ -125,7 +127,21 @@ namespace Sting.Core
         public override string ToString() => type;
     }
 
-    public sealed class ChunkRec { public int cx, cz, genVersion, discoveredTick; public uint contentHash; public ChunkContent content; }
+    public sealed class ChunkRec
+    {
+        public int cx, cz, genVersion, discoveredTick; public uint contentHash; public ChunkContent content;
+        string _key; public string key => _key ??= World.ChunkKey(cx, cz);
+        // caches of pure functions of the seed, the chunk and the clock (never saved, never hashed)
+        internal object sites; internal List<Food> fruit; internal long fruitDay = long.MinValue; internal int fruitSeason;
+        internal List<Bait> baits; internal int baitsCampaign = -1;
+        string[] _sub = new string[0];
+        /// "cx,cz#i": the key of the i-th hive or hunter in this chunk
+        public string Sub(int i)
+        {
+            if (i >= _sub.Length) System.Array.Resize(ref _sub, i + 8);
+            return _sub[i] ??= key + "#" + i;
+        }
+    }
     public sealed class LastSting { public Num x, z; }
     public sealed class ChunkState
     {

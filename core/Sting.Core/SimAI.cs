@@ -105,7 +105,7 @@ namespace Sting.Core
             }
             for (int ri = 0; ri < activeChunks.Count; ri++)
             {
-                var rec = activeChunks[ri]; var c = rec.content; string key = ChunkKey(rec.cx, rec.cz); var st = CS(key); int lvl = EscLevel(key);
+                var rec = activeChunks[ri]; var c = rec.content; string key = rec.key; var st = CS(key); int lvl = EscLevel(key);
                 if (w.role == "sugar")
                 {
                     for (int i = 0; i < c.sugar.Count; i++)

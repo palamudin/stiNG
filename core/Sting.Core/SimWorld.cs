@@ -28,10 +28,13 @@ namespace Sting.Core
         }
 
         /// Live puddles in a chunk: { x, y, z, rate, kind: 'spill', i }
-        public List<Food> SpillsIn(string key)
+        static readonly List<Food> NoFood = new List<Food>();
+        static readonly List<Bait> NoBaits = new List<Bait>();
+
+        public IReadOnlyList<Food> SpillsIn(string key)
         {
+            if (!chunkState.TryGet(key, out var st) || st.spilled == null || !records.TryGet(key, out var rec)) return NoFood;
             var o = new List<Food>();
-            if (!chunkState.TryGet(key, out var st) || st.spilled == null || !records.TryGet(key, out var rec)) return o;
             var ks = new List<int>(st.spilled.Keys); ks.Sort();
             foreach (var i in ks)
             {
@@ -44,7 +47,7 @@ namespace Sting.Core
         public bool CanSpilled(string key, int i) => chunkState.TryGet(key, out var st) && st.spilled != null && st.spilled.TryGetValue(i, out var v) && v > minute;
 
         /// p: where the threat came from; null flees backwards. Never a live wasp position, so peers agree.
-        void StartFlee(Human hm, LastSting p)
+        internal void StartFlee(Human hm, LastSting p)
         {
             if (hm.posture == "sit") Spill(hm);
             Num dx = hm.x - (p != null ? p.x : hm.x - hm.fx), dz = hm.z - (p != null ? p.z : hm.z - hm.fz);
@@ -296,7 +299,7 @@ namespace Sting.Core
             // entrance guard check for every active hive
             foreach (var rec in activeChunks)
             {
-                string key = ChunkKey(rec.cx, rec.cz);
+                string key = rec.key;
                 var hives = rec.content.hives;
                 for (int h = 0; h < hives.Count; h++)
                 {
@@ -500,7 +503,7 @@ namespace Sting.Core
 
         Tree TrunkNear(Wasp w)
         {
-            foreach (var rec in activeChunks) foreach (var t in rec.content.trees)
+            foreach (var rec in activeChunks) if (Near(rec, w.x, w.z)) foreach (var t in rec.content.trees)
                 {
                     Num dx = w.x - t.x, dz = w.z - t.z, d = Sqrt(dx * dx + dz * dz) - t.r;
                     if (d <= 0.06 && w.y > 0.8 && w.y < t.h) return t;
@@ -509,16 +512,12 @@ namespace Sting.Core
         }
 
         public sealed class Sites { public List<V3> holes = new List<V3>(); public List<(V3 p, Tree t)> branches = new List<(V3, Tree)>(); }
-        readonly Dictionary<string, Sites> siteCache = new Dictionary<string, Sites>();
-        readonly Dictionary<string, List<Food>> fruitCache = new Dictionary<string, List<Food>>();
-        readonly Dictionary<string, List<Bait>> baitCache = new Dictionary<string, List<Bait>>();
 
         /// Candidate nest sites around the queen (GDD 6.6). Burrows and branch points are derived from the seed and the
         /// chunk's frozen content, so they cost nothing to store and every peer sees the same ones.
         public Sites SitesIn(ChunkRec rec)
         {
-            string key = ChunkKey(rec.cx, rec.cz);
-            if (siteCache.TryGetValue(key, out var hit)) return hit;
+            if (rec.sites is Sites hit) return hit;
             Num CSz = T.chunk.size, sd = seed & 0xffffffffUL;
             var o = new Sites();
             // h32 reads four arguments; the JS passes a fifth that it ignores, kept so both sides agree
@@ -534,20 +533,18 @@ namespace Sting.Core
                 Num a = H32(sd, rec.cx, rec.cz, i) * 6.28318, d = t.cr * 0.55;
                 o.branches.Add((new V3(t.x + d * DCos(a), Max(1.8, t.h - t.cr * 0.7), t.z + d * DSin(a)), t));
             }
-            if (siteCache.Count > 64) siteCache.Clear();
-            siteCache[key] = o;
+            rec.sites = o;
             return o;
         }
 
         /// Windfall fruit under fruit trees from mid-season (GDD 9.4). Each fruit falls on a day picked by hash and lies
         /// for a few days; a pure function of the seed, the chunk and the clock.
-        public List<Food> FruitIn(ChunkRec rec)
+        public IReadOnlyList<Food> FruitIn(ChunkRec rec)
         {
             Num frac = SeasonFrac;
-            if (frac < T.fruit.startFrac) return new List<Food>();
-            Num sd = seed & 0xffffffffUL; string key = ChunkKey(rec.cx, rec.cz); long today = day;
-            string ck = key + "|" + today + "|" + season.n;
-            if (fruitCache.TryGetValue(ck, out var hit)) return hit;
+            if (frac < T.fruit.startFrac) return NoFood;
+            Num sd = seed & 0xffffffffUL; long today = day;
+            if (rec.fruit != null && rec.fruitDay == today && rec.fruitSeason == season.n) return rec.fruit;
             var o = new List<Food>(); Num span = 1 - T.fruit.startFrac;
             var trees = rec.content.trees;
             for (int ti = 0; ti < trees.Count; ti++)
@@ -562,8 +559,7 @@ namespace Sting.Core
                     o.Add(new Food { x = t.x + d * DCos(a), y = 0.03, z = t.z + d * DSin(a), rate = T.fruit.rate, kind = "fruit", i = ti * 16 + k });
                 }
             }
-            if (fruitCache.Count > 128) fruitCache.Clear();
-            fruitCache[ck] = o;
+            rec.fruit = o; rec.fruitDay = today; rec.fruitSeason = season.n;
             return o;
         }
 
@@ -571,6 +567,7 @@ namespace Sting.Core
         {
             foreach (var rec in activeChunks)
             {
+                if (!Near(rec, w.x, w.z)) continue;
                 var s = SitesIn(rec);
                 foreach (var h in s.holes) if (w.y < 0.3 && Sq(w.x - h.x) + Sq(w.z - h.z) < 0.12 * 0.12) return new SiteHit { type = "ground", x = h.x, z = h.z };
                 foreach (var (b, t) in s.branches) if (D2(w, b) < 0.15 * 0.15) return new SiteHit { type = "branch", x = b.x, y = b.y, z = b.z, t = t };
@@ -613,9 +610,10 @@ namespace Sting.Core
             if (w.state != "fly" && w.state != "stunned") return;
             foreach (var rec in activeChunks)
             {
+                if (!Near(rec, w.x, w.z)) { if (rec.content.webs.Count > 0) CS(rec.key); continue; } // as above: keep the chunk state the JS creates
                 var webs = rec.content.webs;
                 if (webs.Count == 0) continue;
-                var st = CS(ChunkKey(rec.cx, rec.cz));
+                var st = CS(rec.key);
                 for (int i = 0; i < webs.Count; i++)
                 {
                     var wb = webs[i];
@@ -629,7 +627,7 @@ namespace Sting.Core
                     if (r2 > wb.r * wb.r) continue;
                     w.x = q.x; w.y = q.y; w.z = q.z; w.vx = w.vy = w.vz = 0;
                     w.state = "webbed";
-                    w.web = new WebHold { key = ChunkKey(rec.cx, rec.cz), i = i, progress = 0, prevBurst = 1, start = tick, spiderAt = tick + T.web.spiderDelay + Ceil(Sqrt(r2) / T.web.spiderSpeed * 60) };
+                    w.web = new WebHold { key = rec.key, i = i, progress = 0, prevBurst = 1, start = tick, spiderAt = tick + T.web.spiderDelay + Ceil(Sqrt(r2) / T.web.spiderSpeed * 60) };
                     if (w.attach != null) w.attach = null;
                     Emit("webbed", ("id", w.id), ("driven", w.id == drivenId), ("spiderAt", w.web.spiderAt));
                     return;
@@ -656,7 +654,7 @@ namespace Sting.Core
         /// Canopy cover: a tree crown overhead hides a wasp from birds
         bool UnderCanopy(WaspBase w)
         {
-            foreach (var rec in activeChunks) foreach (var t in rec.content.trees)
+            foreach (var rec in activeChunks) if (Near(rec, w.x, w.z)) foreach (var t in rec.content.trees)
                 {
                     Num dx = w.x - t.x, dz = w.z - t.z;
                     if (dx * dx + dz * dz < t.cr * t.cr && w.y < t.h + t.cr) return true;
@@ -684,12 +682,12 @@ namespace Sting.Core
         {
             foreach (var rec in activeChunks)
             {
-                string key = ChunkKey(rec.cx, rec.cz);
+                string key = rec.key;
                 var pl = list(rec.content);
                 for (int i = 0; i < pl.Count; i++)
                 {
                     var bd = pl[i];
-                    string k = key + "#" + i;
+                    string k = rec.Sub(i);
                     var st = states.Get(k);
                     if (st == null)
                     {
@@ -745,7 +743,7 @@ namespace Sting.Core
         {
             Num R = T.wasp.radius, g = T.land.gap;
             if (w.y <= R + g) return "ground";
-            foreach (var rec in activeChunks) foreach (var b in rec.content.boxes)
+            foreach (var rec in activeChunks) if (Near(rec, w.x, w.z)) foreach (var b in rec.content.boxes)
                 {
                     if (w.x < b.minx || w.x > b.maxx || w.z < b.minz || w.z > b.maxz) continue;
                     if (Abs(w.y - (b.maxy + R)) <= g) return b.hive ? "hive" : "wood";
@@ -776,6 +774,7 @@ namespace Sting.Core
             Num R = T.wasp.radius;
             foreach (var rec in activeChunks)
             {
+                if (!Near(rec, w.x, w.z)) continue;
                 foreach (var b in rec.content.boxes)
                 {
                     if (nx < b.minx - R || nx > b.maxx + R || nz < b.minz - R || nz > b.maxz + R) continue;
@@ -825,13 +824,12 @@ namespace Sting.Core
         }
 
         /// Bait stations hang on tree trunks at chest height, picked by hash from the chunk's trees
-        List<Bait> BaitsIn(string key)
+        IReadOnlyList<Bait> BaitsIn(string key)
         {
             var m = muni;
-            if (m == null || m.active == null || !m.active.keys.Contains(key)) return new List<Bait>();
-            if (!records.TryGet(key, out var rec)) return new List<Bait>();
-            string ck = m.active.n + "|" + key;
-            if (baitCache.TryGetValue(ck, out var hit)) return hit;
+            if (m == null || m.active == null || !m.active.keys.Contains(key)) return NoBaits;
+            if (!records.TryGet(key, out var rec)) return NoBaits;
+            if (rec.baits != null && rec.baitsCampaign == m.active.n) return rec.baits;
             var trees = new List<(Tree t, Num h)>();
             for (int i = 0; i < rec.content.trees.Count; i++) trees.Add((rec.content.trees[i], H32(m.active.n, rec.cx, rec.cz, i)));
             Stable.Sort(trees, (a, b) => Stable.Sign(a.h - b.h));
@@ -842,8 +840,7 @@ namespace Sting.Core
                 Num a = h * 6.28318, r = t.r + 0.03;
                 o.Add(new Bait { x = t.x + r * DCos(a), y = T.muni.baitHeight, z = t.z + r * DSin(a), key = key });
             }
-            if (baitCache.Count > 64) baitCache.Clear();
-            baitCache[ck] = o;
+            rec.baits = o; rec.baitsCampaign = m.active.n;
             return o;
         }
 
@@ -851,7 +848,7 @@ namespace Sting.Core
         {
             var o = new List<Bait>();
             if (muni == null || muni.active == null) return o;
-            foreach (var r in activeChunks) o.AddRange(BaitsIn(ChunkKey(r.cx, r.cz)));
+            foreach (var r in activeChunks) o.AddRange(BaitsIn(r.key));
             return o;
         }
 
@@ -896,7 +893,7 @@ namespace Sting.Core
 
         bool NearCan(Wasp w)
         {
-            foreach (var rec in activeChunks) foreach (var c in rec.content.cans) { Num dx = w.x - c.x, dz = w.z - c.z; if (dx * dx + dz * dz < 0.09) return true; }
+            foreach (var rec in activeChunks) if (Near(rec, w.x, w.z)) foreach (var c in rec.content.cans) { Num dx = w.x - c.x, dz = w.z - c.z; if (dx * dx + dz * dz < 0.09) return true; }
             return false;
         }
 
@@ -906,8 +903,9 @@ namespace Sting.Core
         {
             foreach (var rec in activeChunks)
             {
+                if (!Near(rec, w.x, w.z)) continue;
                 var rv = rec.content.rival;
-                if (rv != null && Sq(w.x - rv.ex) + Sq(w.y - rv.ey) + Sq(w.z - rv.ez) < 0.08 * 0.08) return (rv, ChunkKey(rec.cx, rec.cz));
+                if (rv != null && Sq(w.x - rv.ex) + Sq(w.y - rv.ey) + Sq(w.z - rv.ez) < 0.08 * 0.08) return (rv, rec.key);
             }
             return null;
         }
@@ -932,14 +930,14 @@ namespace Sting.Core
             if (net && peer != 0) return;
             if (!settings.rivals) { foreach (var w in new List<Wasp>(wasps)) if (w.colony != "own") Despawn(w); return; }
             var activeKeys = new HashSet<string>();
-            foreach (var r in activeChunks) activeKeys.Add(ChunkKey(r.cx, r.cz));
+            foreach (var r in activeChunks) activeKeys.Add(r.key);
             foreach (var w in new List<Wasp>(wasps)) if (w.colony != "own" && !activeKeys.Contains(w.colony)) Despawn(w);
             if (!daylight) return;
             foreach (var rec in activeChunks)
             {
                 var rv = rec.content.rival;
                 if (rv == null) continue;
-                string key = ChunkKey(rec.cx, rec.cz);
+                string key = rec.key;
                 int n = 0; foreach (var x in wasps) if (x.colony == key) n++;
                 if (n >= System.Math.Min(T.rival.maxPhysical, rv.workers) || tick % 180 >= 60) continue;
                 var w = SpawnWasp(false);
@@ -1126,7 +1124,7 @@ namespace Sting.Core
             // launch physical AI foragers while the player is near the nest (GDD 11.12: far colonies stay abstract)
             Rivals(daylight);
             bool nearNest = false;
-            if (colony.sited) foreach (var r in activeChunks) if (ChunkKey(r.cx, r.cz) == nest.key) { nearNest = true; break; }
+            if (colony.sited) foreach (var r in activeChunks) if (r.key == nest.key) { nearNest = true; break; }
             if (!nearNest)
             {
                 foreach (var w in Own()) if (w.id != drivenId) Despawn(w);
