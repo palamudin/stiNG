@@ -32,6 +32,7 @@ namespace Sting.Core.Tests
             t.colony.mated = 200;
             t.season.startMinute -= 0.71 * t.settings.seasonDays * 1440;
             RunS(t, 120);
+            RunS(t, 1, (sim, i) => Idle(c => c.pick = 1)); // wake the first queen (T1-15)
             return t;
         }
 
@@ -302,8 +303,12 @@ namespace Sting.Core.Tests
                 s.colony.mated = 200;
                 s.season.startMinute -= 0.71 * s.settings.seasonDays * 1440;
                 var ev = RunS(s, 120);
-                var wi = Find(ev, "winter"); var sp = Find(ev, "spring");
-                Ok(wi != null && sp != null, $"the season ends: winter, then spring ({wi?["survivors"]} queens survived)");
+                var wi = Find(ev, "winter");
+                Ok(wi != null && Find(ev, "spring") == null && s.winter != null && s.winter.sites.Count >= 2 && s.wasps.Count == 0,
+                    $"the season ends and the queens sleep until one is chosen ({wi?["survivors"]} survived at {s.winter?.sites.Count} sites: {(s.winter == null ? "" : string.Join(", ", s.winter.sites.Select(x => x.n + " " + x.kind)))})");
+                var pickSite = s.winter.sites[1];
+                var ev2 = RunS(s, 2, (sim, i) => Idle(cm => cm.pick = i == 0 ? 2 : 0));
+                Ok(Count(ev2, "spring") == 1 && s.winter == null && Hypot(s.wasp.x - pickSite.x, s.wasp.z - pickSite.z) < 0.2, $"picking the second wakes that queen where she wintered ({pickSite.kind})");
                 Ok(s.wasp.caste == "queen" && s.colony.adults == 0 && s.colony.cells == 0 && s.season.n == 2, "spring: you are the founding queen of a new colony");
                 var q = s.wasp;
                 Ok(!s.colony.sited, "spring: the queen has no nest yet");
@@ -363,6 +368,33 @@ namespace Sting.Core.Tests
                 var w = s.wasp; Place(w, P(n.x + 20, 1.5, n.z + 2)); w.state = "fly";
                 Num seen = s.ExtSightings(n.x + 20, n.z);
                 Ok(seen >= r20 + T.ext.physPerSec * 0.999, $"and our wasp flying in sight adds a line ({D(seen):0.000})");
+            }
+            // 33. winter with choices (T1-15)
+            {
+                (Sim s, HiberSite site, int scouted, SimEvent win) Late(string scout)
+                {
+                    var s = new Sim(new Settings { seed = 1234 });
+                    s.colony.mated = 300;
+                    s.season.startMinute -= 0.66 * s.settings.seasonDays * 1440;
+                    RunS(s, 2);
+                    var site = s.HiberSites().FirstOrDefault(x => x.kind == scout);
+                    var ev = new List<SimEvent>();
+                    if (site != null) { Place(s.wasp, P(site.x, site.y, site.z)); ev = RunS(s, 2, (sim, i) => Idle(cm => cm.act = i == 1 ? Act.Interact : 0)); }
+                    s.season.startMinute -= 0.05 * s.settings.seasonDays * 1440;
+                    var ev2 = RunS(s, 120);
+                    return (s, site, Count(ev, "hiberScouted"), Find(ev2, "winter"));
+                }
+                var hol = Late("hollow"); var lit = Late("litter");
+                HiberSite At((Sim s, HiberSite site, int scouted, SimEvent win) r) => r.s.winter?.sites.FirstOrDefault(x => x.scouted);
+                Ok(hol.site != null && lit.site != null && hol.scouted == 1 && lit.scouted == 1, $"kinds of winter site near the nest: {string.Join(", ", hol.s.HiberSites().Select(x => x.kind).Distinct())}; E scouts one in late season");
+                Ok(At(hol) != null && At(lit) != null && At(hol).n > At(lit).n * 2, $"most gynes winter where the worker scouted, and a hollow tree wakes more queens than the leaf litter ({At(hol)?.n} vs {At(lit)?.n})");
+                string first = hol.s.winter.sites[0].kind;
+                var sleeping = Persist.Restore(Persist.Snapshot(hol.s));
+                var ev3 = RunS(hol.s, T.hiber.chooseTicks + 2);
+                RunS(sleeping, T.hiber.chooseTicks + 2);
+                Ok(sleeping.StateHash() == hol.s.StateHash() && sleeping.winter == null, "a world saved in winter restores asleep and wakes the same queen");
+                Ok(Count(ev3, "spring") == 1 && (string)Find(ev3, "spring")["kind"] == first, $"left alone, the queen from the site with most survivors wakes ({first})");
+                Ok(hol.s.colony.sugar > Colony.New(true).sugar, $"a well wintered queen wakes with more in reserve ({D(hol.s.colony.sugar):0.00} sugar)");
             }
             // 32. worker ages and guards (T1-13)
             {

@@ -144,6 +144,13 @@ export const T = {
     winterSurvival: 0.03, lineageSurvival: 0.3, winterShare: 0.5,
   },
   queen: { speedMul: 0.8, venomMul: 1.5 },
+  // Winter with choices (T1-15): mated gynes winter at sites near the nest; site quality sets survival. A worker can
+  // scout one site in late season (E) and most gynes go there; in spring the player picks which queen to wake as.
+  hiber: {
+    range: 40, spread: 5, pickShare: 0.6, survival: 0.06, chooseTicks: 1800, reach: 0.15, barkMinR: 0.15,
+    q: { shed: 0.85, hollow: 0.75, bark: 0.5, litter: 0.3, sister: 0.5 },
+    name: { shed: 'in a shed wall', hollow: 'in a hollow tree', bark: 'under loose bark', litter: 'in the leaf litter', sister: 'in a sister nest' },
+  },
 
   // Predators and rivals (GDD 9.3)
   web: { spiderSpeed: 0.06, spiderDelay: 60, escapePerPress: 0.22, aiEscape: 0.004 },

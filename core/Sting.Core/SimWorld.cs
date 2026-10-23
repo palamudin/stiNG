@@ -1259,14 +1259,21 @@ namespace Sting.Core
         void ColonyTick()
         {
             MuniTick(); // the town's campaign runs on whether or not any colony is left
-            if (extinct) return; // the line is over: no colony left to tick
+            if (extinct || winter != null) return; // the line is over, or the queens sleep until one is chosen
             var col = colony;
             bool daylight = IsDaylight(minute) && !Raining && CanFly();
             Num frac = SeasonFrac;
             if (!colony.sited && frac > 0.03)
             {
                 var old = oldNests.Count > 0 ? oldNests[oldNests.Count - 1] : nest;
-                nest = MakeNest(old.treeX, old.treeZ, old.x, old.y, old.z, old.r, old.site ?? "trunk");
+                var tn = springAt != null ? TreeNear(springAt.x, springAt.z) : null;
+                if (tn != null)
+                {
+                    // the nearest tree to where she wintered (T1-15)
+                    Num dx = springAt.x - tn.x, dz = springAt.z - tn.z, dd = Sqrt(dx * dx + dz * dz); if (dd == 0) dd = 1; dx /= dd; dz /= dd;
+                    nest = MakeNest(tn.x, tn.z, tn.x + dx * (tn.r + 0.2), Clamp(1.6, 1.2, Max(1.2, tn.h - 0.6)), tn.z + dz * (tn.r + 0.2), World.NEST.r, "trunk");
+                }
+                else nest = MakeNest(old.treeX, old.treeZ, old.x, old.y, old.z, old.r, old.site ?? "trunk");
                 colony.sited = true;
                 colony.maxCells = T.sites.Of(nest.site).maxCells;
                 Emit("nestFounded", ("x", nest.x), ("y", nest.y), ("z", nest.z), ("key", nest.key), ("auto", true));

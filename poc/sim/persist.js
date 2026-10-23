@@ -28,7 +28,7 @@ const reviver = (k, v) => {
 };
 
 const HUMAN_FIXED = new Set(['id', 'hex', 'short', 'tr', 'chunk', 'home', 'parts']);
-const SKIP = new Set(['events', 'outbox', 'remote', 'log', 'logLen', 'hint', 'feeding', 'humans', 'active', 'activeChunks', 'records', 'ext', 'netStats', '_baitCache', '_siteCache', '_fruitCache', '_tc', '_wc', '_genCache']);
+const SKIP = new Set(['events', 'outbox', 'remote', 'log', 'logLen', 'hint', 'feeding', 'humans', 'active', 'activeChunks', 'records', 'ext', 'netStats', '_baitCache', '_siteCache', '_fruitCache', '_tc', '_wc', '_genCache', '_hiberCache']);
 
 export function snapshot(sim) {
   const out = { v: SAVE_VERSION, gen: GEN_VERSION, opts: { peer: sim.peer, net: sim.net, noAI: sim.noAI, peers: [...sim.interest.keys()] } };

@@ -68,6 +68,13 @@ namespace Sting.Core
             new AllocPreset { name = "Build", sugar = 0.7, protein = 0.7, pulp = 1.6 },
             new AllocPreset { name = "Lie low", sugar = 1, protein = 1, pulp = 1, traffic = 0.35 }, // T1-7
         };
+        /// Winter with choices (T1-15): gynes winter near the nest; site quality sets survival
+        public static class hiber
+        {
+            public static readonly Num range = 40, pickShare = 0.6, survival = 0.06, reach = 0.15, barkMinR = 0.15;
+            public const int spread = 5, chooseTicks = 1800;
+            public static Num Q(string kind) => kind switch { "shed" => (Num)0.85, "hollow" => (Num)0.75, "bark" => (Num)0.5, "litter" => (Num)0.3, _ => (Num)0.5 };
+        }
         /// the oldest workers guard the entrance against other colonies' wasps and the exterminator (T1-13)
         public static class guard { public const int count = 2, huntTicks = 300; public static readonly Num minAdults = 25, radius = 0.6, chase = 2.5, ring = 0.09, humanRadius = 1.5; }
         public static class ai { public const int maxPhysical = 12, launchEvery = 90, collectTicks = 150, attackTicks = 600, evadeTicks = 50; public static readonly Num arrive = 0.05, canDeficit = 0.35; }

@@ -395,6 +395,11 @@ namespace Sting.Core
         void Interact(Wasp w)
         {
             if (w.caste == "queen" && !colony.sited) { var site = SiteNear(w); if (site != null) { FoundNest(w, site); return; } }
+            if (w.caste != "queen" && SeasonFrac >= T.season.reproStart && colony.mated + colony.gynes >= 1)
+            {
+                var hs = HiberNear(w);
+                if (hs != null) { hiberPick = new HiberPick { season = season.n, x = hs.x, z = hs.z, kind = hs.kind }; Emit("hiberScouted", ("kind", hs.kind), ("q", hs.q)); return; }
+            }
             var rv = RivalNestNear(w);
             if (rv != null && w.carry == null) { Raid(w, rv); return; }
             var c = w.contact;
@@ -420,6 +425,7 @@ namespace Sting.Core
                 nest = D2(w, nest.entrance) < 0.4 * 0.4,
                 site = w.caste == "queen" && !colony.sited ? SiteNear(w)?.type : null,
                 rival = w.carry == null && RivalNestNear(w) != null,
+                hiber = w.caste != "queen" && SeasonFrac >= T.season.reproStart && colony.mated + colony.gynes >= 1 ? HiberNear(w)?.kind : null,
             };
         }
 
@@ -878,18 +884,102 @@ namespace Sting.Core
 
         // ---------------- the yearly cycle (GDD 2.2, 5.2, 6.7)
 
-        void EndSeason(string why)
+        /// Hibernation sites near the nest (T1-15): shed walls, hollow trees, loose bark on thick trunks and the leaf
+        /// litter, from the 3x3 chunks around the nest. A pure function of the seed and the nest, cached, never saved.
+        public List<HiberSite> HiberSites()
         {
-            var col = colony;
-            Num survivors = Floor(col.mated * T.season.winterSurvival + H32(season.n, 31));
-            Num lin = Floor(lineage * T.season.lineageSurvival + H32(season.n, 32));
-            Emit("winter", ("why", why), ("mated", col.mated), ("survivors", survivors), ("lineage", lin), ("season", season.n));
-            if (survivors + lin < 1) { extinct = true; foreach (var w in new List<Wasp>(wasps)) Despawn(w); Emit("lineExtinct", ("nestAlive", col.nestAlive)); return; }
-            Spring(survivors, lin);
+            var n = nest;
+            string ck = n.key + "|" + n.x.ToString() + "|" + n.z.ToString();
+            if (hiberCache.list != null && hiberCache.k == ck) return hiberCache.list;
+            var (cx, cz) = SplitKey(n.key); long sd = (long)(seed & 0xffffffffUL);
+            var list = new List<HiberSite>();
+            void Add(string kind, Num x, Num y, Num z) { if (Sq(x - n.x) + Sq(z - n.z) <= T.hiber.range * T.hiber.range) list.Add(new HiberSite { kind = kind, x = x, y = y, z = z, q = T.hiber.Q(kind) }); }
+            for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++)
+                {
+                    var rc = new ChunkRec { cx = cx + dx, cz = cz + dz, content = Content(cx + dx, cz + dz) };
+                    var s = SitesIn(rc);
+                    foreach (var sh in rc.content.sheds) { var p = World.ShedSites(sh).wall; Add("shed", p.x, p.y, p.z); }
+                    foreach (var h in s.hollows) Add("hollow", h.p.x, h.p.y, h.p.z);
+                    var trees = rc.content.trees;
+                    for (int i = 0; i < trees.Count; i++)
+                    {
+                        var t = trees[i];
+                        if (t.r < T.hiber.barkMinR) continue;
+                        Num a = HSeq(sd, rc.cx, rc.cz, i, 941) * 6.28318;
+                        Add("bark", t.x + (t.r + 0.01) * DCos(a), 0.4, t.z + (t.r + 0.01) * DSin(a));
+                    }
+                    foreach (var h in s.holes) Add("litter", h.x, 0.02, h.z);
+                }
+            hiberCache = (ck, list);
+            return list;
         }
 
-        void Spring(Num survivors, Num lin)
+        HiberSite HiberNear(Wasp w)
         {
+            Num r2 = T.hiber.reach * T.hiber.reach;
+            foreach (var s in HiberSites()) if (D2(w, new V3(s.x, s.y, s.z)) < r2) return s;
+            return null;
+        }
+
+        Tree TreeNear(Num px, Num pz)
+        {
+            int cx = World.ChunkOf(px), cz = World.ChunkOf(pz);
+            Tree best = null; Num bd = Num.MaxValue;
+            for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++)
+                    foreach (var t in Content(cx + dx, cz + dz).trees)
+                    {
+                        if (t.h < 2.5) continue;
+                        Num d = Sq(t.x - px) + Sq(t.z - pz);
+                        if (d < bd) { bd = d; best = t; }
+                    }
+            return best;
+        }
+
+        /// Autumn's end (GDD 6.7, T1-15). The mated gynes spread over a few hibernation sites near the nest, most of
+        /// them to the one a worker scouted; each site's quality sets how many wake. The colony sleeps until the
+        /// player picks a queen.
+        void EndSeason(string why)
+        {
+            var col = colony; int sn = season.n;
+            var cands = HiberSites();
+            var order = new List<int>(); for (int i = 0; i < cands.Count; i++) order.Add(i);
+            order.Sort((a, b) => { Num ha = H32(sn, a, 951), hb = H32(sn, b, 951); return ha != hb ? (ha < hb ? -1 : 1) : a.CompareTo(b); });
+            int pk = -1;
+            if (hiberPick != null && hiberPick.season == sn) for (int i = 0; i < cands.Count; i++) if (cands[i].x == hiberPick.x && cands[i].z == hiberPick.z) { pk = i; break; }
+            var chosen = new List<int>();
+            foreach (int i in order) { if (i == pk) continue; if (chosen.Count >= T.hiber.spread) break; chosen.Add(i); }
+            var share = new List<(int i, Num f)>();
+            if (pk >= 0) share.Add((pk, T.hiber.pickShare));
+            foreach (int i in chosen) share.Add((i, (1 - (pk >= 0 ? T.hiber.pickShare : 0)) / System.Math.Max(1, chosen.Count)));
+            var sites = new List<HiberSite>();
+            Num survivors = 0;
+            foreach (var (i, f) in share)
+            {
+                var s = cands[i]; int k = (int)Floor(col.mated * f * T.hiber.survival * s.q + H32(sn, i, 952));
+                if (k >= 1) { sites.Add(new HiberSite { kind = s.kind, x = s.x, y = s.y, z = s.z, q = s.q, n = k, scouted = i == pk }); survivors += k; }
+            }
+            sites.Sort((a, b) => a.n != b.n ? b.n.CompareTo(a.n) : a.q != b.q ? (b.q < a.q ? -1 : 1) : a.x != b.x ? (a.x < b.x ? -1 : 1) : a.z != b.z ? (a.z < b.z ? -1 : 1) : 0);
+            Num lin = Floor(lineage * T.season.lineageSurvival + H32(sn, 32));
+            Emit("winter", ("why", why), ("mated", col.mated), ("survivors", survivors), ("lineage", lin), ("season", sn), ("sites", sites.Count));
+            if (survivors + lin < 1) { extinct = true; foreach (var w in new List<Wasp>(wasps)) Despawn(w); Emit("lineExtinct", ("nestAlive", col.nestAlive)); return; }
+            // only sister nests made it: you wake in one of them
+            if (sites.Count == 0) sites.Add(new HiberSite { kind = "sister", x = nest.spawn.x, y = nest.spawn.y, z = nest.spawn.z, q = T.hiber.Q("sister"), n = 0 });
+            foreach (var w in new List<Wasp>(wasps)) Despawn(w);
+            ghost = null;
+            winter = new Winter { why = why, sites = sites, survivors = survivors, lineage = lin, until = tick + T.hiber.chooseTicks };
+        }
+
+        void WinterStep(int k)
+        {
+            var W = winter;
+            bool ok = k >= 1 && k <= W.sites.Count;
+            if (ok || tick >= W.until) Spring(ok ? k - 1 : 0);
+        }
+
+        void Spring(int choice)
+        {
+            var W = winter; var site = W.sites[choice]; Num survivors = W.survivors, lin = W.lineage;
+            winter = null;
             // the queen that continues is yours; the rest found lineage colonies (Q-10)
             lineage = survivors + lin - 1;
             Num winterDays = Rnd(settings.seasonDays * T.season.winterShare);
@@ -901,6 +991,9 @@ namespace Sting.Core
             colony = Colony.New(true);
             colony.alloc = alloc;
             colony.sited = false;
+            colony.sugar *= 0.5 + site.q; // a queen who wintered well wakes with more in reserve
+            springAt = new Spot { x = site.x, z = site.z };
+            hiberPick = null;
             oldNests.Add(nest);
             foreach (var w in new List<Wasp>(wasps)) Despawn(w);
             foreach (var s in chunkState.Values) s.esc = 0;
@@ -908,10 +1001,11 @@ namespace Sting.Core
             ext = new Ext();
             ghost = null;
             var q = SpawnWasp(true, "queen");
+            q.x = site.x; q.y = site.y + 0.05; q.z = site.z;
             drivenId = q.id;
             foreach (var hm in active) CatchUpHuman(hm);
             UpdateChunks(true);
-            Emit("spring", ("season", season.n), ("lineage", lineage), ("id", q.id));
+            Emit("spring", ("season", season.n), ("lineage", lineage), ("id", q.id), ("kind", site.kind));
         }
     }
 }

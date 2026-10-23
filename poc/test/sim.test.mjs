@@ -298,8 +298,12 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   s.colony.mated = 200;
   s.season.startMinute -= 0.71 * s.settings.seasonDays * 1440;
   const ev = run(s, 120, () => idle());
-  const wi = ev.find((e) => e.type === 'winter'), sp = ev.find((e) => e.type === 'spring');
-  ok(wi && sp, `the season ends: winter, then spring (${wi && wi.survivors} queens survived)`);
+  const wi = ev.find((e) => e.type === 'winter');
+  ok(wi && !ev.find((e) => e.type === 'spring') && s.winter && s.winter.sites.length >= 2 && !s.wasps.length,
+    `the season ends and the queens sleep until one is chosen (${wi && wi.survivors} survived at ${s.winter && s.winter.sites.length} sites: ${s.winter && s.winter.sites.map((x) => `${x.n} ${x.kind}`).join(', ')})`);
+  const pickSite = s.winter.sites[1];
+  const ev2 = run(s, 2, (sim, i) => idle({ pick: i === 0 ? 2 : 0 }));
+  ok(count(ev2, 'spring') === 1 && !s.winter && Math.hypot(s.wasp.x - pickSite.x, s.wasp.z - pickSite.z) < 0.2, `picking the second wakes that queen where she wintered (${pickSite.kind})`);
   ok(s.wasp.caste === 'queen' && s.colony.adults === 0 && s.colony.cells === 0 && s.season.n === 2, 'spring: you are the founding queen of a new colony');
   // founding: pick a tree (E at the trunk), then bring pulp and prey; the queen lays
   const q = s.wasp;
@@ -315,6 +319,34 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   place(q, E); run(s, 2, () => idle());
   run(s, s.dayTicks / 2, (sim) => { if (sim.wasp.state === 'fly') place(sim.wasp, { x: E.x + 0.3, y: E.y, z: E.z }); return idle(); });
   ok(s.colony.cells > 10 && s.colony.eggs + s.colony.larvae > 1, `founding: pulp builds cells and the queen lays (${s.colony.cells.toFixed(0)} cells, ${(s.colony.eggs + s.colony.larvae).toFixed(1)} brood)`);
+}
+
+// 33. Winter with choices (T1-15): a worker scouts a winter site in late season and most gynes winter there; a good
+// site wakes more queens than a poor one; with no choice made, the strongest site wakes on its own
+{
+  const late = (scout) => {
+    const s = new Sim({ seed: 1234 });
+    s.colony.mated = 300;
+    s.season.startMinute -= 0.66 * s.settings.seasonDays * 1440;
+    run(s, 2);
+    const site = s.hiberSites().find((x) => x.kind === scout);
+    let ev = [];
+    if (site) { place(s.wasp, { x: site.x, y: site.y, z: site.z }); ev = run(s, 2, (sim, i) => idle({ act: i === 1 ? Act.Interact : 0 })); }
+    s.season.startMinute -= 0.05 * s.settings.seasonDays * 1440;
+    const ev2 = run(s, 120);
+    return { s, site, scouted: count(ev, 'hiberScouted'), win: ev2.find((e) => e.type === 'winter') };
+  };
+  const shed = late('hollow'), lit = late('litter');
+  const at = (r) => r.win && r.win.sites.find((x) => x.scouted);
+  ok(shed.site && lit.site && shed.scouted === 1 && lit.scouted === 1, `kinds of winter site near the nest: ${[...new Set(shed.s.hiberSites().map((x) => x.kind))].join(', ')}; E scouts one in late season`);
+  ok(at(shed) && at(lit) && at(shed).n > at(lit).n * 2, `most gynes winter where the worker scouted, and a hollow tree wakes more queens than the leaf litter (${at(shed) && at(shed).n} vs ${at(lit) && at(lit).n})`);
+  const sleeping = restore(snapshot(shed.s));
+  const ev3 = run(shed.s, T.hiber.chooseTicks + 2);
+  run(sleeping, T.hiber.chooseTicks + 2);
+  ok(sleeping.stateHash() === shed.s.stateHash() && !sleeping.winter, 'a world saved in winter restores asleep and wakes the same queen');
+  ok(count(ev3, 'spring') === 1 && ev3.find((e) => e.type === 'spring').kind === shed.win.sites[0].kind, `left alone, the queen from the site with most survivors wakes (${shed.win.sites[0].kind})`);
+  const sugar = shed.s.colony.sugar;
+  ok(sugar > newColony(true).sugar, `a well wintered queen wakes with more in reserve (${sugar.toFixed(2)} sugar)`);
 }
 
 // 14. Predators, landing, rivals (GDD 7.2, 9.3)
@@ -548,6 +580,7 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
     t.colony.mated = 200;
     t.season.startMinute -= 0.71 * t.settings.seasonDays * 1440;
     run(t, 120);
+    run(t, 1, () => idle({ pick: 1 })); // wake the first queen (T1-15)
     return t;
   };
   const found = (t, p) => { place(t.wasp, p); return run(t, 2, (sim, i) => idle({ act: i === 1 ? Act.Interact : 0 })); };
@@ -638,7 +671,7 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   let ss = null;
   for (let seed = 1; seed < 60 && !ss; seed++) {
     const t = new Sim({ seed });
-    t.colony.mated = 200; t.season.startMinute -= 0.71 * t.settings.seasonDays * 1440; run(t, 120);
+    t.colony.mated = 200; t.season.startMinute -= 0.71 * t.settings.seasonDays * 1440; run(t, 120); run(t, 1, () => idle({ pick: 1 }));
     const rec = t.activeChunks.find((r) => r.content.sheds.length);
     if (rec) ss = { t, sh: rec.content.sheds[0] };
   }
@@ -646,7 +679,7 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   const sites = shedSites(ss.sh);
   for (const type of ['wall', 'attic']) {
     const t = new Sim({ seed: ss.t.seed });
-    t.colony.mated = 200; t.season.startMinute -= 0.71 * t.settings.seasonDays * 1440; run(t, 120);
+    t.colony.mated = 200; t.season.startMinute -= 0.71 * t.settings.seasonDays * 1440; run(t, 120); run(t, 1, () => idle({ pick: 1 }));
     const p = sites[type];
     place(t.wasp, { x: p.x + p.nx * 0.05, y: p.y, z: p.z + p.nz * 0.05 });
     ev = run(t, 2, (sim, i) => idle({ act: i === 1 ? Act.Interact : 0 }));
@@ -776,7 +809,7 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
 
 // 29. Hollow trees and nest thermals (GDD 6.6, T1-14)
 {
-  const spring = () => { const t = new Sim({ seed: 1234 }); t.colony.mated = 200; t.season.startMinute -= 0.71 * t.settings.seasonDays * 1440; run(t, 120); return t; };
+  const spring = () => { const t = new Sim({ seed: 1234 }); t.colony.mated = 200; t.season.startMinute -= 0.71 * t.settings.seasonDays * 1440; run(t, 120); run(t, 1, () => idle({ pick: 1 })); return t; };
   const t = spring();
   const hol = t.activeChunks.flatMap((r) => t.sitesIn(r).hollows);
   ok(hol.length > 3 && hol.every((h) => h.t.r >= T.sites.hollowMinR && h.y > 0.6 && h.y < h.t.h), `some thick trees have a hollow in the trunk (${hol.length} near home)`);

@@ -375,7 +375,7 @@ Economy step in Appendix A.4.
 - Each site type has: exposure to weather, thermal stability, human discovery chance, flood risk and maximum size.
 - Nest growth: builders turn pulp into cells and envelope layers. Size caps the colony.
 
-### 6.7 Succession and the line **[D] D-05** **[T0] [T1] [T2]**
+### 6.7 Succession and the line **[D] D-05** **[T0] [T2]** (lineage colonies as real AI colonies T2)
 
 - Gynes leave in autumn, mate with males present in the mating area, then search for a hibernation site.
 - Winter mortality per hibernating queen depends on site quality *(tune)*.
@@ -1054,6 +1054,14 @@ All five are in the C# core with parity: the 22 JS digests still match in the do
 
 **Guards.** Once a colony has at least 25 mature workers, the first two physical wasps it sends out while the player is near the nest are guards. They circle a few centimetres outside the entrance, refuel there, and go in at night like the others. A rival wasp, or another player's wasp, within 0.6 m of the entrance is chased (up to 2.5 m out, for 5 s) and grappled on contact with the existing fight rules: a rival on the same peer fights locally; another player's wasp fights through the remote fight exchange, which the guard's peer starts and both peers resolve identically. Guards also go for the exterminator when he comes within 1.5 m of the entrance, stinging him with the same attack AI as alarm pheromone. Guards do not count against the cap on physical foragers. Other players' wasps are fair game because Q-07 makes separate colonies rivals by default; co-op colonies (opt-in) will exempt each other when co-op exists.
 
+### 18.24 Winter with choices as built (T1-15)
+
+**Hibernation sites.** Around the nest (its 3×3 chunks, within 40 m) the world offers four kinds of winter shelter, all derived from the seed: a crack in a shed wall (shelter 85%), a hollow tree (75%), loose bark low on a thick trunk (50%) and the leaf litter at burrow spots (30%).
+
+**Scouting.** From the mating season on (once the colony has gynes or mated queens), a worker pressing E at one of these sites scouts it. At the season's end 60% of the mated gynes winter there; the rest spread evenly over five other sites picked by hash. Each site wakes `mated × share × 6% × shelter` queens, rounded with a seeded fraction, so a scouted hollow tree wakes several times as many as the leaf litter.
+
+**Waking.** When the season ends the colony sleeps: the wasps go, and the game shows one choice per site that woke a queen (how many, what kind of shelter, how far from the old nest, and whether it is the scouted one). The choice is sent as an ordinary recorded command, so replays and saves keep it; a world saved in winter restores asleep. Left alone (bots, the lab), the site with most survivors wakes after 30 s. The chosen queen wakes at her site, which is where the next season starts, with sugar reserves scaled by her site's shelter (×0.5 to ×1.35). The other survivors found sister nests as before. If no own queen survived but sister nests did, you wake in one of them. A queen who never founds a nest settles in the nearest tree to where she wintered.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1062,7 +1070,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (74 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (75 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -1082,7 +1090,7 @@ Everything in `POC.md` (74 features) and its C# port (18.18), including the Tier
 | T1-12 | Regions: an 8×8 chunk layout pass (park, gardens, houses with fences, farmland, forest edge) under the chunk pass, with pulp from fences that runs out (a chunk delta) | 4.2, 4.3, 4.5 | L | Q-06 |
 | T1-13 | **Built (18.23).** Worker ages and guards: young workers stay in, older ones forage, the oldest guard the entrance and attack intruders (rivals, raiders, other players' wasps) | 6.5 | M | Q-07 for players |
 | T1-14 | **Built (18.21).** Hollow-tree nest site and nest thermals: site insulation sets how cold snaps and heat slow the brood | 6.6 | S | |
-| T1-15 | Winter with choices: gynes pick hibernation sites whose quality sets winter survival; in spring the player chooses which surviving queen to continue | 6.7 | M | |
+| T1-15 | **Built (18.24).** Winter with choices: gynes pick hibernation sites whose quality sets winter survival; in spring the player chooses which surviving queen to continue | 6.7 | M | |
 | T1-16 | Senses for AI wasps: scent fields (sugar, protein, alarm) as decaying point sources and a vision cone, replacing the AI's perfect knowledge of every food source | 7.3 | M | |
 | T1-17 | **Built (18.20).** Line of sight for panic: contagion only between humans who can see each other | 8.9 | S | |
 | T1-18 | **Built (18.20).** Per-human memory: recency and place, so a person stung at this table is jumpy here and calmer elsewhere | 8.10 | S | |
@@ -1092,7 +1100,7 @@ Everything in `POC.md` (74 features) and its C# port (18.18), including the Tier
 | T1-22 | Tuning as data: the tuning tables as versioned plain-text files read by own parsers in JS and C#, and the tuning hash in the world record | 13 | M | |
 | T1-23 | **Built (18.21).** Solo time: accelerate time in the colony view, and the Reflex slowdown as a solo option | 5.1, 7.8 | S | |
 
-Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, then the other S items: T1-14, T1-17, T1-18, T1-23, all done; T1-20 waits on regions), then the M items (T1-6, T1-7 and T1-13 done); each batch is built in the PoC and then ported to the core with parity.
+Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, then the other S items: T1-14, T1-17, T1-18, T1-23, all done; T1-20 waits on regions), then the M items (T1-6, T1-7, T1-13 and T1-15 done); each batch is built in the PoC and then ported to the core with parity.
 
 ### 19.3 Tier 2: later
 

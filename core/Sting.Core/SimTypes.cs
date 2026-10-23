@@ -183,7 +183,12 @@ namespace Sting.Core
         public Dictionary<int, int> lastSeq = new Dictionary<int, int>(); public Dictionary<string, List<int>> stingTicks = new Dictionary<string, List<int>>();
         public List<int> ruled = new List<int>();
     }
-    public sealed class Hint { public string opening, prey, site; public bool bait, wood, nest, rival; }
+    public sealed class Hint { public string opening, prey, site, hiber; public bool bait, wood, nest, rival; }
+    /// A hibernation site and the queens waking there (T1-15)
+    public sealed class HiberSite { public string kind; public Num x, y, z, q; public int n; public bool scouted; }
+    public sealed class Winter { public string why; public List<HiberSite> sites = new List<HiberSite>(); public Num survivors, lineage; public int until; }
+    public sealed class HiberPick { public int season; public Num x, z; public string kind; }
+    public sealed class Spot { public Num x, z; }
     public sealed class SiteHit { public string type; public Num x, y, z, ix, iz, nx, nz; public Tree t; }
     public sealed class Bait { public Num x, y, z; public string key; }
     public sealed class PreyHit { public string kind, key; public int i, hive; public Num protein; }

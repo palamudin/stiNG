@@ -65,6 +65,7 @@ export class Sim {
     this.stats = { stings: 0, aiStings: 0, remoteStings: 0, full: 0, deaths: 0, causes: {}, caught: 0, deposits: 0 };
     this.wasps = [];
     this.nextWaspId = this.peer * 1000000 + 1;
+    this.winter = null; this.hiberPick = null; this.springAt = null; // T1-15
     this.ext = { visit: 0, state: 'none', arriveMinute: 0, hm: null, lead: null };
     this.prevAct = 0;
     this.pressUsed = false;
@@ -269,8 +270,10 @@ export class Sim {
     const act = cmd.act | 0, edge = act & ~this.prevAct;
     this.prevAct = act;
     if (cmd.alloc > 0 && cmd.alloc <= T.alloc.length && this.colony.alloc !== cmd.alloc - 1) { this.colony.alloc = cmd.alloc - 1; this.emit('alloc', { preset: this.colony.alloc }); }
+    let pick = cmd.pick | 0;
+    if (this.winter) { this._winterStep(pick); pick = 0; } // in winter a pick chooses the queen (T1-15)
     if (edge & Act.Switch) this._possessNearest();
-    else if (cmd.pick > 0 && cmd.pick !== this.drivenId) this._possessNearest(cmd.pick);
+    else if (pick > 0 && pick !== this.drivenId) this._possessNearest(pick);
     this._pendingSwitchTick();
     if (edge & Act.Rest) this._rest();
     if (!cmd.sting) this.pressUsed = false;
@@ -296,7 +299,7 @@ export class Sim {
     // 4. colony at 1 Hz
     if (this.tick % 60 === 0) this._colonyTick();
     // 5. respawn of the driven wasp
-    if (!this._driven() && !this.extinct && this.tick >= this.respawnAt) this._respawn();
+    if (!this._driven() && !this.extinct && !this.winter && this.tick >= this.respawnAt) this._respawn();
     this._updateChunks();
     if (this.net && this.tick % T.net.stateEvery === 0) this._sendState();
   }
@@ -1043,6 +1046,10 @@ export class Sim {
 
   _interact(w) {
     if (w.caste === 'queen' && !this.colony.sited) { const site = this._siteNear(w); if (site) { this._foundNest(w, site); return; } }
+    if (w.caste !== 'queen' && this.seasonFrac >= T.season.reproStart && this.colony.mated + this.colony.gynes >= 1) {
+      const hs = this._hiberNear(w);
+      if (hs) { this.hiberPick = { season: this.season.n, x: hs.x, z: hs.z, kind: hs.kind }; this.emit('hiberScouted', { kind: hs.kind, q: hs.q }); return; }
+    }
     const rv = this._rivalNestNear(w);
     if (rv && !w.carry) { this._raid(w, rv); return; }
     const c = w.contact;
@@ -1065,6 +1072,7 @@ export class Sim {
       nest: dist2(w, this.nest.entrance) < 0.4 * 0.4,
       site: w.caste === 'queen' && !this.colony.sited ? (this._siteNear(w) || {}).type || null : null,
       rival: !w.carry && !!this._rivalNestNear(w),
+      hiber: w.caste !== 'queen' && this.seasonFrac >= T.season.reproStart && this.colony.mated + this.colony.gynes >= 1 ? (this._hiberNear(w) || {}).kind || null : null,
     };
   }
 
@@ -1428,16 +1436,81 @@ export class Sim {
 
   // ---------------- the yearly cycle (GDD 2.2, 5.2, 6.7)
 
-  _endSeason(why) {
-    const S = T.season, col = this.colony;
-    const survivors = Math.floor(col.mated * S.winterSurvival + h32(this.season.n, 31));
-    const lineage = Math.floor(this.lineage * S.lineageSurvival + h32(this.season.n, 32));
-    this.emit('winter', { why, mated: col.mated, survivors, lineage, season: this.season.n });
-    if (survivors + lineage < 1) { this.extinct = true; for (const w of this.wasps.slice()) this._despawn(w); this.emit('lineExtinct', { nestAlive: col.nestAlive }); return; }
-    this._spring(survivors, lineage);
+  // Hibernation sites near the nest (T1-15): shed walls, hollow trees, loose bark on thick trunks and the leaf litter,
+  // from the 3x3 chunks around the nest. A pure function of the seed and the nest, so it is cached and never saved.
+  hiberSites() {
+    const n = this.nest, H = T.hiber;
+    const ck = n.key + '|' + n.x + '|' + n.z;
+    if (this._hiberCache && this._hiberCache.k === ck) return this._hiberCache.list;
+    const [cx, cz] = n.key.split(',').map(Number), sd = Number(this.seed & 0xffffffffn), list = [];
+    const add = (kind, x, y, z) => { if (sq(x - n.x) + sq(z - n.z) <= H.range * H.range) list.push({ kind, x, y, z, q: H.q[kind] }); };
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+      const rc = { cx: cx + dx, cz: cz + dz, content: this._content(cx + dx, cz + dz) }, s = this.sitesIn(rc);
+      for (const sh of rc.content.sheds) { const p = shedSites(sh).wall; add('shed', p.x, p.y, p.z); }
+      for (const h of s.hollows) add('hollow', h.x, h.y, h.z);
+      rc.content.trees.forEach((t, i) => {
+        if (t.r < H.barkMinR) return;
+        const a = hseq(sd, rc.cx, rc.cz, i, 941) * 6.28318;
+        add('bark', t.x + (t.r + 0.01) * dcos(a), 0.4, t.z + (t.r + 0.01) * dsin(a));
+      });
+      for (const h of s.holes) add('litter', h.x, 0.02, h.z);
+    }
+    this._hiberCache = { k: ck, list };
+    return list;
+  }
+  _treeNear(p) {
+    const cx = chunkOf(p.x), cz = chunkOf(p.z);
+    let best = null, bd = Infinity;
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) for (const t of this._content(cx + dx, cz + dz).trees) {
+      if (t.h < 2.5) continue;
+      const d = sq(t.x - p.x) + sq(t.z - p.z);
+      if (d < bd) { bd = d; best = t; }
+    }
+    return best;
+  }
+  _hiberNear(w) {
+    const r2 = T.hiber.reach * T.hiber.reach;
+    for (const s of this.hiberSites()) if (dist2(w, s) < r2) return s;
+    return null;
   }
 
-  _spring(survivors, lineage) {
+  // Autumn's end (GDD 6.7, T1-15). The mated gynes spread over a few hibernation sites near the nest, most of them to
+  // the one a worker scouted; each site's quality sets how many wake. The colony sleeps until the player picks a queen.
+  _endSeason(why) {
+    const S = T.season, H = T.hiber, col = this.colony, n = this.season.n;
+    const cands = this.hiberSites();
+    const order = cands.map((s, i) => i).sort((a, b) => h32(n, a, 951) - h32(n, b, 951) || a - b);
+    const pk = this.hiberPick && this.hiberPick.season === n ? cands.findIndex((s) => s.x === this.hiberPick.x && s.z === this.hiberPick.z) : -1;
+    const chosen = order.filter((i) => i !== pk).slice(0, H.spread);
+    const share = new Map();
+    if (pk >= 0) share.set(pk, H.pickShare);
+    for (const i of chosen) share.set(i, (1 - (pk >= 0 ? H.pickShare : 0)) / Math.max(1, chosen.length));
+    const sites = [];
+    let survivors = 0;
+    for (const [i, f] of share) {
+      const s = cands[i], k = Math.floor(col.mated * f * H.survival * s.q + h32(n, i, 952));
+      if (k >= 1) { sites.push({ kind: s.kind, x: s.x, y: s.y, z: s.z, q: s.q, n: k, scouted: i === pk }); survivors += k; }
+    }
+    sites.sort((a, b) => b.n - a.n || b.q - a.q || a.x - b.x || a.z - b.z);
+    const lineage = Math.floor(this.lineage * S.lineageSurvival + h32(n, 32));
+    this.emit('winter', { why, mated: col.mated, survivors, lineage, season: n, sites: sites.map((s) => ({ kind: s.kind, n: s.n, q: s.q, scouted: s.scouted, dist: Math.sqrt(sq(s.x - this.nest.x) + sq(s.z - this.nest.z)) })) });
+    if (survivors + lineage < 1) { this.extinct = true; for (const w of this.wasps.slice()) this._despawn(w); this.emit('lineExtinct', { nestAlive: col.nestAlive }); return; }
+    // only sister nests made it: you wake in one of them
+    if (!sites.length) sites.push({ kind: 'sister', x: this.nest.spawn.x, y: this.nest.spawn.y, z: this.nest.spawn.z, q: H.q.sister, n: 0, scouted: false });
+    for (const w of this.wasps.slice()) this._despawn(w);
+    this.ghost = null;
+    this.winter = { why, sites, survivors, lineage, until: this.tick + H.chooseTicks };
+  }
+
+  _winterStep(k) {
+    const W = this.winter;
+    const ok = k >= 1 && k <= W.sites.length;
+    if (ok || this.tick >= W.until) this._spring(ok ? k - 1 : 0);
+  }
+
+  _spring(choice) {
+    const W = this.winter, site = W.sites[choice], survivors = W.survivors, lineage = W.lineage;
+    this.winter = null;
     // the queen that continues is yours; the rest found lineage colonies (Q-10)
     this.lineage = survivors + lineage - 1;
     const winterDays = rnd(this.settings.seasonDays * T.season.winterShare);
@@ -1449,6 +1522,9 @@ export class Sim {
     this.colony = newColony(true);
     this.colony.alloc = alloc;
     this.colony.sited = false;
+    this.colony.sugar *= 0.5 + site.q; // a queen who wintered well wakes with more in reserve
+    this.springAt = { x: site.x, z: site.z };
+    this.hiberPick = null;
     this.oldNests.push(this.nest);
     for (const w of this.wasps.slice()) this._despawn(w);
     for (const s of this.chunkState.values()) s.esc = 0;
@@ -1456,10 +1532,11 @@ export class Sim {
     this.ext = { visit: 0, state: 'none', arriveMinute: 0, hm: null, lead: null };
     this.ghost = null;
     const q = this._spawnWasp(true, 'queen');
+    q.x = site.x; q.y = site.y + 0.05; q.z = site.z;
     this.drivenId = q.id;
     for (const hm of this.active) this._catchUpHuman(hm);
     this._updateChunks(true);
-    this.emit('spring', { season: this.season.n, lineage: this.lineage, id: q.id });
+    this.emit('spring', { season: this.season.n, lineage: this.lineage, id: q.id, kind: site.kind });
   }
 
   // ---------------- humans (GDD 8.2, 8.9, 8.10)
@@ -2533,13 +2610,17 @@ export class Sim {
 
   _colonyTick() {
     this._muniTick(); // the town's campaign runs on whether or not any colony is left
-    if (this.extinct) return; // the line is over: no colony left to tick
+    if (this.extinct || this.winter) return; // the line is over, or the queens sleep until one is chosen
     const col = this.colony;
     const daylight = isDaylight(this.minute) && !this.raining && this.canFly();
     const frac = this.seasonFrac;
     if (this.colony.sited === false && frac > 0.03) {
       const old = this.oldNests[this.oldNests.length - 1] || this.nest;
-      this.nest = makeNest(old.treeX, old.treeZ, old.x, old.y, old.z, old.r, old.site || 'trunk');
+      const t = this.springAt ? this._treeNear(this.springAt) : null;
+      if (t) { // the nearest tree to where she wintered (T1-15)
+        let dx = this.springAt.x - t.x, dz = this.springAt.z - t.z; const d = Math.sqrt(dx * dx + dz * dz) || 1; dx /= d; dz /= d;
+        this.nest = makeNest(t.x, t.z, t.x + dx * (t.r + 0.2), clamp(1.6, 1.2, Math.max(1.2, t.h - 0.6)), t.z + dz * (t.r + 0.2), NEST.r, 'trunk');
+      } else this.nest = makeNest(old.treeX, old.treeZ, old.x, old.y, old.z, old.r, old.site || 'trunk');
       this.colony.sited = true;
       this.colony.maxCells = T.sites[this.nest.site].maxCells;
       this.emit('nestFounded', { x: this.nest.x, y: this.nest.y, z: this.nest.z, key: this.nest.key, auto: true });

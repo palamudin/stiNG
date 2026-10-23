@@ -86,7 +86,7 @@ namespace Sting.Core
 
     public static class Persist
     {
-        public const int SAVE_VERSION = 6; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers
+        public const int SAVE_VERSION = 7; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices
         const uint MAGIC = 0x474E4953; // "SING"
 
         // ---------------------------------------------------------------- one Io per type
@@ -275,6 +275,13 @@ namespace Sting.Core
             if (a.Reading) s.season = new Season();
             a.I(ref s.season.n); a.D(ref s.season.startMinute); a.S(ref s.season.phase);
             a.D(ref s.lineage); a.I(ref s.drivenId);
+            if (a.Opt(ref s.winter))
+            {
+                var W = s.winter; a.S(ref W.why); a.D(ref W.survivors); a.D(ref W.lineage); a.I(ref W.until);
+                a.List(ref W.sites, () => new HiberSite(), h => { a.S(ref h.kind); a.D(ref h.x); a.D(ref h.y); a.D(ref h.z); a.D(ref h.q); a.I(ref h.n); a.B(ref h.scouted); });
+            }
+            if (a.Opt(ref s.hiberPick)) { a.I(ref s.hiberPick.season); a.D(ref s.hiberPick.x); a.D(ref s.hiberPick.z); a.S(ref s.hiberPick.kind); }
+            if (a.Opt(ref s.springAt)) { a.D(ref s.springAt.x); a.D(ref s.springAt.z); }
             if (a.Opt(ref s.pendingSwitch)) { a.I(ref s.pendingSwitch.at); a.I(ref s.pendingSwitch.target); }
             if (a.Opt(ref s.muni))
             {

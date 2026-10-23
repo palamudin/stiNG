@@ -1228,7 +1228,7 @@ function logEvent(text) {
 }
 
 // Colony view (GDD 10.3): the workers that are out, nearest first, each one a button to drive her
-const ROLE_NAME = { sugar: 'sugar forager', protein: 'hunter', pulp: 'pulp forager' };
+const ROLE_NAME = { sugar: 'sugar forager', protein: 'hunter', pulp: 'pulp forager', guard: 'guard' };
 const MODE_NAME = { pick: 'choosing', outbound: 'flying out', collect: 'collecting', return: 'flying home', attack: 'attacking', evade: 'getting away', guard: 'guarding', hunt: 'chasing' };
 $('nWorkers').addEventListener('pointerdown', (e) => {
   const b = e.target.closest('button[data-id]');
@@ -1397,6 +1397,7 @@ function updateHud() {
   else if (w.state === 'landed') hint = w.walking ? 'Walking · off the edge and you drop into flight' : 'Resting costs no sugar in the warmth · WASD walk · Space, Shift or sting takes off';
   else if (w.state === 'perched') hint = `${kbd('W')}${kbd('A')}${kbd('S')}${kbd('D')} crawl (look up or down to climb) · ${kbd('LMB')} sting · ${kbd('Space')} take off · ${kbd('E')} crawl under at an opening`;
   else if (h.rival) hint = `${kbd('E')} steal a larva from the rival nest`;
+  else if (h.hiber) hint = `${kbd('E')} scout this winter site for the young queens: ${T.hiber.name[h.hiber]}, shelter ${Math.round(T.hiber.q[h.hiber] * 100)}%`;
   else if (w.state === 'under') {
     const hm = sim.humanByHex(w.under.hex);
     const g = garmentGraph(hm.tr, hm.clothing, hm.posture, hm.parts[hm.posture]);
@@ -1631,19 +1632,16 @@ function handleEvents(events) {
         break;
       case 'perch': if (sim.wasp && e.id === sim.drivenId) logEvent(`perched on #${e.humanHex.slice(0, 4)}`); break;
       case 'knockedOff': if (e.id === sim.drivenId) toast('Knocked off', 'var(--yellow)', 1.2); break;
-      case 'nestFounded': toast(e.auto ? 'The queen settled in last year\'s tree' : 'Nest founded', 'var(--yellow)', 2.4); logEvent('nest founded'); break;
+      case 'nestFounded': toast(e.auto ? 'The queen settled in a tree near where she wintered' : 'Nest founded', 'var(--yellow)', 2.4); logEvent('nest founded'); break;
       case 'winter':
         {
           const total = e.survivors + e.lineage;
-          $('winterText').textContent = `${e.why === 'autumn' ? 'The colony died with the autumn, as colonies do.' : 'Your colony did not make it through the season.'} ${fmt(e.mated)} young queen${Math.round(e.mated) === 1 ? '' : 's'} mated and went into hibernation; ${e.survivors} survived the cold.${e.lineage ? ` ${e.lineage} older sister nest${e.lineage === 1 ? '' : 's'} of your line also made it.` : ''} ${total > 1 ? `You wake as one of ${total} queens of the line.` : 'You wake as the last queen of the line.'}`;
+          if (!lab && sim.winter) showWinter(`${e.why === 'autumn' ? 'The colony died with the autumn, as colonies do.' : 'Your colony did not make it through the season.'} ${fmt(e.mated)} young queen${Math.round(e.mated) === 1 ? '' : 's'} mated and went into hibernation; ${e.survivors} survived the cold.${e.lineage ? ` ${e.lineage} older sister nest${e.lineage === 1 ? '' : 's'} of your line also made it.` : ''} ${total > 1 ? 'Choose which queen you wake as; the others found sister nests.' : 'You wake as the last queen of the line.'}`);
         }
         break;
+      case 'hiberScouted': toast(`Winter site scouted: ${T.hiber.name[e.kind]}. Most of the young queens will winter here.`, 'var(--yellow)', 3); break;
       case 'spring':
-        $('winterScreen').hidden = false;
-        paused = true;
-        document.exitPointerLock?.();
-        $('pauseScreen').hidden = true;
-        logEvent(`season ${e.season} · you are the queen`);
+        logEvent(`season ${e.season} · you are the queen, waking ${T.hiber.name[e.kind] || ''}`);
         waspSwitched(e.id, 0.98);
         syncChunks();
         break;
@@ -1764,7 +1762,7 @@ function updateCamera(p, dt) {
   const fwd = new THREE.Vector3(Math.sin(input.yaw) * Math.cos(input.pitch), Math.sin(input.pitch), Math.cos(input.yaw) * Math.cos(input.pitch));
   const want = dead ? 0.9 : w.state === 'attached' || w.state === 'under' || w.state === 'perched' ? 0.17 : w.state === 'balled' ? 0.25 : w.contact ? 0.13 : 0.1;
   camDist += (want - camDist) * (1 - Math.exp(-dt * 4));
-  const focus = dead && deathSpot ? deathSpot : p || V(w);
+  const focus = dead && deathSpot ? deathSpot : p || (w ? V(w) : V(sim.nest.spawn)); // no wasp at all in winter (T1-15)
   let off = fwd.clone().multiplyScalar(-camDist).add(new THREE.Vector3(0, camDist * 0.28, 0));
   // on a body: look at the wasp from outside the skin, along the surface normal, blended with the view direction
   const onBody = !dead && (w.state === 'perched' ? w.perch : w.state === 'attached' ? w.attach : null);
@@ -1957,12 +1955,32 @@ $('bContinue').addEventListener('click', () => {
     newWorld(null, { sim: restore(json), json });
     $('startScreen').hidden = true; running = true; lock();
     toast(`Day ${sim.day + 1} · season ${sim.season.n}`, 'var(--yellow)', 2);
+    if (sim.winter) showWinter('Winter. The young queens of your line are asleep. Choose which one you wake as.');
   } catch (err) { $('startNote').textContent = /generator/.test(err.message) ? 'That save is from an older version of the world generator and cannot be continued. Start a new world.' : `That save could not be loaded: ${err.message}`; }
 });
 showContinue();
 
 $('bStart').addEventListener('click', () => { initAudio(); applyDisplaySettings(); newWorld(readSettings()); $('startScreen').hidden = true; running = true; lock(); });
-$('bSpring').addEventListener('click', () => { $('winterScreen').hidden = true; setPaused(false); lock(); toast('Spring. Pick a tree and press E at the trunk to found the nest.', 'var(--yellow)', 4); });
+// Winter (T1-15): one button per wintering site; where she wakes is where the next season starts
+function showWinter(text) {
+  $('winterText').textContent = text;
+  $('winterSites').innerHTML = sim.winter.sites.map((s, i) => {
+    const d = Math.round(Math.hypot(s.x - sim.nest.x, s.z - sim.nest.z));
+    return `<button class="ghost" data-i="${i + 1}"><b>${s.n || 1} queen${(s.n || 1) === 1 ? '' : 's'} ${T.hiber.name[s.kind]}</b><span>${d} m from the old nest · shelter ${Math.round(s.q * 100)}%${s.scouted ? ' · the site you scouted' : ''}</span></button>`;
+  }).join('');
+  $('winterScreen').hidden = false;
+  setPaused(true);
+  $('pauseScreen').hidden = true;
+  document.exitPointerLock?.();
+}
+// Waking: a pick goes out in the next command, and the sim wakes that queen
+function wake(i) {
+  pickOnce = i; input.pick = 1;
+  $('winterScreen').hidden = true; setPaused(false); lock();
+  toast('Spring. Find a nest site and press E: a trunk, a burrow, under a branch, a gap in a shed or a hollow tree.', 'var(--yellow)', 4);
+}
+$('bSpring').addEventListener('click', () => wake(1));
+$('winterSites').addEventListener('click', (e) => { const b = e.target.closest('button[data-i]'); if (b) wake(+b.dataset.i); });
 $('bNewLine').addEventListener('click', () => { $('extinctScreen').hidden = true; newWorld(settings); running = true; lock(); });
 try { if (localStorage.getItem('sting.lab') === '1') toggleLab(); } catch { /* optional */ }
 if (matchMedia('(pointer: coarse)').matches) $('startNote').textContent = 'Needs a keyboard and mouse. On touch devices you can look around but not fly.';

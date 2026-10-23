@@ -50,6 +50,8 @@ namespace Sting.Core
         public List<Wasp> wasps = new List<Wasp>();
         public int nextWaspId;
         public Ext ext = new Ext();
+        public Winter winter; public HiberPick hiberPick; public Spot springAt; // T1-15
+        internal (string k, List<HiberSite> list) hiberCache;
         public int prevAct; public bool pressUsed;
         public int respawnAt; public bool extinct;
         public Wasp ghost;
@@ -336,8 +338,10 @@ namespace Sting.Core
             int act = cmd.act, edge = act & ~prevAct;
             prevAct = act;
             if (cmd.alloc > 0 && cmd.alloc <= T.alloc.Length && colony.alloc != cmd.alloc - 1) { colony.alloc = cmd.alloc - 1; Emit("alloc", ("preset", colony.alloc)); }
+            int pick = cmd.pick;
+            if (winter != null) { WinterStep(pick); pick = 0; } // in winter a pick chooses the queen (T1-15)
             if ((edge & Act.Switch) != 0) PossessNearest();
-            else if (cmd.pick > 0 && cmd.pick != drivenId) PossessNearest(cmd.pick);
+            else if (pick > 0 && pick != drivenId) PossessNearest(pick);
             PendingSwitchTick();
             if ((edge & Act.Rest) != 0) Rest();
             if (cmd.sting == 0) pressUsed = false;
@@ -364,7 +368,7 @@ namespace Sting.Core
             // 4. colony at 1 Hz
             if (tick % 60 == 0) ColonyTick();
             // 5. respawn of the driven wasp
-            if (Driven() == null && !extinct && tick >= respawnAt) Respawn();
+            if (Driven() == null && !extinct && winter == null && tick >= respawnAt) Respawn();
             UpdateChunks();
             if (net && tick % T.net.stateEvery == 0) SendState();
         }
