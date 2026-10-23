@@ -17,11 +17,11 @@ namespace Sting.Core
             string key = hm.chunk; var rec = records.Get(key);
             if (rec == null || EscLevel(key) >= 2) return;
             if (Unit(Hash(seed, Domain.HumanSchedule, hm.id, unchecked((ulong)tick * 2 + 1))) >= T.panic.spillChance) return;
-            int best = -1; double bd = T.panic.spillReach * T.panic.spillReach;
+            int best = -1; Num bd = T.panic.spillReach * T.panic.spillReach;
             var cans = rec.content.cans;
-            for (int i = 0; i < cans.Count; i++) { double d = Sq(cans[i].x - hm.x) + Sq(cans[i].z - hm.z); if (d < bd) { bd = d; best = i; } }
+            for (int i = 0; i < cans.Count; i++) { Num d = Sq(cans[i].x - hm.x) + Sq(cans[i].z - hm.z); if (d < bd) { bd = d; best = i; } }
             if (best < 0) return;
-            var st = CS(key); var sp = st.spilled ??= new Dictionary<int, double>();
+            var st = CS(key); var sp = st.spilled ??= new Dictionary<int, Num>();
             if ((sp.TryGetValue(best, out var until) ? until : 0) > minute) return;
             sp[best] = minute + T.panic.spillMinutes;
             Emit("spill", ("key", key), ("i", best), ("humanHex", hm.hex));
@@ -47,8 +47,8 @@ namespace Sting.Core
         void StartFlee(Human hm, LastSting p)
         {
             if (hm.posture == "sit") Spill(hm);
-            double dx = hm.x - (p != null ? p.x : hm.x - hm.fx), dz = hm.z - (p != null ? p.z : hm.z - hm.fz);
-            double d = Sqrt(dx * dx + dz * dz);
+            Num dx = hm.x - (p != null ? p.x : hm.x - hm.fx), dz = hm.z - (p != null ? p.z : hm.z - hm.fz);
+            Num d = Sqrt(dx * dx + dz * dz);
             if (d < 1e-6) { dx = -hm.fx; dz = -hm.fz; d = 1; }
             hm.dirX = dx / d; hm.dirZ = dz / d;
             hm.state = "flee";
@@ -58,10 +58,10 @@ namespace Sting.Core
             Emit("flee", ("humanHex", hm.hex));
         }
 
-        static bool WalkTo(Human hm, double tx, double tz, double speed)
+        static bool WalkTo(Human hm, Num tx, Num tz, Num speed)
         {
-            double step = 3 * T.DT * speed;
-            double dx = tx - hm.x, dz = tz - hm.z, d = Sqrt(dx * dx + dz * dz);
+            Num step = 3 * T.DT * speed;
+            Num dx = tx - hm.x, dz = tz - hm.z, d = Sqrt(dx * dx + dz * dz);
             if (d <= step) { hm.x = tx; hm.z = tz; return true; }
             hm.fx = dx / d; hm.fz = dz / d;
             hm.x += hm.fx * step; hm.z += hm.fz * step;
@@ -70,15 +70,15 @@ namespace Sting.Core
 
         void Humans()
         {
-            var old = new double[active.Count];
+            var old = new Num[active.Count];
             for (int i = 0; i < old.Length; i++) old[i] = active[i].panic;
-            double r2 = T.panic.contagionRadius * T.panic.contagionRadius;
+            Num r2 = T.panic.contagionRadius * T.panic.contagionRadius;
             long md = MinuteOfDay(minute);
             // active may be replaced inside the loop (the exterminator leaving); like the JS, keep indexing the live list
             for (int i = 0; i < active.Count; i++)
             {
                 var hm = active[i];
-                double oldI = i < old.Length ? old[i] : double.NaN;
+                Num oldI = i < old.Length ? old[i] : Num.NaN;
                 if (hm.special) { ExtStep(hm, oldI); continue; }
                 // schedule
                 var win = Window(hm);
@@ -97,12 +97,12 @@ namespace Sting.Core
                 if (hm.state == "arrive") { if (WalkTo(hm, hm.home.x, hm.home.z, T.panic.walkSpeed)) Seat(hm); continue; }
                 if (hm.state == "leave") { if (WalkTo(hm, hm.home.ax, hm.home.az, T.panic.walkSpeed)) GoAway(hm); continue; }
                 // panic
-                double gain = 0;
+                Num gain = 0;
                 for (int j = 0; j < active.Count; j++)
                 {
-                    double oj = j < old.Length ? old[j] : double.NaN;
+                    Num oj = j < old.Length ? old[j] : Num.NaN;
                     if (i == j || oj < T.panic.contagionMin) continue;
-                    var o = active[j]; double dx = o.x - hm.x, dz = o.z - hm.z;
+                    var o = active[j]; Num dx = o.x - hm.x, dz = o.z - hm.z;
                     if (dx * dx + dz * dz <= r2) gain += T.panic.contagionRate * oj * hm.tr.sociability * hm.tr.panicSusceptibility;
                 }
                 hm.panic = Min(1, oldI * T.panic.decayPerStep + gain);
@@ -132,10 +132,10 @@ namespace Sting.Core
             foreach (var w in wasps)
             {
                 if (!(w.state == "fly" || w.state == "chewing" || w.state == "landed")) continue;
-                double dx = w.x - hm.x, dz = w.z - hm.z;
+                Num dx = w.x - hm.x, dz = w.z - hm.z;
                 if (dx * dx + dz * dz > 4) continue;
                 var lp = Body.ToLocal(hm.F, w.P);
-                double hd2 = D2(lp, head.a);
+                Num hd2 = D2(lp, head.a);
                 if (hd2 < T.esc.faceRadius * T.esc.faceRadius) { target = w; why = "face"; break; }
                 if (lvl >= 1 && hd2 < T.esc.headRadius * T.esc.headRadius) { target = w; why = "head"; break; }
                 if (lvl >= 1 && (w.ai.atFood == "can" || (w.state == "landed" && NearCan(w))) && dx * dx + dz * dz < 1.5) { target = w; why = "food"; break; }
@@ -144,7 +144,7 @@ namespace Sting.Core
             if (target == null) { hm.annoy = 0; hm.annoyId = 0; return; }
             if (hm.annoyId != target.id) { hm.annoyId = target.id; hm.annoy = 0; }
             hm.annoy += 3;
-            double need = hm.tr.reactionTicks * (why == "face" ? 3 : T.esc.noticeMul) + (why == "spray" ? 20 : 0);
+            Num need = hm.tr.reactionTicks * (why == "face" ? 3 : T.esc.noticeMul) + (why == "spray" ? 20 : 0);
             if (hm.annoy < need) return;
             hm.annoy = 0;
             hm.cooldown = tick + T.esc.cooldownTicks;
@@ -199,10 +199,10 @@ namespace Sting.Core
                 ulong id = Hash(seed, Domain.WorldGen, 0xE77, (ulong)e.visit);
                 string hex = Hex64(id);
                 var tr = ExtTraits(seed, id);
-                double ang = H32(e.visit, 9) * 6.28318;
-                var n = nest; double dxn = n.x - n.treeX, dzn = n.z - n.treeZ, dn = Sqrt(dxn * dxn + dzn * dzn); if (dn == 0) dn = 1;
-                double ax = n.treeX + 30 * DCos(ang), az = n.treeZ + 30 * DSin(ang);
-                double gx = n.x + dxn / dn * 0.45, gz = n.z + dzn / dn * 0.45;
+                Num ang = H32(e.visit, 9) * 6.28318;
+                var n = nest; Num dxn = n.x - n.treeX, dzn = n.z - n.treeZ, dn = Sqrt(dxn * dxn + dzn * dzn); if (dn == 0) dn = 1;
+                Num ax = n.treeX + 30 * DCos(ang), az = n.treeZ + 30 * DSin(ang);
+                Num gx = n.x + dxn / dn * 0.45, gz = n.z + dzn / dn * 0.45;
                 e.hm = new Human
                 {
                     id = id, hex = hex, @short = "EXT", tr = tr, special = true, clothing = Body.SuitClothing(e.visit > 1), chunk = nest.key,
@@ -224,7 +224,7 @@ namespace Sting.Core
             return lv;
         }
 
-        void ExtStep(Human hm, double oldPanic)
+        void ExtStep(Human hm, Num oldPanic)
         {
             var e = ext;
             hm.panic = Max(0, oldPanic * T.panic.decayPerStep);
@@ -245,7 +245,7 @@ namespace Sting.Core
                 if (hm.treat >= T.ext.treatTicks)
                 {
                     int outside = Own().Count;
-                    double died = Max(0, colony.adults - outside);
+                    Num died = Max(0, colony.adults - outside);
                     Colony.DestroyNest(colony);
                     colony.adults = outside;
                     colony.stats.died += died;
@@ -272,7 +272,7 @@ namespace Sting.Core
 
         // ---------------- bees (GDD 9.2)
 
-        void AlarmHive(string key, int h, WaspBase w, double radius, bool fromRemote = false)
+        void AlarmHive(string key, int h, WaspBase w, Num radius, bool fromRemote = false)
         {
             var rec = records.Get(key); var hv = rec.content.hives[h];
             string k = key + "#" + h;
@@ -304,13 +304,13 @@ namespace Sting.Core
                     foreach (var w in wasps)
                     {
                         if (w.state != "fly" && w.state != "chewing" && w.state != "landed") continue;
-                        double dx = w.x - hv.ex, dy = w.y - hv.ey, dz = w.z - hv.ez;
+                        Num dx = w.x - hv.ex, dy = w.y - hv.ey, dz = w.z - hv.ez;
                         if (dx * dx + dy * dy + dz * dz < Sq(T.bees.entranceAlarm)) { AlarmHive(key, h, w, 2); break; }
                     }
                 }
             }
             if (hiveAlarms.Count == 0) return;
-            double agg = settings.beeAggression;
+            Num agg = settings.beeAggression;
             var attached = new OrderedMap<int, int>();
             foreach (var kv in hiveAlarms)
             {
@@ -332,7 +332,7 @@ namespace Sting.Core
                         attached.Set(target.id, attached.Get(target.id) + 1);
                         continue;
                     }
-                    double tx, ty, tz;
+                    Num tx, ty, tz;
                     if (p.mode == "pursue" && target != null && !ending && (target.state == "fly" || target.state == "stunned" || target.state == "chewing" || target.state == "balled"))
                     {
                         tx = target.x; ty = target.y; tz = target.z;
@@ -343,11 +343,11 @@ namespace Sting.Core
                         var q = BeePos(hv, b, tick); tx = q.x; ty = q.y; tz = q.z;
                         if (D2(new V3(p.x, p.y, p.z), q) < 0.01) { al.phys.Remove(b); continue; }
                     }
-                    double dx = tx - p.x, dy = ty - p.y, dz = tz - p.z;
-                    double d = Sqrt(dx * dx + dy * dy + dz * dz); if (d == 0 || double.IsNaN(d)) d = 1;
-                    double sp = T.bees.pursueSpeed * (0.9 + 0.2 * agg);
+                    Num dx = tx - p.x, dy = ty - p.y, dz = tz - p.z;
+                    Num d = Sqrt(dx * dx + dy * dy + dz * dz); if (d == 0 || d.IsNaN) d = 1;
+                    Num sp = T.bees.pursueSpeed * (0.9 + 0.2 * agg);
                     dx = dx / d * sp - p.vx; dy = dy / d * sp - p.vy; dz = dz / d * sp - p.vz;
-                    double dl = Sqrt(dx * dx + dy * dy + dz * dz), amax = T.bees.accel * T.DT;
+                    Num dl = Sqrt(dx * dx + dy * dy + dz * dz), amax = T.bees.accel * T.DT;
                     if (dl > amax) { dx *= amax / dl; dy *= amax / dl; dz *= amax / dl; }
                     p.vx += dx; p.vy += dy; p.vz += dz;
                     p.x += p.vx * T.DT; p.y += p.vy * T.DT; p.z += p.vz * T.DT;
@@ -379,7 +379,7 @@ namespace Sting.Core
         void BallEscape(Wasp w, bool burstEdge)
         {
             if (w.state != "balled") return;
-            double n = Max(1, w.ball.bees != 0 ? w.ball.bees : T.bees.ballMin);
+            Num n = Max(1, w.ball.bees != 0 ? w.ball.bees : T.bees.ballMin);
             if (burstEdge) w.ball.progress += T.bees.escapePerPress / (n * 0.2);
             if (w.id != drivenId && H32(w.id, tick, 11) < 0.004) w.ball.progress = 1;
             if (w.ball.progress >= 1)
@@ -403,10 +403,10 @@ namespace Sting.Core
 
         // ---------------- perching and crawling on people (GDD 7.2, 8.3)
 
-        double TickleNeed(Human hm, int zone)
+        Num TickleNeed(Human hm, int zone)
         {
             int cover = Body.ZoneCover(hm.clothing, zone);
-            double k = T.perch.tickleBase * (cover == 2 ? T.perch.thinMul * 1.5 : cover == 1 ? T.perch.thinMul : T.perch.bareMul);
+            Num k = T.perch.tickleBase * (cover == 2 ? T.perch.thinMul * 1.5 : cover == 1 ? T.perch.thinMul : T.perch.bareMul);
             if (zone == Zone.UpperBack || zone == Zone.Acnestis || zone == Zone.LowerBack || zone == Zone.Buttocks) k *= T.perch.backMul;
             if (zone == Zone.Face || zone == Zone.Ears || zone == Zone.NeckFront) k *= T.perch.faceMul;
             return Max(T.resolve.minConsequenceTicks, Rnd(hm.tr.reactionTicks * k));
@@ -416,7 +416,7 @@ namespace Sting.Core
         {
             var hm = HumanByHex(humanHex);
             if (hm == null) return;
-            double R = T.wasp.radius;
+            Num R = T.wasp.radius;
             w.state = "perched"; w.vx = w.vy = w.vz = 0;
             w.perch = new Perch { hex = hm.hex, posture = hm.posture, local = new V3(surf.x + n.x * R, surf.y + n.y * R, surf.z + n.z * R), n = n, surf = surf, zone = zone, part = part, tickle = 0, need = TickleNeed(hm, zone), quietUntil = 0 };
             Emit("perch", ("id", w.id), ("humanHex", hm.hex), ("zone", zone));
@@ -425,15 +425,15 @@ namespace Sting.Core
         /// Put a local point back on the nearest body surface
         (string part, V3 n, V3 surf, V3 local, int zone) OnBody(Human hm, V3 lp)
         {
-            Part best = null; SegQ bq = default; V3 bn = default; double bd = double.PositiveInfinity;
+            Part best = null; SegQ bq = default; V3 bn = default; Num bd = Num.MaxValue;
             foreach (var part in hm.PartsNow)
             {
                 var q = Body.SegClosest(part.a, part.b, lp);
-                double ex = lp.x - q.x, ey = lp.y - q.y, ez = lp.z - q.z, d = Sqrt(ex * ex + ey * ey + ez * ez); if (d == 0) d = 1e-9;
-                double gap = d - part.r;
+                Num ex = lp.x - q.x, ey = lp.y - q.y, ez = lp.z - q.z, d = Sqrt(ex * ex + ey * ey + ez * ez); if (d == 0) d = 1e-9;
+                Num gap = d - part.r;
                 if (gap < bd) { bd = gap; best = part; bq = q; bn = new V3(ex / d, ey / d, ez / d); }
             }
-            double R = T.wasp.radius;
+            Num R = T.wasp.radius;
             var surf = new V3(bq.x + bn.x * best.r, bq.y + bn.y * best.r, bq.z + bn.z * best.r);
             return (best.name, bn, surf, new V3(surf.x + bn.x * R, surf.y + bn.y * R, surf.z + bn.z * R), Body.Classify(best, bq, bn, surf, hm.tr.height / 1.75));
         }
@@ -453,11 +453,11 @@ namespace Sting.Core
             if (cmd.mx != 0 || cmd.mz != 0)
             {
                 // crawl relative to the camera, projected onto the skin
-                double yaw = cmd.yawQ * 1e-4, sy = DSin(yaw), cy = DCos(yaw);
-                double mz = cmd.mz / 100.0, mx = cmd.mx / 100.0, sp = T.perch.crawlSpeed * T.DT;
-                double wx = (sy * mz - cy * mx) * sp, wz = (cy * mz + sy * mx) * sp;
-                double lwx = hm.fz * wx - hm.fx * wz, lwz = hm.fx * wx + hm.fz * wz; // world delta -> body frame
-                double pitch = cmd.pitchQ * 1e-4;
+                Num yaw = cmd.yawQ * 1e-4, sy = DSin(yaw), cy = DCos(yaw);
+                Num mz = (Num)cmd.mz / 100, mx = (Num)cmd.mx / 100, sp = T.perch.crawlSpeed * T.DT;
+                Num wx = (sy * mz - cy * mx) * sp, wz = (cy * mz + sy * mx) * sp;
+                Num lwx = hm.fz * wx - hm.fx * wz, lwz = hm.fx * wx + hm.fz * wz; // world delta -> body frame
+                Num pitch = cmd.pitchQ * 1e-4;
                 var nl = new V3(p.local.x + lwx, p.local.y + mz * sp * DSin(pitch) * 2, p.local.z + lwz);
                 var c = OnBody(hm, nl);
                 p.local = c.local; p.n = c.n; p.surf = c.surf; p.zone = c.zone; p.part = c.part;
@@ -469,8 +469,8 @@ namespace Sting.Core
             if ((edge & Act.Interact) != 0)
             {
                 var nodes = UnderNodes(hm);
-                int best = -1; double bd = T.under.openingRadius * T.under.openingRadius;
-                for (int i = 0; i < nodes.Count; i++) if (nodes[i].opening) { double q = D2(nodes[i].pos, p.local); if (q <= bd) { bd = q; best = i; } }
+                int best = -1; Num bd = T.under.openingRadius * T.under.openingRadius;
+                for (int i = 0; i < nodes.Count; i++) if (nodes[i].opening) { Num q = D2(nodes[i].pos, p.local); if (q <= bd) { bd = q; best = i; } }
                 if (best >= 0) { w.perch = null; w.state = "fly"; EnterUnder(w, hm.hex, best); return; }
             }
             if (armed)
@@ -502,7 +502,7 @@ namespace Sting.Core
         {
             foreach (var rec in activeChunks) foreach (var t in rec.content.trees)
                 {
-                    double dx = w.x - t.x, dz = w.z - t.z, d = Sqrt(dx * dx + dz * dz) - t.r;
+                    Num dx = w.x - t.x, dz = w.z - t.z, d = Sqrt(dx * dx + dz * dz) - t.r;
                     if (d <= 0.06 && w.y > 0.8 && w.y < t.h) return t;
                 }
             return null;
@@ -519,19 +519,19 @@ namespace Sting.Core
         {
             string key = ChunkKey(rec.cx, rec.cz);
             if (siteCache.TryGetValue(key, out var hit)) return hit;
-            double CSz = T.chunk.size, sd = seed & 0xffffffffUL;
+            Num CSz = T.chunk.size, sd = seed & 0xffffffffUL;
             var o = new Sites();
             // h32 reads four arguments; the JS passes a fifth that it ignores, kept so both sides agree
             for (int i = 0; i < T.sites.holesPerChunk; i++)
             {
-                double x = (rec.cx + (H32(sd, rec.cx, rec.cz, i) - 0.5) * 0.8) * CSz, z = (rec.cz + (H32(sd, rec.cx, rec.cz, i) - 0.5) * 0.8) * CSz;
+                Num x = (rec.cx + (H32(sd, rec.cx, rec.cz, i) - 0.5) * 0.8) * CSz, z = (rec.cz + (H32(sd, rec.cx, rec.cz, i) - 0.5) * 0.8) * CSz;
                 o.holes.Add(new V3(x, 0, z));
             }
             var trees = rec.content.trees;
             for (int i = 0; i < trees.Count; i++)
             {
                 var t = trees[i];
-                double a = H32(sd, rec.cx, rec.cz, i) * 6.28318, d = t.cr * 0.55;
+                Num a = H32(sd, rec.cx, rec.cz, i) * 6.28318, d = t.cr * 0.55;
                 o.branches.Add((new V3(t.x + d * DCos(a), Max(1.8, t.h - t.cr * 0.7), t.z + d * DSin(a)), t));
             }
             if (siteCache.Count > 64) siteCache.Clear();
@@ -543,12 +543,12 @@ namespace Sting.Core
         /// for a few days; a pure function of the seed, the chunk and the clock.
         public List<Food> FruitIn(ChunkRec rec)
         {
-            double frac = SeasonFrac;
+            Num frac = SeasonFrac;
             if (frac < T.fruit.startFrac) return new List<Food>();
-            double sd = seed & 0xffffffffUL; string key = ChunkKey(rec.cx, rec.cz); long today = day;
+            Num sd = seed & 0xffffffffUL; string key = ChunkKey(rec.cx, rec.cz); long today = day;
             string ck = key + "|" + today + "|" + season.n;
             if (fruitCache.TryGetValue(ck, out var hit)) return hit;
-            var o = new List<Food>(); double span = 1 - T.fruit.startFrac;
+            var o = new List<Food>(); Num span = 1 - T.fruit.startFrac;
             var trees = rec.content.trees;
             for (int ti = 0; ti < trees.Count; ti++)
             {
@@ -556,9 +556,9 @@ namespace Sting.Core
                 if (H32(sd, rec.cx, rec.cz, ti) >= T.fruit.treeShare) continue;
                 for (int k = 0; k < T.fruit.perTree; k++)
                 {
-                    double fall = Floor(season.startMinute / 1440 + settings.seasonDays * (T.fruit.startFrac + span * H32(sd, rec.cx, rec.cz, ti)));
+                    Num fall = Floor(season.startMinute / 1440 + settings.seasonDays * (T.fruit.startFrac + span * H32(sd, rec.cx, rec.cz, ti)));
                     if (today < fall || today >= fall + T.fruit.rotDays) continue;
-                    double a = H32(sd, ti, k, 933) * 6.28318, d = t.r + 0.2 + T.fruit.spread * H32(sd, ti, k, 934);
+                    Num a = H32(sd, ti, k, 933) * 6.28318, d = t.r + 0.2 + T.fruit.spread * H32(sd, ti, k, 934);
                     o.Add(new Food { x = t.x + d * DCos(a), y = 0.03, z = t.z + d * DSin(a), rate = T.fruit.rate, kind = "fruit", i = ti * 16 + k });
                 }
             }
@@ -593,10 +593,10 @@ namespace Sting.Core
             else
             {
                 var t = site.t;
-                double dx = w.x - t.x, dz = w.z - t.z;
-                double d = Sqrt(dx * dx + dz * dz); if (d == 0) d = 1;
+                Num dx = w.x - t.x, dz = w.z - t.z;
+                Num d = Sqrt(dx * dx + dz * dz); if (d == 0) d = 1;
                 dx /= d; dz /= d;
-                double y = Clamp(w.y, 1.2, Max(1.2, t.h - 0.6));
+                Num y = Clamp(w.y, 1.2, Max(1.2, t.h - 0.6));
                 nest = MakeNest(t.x, t.z, t.x + dx * (t.r + 0.2), y, t.z + dz * (t.r + 0.2), NEST.r, "trunk");
             }
             colony.sited = true;
@@ -620,16 +620,16 @@ namespace Sting.Core
                 {
                     var wb = webs[i];
                     if (st.webTorn != null && st.webTorn.TryGetValue(i, out var td) && td == day) continue;
-                    double d0 = (p0.x - wb.x) * wb.nx + (p0.z - wb.z) * wb.nz, d1 = (w.x - wb.x) * wb.nx + (w.z - wb.z) * wb.nz;
+                    Num d0 = (p0.x - wb.x) * wb.nx + (p0.z - wb.z) * wb.nz, d1 = (w.x - wb.x) * wb.nx + (w.z - wb.z) * wb.nz;
                     if (d0 * d1 > 0 && Abs(d1) > T.wasp.radius) continue;
-                    double t = d0 == d1 ? 1 : Clamp(d0 / (d0 - d1), 0, 1);
+                    Num t = d0 == d1 ? 1 : Clamp(d0 / (d0 - d1), 0, 1);
                     var q = new V3(p0.x + (w.x - p0.x) * t, p0.y + (w.y - p0.y) * t, p0.z + (w.z - p0.z) * t);
-                    double dx = q.x - wb.x, dy = q.y - wb.y, dz = q.z - wb.z;
-                    double r2 = dx * dx + dy * dy + dz * dz;
+                    Num dx = q.x - wb.x, dy = q.y - wb.y, dz = q.z - wb.z;
+                    Num r2 = dx * dx + dy * dy + dz * dz;
                     if (r2 > wb.r * wb.r) continue;
                     w.x = q.x; w.y = q.y; w.z = q.z; w.vx = w.vy = w.vz = 0;
                     w.state = "webbed";
-                    w.web = new WebHold { key = ChunkKey(rec.cx, rec.cz), i = i, progress = 0, prevBurst = 1, start = tick, spiderAt = tick + T.web.spiderDelay + System.Math.Ceiling(Sqrt(r2) / T.web.spiderSpeed * 60) };
+                    w.web = new WebHold { key = ChunkKey(rec.cx, rec.cz), i = i, progress = 0, prevBurst = 1, start = tick, spiderAt = tick + T.web.spiderDelay + Ceil(Sqrt(r2) / T.web.spiderSpeed * 60) };
                     if (w.attach != null) w.attach = null;
                     Emit("webbed", ("id", w.id), ("driven", w.id == drivenId), ("spiderAt", w.web.spiderAt));
                     return;
@@ -658,7 +658,7 @@ namespace Sting.Core
         {
             foreach (var rec in activeChunks) foreach (var t in rec.content.trees)
                 {
-                    double dx = w.x - t.x, dz = w.z - t.z;
+                    Num dx = w.x - t.x, dz = w.z - t.z;
                     if (dx * dx + dz * dz < t.cr * t.cr && w.y < t.h + t.cr) return true;
                 }
             return false;
@@ -679,8 +679,8 @@ namespace Sting.Core
 
         /// One code path for every aerial hunter: patrol a pure-function loop, pick a flying wasp in sight, chase it with a
         /// capped acceleration (so sharp turns escape), give up after a while, then cool off and return to the loop.
-        void Hunters(System.Func<ChunkContent, List<Patrol>> list, System.Func<Patrol, double, V3> posFn, T.Hunter B, OrderedMap<string, HunterState> states,
-            System.Func<Wasp, bool> canSee, System.Func<Wasp, bool> abort, string cause, string ev, double cruise)
+        void Hunters(System.Func<ChunkContent, List<Patrol>> list, System.Func<Patrol, Num, V3> posFn, T.Hunter B, OrderedMap<string, HunterState> states,
+            System.Func<Wasp, bool> canSee, System.Func<Wasp, bool> abort, string cause, string ev, Num cruise)
         {
             foreach (var rec in activeChunks)
             {
@@ -695,21 +695,21 @@ namespace Sting.Core
                     {
                         if (tick % 6 != i % 6) continue;
                         var p = posFn(bd, tick);
-                        Wasp target = null; double best = B.sight * B.sight;
+                        Wasp target = null; Num best = B.sight * B.sight;
                         foreach (var w in wasps)
                         {
                             if (w.state != "fly" || !canSee(w)) continue;
-                            double q = D2(w, p);
+                            Num q = D2(w, p);
                             if (q < best && !UnderCanopy(w)) { best = q; target = w; }
                         }
                         if (target == null) continue;
-                        double d0 = Sqrt(best); if (d0 == 0) d0 = 1;
+                        Num d0 = Sqrt(best); if (d0 == 0) d0 = 1;
                         st = new HunterState { mode = "dive", x = p.x, y = p.y, z = p.z, vx = (target.x - p.x) / d0 * 3, vy = (target.y - p.y) / d0 * 3, vz = (target.z - p.z) / d0 * 3, target = target.id, until = tick + B.diveTicks };
                         states.Set(k, st);
                         Emit(ev + "Dive", ("key", key), ("i", i), ("target", target.id), ("driven", target.id == drivenId));
                         continue;
                     }
-                    double tx, ty, tz, speed = B.speed;
+                    Num tx, ty, tz, speed = B.speed;
                     if (st.mode == "dive")
                     {
                         var t = WaspById(st.target);
@@ -728,10 +728,10 @@ namespace Sting.Core
                         tx = p.x; ty = p.y; tz = p.z; speed = cruise;
                         if (D2(new V3(st.x, st.y, st.z), p) < 0.25 || tick > st.until + 900) { states.Delete(k); continue; }
                     }
-                    double dx = tx - st.x, dy = ty - st.y, dz = tz - st.z;
-                    double d = Sqrt(dx * dx + dy * dy + dz * dz); if (d == 0) d = 1;
+                    Num dx = tx - st.x, dy = ty - st.y, dz = tz - st.z;
+                    Num d = Sqrt(dx * dx + dy * dy + dz * dz); if (d == 0) d = 1;
                     dx = dx / d * speed - st.vx; dy = dy / d * speed - st.vy; dz = dz / d * speed - st.vz;
-                    double dl = Sqrt(dx * dx + dy * dy + dz * dz), amax = B.accel * T.DT;
+                    Num dl = Sqrt(dx * dx + dy * dy + dz * dz), amax = B.accel * T.DT;
                     if (dl > amax) { dx *= amax / dl; dy *= amax / dl; dz *= amax / dl; }
                     st.vx += dx; st.vy += dy; st.vz += dz;
                     st.x += st.vx * T.DT; st.y = Max(0.3, st.y + st.vy * T.DT); st.z += st.vz * T.DT;
@@ -743,7 +743,7 @@ namespace Sting.Core
 
         string SurfaceBelow(Wasp w)
         {
-            double R = T.wasp.radius, g = T.land.gap;
+            Num R = T.wasp.radius, g = T.land.gap;
             if (w.y <= R + g) return "ground";
             foreach (var rec in activeChunks) foreach (var b in rec.content.boxes)
                 {
@@ -770,10 +770,10 @@ namespace Sting.Core
         /// the sides of boxes and tree trunks stop it.
         void Walk(Wasp w, Cmd cmd)
         {
-            double yaw = cmd.yawQ * 1e-4, sy = DSin(yaw), cy = DCos(yaw);
-            double mz = cmd.mz / 100.0, mx = cmd.mx / 100.0, sp = T.land.walkSpeed * T.DT;
-            double nx = w.x + (sy * mz - cy * mx) * sp, nz = w.z + (cy * mz + sy * mx) * sp;
-            double R = T.wasp.radius;
+            Num yaw = cmd.yawQ * 1e-4, sy = DSin(yaw), cy = DCos(yaw);
+            Num mz = (Num)cmd.mz / 100, mx = (Num)cmd.mx / 100, sp = T.land.walkSpeed * T.DT;
+            Num nx = w.x + (sy * mz - cy * mx) * sp, nz = w.z + (cy * mz + sy * mx) * sp;
+            Num R = T.wasp.radius;
             foreach (var rec in activeChunks)
             {
                 foreach (var b in rec.content.boxes)
@@ -781,7 +781,7 @@ namespace Sting.Core
                     if (nx < b.minx - R || nx > b.maxx + R || nz < b.minz - R || nz > b.maxz + R) continue;
                     if (w.y > b.miny && w.y < b.maxy) return; // blocked by the side
                 }
-                foreach (var t in rec.content.trees) { double dx = nx - t.x, dz = nz - t.z; if (dx * dx + dz * dz < Sq(t.r + R)) return; }
+                foreach (var t in rec.content.trees) { Num dx = nx - t.x, dz = nz - t.z; if (dx * dx + dz * dz < Sq(t.r + R)) return; }
             }
             w.x = nx; w.z = nz; w.yaw = yaw; w.walking = true;
             // walking into a person climbs onto them (an arm on the table, a leg on the grass)
@@ -832,14 +832,14 @@ namespace Sting.Core
             if (!records.TryGet(key, out var rec)) return new List<Bait>();
             string ck = m.active.n + "|" + key;
             if (baitCache.TryGetValue(ck, out var hit)) return hit;
-            var trees = new List<(Tree t, double h)>();
+            var trees = new List<(Tree t, Num h)>();
             for (int i = 0; i < rec.content.trees.Count; i++) trees.Add((rec.content.trees[i], H32(m.active.n, rec.cx, rec.cz, i)));
             Stable.Sort(trees, (a, b) => Stable.Sign(a.h - b.h));
             var o = new List<Bait>();
             for (int i = 0; i < trees.Count && i < T.muni.baitsPerChunk; i++)
             {
                 var (t, h) = trees[i];
-                double a = h * 6.28318, r = t.r + 0.03;
+                Num a = h * 6.28318, r = t.r + 0.03;
                 o.Add(new Bait { x = t.x + r * DCos(a), y = T.muni.baitHeight, z = t.z + r * DSin(a), key = key });
             }
             if (baitCache.Count > 64) baitCache.Clear();
@@ -857,7 +857,7 @@ namespace Sting.Core
 
         Bait BaitNear(Wasp w)
         {
-            double r2 = T.muni.baitDist * T.muni.baitDist;
+            Num r2 = T.muni.baitDist * T.muni.baitDist;
             foreach (var b in MuniBaits()) if (D2(w, new V3(b.x, b.y, b.z)) <= r2) return b;
             return null;
         }
@@ -869,12 +869,12 @@ namespace Sting.Core
         }
 
         /// A poisoned load reaches the nest: it is fed to larvae and shared with adults
-        void Poison(double amount, int byId)
+        void Poison(Num amount, int byId)
         {
             var col = colony;
-            double inside = Max(0, col.adults - OwnWorkers());
-            double adults = Min(inside, col.adults * T.muni.poisonAdults * amount);
-            double lf = Min(1, T.muni.poisonLarvae * amount), larvae = col.larvae * lf + col.rLarvae * lf;
+            Num inside = Max(0, col.adults - OwnWorkers());
+            Num adults = Min(inside, col.adults * T.muni.poisonAdults * amount);
+            Num lf = Min(1, T.muni.poisonLarvae * amount), larvae = col.larvae * lf + col.rLarvae * lf;
             col.adults -= adults; col.larvae -= col.larvae * lf; col.rLarvae -= col.rLarvae * lf;
             col.stats.poisoned += adults + larvae;
             Emit("poisoned", ("id", byId), ("adults", adults), ("larvae", larvae));
@@ -886,17 +886,17 @@ namespace Sting.Core
             var m = muni; var col = colony;
             if (!col.nestAlive || !m.active.keys.Contains(nest.key)) return;
             if (!(IsDaylight(minute) && !Raining && CanFly())) return;
-            var a = T.alloc[col.alloc]; double share = a.protein / ((a.sugar + a.protein + a.pulp) / 3);
-            double dtDay = 60.0 / dayTicks;
-            double inside = Max(0, col.adults - Own().Count);
-            double kill = inside * T.muni.abstractKillPerDay * share * dtDay;
+            var a = T.alloc[col.alloc]; Num share = a.protein / ((a.sugar + a.protein + a.pulp) / 3);
+            Num dtDay = (Num)60 / dayTicks;
+            Num inside = Max(0, col.adults - Own().Count);
+            Num kill = inside * T.muni.abstractKillPerDay * share * dtDay;
             col.adults -= kill; col.larvae -= col.larvae * T.muni.abstractKillPerDay * share * dtDay;
             col.stats.poisoned += kill;
         }
 
         bool NearCan(Wasp w)
         {
-            foreach (var rec in activeChunks) foreach (var c in rec.content.cans) { double dx = w.x - c.x, dz = w.z - c.z; if (dx * dx + dz * dz < 0.09) return true; }
+            foreach (var rec in activeChunks) foreach (var c in rec.content.cans) { Num dx = w.x - c.x, dz = w.z - c.z; if (dx * dx + dz * dz < 0.09) return true; }
             return false;
         }
 
@@ -962,7 +962,7 @@ namespace Sting.Core
                 // other players' wasps near the nest count too (rivals live on this peer only)
                 if (t == null) foreach (var r in remote.Values) if (!r.rival && (r.state == "fly" || r.state == "landed") && D2(r, home) < Sq(T.rival.guardRadius)) { t = r; break; }
                 if (t != null) { ai.mode = "hunt"; ai.huntId = t.id; ai.timer = tick + T.rival.huntTicks; }
-                else { Steer(w, new V3(home.x + 0.12 * DCos(tick / 40.0 + w.id), home.y + 0.05, home.z + 0.12 * DSin(tick / 40.0 + w.id)), cmd); return cmd; }
+                else { Steer(w, new V3(home.x + 0.12 * DCos((Num)tick / 40 + w.id), home.y + 0.05, home.z + 0.12 * DSin((Num)tick / 40 + w.id)), cmd); return cmd; }
             }
             if (ai.mode == "hunt")
             {
@@ -1012,7 +1012,7 @@ namespace Sting.Core
             Publish(new NetEv { type = "fight", a = a.id, b = otherId, toPeer = p, venom = a.venom, queen = a.caste == "queen" });
         }
 
-        static double FightScore(int id, double venom, bool queen, double mash, double start) => venom + (queen ? 1 : 0) + mash + H32(id, start, 61) * 1.2;
+        static Num FightScore(int id, Num venom, bool queen, Num mash, Num start) => venom + (queen ? 1 : 0) + mash + H32(id, start, 61) * 1.2;
 
         void FightResolve(Wasp w, bool won, int otherId)
         {
@@ -1041,7 +1041,7 @@ namespace Sting.Core
                 if (tick < w.fight.until || w.fight.other < w.id) continue;
                 var o = WaspById(w.fight.other);
                 if (o == null) { w.state = "fly"; w.fight = null; continue; }
-                double Score(Wasp x) => x.venom + (x.caste == "queen" ? 1 : 0) + x.fight.mash + H32(x.id, tick, 61) * 1.2;
+                Num Score(Wasp x) => x.venom + (x.caste == "queen" ? 1 : 0) + x.fight.mash + H32(x.id, tick, 61) * 1.2;
                 var (win, lose) = Score(w) >= Score(o) ? (w, o) : (o, w);
                 win.state = "stunned"; win.stateTicks = 20; win.fight = null;
                 Die(lose, lose.colony == "own" ? "killed by a rival wasp" : "killed by your worker", null);
@@ -1074,7 +1074,7 @@ namespace Sting.Core
             // My rivals against other peers' wasps: I own the rivals, so I start these fights
             var busy = new HashSet<int>();
             foreach (var w in wasps) if (w.state == "fighting" && w.fight.remote) busy.Add(w.fight.other);
-            double rr = T.rival.remoteFightRange * T.rival.remoteFightRange;
+            Num rr = T.rival.remoteFightRange * T.rival.remoteFightRange;
             foreach (var a in free)
             {
                 if (a.colony == "own" || a.state == "fighting") continue;
@@ -1098,7 +1098,7 @@ namespace Sting.Core
             MuniTick();
             var col = colony;
             bool daylight = IsDaylight(minute) && !Raining && CanFly();
-            double frac = SeasonFrac;
+            Num frac = SeasonFrac;
             if (!colony.sited && frac > 0.03)
             {
                 var old = oldNests.Count > 0 ? oldNests[oldNests.Count - 1] : nest;
@@ -1107,15 +1107,15 @@ namespace Sting.Core
                 colony.maxCells = T.sites.Of(nest.site).maxCells;
                 Emit("nestFounded", ("x", nest.x), ("y", nest.y), ("z", nest.z), ("key", nest.key), ("auto", true));
             }
-            Colony.Step(col, 60.0 / dayTicks, OwnWorkers(), daylight, frac, bio);
+            Colony.Step(col, (Num)60 / dayTicks, OwnWorkers(), daylight, frac, bio);
             if (Raining && col.nestAlive && col.sited)
             {
                 // the site decides what rain costs: burrows flood, open nests chill (GDD 6.6)
-                var st = T.sites.Of(nest.site); double dt = 60.0 / dayTicks;
-                double fl = st.flood * dt, inside = Max(0, col.adults - Own().Count);
+                var st = T.sites.Of(nest.site); Num dt = (Num)60 / dayTicks;
+                Num fl = st.flood * dt, inside = Max(0, col.adults - Own().Count);
                 col.eggs -= col.eggs * fl; col.larvae -= col.larvae * fl; col.pupae -= col.pupae * fl;
                 col.rEggs -= col.rEggs * fl; col.rLarvae -= col.rLarvae * fl; col.rPupae -= col.rPupae * fl;
-                double cold = Min(inside, inside * T.sites.rainMortality * st.exposure * dt);
+                Num cold = Min(inside, inside * T.sites.rainMortality * st.exposure * dt);
                 col.adults -= cold; col.stats.died += cold;
             }
             string ph = Colony.SeasonPhase(frac);
@@ -1133,9 +1133,9 @@ namespace Sting.Core
                 return;
             }
             int own = Own().Count;
-            double inside2 = col.adults - own;
+            Num inside2 = col.adults - own;
             int ai = own - (Driven() != null ? 1 : 0);
-            double cap = Min(T.ai.maxPhysical, Floor(col.adults * 0.4));
+            Num cap = Min(T.ai.maxPhysical, Floor(col.adults * 0.4));
             if (!noAI && daylight && col.nestAlive && inside2 >= 1 && ai < cap && tick % T.ai.launchEvery < 60) SpawnWasp(false);
         }
     }

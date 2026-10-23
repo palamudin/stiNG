@@ -115,7 +115,7 @@ Even a perfect season ends with the colony dying. "Survival" means passing the l
 - **R-01** The sim MUST NOT read anything from the presentation layer except player input commands.
 - **R-02** Anything that can change gameplay state MUST be computed by the sim.
 - **R-03** Animation, particles, ragdolls and audio MAY differ between peers and MUST NOT feed back into the sim.
-- **R-04** Sim state and sim decisions MUST use fixed-point math. `float` and `double` are forbidden in `Sting.Core` except in offline tools that generate data tables.
+- **R-04** Sim state and sim decisions MUST use fixed-point math. `float` and `double` are forbidden in `Sting.Core` except in offline tools that generate data tables. As built (18.18): the core is written against `Num`, which is Q32.32 in the shipping build and a double only in the build that proves parity with the PoC.
 - **R-05** All randomness MUST come from the counter-based RNG (3.5) keyed by (world seed, domain, entity, tick, salt). No stateful global RNG, no `System.Random`.
 - **R-06** Iteration order MUST be deterministic: entities in ascending `EntityId` order. Never depend on `Dictionary` or `HashSet` enumeration order. Never use an unstable sort without a total-order tiebreak.
 - **R-07** The sim MUST NOT read wall-clock time. Only ticks.
@@ -998,7 +998,11 @@ A dragonfly patrols a low loop (0.6–1.4 m) in about half the chunks. It darts 
 
 Two rules made the port mechanical: the JS sim may use only operations that are exact in IEEE doubles (its own sine, arctangent and rounding, no `Math.round`, `hypot` or `atan2`), and every map whose order can change a result is an insertion-ordered map in C# (`OrderedMap`), every sort is stable, every string sort is ordinal.
 
-The port keeps doubles so that parity with the PoC can be proven first. R-04 still stands for Unity: the swap to `Fix64` is the next step, done behind the same parity harness so that what changes is only rounding, measured against the double reference rather than guessed. The C# save is binary and exact (each double as its 8 bytes); it is not interchangeable with the PoC's JSON saves, and does not need to be.
+Every quantity in the core is a `Num`, and the same sources build two ways. The default build makes `Num` an IEEE double, which is what the parity harness proves against the JS. The fixed build (`-p:StingFixed=true`) makes `Num` Q32.32 fixed point on a long, which is what R-04 asks for: integer arithmetic only, so no CPU, compiler or backend can change a bit (IL2CPP on ARM64 may fuse `a*b+c` into one rounding; integers cannot). Both builds evaluate the same expression trees in the same order; sim code never does arithmetic on runtime doubles, only on `Num` and on double constants that meet a `Num`.
+
+The fixed build cannot match the JS bit for bit, so it is held to properties and to its own record instead: a save restored mid-run carries on exactly like the run that was never saved; two peers on good and awful links, a late joiner, a cheater's victim and a three-peer mesh agree on every human at every check; and `core/fixtures/fixed.txt` locks its digests so any later change shows. Against the double build it plays the same game: over the five scenarios the first difference is one deposit landing a tick later after 14 seconds, positions until then agree within 0.003 mm, and every end figure (stings, deaths, prey caught, deposits, adults to 0.1, brood, seasons) is identical. It runs about 2.2 times slower than doubles, around 0.3 ms per tick with a full colony out, which is 2% of one core at 60 Hz.
+
+The C# save is binary and exact (each number as its 8 bytes, a double's or a fixed point's); it is not interchangeable with the PoC's JSON saves, and does not need to be.
 
 Porting found two bugs, fixed in both: a line that went extinct kept ticking its colony and could come back the next autumn, and alarm pheromone kept relaunching attacks on a human who had gone home.
 

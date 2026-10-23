@@ -9,70 +9,70 @@ namespace Sting.Core
     public sealed class Cmd
     {
         public int mx, my, mz, burst, sting, yawQ, pitchQ, act, alloc, pick;
-        public bool hasDir; public double dirX, dirY, dirZ, throttle;
+        public bool hasDir; public Num dirX, dirY, dirZ, throttle;
         public Cmd Clone() => (Cmd)MemberwiseClone();
     }
 
-    public sealed class Carry { public string kind, what; public double amount; public bool poison; }
+    public sealed class Carry { public string kind, what; public Num amount; public bool poison; }
     public sealed class AiTarget { public string kind, key, sub, hex; public int i, c; public V3 p; }
     public sealed class Ai
     {
-        public string mode = "pick"; public AiTarget target; public double timer, until; public string humanHex; public int stings, huntId;
-        public double stingHold, cargo; public string atFood;
+        public string mode = "pick"; public AiTarget target; public Num timer, until; public string humanHex; public int stings, huntId;
+        public Num stingHold, cargo; public string atFood;
         public Ai Clone() => (Ai)MemberwiseClone();
     }
     public sealed class Attach { public string hex, posture; public V3 local, n; public int start; public bool deepened; public int zone; }
     public sealed class UnderMove { public int to, t; }
-    public sealed class Under { public string hex, posture, key; public int node, sel, entered; public UnderMove move; public double nextPress; public bool mxHeld, mzHeld; }
-    public sealed class Ball { public double temp, progress, prevBurst, bees; }
-    public sealed class WebHold { public string key; public int i; public double progress, prevBurst; public int start; public double spiderAt; }
+    public sealed class Under { public string hex, posture, key; public int node, sel, entered; public UnderMove move; public Num nextPress; public bool mxHeld, mzHeld; }
+    public sealed class Ball { public Num temp, progress, prevBurst, bees; }
+    public sealed class WebHold { public string key; public int i; public Num progress, prevBurst; public int start; public Num spiderAt; }
     public sealed class Fight
     {
-        public int other; public bool remote, starter; public int peer; public double start, until, mash, myVenom, theirVenom; public bool theirQueen;
+        public int other; public bool remote, starter; public int peer; public Num start, until, mash, myVenom, theirVenom; public bool theirQueen;
     }
     public sealed class Contact
     {
-        public string humanHex; public int zone; public bool blocked; public double reach; public V3 n, surf; public string part;
+        public string humanHex; public int zone; public bool blocked; public Num reach; public V3 n, surf; public string part;
         public int opening = -1; public string openingKey;
     }
     public sealed class Perch
     {
-        public string hex, posture; public V3 local, n, surf; public int zone; public string part; public double tickle, need, quietUntil;
+        public string hex, posture; public V3 local, n, surf; public int zone; public string part; public Num tickle, need, quietUntil;
     }
 
     /// What every wasp, local or remote, has: enough to be chased, hit or drawn
     public class WaspBase
     {
         public int id; public string caste = "worker";
-        public double x, y, z, vx, vy, vz;
+        public Num x, y, z, vx, vy, vz;
         public string state = "fly";
         public V3 P => new V3(x, y, z);
     }
 
     public sealed class Wasp : WaspBase
     {
-        public double yaw, pitch, energy = 1, venom = 1;
+        public Num yaw, pitch, energy = 1, venom = 1;
         public int stateTicks;
-        public Attach attach; public Under under; public Ball ball; public double born;
+        public Attach attach; public Under under; public Ball ball; public Num born;
         public Carry carry; public int groundTicks, chew; public string role = "sugar", colony = "own";
         public WebHold web; public Fight fight; public Ai ai = new Ai(); public Contact contact; public Perch perch;
-        public bool walking; public double fightReqUntil;
+        public bool walking; public Num fightReqUntil;
         public Wasp Ghost() { var g = (Wasp)MemberwiseClone(); g.state = "dead"; return g; }
     }
 
     public sealed class RemoteWasp : WaspBase
     {
         public string carry, under; public bool rival;
-        public int peer, stamp, seen, bad; public double px, py, pz;
+        public int peer, stamp, seen, bad; public Num px, py, pz;
     }
 
-    public sealed class Home { public double x, z, fx, fz, ax, az; public string posture; }
+    public sealed class Home { public Num x, z, fx, fz, ax, az; public string posture; }
     public sealed class Human
     {
         public ulong id; public string hex, @short; public Traits tr; public Clothing clothing; public string chunk; public Home home;
-        public double x, z, fx, fz; public string posture; public string state = "idle";
-        public double panic, fleeSteps, dirX, dirZ, stungCount; public long winDay = -1; public HumanWin win;
-        public int annoyId; public double annoy, cooldown, sprayCount, treat; public long clothesDay; public bool special;
+        public Num x, z, fx, fz; public string posture; public string state = "idle";
+        public Num panic, fleeSteps, dirX, dirZ, stungCount; public long winDay = -1; public HumanWin win;
+        public int annoyId; public Num annoy, cooldown, sprayCount, treat; public long clothesDay; public bool special;
         public List<Part> sit, stand;
         public List<Part> Parts(string posture) => posture == "sit" ? sit : stand;
         public List<Part> PartsNow => posture == "sit" ? sit : stand;
@@ -87,11 +87,11 @@ namespace Sting.Core
     {
         public string type; public int seq, commit;
         public int waspId; public bool driven; public string humanHex; public int zone; public bool under; public List<Swat> swats;
-        public double panicGain; public bool flee; public double sx, sz; public double extra;
-        public string key; public int i, hive, h, target; public string what; public double radius;
-        public string byHex, cause; public double x, y, z;
-        public double start, end, window; public int kind; public V3 center; public bool kills; public string why;
-        public int a, b, toPeer; public double venom, mash; public bool queen; public int id;
+        public Num panicGain; public bool flee; public Num sx, sz; public Num extra;
+        public string key; public int i, hive, h, target; public string what; public Num radius;
+        public string byHex, cause; public Num x, y, z;
+        public Num start, end, window; public int kind; public V3 center; public bool kills; public string why;
+        public int a, b, toPeer; public Num venom, mash; public bool queen; public int id;
         public NetEv() { mk = "ev"; }
         public NetEv Copy()
         {
@@ -99,7 +99,7 @@ namespace Sting.Core
             if (swats != null) { e.swats = new List<Swat>(); foreach (var s in swats) e.swats.Add(s.Clone()); }
             return e;
         }
-        static double Z(double v) => v == 0 ? 0 : v; // -0 arrives as 0 (the JS lab serializes events as JSON)
+        static Num Z(Num v) => v == 0 ? 0 : v; // -0 arrives as 0 (the JS lab serializes events as JSON)
         static V3 Z(V3 v) => new V3(Z(v.x), Z(v.y), Z(v.z));
         /// A copy as it arrives at another peer
         public NetEv WireCopy()
@@ -126,31 +126,31 @@ namespace Sting.Core
     }
 
     public sealed class ChunkRec { public int cx, cz, genVersion, discoveredTick; public uint contentHash; public ChunkContent content; }
-    public sealed class LastSting { public double x, z; }
+    public sealed class LastSting { public Num x, z; }
     public sealed class ChunkState
     {
-        public double esc, chewed;
-        public Dictionary<int, double> caughtFly = new Dictionary<int, double>();
+        public Num esc, chewed;
+        public Dictionary<int, Num> caughtFly = new Dictionary<int, Num>();
         public Dictionary<int, int> caughtCat = new Dictionary<int, int>();
         public Dictionary<int, Dictionary<int, int>> beeLost = new Dictionary<int, Dictionary<int, int>>();
         public LastSting lastSting;
         public Dictionary<int, long> webTorn;
-        public Dictionary<int, double> spilled;
+        public Dictionary<int, Num> spilled;
     }
 
-    public sealed class BeePhys { public double x, y, z, vx, vy, vz, stun; public string mode; }
+    public sealed class BeePhys { public Num x, y, z, vx, vy, vz, stun; public string mode; }
     /// phys: JS object with integer keys, which iterate in ascending order
-    public sealed class HiveAlarm { public string key; public int h, target; public double until; public SortedDictionary<int, BeePhys> phys = new SortedDictionary<int, BeePhys>(); }
-    public sealed class HunterState { public string mode; public double x, y, z, vx, vy, vz, until; public int target; }
-    public sealed class Ext { public int visit; public string state = "none"; public double arriveMinute; public Human hm; }
-    public sealed class Spray { public string hex; public double start, end; }
-    public sealed class Alarm { public double x, y, z, until; public string killerHex; }
-    public sealed class Season { public int n; public double startMinute; public string phase; }
-    public sealed class MuniCampaign { public int n; public string center; public List<string> keys; public double until; }
-    public sealed class Muni { public int n; public MuniCampaign active; public double cooldownUntil; }
+    public sealed class HiveAlarm { public string key; public int h, target; public Num until; public SortedDictionary<int, BeePhys> phys = new SortedDictionary<int, BeePhys>(); }
+    public sealed class HunterState { public string mode; public Num x, y, z, vx, vy, vz, until; public int target; }
+    public sealed class Ext { public int visit; public string state = "none"; public Num arriveMinute; public Human hm; }
+    public sealed class Spray { public string hex; public Num start, end; }
+    public sealed class Alarm { public Num x, y, z, until; public string killerHex; }
+    public sealed class Season { public int n; public Num startMinute; public string phase; }
+    public sealed class MuniCampaign { public int n; public string center; public List<string> keys; public Num until; }
+    public sealed class Muni { public int n; public MuniCampaign active; public Num cooldownUntil; }
     public sealed class PendingSwitch { public int at, target; }
-    public sealed class SimStats { public double stings, aiStings, remoteStings, full, deaths, caught, deposits; public Dictionary<string, double> causes = new Dictionary<string, double>(); }
-    public sealed class NetStats { public double sent, recv, late, lateMax, rejected, dropped; }
+    public sealed class SimStats { public Num stings, aiStings, remoteStings, full, deaths, caught, deposits; public Dictionary<string, Num> causes = new Dictionary<string, Num>(); }
+    public sealed class NetStats { public Num sent, recv, late, lateMax, rejected, dropped; }
     public sealed class Plaus
     {
         public Dictionary<int, int> strikes = new Dictionary<int, int>(); public List<int> quarantined = new List<int>();
@@ -158,9 +158,9 @@ namespace Sting.Core
         public List<int> ruled = new List<int>();
     }
     public sealed class Hint { public string opening, prey, site; public bool bait, wood, nest, rival; }
-    public sealed class SiteHit { public string type; public double x, y, z, ix, iz, nx, nz; public Tree t; }
-    public sealed class Bait { public double x, y, z; public string key; }
-    public sealed class PreyHit { public string kind, key; public int i, hive; public double protein; }
-    public sealed class Food { public double x, y, z, rate; public string kind; public int i; public SugarNode node; }
+    public sealed class SiteHit { public string type; public Num x, y, z, ix, iz, nx, nz; public Tree t; }
+    public sealed class Bait { public Num x, y, z; public string key; }
+    public sealed class PreyHit { public string kind, key; public int i, hive; public Num protein; }
+    public sealed class Food { public Num x, y, z, rate; public string kind; public int i; public SugarNode node; }
     public sealed class SimOpts { public int peer; public bool net, noAI; public List<int> peers; }
 }

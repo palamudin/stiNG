@@ -80,7 +80,7 @@ namespace Sting.Core
                     if (!(ev.panicGain >= 0 && ev.panicGain <= 1)) return "panic out of range";
                     if (hm != null)
                     {
-                        double drift = T.plaus.humanDrift * Max(0, tick - ev.tick) / 60;
+                        Num drift = T.plaus.humanDrift * Max(0, tick - ev.tick) / 60;
                         if (Sqrt(Sq(ev.sx - hm.x) + Sq(ev.sz - hm.z)) > T.plaus.stingReach + drift) return "stung from out of reach";
                     }
                     string k = ev.peer + ":" + ev.waspId;
@@ -128,7 +128,7 @@ namespace Sting.Core
                 // display only: a wasp that moved faster than any wasp can is not drawn there (local, so it cannot desync)
                 if (prev != null && prev.peer == m.peer && m.tick > prev.stamp)
                 {
-                    double v = Sqrt(Sq(r.x - prev.px) + Sq(r.y - prev.py) + Sq(r.z - prev.pz)) / ((m.tick - prev.stamp) / 60.0);
+                    Num v = Sqrt(Sq(r.x - prev.px) + Sq(r.y - prev.py) + Sq(r.z - prev.pz)) / ((Num)(m.tick - prev.stamp) / 60);
                     if (v > T.plaus.maxSpeed && (prev.bad = prev.bad + 1) < 4) { netStats.dropped++; ids.Add(r.id); prev.seen = tick; continue; }
                     prev.bad = 0;
                 }
@@ -149,7 +149,7 @@ namespace Sting.Core
             {
                 var e = kv.Value;
                 if (tick - e.seen > T.net.remoteTimeout) { remote.Delete(kv.Key); continue; }
-                double dt = (tick - e.stamp) / 60.0;
+                Num dt = (Num)(tick - e.stamp) / 60;
                 bool moving = e.state == "fly" || e.state == "stunned";
                 e.x = e.px + (moving ? e.vx * dt : 0); e.y = Max(T.wasp.radius, e.py + (moving ? e.vy * dt : 0)); e.z = e.pz + (moving ? e.vz * dt : 0);
             }
@@ -157,7 +157,7 @@ namespace Sting.Core
 
         WaspBase AnyWasp(int id) => (WaspBase)WaspById(id) ?? remote.Get(id);
 
-        Swat FromEv(Swat s, string actorHex, string frameHex, string stungHex, double contactTick, int underOnly, int byWasp, bool pre, string why)
+        Swat FromEv(Swat s, string actorHex, string frameHex, string stungHex, Num contactTick, int underOnly, int byWasp, bool pre, string why)
         {
             var c = s.Clone();
             if (actorHex != null) c.actorHex = actorHex;

@@ -7,12 +7,13 @@ namespace Sting.Core.Tests
     public sealed class Digest
     {
         uint h = 0x811c9dc5;
-        public void F(double v)
+        /// The number's own bits: IEEE bytes in the double build (matching the JS), Q32.32 raw in the fixed build
+        public void F(Num v)
         {
-            ulong bits = (ulong)BitConverter.DoubleToInt64Bits(v);
+            ulong bits = (ulong)v.Bits;
             unchecked { for (int i = 0; i < 8; i++) { h ^= (byte)(bits >> (8 * i)); h *= 0x01000193; } }
         }
-        public void F(bool v) => F(v ? 1.0 : 0.0);
+        public void F(bool v) => F(v ? 1 : 0);
         public void S(string s) { F(s.Length); foreach (char ch in s) F(ch); }
         public string Hex => h.ToString("x8");
 

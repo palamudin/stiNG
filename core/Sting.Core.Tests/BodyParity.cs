@@ -31,7 +31,7 @@ namespace Sting.Core.Tests
                             foreach (var part in parts)
                             {
                                 var q = Body.SegClosest(part.a, part.b, lp);
-                                double nx = lp.x - q.x, ny = lp.y - q.y, nz = lp.z - q.z, nl = Sqrt(nx * nx + ny * ny + nz * nz); if (nl == 0) nl = 1;
+                                Num nx = lp.x - q.x, ny = lp.y - q.y, nz = lp.z - q.z, nl = Sqrt(nx * nx + ny * ny + nz * nz); if (nl == 0) nl = 1;
                                 d.F(q.t); d.F(q.x); d.F(q.y); d.F(q.z);
                                 d.F(Body.Classify(part, q, new V3(nx / nl, ny / nl, nz / nl), lp, tr.height / 1.75));
                             }

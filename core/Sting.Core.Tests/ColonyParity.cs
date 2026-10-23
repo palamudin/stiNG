@@ -23,7 +23,7 @@ namespace Sting.Core.Tests
                     c.alloc = (i / 3000) % 4;
                     if (variant == 3 && i == 9000) { c.protein = 0; c.sugar = 0; }
                     if (variant == 2 && i % 500 == 0) c.pulp += 20;
-                    double frac = System.Math.Min(1, 0.3 + i / 24000.0 * 0.75);
+                    Num frac = System.Math.Min(1, 0.3 + i / 24000.0 * 0.75);
                     Colony.Step(c, 1.0 / 120, i % 7, (i % 1440) < 900, frac, variant == 0 ? 0.2 : 1);
                     if (i % 200 == 0) { Dc(c); d.F(Colony.SugarCap(c)); d.F(Colony.ProteinCap(c)); d.F(Colony.Finished(c, i % 3)); d.S(Colony.SeasonPhase(frac)); }
                 }

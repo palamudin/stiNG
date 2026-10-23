@@ -14,11 +14,23 @@ namespace Sting.Core.Tests
         static void Out(string name, string hex) => got[name] = hex;
         static readonly ulong[] Seeds = { 1234UL, 7UL, 0xDEADBEEFCAFEBABEUL };
 
+        /// Properties that must hold in both builds (self-consistency, peers agreeing); name, held, detail
+        static readonly List<(string name, bool ok, string detail)> asserts = new List<(string, bool, string)>();
+        static void Assert(string name, bool ok, string detail = "") => asserts.Add((name, ok, detail));
+        /// Outcome figures per scenario, written per build so the two builds can be compared
+        static readonly List<string> stats = new List<string>();
+        static string Fixtures(string f) => Path.Combine(AppContext.BaseDirectory, "../../../../fixtures/" + f);
+        static string FixturesOut(string f) => Path.GetFullPath(Fixtures(f));
+
         static int Main(string[] args)
         {
-            string fixtures = Path.Combine(AppContext.BaseDirectory, "../../../../fixtures/parity.txt");
-            var want = new List<(string, string)>();
-            foreach (var line in File.ReadAllLines(fixtures)) { if (line.Trim().Length == 0) continue; var p = line.Split(' '); want.Add((p[0], p[1])); }
+            if (args.Length >= 2 && args[0] == "--events")
+            {
+                // print every event of the jab scenario up to a tick, to see where the two builds part
+                var sim = new Sim(new Settings { seed = 1234 }); var bot = Bots.StingBot("jab"); int until = int.Parse(args[1]);
+                for (int t = 0; t < until; t++) { sim.Step(bot(sim)); foreach (var e in sim.DrainEvents()) Console.WriteLine($"{e.t} {e.type} {string.Join(",", e.d.Values)}"); }
+                return 0;
+            }
             var sw = System.Diagnostics.Stopwatch.StartNew();
             WorldParity();
             BodyParity();
@@ -26,16 +38,50 @@ namespace Sting.Core.Tests
             SimParity();
             NetParity();
             Extra();
-            int fail = 0, pass = 0, missing = 0;
+            int fail = 0;
+            foreach (var (name, ok, detail) in asserts) { Console.WriteLine($"{(ok ? "PASS" : "FAIL")} {name} {detail}"); if (!ok) fail++; }
+#if STING_FIXED
+            const string build = "fixed";
+            // Q32.32 cannot match the JS doubles; the fixed build is locked against its own earlier digests instead
+            string lockFile = FixturesOut("fixed.txt");
+            bool update = Array.IndexOf(args, "--update") >= 0 || !File.Exists(lockFile);
+            var want = update ? new List<(string, string)>() : Read(lockFile);
+            if (update) { var lines = new List<string>(); foreach (var kv in got) lines.Add(kv.Key + " " + kv.Value); File.WriteAllLines(lockFile, lines); Console.WriteLine($"wrote {lockFile}"); }
+#else
+            const string build = "double";
+            var want = Read(Fixtures("parity.txt"));
+#endif
+            int pass = 0, differ = 0, missing = 0;
             foreach (var (name, hex) in want)
             {
                 if (!got.TryGetValue(name, out var g)) { missing++; Console.WriteLine($"SKIP {name} (not ported yet)"); continue; }
                 if (g == hex) { pass++; Console.WriteLine($"PASS {name} {hex}"); }
-                else { fail++; Console.WriteLine($"FAIL {name} js {hex} cs {g}"); }
+                else { differ++; Console.WriteLine($"FAIL {name} want {hex} got {g}"); }
             }
-            Console.WriteLine($"\n{pass} match, {fail} differ, {missing} not ported · {sw.ElapsedMilliseconds} ms");
-            return fail == 0 ? 0 : 1;
+            File.WriteAllLines(FixturesOut($"stats.{build}.txt"), stats);
+            SaveTraces(FixturesOut($"trace.{build}.txt"));
+            CompareTraces(build, FixturesOut(build == "fixed" ? "trace.double.txt" : "trace.fixed.txt"));
+            string other = FixturesOut(build == "fixed" ? "stats.double.txt" : "stats.fixed.txt");
+            if (File.Exists(other))
+            {
+                Console.WriteLine($"\noutcomes, this build ({build}) | the other build:");
+                var o = File.ReadAllLines(other);
+                for (int i = 0; i < stats.Count; i++) Console.WriteLine($"  {stats[i]}\n  {(i < o.Length ? o[i] : "")}");
+            }
+            Console.WriteLine($"\n{build} build: {pass} digests match, {differ} differ, {missing} missing; {asserts.Count - fail}/{asserts.Count} properties hold · {sw.ElapsedMilliseconds} ms");
+            return differ == 0 && fail == 0 ? 0 : 1;
         }
+
+        static List<(string, string)> Read(string path)
+        {
+            var want = new List<(string, string)>();
+            foreach (var line in File.ReadAllLines(path)) { if (line.Trim().Length == 0) continue; var p = line.Split(' '); want.Add((p[0], p[1])); }
+            return want;
+        }
+
+        static string Stat(string name, Sim s) =>
+            $"{name,-10} stings {s.stats.stings + s.stats.aiStings,4} (driven {s.stats.stings,3}) deaths {s.stats.deaths,3} caught {s.stats.caught,4} deposits {s.stats.deposits,4} " +
+            $"adults {(double)s.colony.adults,8:0.0} brood {(double)Colony.BroodTotal(s.colony),8:0.0} season {s.season.n} humans stung {s.stung.Count}";
 
         static void WorldParity()
         {
@@ -66,7 +112,7 @@ namespace Sting.Core.Tests
                     foreach (var b in Concat(c.birds, c2.birds)) { var p = World.BirdPos(b, t); d.F(p.x); d.F(p.y); d.F(p.z); }
                     foreach (var b in Concat(c.dragonflies, c2.dragonflies)) { var p = World.DragonPos(b, t); d.F(p.x); d.F(p.y); d.F(p.z); }
                 }
-                for (int i = 0; i < 2000; i++) { double y = DSin(i * 0.37) * (i % 9 - 4), x = DSin(i * 0.91 + 1) * (i % 5 - 2); d.F(DAtan2(y, x)); d.F(DSin(i * 0.013 - 7)); d.F(H32(i, -i * 3, i * 7 + 0.5, 1e9 + i)); }
+                for (int i = 0; i < 2000; i++) { Num y = DSin(i * 0.37) * (i % 9 - 4), x = DSin(i * 0.91 + 1) * (i % 5 - 2); d.F(DAtan2(y, x)); d.F(DSin(i * 0.013 - 7)); d.F(H32(i, -i * 3, i * 7 + 0.5, 1e9 + i)); }
                 foreach (var site in new[] { "trunk", "ground", "branch", "wall", "attic" })
                 {
                     var n = World.MakeNest(-3, -2, 4.5, 2.1, 7.25, 0.14, site);

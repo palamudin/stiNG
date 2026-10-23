@@ -1,0 +1,12 @@
+<Project>
+  <!-- neither build compiles the other build's generated files -->
+  <PropertyGroup>
+    <DefaultItemExcludes>$(DefaultItemExcludes);obj/**;bin/**;obj-fixed/**;bin-fixed/**</DefaultItemExcludes>
+  </PropertyGroup>
+  <!-- dotnet build/run -p:StingFixed=true builds Sting.Core with Num as Q32.32 fixed point (GDD R-04).
+       The fixed build keeps its own bin and obj folders so the two builds never mix. -->
+  <PropertyGroup Condition="'$(StingFixed)' == 'true'">
+    <BaseIntermediateOutputPath>obj-fixed/</BaseIntermediateOutputPath>
+    <BaseOutputPath>bin-fixed/</BaseOutputPath>
+  </PropertyGroup>
+</Project>

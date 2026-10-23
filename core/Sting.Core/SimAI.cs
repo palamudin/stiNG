@@ -97,10 +97,10 @@ namespace Sting.Core
         void AiPick(Wasp w)
         {
             var ai = w.ai; var col = colony;
-            AiTarget best = null; double bs = double.PositiveInfinity;
+            AiTarget best = null; Num bs = Num.MaxValue;
             void Consider(AiTarget t, V3 pos)
             {
-                double s = Sqrt(D2(w, pos)) + H32(w.id, t.i, t.c, day) * 12;
+                Num s = Sqrt(D2(w, pos)) + H32(w.id, t.i, t.c, day) * 12;
                 if (s < bs) { bs = s; best = t; }
             }
             for (int ri = 0; ri < activeChunks.Count; ri++)
@@ -127,7 +127,7 @@ namespace Sting.Core
                     {
                         // a bait station smells of meat from a long way off
                         var b = baits[i];
-                        double s = Sqrt(D2(w, new V3(b.x, b.y, b.z))) - T.muni.aiLure + H32(w.id, i, ri + 70, day) * 12;
+                        Num s = Sqrt(D2(w, new V3(b.x, b.y, b.z))) - T.muni.aiLure + H32(w.id, i, ri + 70, day) * 12;
                         if (s < bs) { bs = s; best = new AiTarget { kind = "bait", key = key, i = i, c = ri + 70 }; }
                     }
                 }
@@ -169,8 +169,8 @@ namespace Sting.Core
                 var part = parts[i];
                 var mid = new V3((part.a.x + part.b.x) / 2, (part.a.y + part.b.y) / 2, (part.a.z + part.b.z) / 2);
                 var q = Body.SegClosest(part.a, part.b, mid);
-                double nx = lp.x - q.x, ny = lp.y - q.y, nz = lp.z - q.z;
-                double nl = Sqrt(nx * nx + ny * ny + nz * nz); if (nl == 0) nl = 1;
+                Num nx = lp.x - q.x, ny = lp.y - q.y, nz = lp.z - q.z;
+                Num nl = Sqrt(nx * nx + ny * ny + nz * nz); if (nl == 0) nl = 1;
                 nx /= nl; ny /= nl; nz /= nl;
                 var surf = new V3(q.x + nx * part.r, q.y + ny * part.r, q.z + nz * part.r);
                 int zone = Body.Classify(part, q, new V3(nx, ny, nz), surf, hm.tr.height / 1.75);
@@ -182,12 +182,12 @@ namespace Sting.Core
 
         static void Steer(Wasp w, V3 tp, Cmd cmd)
         {
-            double dx = tp.x - w.x, dy = tp.y - w.y, dz = tp.z - w.z;
-            double d = Sqrt(dx * dx + dy * dy + dz * dz);
+            Num dx = tp.x - w.x, dy = tp.y - w.y, dz = tp.z - w.z;
+            Num d = Sqrt(dx * dx + dy * dy + dz * dz);
             if (d < 1e-6) return;
             // climb over obstacles on long legs
             if (d > 3 && w.y < 1.4) dy += 1.2;
-            double m = Sqrt(dx * dx + dy * dy + dz * dz);
+            Num m = Sqrt(dx * dx + dy * dy + dz * dz);
             cmd.dirX = dx / m; cmd.dirY = dy / m; cmd.dirZ = dz / m;
             cmd.throttle = Clamp(Sqrt(2 * T.wasp.accel * d) * 0.7 / T.wasp.cruise, 0.06, 1);
         }

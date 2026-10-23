@@ -11,9 +11,9 @@ namespace Sting.Core
     {
         public const int CMD_FIELDS = 10; // mx, my, mz, burst, sting, yawQ, pitchQ, act, alloc, pick
 
-        static double D2(V3 a, V3 b) { double dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z; return dx * dx + dy * dy + dz * dz; }
-        static double D2(WaspBase a, V3 b) => D2(a.P, b);
-        static double D2(WaspBase a, WaspBase b) => D2(a.P, b.P);
+        static Num D2(V3 a, V3 b) { Num dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z; return dx * dx + dy * dy + dz * dz; }
+        static Num D2(WaspBase a, V3 b) => D2(a.P, b);
+        static Num D2(WaspBase a, WaspBase b) => D2(a.P, b.P);
         static readonly HashSet<string> IMMEDIATE = new HashSet<string> { "caught", "beeAlarm", "died", "fight", "fightReq", "fightJoin", "fightRefuse", "fightEnd", "raid" };
 
         public Settings settings;
@@ -56,9 +56,9 @@ namespace Sting.Core
         public Hint hint = new Hint();
         public int[] log = new int[CMD_FIELDS * 4096]; public int logLen;
         public long minute, day;
-        public double bio;
+        public Num bio;
         public Season season;
-        public double lineage;
+        public Num lineage;
         public int drivenId;
         public PendingSwitch pendingSwitch;
         public Muni muni;
@@ -119,7 +119,7 @@ namespace Sting.Core
         /// Human traits with the world's modifiers applied (GDD 4.8). The resolver still enforces the consequence window.
         public Traits TraitsFor(ulong id)
         {
-            var tr = Body.HumanTraits(seed, id); double r = settings.reaction;
+            var tr = Body.HumanTraits(seed, id); Num r = settings.reaction;
             if (r != 1) tr.reactionTicks = Max(T.resolve.minConsequenceTicks, Rnd(tr.reactionTicks * r));
             return tr;
         }
@@ -136,20 +136,20 @@ namespace Sting.Core
             for (int i = 1; i < L.Length; i++) if (s.esc >= L[i]) lv = i;
             return lv;
         }
-        public int EscAt(double x, double z) => EscLevel(ChunkKey(ChunkOf(x), ChunkOf(z)));
-        public void AddEsc(double x, double z, double pts)
+        public int EscAt(Num x, Num z) => EscLevel(ChunkKey(ChunkOf(x), ChunkOf(z)));
+        public void AddEsc(Num x, Num z, Num pts)
         {
             string k = ChunkKey(ChunkOf(x), ChunkOf(z)); int before = EscLevel(k);
             CS(k).esc += pts * settings.escalation * (colony != null && colony.sited && k == nest.key ? T.sites.Of(nest.site).discovery : 1);
             int after = EscLevel(k);
             if (after != before) Emit("escalation", ("key", k), ("level", after));
         }
-        public double Temperature => TempAt(seed, minute);
+        public Num Temperature => TempAt(seed, minute);
         public bool Raining => IsRaining(seed, minute);
         public int PhysicalCount => Own().Count;
         List<Wasp> Own() { var l = new List<Wasp>(); foreach (var w in wasps) if (w.colony == "own") l.Add(w); return l; }
         int OwnWorkers() { int n = 0; foreach (var w in wasps) if (w.colony == "own" && w.caste != "queen") n++; return n; }
-        public double SeasonFrac => (minute - season.startMinute) / (settings.seasonDays * 1440);
+        public Num SeasonFrac => (minute - season.startMinute) / (settings.seasonDays * 1440);
         public bool CanFly() => Temperature >= T.weather.flyMinTemp;
 
         static int ById(Wasp a, Wasp b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
@@ -163,7 +163,7 @@ namespace Sting.Core
             };
             if (!driven)
             {
-                var a = T.alloc[colony.alloc]; double s = a.sugar + a.protein + a.pulp, r = H32(id, 77) * s;
+                var a = T.alloc[colony.alloc]; Num s = a.sugar + a.protein + a.pulp, r = H32(id, 77) * s;
                 w.role = r < a.sugar ? "sugar" : r < a.sugar + a.protein ? "protein" : "pulp";
                 w.x = nest.entrance.x; w.y = nest.entrance.y - 0.03; w.z = nest.entrance.z;
             }
@@ -177,7 +177,7 @@ namespace Sting.Core
 
         void UpdateChunks(bool force = false)
         {
-            double wx, wz;
+            Num wx, wz;
             var dw = Driven() ?? ghost;
             if (dw != null) { wx = dw.x; wz = dw.z; } else { wx = nest.spawn.x; wz = nest.spawn.z; }
             int ccx = ChunkOf(wx), ccz = ChunkOf(wz);
@@ -222,7 +222,7 @@ namespace Sting.Core
                     if (!humans.TryGet(hex, out var hm))
                     {
                         var tr = TraitsFor(id);
-                        double ax = hs.x + T.panic.approachDist * DCos(hs.exit), az = hs.z + T.panic.approachDist * DSin(hs.exit);
+                        Num ax = hs.x + T.panic.approachDist * DCos(hs.exit), az = hs.z + T.panic.approachDist * DSin(hs.exit);
                         hm = new Human
                         {
                             id = id, hex = hex, @short = hex.Substring(0, 4), tr = tr, clothing = Body.HumanClothing(seed, id, day), chunk = k,
@@ -344,7 +344,7 @@ namespace Sting.Core
             {
                 long days = newDay - day;
                 day = newDay;
-                double k = 1;
+                Num k = 1;
                 for (long i = 0; i < days; i++) k *= 1 - T.esc.decayPerDay;
                 foreach (var s in chunkState.Values) { s.esc *= k; s.beeLost = new Dictionary<int, Dictionary<int, int>>(); s.caughtCat = new Dictionary<int, int>(); }
                 Emit("newDay", ("day", newDay));
@@ -360,7 +360,7 @@ namespace Sting.Core
             var d = Driven();
             if (d == null || d.state == "under" || d.state == "balled") return;
             if (pendingSwitch != null) { bool same = pick != 0 && pendingSwitch.target == pick; pendingSwitch = null; Emit("switchCancelled"); if (pick == 0 || same) return; }
-            Wasp best = null; double bd = double.PositiveInfinity;
+            Wasp best = null; Num bd = Num.MaxValue;
             if (pick != 0)
             {
                 var w = WaspById(pick);
@@ -370,14 +370,14 @@ namespace Sting.Core
             else foreach (var w in wasps)
                 {
                     if (w == d || w.state == "dead" || w.colony != "own") continue;
-                    double q = D2(w, d);
+                    Num q = D2(w, d);
                     if (q < bd) { bd = q; best = w; }
                 }
             if (best != null && bd <= T.possess.freeRange * T.possess.freeRange) { Possess(d, best); return; }
             bool inside = colony.nestAlive && colony.sited && colony.adults - OwnWorkers() >= 1;
             if (best == null && !inside) { Emit("noSwitch"); return; }
             pendingSwitch = new PendingSwitch { at = tick + T.possess.relayTicks, target = best != null ? best.id : 0 };
-            Emit("switchPending", ("seconds", T.possess.relayTicks / 60.0), ("toNest", best == null));
+            Emit("switchPending", ("seconds", (Num)T.possess.relayTicks / 60), ("toNest", best == null));
         }
 
         void Possess(Wasp d, Wasp best)
@@ -412,12 +412,12 @@ namespace Sting.Core
             if (d == null || D2(d, nest.entrance) > 0.4 * 0.4) { Emit("cantRest", ("why", "away")); return; }
             long md = MinuteOfDay(minute);
             if (md >= T.time.dawn && md < T.time.dusk) { Emit("cantRest", ("why", "day")); return; }
-            double target = (md >= T.time.dusk ? day + 1 : day) * 1440 + T.time.dawn;
-            double skipMin = target - minute;
-            double skipTicks = skipMin * tpm;
+            Num target = (md >= T.time.dusk ? day + 1 : day) * 1440 + T.time.dawn;
+            Num skipMin = target - minute;
+            Num skipTicks = skipMin * tpm;
             clockOffset += (long)skipTicks;
             // the colony lives through the skipped time
-            double steps = Floor(skipTicks / 60), dtDay = 60.0 / dayTicks;
+            Num steps = Floor(skipTicks / 60), dtDay = (Num)60 / dayTicks;
             for (int i = 0; i < steps; i++) Colony.Step(colony, dtDay, wasps.Count, false, SeasonFrac, bio);
             foreach (var w in new List<Wasp>(wasps)) if (w != d) Despawn(w);
             Minute(ClockMinutes(tick + clockOffset, settings));
@@ -431,9 +431,9 @@ namespace Sting.Core
         sealed class Fnv
         {
             uint h = 0x811c9dc5;
-            public void F(double v)
+            public void F(Num v)
             {
-                ulong b = (ulong)System.BitConverter.DoubleToInt64Bits(v);
+                ulong b = (ulong)v.Bits;
                 for (int i = 0; i < 8; i++) { h ^= (uint)((b >> (8 * i)) & 0xff); h = unchecked(h * 0x01000193); }
             }
             public string Hex => h.ToString("x8");
@@ -489,7 +489,7 @@ namespace Sting.Core
         public static uint ContentHash(ChunkContent c)
         {
             uint h = 0x811c9dc5;
-            void F(double v) { ulong b = (ulong)System.BitConverter.DoubleToInt64Bits(v); for (int i = 0; i < 8; i++) { h ^= (uint)((b >> (8 * i)) & 0xff); h = unchecked(h * 0x01000193); } }
+            void F(Num v) { ulong b = (ulong)v.Bits; for (int i = 0; i < 8; i++) { h ^= (uint)((b >> (8 * i)) & 0xff); h = unchecked(h * 0x01000193); } }
             F(c.cx); F(c.cz); F(c.tint);
             foreach (var t in c.trees) { F(t.x); F(t.z); F(t.r); F(t.h); }
             foreach (var t in c.boxes) { F(t.minx); F(t.maxx); F(t.miny); F(t.maxy); F(t.minz); F(t.maxz); }

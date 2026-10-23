@@ -17,7 +17,7 @@ namespace Sting.Core
             return sim =>
             {
                 var w = sim.wasp;
-                double wy = w != null ? w.yaw : 0; if (double.IsNaN(wy)) wy = 0;
+                Num wy = w != null ? w.yaw : 0; if (wy.IsNaN) wy = 0;
                 var cmd = IdleCmd(RndI(wy * 1e4));
                 if (w == null || w.state == "dead" || sim.Driven() == null) { phase = "approach"; tHm = null; return cmd; }
                 if (tHm == null || tHm.state != "idle" || tHm.posture != "sit")
@@ -31,8 +31,8 @@ namespace Sting.Core
                     phase = "approach";
                 }
                 var tp = Body.ToWorld(tHm.F, tMid);
-                double dx = tp.x - w.x, dy = tp.y - w.y, dz = tp.z - w.z, d = Sqrt(dx * dx + dy * dy + dz * dz);
-                double yaw = DAtan2(dx, dz), pitch = DAtan2(dy, Sqrt(dx * dx + dz * dz));
+                Num dx = tp.x - w.x, dy = tp.y - w.y, dz = tp.z - w.z, d = Sqrt(dx * dx + dy * dy + dz * dz);
+                Num yaw = DAtan2(dx, dz), pitch = DAtan2(dy, Sqrt(dx * dx + dz * dz));
                 if (phase == "approach")
                 {
                     cmd.yawQ = RndI(yaw * 1e4); cmd.pitchQ = RndI(pitch * 1e4);

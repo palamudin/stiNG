@@ -16,7 +16,7 @@ namespace Sting.Core
         public Archive(BinaryWriter w) { this.w = w; }
         public Archive(BinaryReader r) { this.r = r; }
 
-        public void D(ref double v) { if (Reading) v = r.ReadDouble(); else w.Write(v); }
+        public void D(ref Num v) { if (Reading) v = Num.FromBits(r.ReadInt64()); else w.Write(v.Bits); }
         public void I(ref int v) { if (Reading) v = r.ReadInt32(); else w.Write(v); }
         public void L(ref long v) { if (Reading) v = r.ReadInt64(); else w.Write(v); }
         public void U(ref ulong v) { if (Reading) v = r.ReadUInt64(); else w.Write(v); }
@@ -199,12 +199,12 @@ namespace Sting.Core
         static ChunkState IoChunkState(Archive a, ChunkState s)
         {
             a.D(ref s.esc); a.D(ref s.chewed);
-            a.Dict(ref s.caughtFly, () => 0.0, v => { a.D(ref v); return v; });
+            a.Dict(ref s.caughtFly, () => (Num)0, v => { a.D(ref v); return v; });
             a.Dict(ref s.caughtCat, () => 0, v => { a.I(ref v); return v; });
             a.Dict(ref s.beeLost, () => null, v => { a.Dict(ref v, () => 0, x => { a.I(ref x); return x; }); return v; });
             if (a.Opt(ref s.lastSting)) { a.D(ref s.lastSting.x); a.D(ref s.lastSting.z); }
             a.Dict(ref s.webTorn, () => 0L, v => { a.L(ref v); return v; });
-            a.Dict(ref s.spilled, () => 0.0, v => { a.D(ref v); return v; });
+            a.Dict(ref s.spilled, () => (Num)0, v => { a.D(ref v); return v; });
             return s;
         }
 
@@ -262,8 +262,8 @@ namespace Sting.Core
             a.D(ref st.stings); a.D(ref st.aiStings); a.D(ref st.remoteStings); a.D(ref st.full); a.D(ref st.deaths); a.D(ref st.caught); a.D(ref st.deposits);
             {
                 int n = st.causes.Count; a.I(ref n);
-                if (a.Reading) { st.causes.Clear(); for (int i = 0; i < n; i++) { string k = null; double v = 0; a.S(ref k); a.D(ref v); st.causes[k] = v; } }
-                else { var ks = new List<string>(st.causes.Keys); ks.Sort(string.CompareOrdinal); foreach (var k in ks) { string kk = k; double v = st.causes[k]; a.S(ref kk); a.D(ref v); } }
+                if (a.Reading) { st.causes.Clear(); for (int i = 0; i < n; i++) { string k = null; Num v = 0; a.S(ref k); a.D(ref v); st.causes[k] = v; } }
+                else { var ks = new List<string>(st.causes.Keys); ks.Sort(string.CompareOrdinal); foreach (var k in ks) { string kk = k; Num v = st.causes[k]; a.S(ref kk); a.D(ref v); } }
             }
             a.List(ref s.wasps, () => new Wasp(), w => Io(a, w));
             a.I(ref s.nextWaspId); a.I(ref s.prevAct); a.B(ref s.pressUsed); a.I(ref s.respawnAt); a.B(ref s.extinct);

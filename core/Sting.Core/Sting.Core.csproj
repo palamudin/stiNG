@@ -10,4 +10,8 @@
     <RootNamespace>Sting.Core</RootNamespace>
     <Deterministic>true</Deterministic>
   </PropertyGroup>
+  <!-- dotnet build -p:StingFixed=true: Num becomes Q32.32 fixed point (GDD R-04) -->
+  <PropertyGroup Condition="'$(StingFixed)' == 'true'">
+    <DefineConstants>$(DefineConstants);STING_FIXED</DefineConstants>
+  </PropertyGroup>
 </Project>

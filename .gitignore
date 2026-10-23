@@ -4,3 +4,7 @@ node_modules/
 *.user
 .vs/
 .DS_Store
+bin-fixed/
+obj-fixed/
+core/fixtures/stats.*.txt
+core/fixtures/trace.*.txt

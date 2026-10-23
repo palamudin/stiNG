@@ -44,6 +44,6 @@ namespace Sting.Core
             for (int i = 0; i < list.Count; i++) list[i] = idx[i].Value;
         }
         /// JS-style comparator returning a double (a - b), mapped to an int sign
-        public static int Sign(double d) => d < 0 ? -1 : d > 0 ? 1 : 0;
+        public static int Sign(Num d) => d < 0 ? -1 : d > 0 ? 1 : 0;
     }
 }

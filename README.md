@@ -12,7 +12,7 @@ An open-world, multiplayer wasp colony simulator. You run a colony through its y
 |---|---|
 | [`docs/STING_GDD.md`](docs/STING_GDD.md) | The game design document: pillars, simulation architecture, world, colony, wasp, humans, bees, multiplayer, Unity contract, decisions, open questions, and findings from the PoC |
 | [`poc/`](poc/) | The three.js proof of concept. A deterministic simulation core (`poc/sim/`) that owns every outcome, and a presentation layer (`poc/game.js`) that only draws. See [`poc/POC.md`](poc/POC.md) for the feature list and what has been verified |
-| [`core/`](core/) | `Sting.Core`, the simulation in C# for the Unity port: the whole PoC sim, network lab and saves, bit-identical to the JS reference (22 parity digests). Doubles for now; Fix64 next |
+| [`core/`](core/) | `Sting.Core`, the simulation in C# for the Unity port: the whole PoC sim, network lab and saves. One source, two builds: doubles (bit-identical to the JS, 22 digests) and Q32.32 fixed point (the shipping build, GDD R-04) |
 | [`protocode/`](protocode/) | C# protocode for the Unity port (`Sting.Core`): Fix64, the counter-based RNG, human traits, the sting resolver, reach, chunk storage and authority, colony economy. Compiles with zero packages |
 | [`art/keyart/`](art/keyart/) | Key art sources: the stare, the standoff, the logo lockup and a Steam capsule (Design canvas `.dc.html` files) |
 
@@ -42,6 +42,10 @@ node test/net.test.mjs   # two peers over simulated links: agreement on every hu
 ```sh
 cd poc && node test/parity.mjs                          # writes core/fixtures/parity.txt from the JS reference
 cd core/Sting.Core.Tests && dotnet run -c Release       # must reproduce every digest bit for bit
+dotnet build -c Release -p:StingFixed=true && ./bin-fixed/Release/net8.0/Sting.Core.Tests
+                                                        # the fixed-point build: saves, peer agreement, its own
+                                                        # locked digests (--update after a deliberate change),
+                                                        # and how far it drifts from the double build
 ```
 
 **C# protocode** (.NET 8 SDK):

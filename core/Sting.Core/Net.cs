@@ -15,7 +15,7 @@ namespace Sting.Core
     {
         static readonly string[] STATES = { "fly", "stunned", "attached", "under", "chewing", "trapped", "balled", "landed", "webbed", "fighting", "dead", "perched" };
         static readonly string[] CARRY = { null, "fly", "caterpillar", "bee", "pulp", "larva" };
-        const double CS = T.chunk.size, YMAX = 40, VMAX = 8;
+        static readonly Num CS = T.chunk.size, YMAX = 40, VMAX = 8;
         public const int BYTES_PER_WASP = 19;
 
         static void U8(byte[] b, int o, int v) => b[o] = (byte)v;
@@ -29,8 +29,8 @@ namespace Sting.Core
             var b = new byte[6 + m.wasps.Count * BYTES_PER_WASP];
             U8(b, 0, m.peer); U32(b, 1, (uint)m.tick); U8(b, 5, m.wasps.Count);
             int o = 6;
-            static int Q16(double x, double lo, double hi) => (int)Max(0, Min(65535, Rnd((x - lo) / (hi - lo) * 65535)));
-            static int Q8(double x) => (int)Max(-127, Min(127, Rnd(x / VMAX * 127)));
+            static int Q16(Num x, Num lo, Num hi) => (int)Max(0, Min(65535, Rnd((x - lo) / (hi - lo) * 65535)));
+            static int Q8(Num x) => (int)Max(-127, Min(127, Rnd(x / VMAX * 127)));
             foreach (var w in m.wasps)
             {
                 int cx = World.ChunkOf(w.x), cz = World.ChunkOf(w.z);
@@ -47,7 +47,7 @@ namespace Sting.Core
         public static StateMsg DecodeState(byte[] b, string underHex = null)
         {
             int n = b[5];
-            static double D16(int x, double lo, double hi) => lo + x / 65535.0 * (hi - lo);
+            static Num D16(int x, Num lo, Num hi) => lo + (Num)x / 65535 * (hi - lo);
             var m = new StateMsg { peer = b[0], tick = (int)R32(b, 1) };
             int o = 6;
             for (int i = 0; i < n; i++)
@@ -56,7 +56,7 @@ namespace Sting.Core
                 m.wasps.Add(new RemoteWasp
                 {
                     id = (int)R32(b, o), x = cx * CS + D16(R16(b, o + 8), -CS / 2, CS / 2), y = D16(R16(b, o + 10), 0, YMAX), z = cz * CS + D16(R16(b, o + 12), -CS / 2, CS / 2),
-                    vx = (sbyte)b[o + 14] / 127.0 * VMAX, vy = (sbyte)b[o + 15] / 127.0 * VMAX, vz = (sbyte)b[o + 16] / 127.0 * VMAX,
+                    vx = (Num)(sbyte)b[o + 14] / 127 * VMAX, vy = (Num)(sbyte)b[o + 15] / 127 * VMAX, vz = (Num)(sbyte)b[o + 16] / 127 * VMAX,
                     state = b[o + 17] < STATES.Length ? STATES[b[o + 17]] : null, caste = (flags & 128) != 0 ? "queen" : "worker",
                     under = (flags & 64) != 0 ? underHex ?? "yes" : null, rival = (flags & 32) != 0, carry = (flags & 31) < CARRY.Length ? CARRY[flags & 31] : null,
                 });
@@ -66,7 +66,7 @@ namespace Sting.Core
         }
     }
 
-    public sealed class LinkSpec { public string name; public int latency, jitter; public double loss; }
+    public sealed class LinkSpec { public string name; public int latency, jitter; public Num loss; }
 
     /// Unreliable state packets are simply dropped on loss. Events ride redundantly in following packets
     /// (GDD 11.13), so a lost event costs one state interval rather than a full round trip. Events stay in order.
@@ -81,10 +81,10 @@ namespace Sting.Core
         };
         public static LinkSpec Spec(string name) => name != null && LINKS.TryGetValue(name, out var s) ? s : LINKS["good"];
 
-        readonly int latency, jitter, seed; readonly double loss;
-        struct Q { public double at; public int n; public Msg msg; }
+        readonly int latency, jitter, seed; readonly Num loss;
+        struct Q { public Num at; public int n; public Msg msg; }
         List<Q> q = new List<Q>();
-        int n; double lastEventAt;
+        int n; Num lastEventAt;
         public int sent, dropped, resent;
 
         public Link(LinkSpec s, int seed) { latency = s.latency; jitter = s.jitter; loss = s.loss; this.seed = seed; }
@@ -93,7 +93,7 @@ namespace Sting.Core
         {
             sent++;
             int k0 = n++;
-            double at = tick + latency + Floor(H32(seed, k0, 2) * (jitter + 1));
+            Num at = tick + latency + Floor(H32(seed, k0, 2) * (jitter + 1));
             if (msg is BinMsg)
             {
                 if (H32(seed, k0, 1) < loss) { dropped++; return; }
@@ -132,7 +132,7 @@ namespace Sting.Core
         readonly Link ab, ba;
         public Func<Sim, Cmd> botB;
         public readonly Checks checks = new Checks();
-        public double bytesAB, bytesBA, bytesABState, bytesABEvents;
+        public Num bytesAB, bytesBA, bytesABState, bytesABEvents;
         public List<SimEvent> bEvents = new List<SimEvent>();
         /// A test hook: runs on a peer's outbox before it is sent ("ab" or "ba"), so a test can turn a peer into a cheater
         public Action<Sim, string> beforeOut;
@@ -158,13 +158,13 @@ namespace Sting.Core
                 if (m is StateMsg sm)
                 {
                     var bin = Wire.EncodeState(sm);
-                    double len = bin.Length + 28; // + UDP/IP headers
+                    Num len = bin.Length + 28; // + UDP/IP headers
                     if (dir == "ab") { bytesAB += len; bytesABState += len; } else bytesBA += len;
                     link.Send(new BinMsg { bin = bin }, sim.tick);
                 }
                 else
                 {
-                    double len = ((NetEv)m).ApproxJsonLength() + 28;
+                    Num len = ((NetEv)m).ApproxJsonLength() + 28;
                     if (dir == "ab") { bytesAB += len; bytesABEvents += len; } else bytesBA += len;
                     link.Send(m, sim.tick);
                 }
@@ -175,7 +175,7 @@ namespace Sting.Core
         static List<Msg> In(List<Msg> msgs) => msgs.ConvertAll(m => m is BinMsg bm ? Wire.DecodeState(bm.bin) : m);
 
         /// Average upstream bandwidth of peer A (state packets + events), bytes per second
-        public (double total, double state, double events) Bandwidth() { double secs = Math.Max(1, a.tick) / 60.0; return (bytesAB / secs, bytesABState / secs, bytesABEvents / secs); }
+        public (Num total, Num state, Num events) Bandwidth() { Num secs = (Num)Math.Max(1, a.tick) / 60; return (bytesAB / secs, bytesABState / secs, bytesABEvents / secs); }
 
         public void Step(Cmd cmdA, Cmd cmdB = null)
         {
@@ -207,7 +207,7 @@ namespace Sting.Core
         }
 
         /// How far A's picture of B's wasp is from where B's wasp really is (GDD 11.4)
-        public double? RemoteError()
+        public Num? RemoteError()
         {
             if (b == null) return null;
             var bw = b.Driven();

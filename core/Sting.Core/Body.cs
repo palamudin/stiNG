@@ -17,35 +17,35 @@ namespace Sting.Core
     public static class Top { public const int TShirt = 0, Tank = 1, Jacket = 2, Suit = 3; }
     public static class Bottom { public const int Jeans = 0, Shorts = 1, Skirt = 2, Suit = 3; }
 
-    public sealed class ZoneDef { public double @base, back, girth, stiff, sens, extra; public int policy; public bool helper; }
+    public sealed class ZoneDef { public Num @base, back, girth, stiff, sens, extra; public int policy; public bool helper; }
 
     public sealed class Traits
     {
         public ulong id;
-        public double height, armRatio, flexibility, girth, ageStiffness, reactionTicks, style, accuracy, panicSusceptibility, sociability, escalation;
+        public Num height, armRatio, flexibility, girth, ageStiffness, reactionTicks, style, accuracy, panicSusceptibility, sociability, escalation;
         public Traits Clone() => (Traits)MemberwiseClone();
     }
-    public sealed class Clothing { public int top, bottom; public double stiffness; public bool topOff, collarTaped; public Clothing Clone() => (Clothing)MemberwiseClone(); }
-    public sealed class Part { public string name; public V3 a, b; public double r, side; }
-    public struct SegQ { public double t, x, y, z; }
+    public sealed class Clothing { public int top, bottom; public Num stiffness; public bool topOff, collarTaped; public Clothing Clone() => (Clothing)MemberwiseClone(); }
+    public sealed class Part { public string name; public V3 a, b; public Num r, side; }
+    public struct SegQ { public Num t, x, y, z; }
     /// A body frame: position and facing on the ground plane
-    public struct Frame { public double x, z, fx, fz; public Frame(double x, double z, double fx, double fz) { this.x = x; this.z = z; this.fx = fx; this.fz = fz; } }
+    public struct Frame { public Num x, z, fx, fz; public Frame(Num x, Num z, Num fx, Num fz) { this.x = x; this.z = z; this.fx = fx; this.fz = fz; } }
 
     public sealed class Swat
     {
-        public ulong actorId; public string actorHex, frameHex, stungHex; public int kind; public double start, window, radius, reach, contactTick;
+        public ulong actorId; public string actorHex, frameHex, stungHex; public int kind; public Num start, window, radius, reach, contactTick;
         public V3 center; public bool kills, pre; public List<int> hits = new List<int>(); public int underOnly, byWasp, targetId; public string why;
         public Swat Clone() { var s = (Swat)MemberwiseClone(); s.hits = new List<int>(hits); return s; }
     }
-    public sealed class Plan { public List<Swat> swats = new List<Swat>(); public double panicGain; public bool flee; }
-    public sealed class StingIn { public double contactTick; public string mode = "jab"; public bool under; public V3 contactPointBody; }
-    public sealed class Companion { public ulong id; public string hex; public double distance, reactionTicks; public double style; }
-    public sealed class StingCtx { public double clothingStiffness, panic, stung, panicMul; public List<Companion> companions; }
+    public sealed class Plan { public List<Swat> swats = new List<Swat>(); public Num panicGain; public bool flee; }
+    public sealed class StingIn { public Num contactTick; public string mode = "jab"; public bool under; public V3 contactPointBody; }
+    public sealed class Companion { public ulong id; public string hex; public Num distance, reactionTicks; public Num style; }
+    public sealed class StingCtx { public Num clothingStiffness, panic, stung, panicMul; public List<Companion> companions; }
     public sealed class GNode { public string key; public int zone; public bool opening; public V3 n, pos; public List<int> links = new List<int>(); }
 
     public static class Body
     {
-        static ZoneDef Z(double @base, double back, double girth, double stiff, double sens, int policy, bool helper, double extra = 0) =>
+        static ZoneDef Z(Num @base, Num back, Num girth, Num stiff, Num sens, int policy, bool helper, Num extra = default) =>
             new ZoneDef { @base = @base, back = back, girth = girth, stiff = stiff, sens = sens, policy = policy, helper = helper, extra = extra };
         public static readonly ZoneDef[] ZONES = {
             Z(0.90, 0.2, 0.0, 0.3, 0.9, Policy.Slap, true),
@@ -67,9 +67,9 @@ namespace Sting.Core
             Z(0.95, 0.3, 0.5, 0.2, 0.9, Policy.Slap, true),
         };
 
-        public static double SelfReach(ZoneDef z, Traits h, double clothingStiffness)
+        public static Num SelfReach(ZoneDef z, Traits h, Num clothingStiffness)
         {
-            double r = z.@base
+            Num r = z.@base
                 + T.reach.arm * (h.armRatio - 1)
                 + T.reach.flex * (h.flexibility - 0.5) * z.back
                 - T.reach.girth * h.girth * z.girth
@@ -117,16 +117,16 @@ namespace Sting.Core
             return 0;
         }
 
-        static Part P(string name, double ax, double ay, double az, double bx, double by, double bz, double r, double side = 0) =>
+        static Part P(string name, Num ax, Num ay, Num az, Num bx, Num by, Num bz, Num r, Num side = default) =>
             new Part { name = name, a = new V3(ax, ay, az), b = new V3(bx, by, bz), r = r, side = side };
 
         public static List<Part> BodyParts(Traits h, string posture)
         {
-            double s = h.height / 1.75, g = h.girth, ar = h.armRatio;
-            double tor = 0.14 + 0.08 * g, pel = 0.12 + 0.05 * g;
-            double ax = tor + 0.065, lx = 0.085 + 0.025 * g;
+            Num s = h.height / 1.75, g = h.girth, ar = h.armRatio;
+            Num tor = 0.14 + 0.08 * g, pel = 0.12 + 0.05 * g;
+            Num ax = tor + 0.065, lx = 0.085 + 0.025 * g;
             var L = new List<Part>();
-            void Arm(string name, double sd, double[] a, double[] b, double r) =>
+            void Arm(string name, Num sd, Num[] a, Num[] b, Num r) =>
                 L.Add(P(name, a[0] * sd, a[1], a[2], (a[0] + (b[0] - a[0]) * ar) * sd, a[1] + (b[1] - a[1]) * ar, a[2] + (b[2] - a[2]) * ar, r, sd));
             if (posture == "stand")
             {
@@ -135,7 +135,7 @@ namespace Sting.Core
                 L.Add(P("Shoulders", -(ax - 0.03), 1.385, -0.01, ax - 0.03, 1.385, -0.01, 0.062));
                 L.Add(P("Torso", 0, 1.0, 0, 0, 1.29, 0, tor));
                 L.Add(P("Pelvis", -0.07, 0.9, 0, 0.07, 0.9, 0, pel));
-                foreach (double sd in new double[] { -1, 1 })
+                foreach (Num sd in new Num[] { -1, 1 })
                 {
                     string n = sd < 0 ? "L" : "R";
                     Arm("UpperArm" + n, sd, new[] { ax, 1.37, 0 }, new[] { ax + 0.03, 1.08, 0 }, 0.045);
@@ -152,7 +152,7 @@ namespace Sting.Core
                 L.Add(P("Shoulders", -(ax - 0.03), 0.985, -0.01, ax - 0.03, 0.985, -0.01, 0.062));
                 L.Add(P("Torso", 0, 0.6, 0, 0, 0.89, 0.01, tor));
                 L.Add(P("Pelvis", -0.07, 0.5, 0, 0.07, 0.5, 0, pel));
-                foreach (double sd in new double[] { -1, 1 })
+                foreach (Num sd in new Num[] { -1, 1 })
                 {
                     string n = sd < 0 ? "L" : "R";
                     Arm("UpperArm" + n, sd, new[] { ax, 0.97, 0 }, new[] { ax + 0.02, 0.74, 0.12 }, 0.045);
@@ -168,14 +168,14 @@ namespace Sting.Core
 
         public static SegQ SegClosest(V3 a, V3 b, V3 p)
         {
-            double abx = b.x - a.x, aby = b.y - a.y, abz = b.z - a.z;
-            double L2 = abx * abx + aby * aby + abz * abz;
-            double t = L2 > 0 ? ((p.x - a.x) * abx + (p.y - a.y) * aby + (p.z - a.z) * abz) / L2 : 0;
+            Num abx = b.x - a.x, aby = b.y - a.y, abz = b.z - a.z;
+            Num L2 = abx * abx + aby * aby + abz * abz;
+            Num t = L2 > 0 ? ((p.x - a.x) * abx + (p.y - a.y) * aby + (p.z - a.z) * abz) / L2 : 0;
             t = t < 0 ? 0 : t > 1 ? 1 : t;
             return new SegQ { t = t, x = a.x + abx * t, y = a.y + aby * t, z = a.z + abz * t };
         }
 
-        public static int Classify(Part part, SegQ q, V3 n, V3 p, double s)
+        public static int Classify(Part part, SegQ q, V3 n, V3 p, Num s)
         {
             switch (part.name)
             {
@@ -203,10 +203,10 @@ namespace Sting.Core
 
         // Body frame: forward f = (fx, 0, fz), right r = (fz, 0, -fx), up = y.
         public static V3 ToWorld(Frame hm, V3 p) => new V3(hm.x + hm.fz * p.x + hm.fx * p.z, p.y, hm.z - hm.fx * p.x + hm.fz * p.z);
-        public static V3 ToLocal(Frame hm, V3 w) { double dx = w.x - hm.x, dz = w.z - hm.z; return new V3(dx * hm.fz - dz * hm.fx, w.y, dx * hm.fx + dz * hm.fz); }
+        public static V3 ToLocal(Frame hm, V3 w) { Num dx = w.x - hm.x, dz = w.z - hm.z; return new V3(dx * hm.fz - dz * hm.fx, w.y, dx * hm.fx + dz * hm.fz); }
         public static V3 DirToWorld(Frame hm, V3 d) => new V3(hm.fz * d.x + hm.fx * d.z, d.y, -hm.fx * d.x + hm.fz * d.z);
 
-        static int KindFor(int policy, double reach)
+        static int KindFor(int policy, Num reach)
         {
             if (reach < T.reach.minReachToSwat) return SwatKind.Contort;
             switch (policy)
@@ -218,13 +218,13 @@ namespace Sting.Core
                 default: return SwatKind.Slap;
             }
         }
-        public static double WindowFor(int k) => k == SwatKind.Slap ? 4 : k == SwatKind.Brush ? 6 : k == SwatKind.Cover ? 8 : k == SwatKind.Compress ? 8 : 10;
-        static double RadiusFor(int k, double style, double accuracy, double reach)
+        public static Num WindowFor(int k) => k == SwatKind.Slap ? 4 : k == SwatKind.Brush ? 6 : k == SwatKind.Cover ? 8 : k == SwatKind.Compress ? 8 : 10;
+        static Num RadiusFor(int k, Num style, Num accuracy, Num reach)
         {
             if (k == SwatKind.Brush) return T.resolve.brushRadius;
             if (k == SwatKind.Cover) return T.resolve.coverRadius;
             if (k == SwatKind.Contort) return T.resolve.contortRadius;
-            double b = style == Style.Precise ? T.resolve.preciseRadius : T.resolve.flailerRadius;
+            Num b = style == Style.Precise ? T.resolve.preciseRadius : T.resolve.flailerRadius;
             return b * (1 + (1 - accuracy) * 0.5) * (1 + (1 - reach) * 0.5);
         }
 
@@ -239,23 +239,23 @@ namespace Sting.Core
         public static Plan ResolveSting(StingIn e, Traits h, ZoneDef z, StingCtx ctx)
         {
             var plan = new Plan();
-            double n = Min(ctx.stung, T.memory.maxStings);
-            double quick = Max(T.memory.minFactor, 1 - T.memory.fasterPerSting * n);
-            double pain = e.mode == "touch" ? 0 : (e.mode == "full" ? T.resolve.fullPain : T.resolve.jabPain) * z.sens * (e.under ? T.under.panicMul : 1);
+            Num n = Min(ctx.stung, T.memory.maxStings);
+            Num quick = Max(T.memory.minFactor, 1 - T.memory.fasterPerSting * n);
+            Num pain = e.mode == "touch" ? 0 : (e.mode == "full" ? T.resolve.fullPain : T.resolve.jabPain) * z.sens * (e.under ? T.under.panicMul : 1);
             plan.panicGain = pain * h.panicSusceptibility * (ctx.panicMul != 0 ? ctx.panicMul : 1) * (1 + T.memory.panicPerSting * n);
             plan.flee = e.mode != "touch" && !e.under && (ctx.panic + plan.panicGain >= T.resolve.fleePanic || h.style == Style.Runner);
             if (e.under)
             {
-                double delay = Rnd(h.reactionTicks * quick);
+                Num delay = Rnd(h.reactionTicks * quick);
                 if (delay < T.resolve.minConsequenceTicks) delay = T.resolve.minConsequenceTicks;
                 plan.swats.Add(new Swat { actorId = h.id, kind = SwatKind.Compress, start = e.contactTick + delay, window = WindowFor(SwatKind.Compress), center = e.contactPointBody, radius = T.under.compressRadius, kills = true, reach = 1 });
                 return plan;
             }
             if (h.style != Style.Freezer)
             {
-                double reach = SelfReach(z, h, ctx.clothingStiffness);
+                Num reach = SelfReach(z, h, ctx.clothingStiffness);
                 int kind = KindFor(z.policy, reach);
-                double delay = Rnd((h.reactionTicks + z.extra + (kind == SwatKind.Contort ? T.resolve.contortExtraTicks : 0)) * quick);
+                Num delay = Rnd((h.reactionTicks + z.extra + (kind == SwatKind.Contort ? T.resolve.contortExtraTicks : 0)) * quick);
                 if (delay < T.resolve.minConsequenceTicks) delay = T.resolve.minConsequenceTicks;
                 plan.swats.Add(new Swat
                 {
@@ -283,15 +283,15 @@ namespace Sting.Core
 
         // ---------------------------------------------------------------- under clothing (GDD 8.8)
         static Part PartByName(List<Part> parts, string name) { foreach (var p in parts) if (p.name == name) return p; return null; }
-        static V3 Norm(double x, double y, double z) { double m = Sqrt(x * x + y * y + z * z); return new V3(x / m, y / m, z / m); }
+        static V3 Norm(Num x, Num y, Num z) { Num m = Sqrt(x * x + y * y + z * z); return new V3(x / m, y / m, z / m); }
 
         public static List<GNode> GarmentGraph(Traits h, Clothing clothing, string posture, List<Part> parts)
         {
             var nodes = new List<GNode>();
-            int Add(string key, string partName, double t, V3 n, int zone, bool opening)
+            int Add(string key, string partName, Num t, V3 n, int zone, bool opening)
             {
                 var p = PartByName(parts, partName);
-                double ax = p.a.x + (p.b.x - p.a.x) * t, ay = p.a.y + (p.b.y - p.a.y) * t, az = p.a.z + (p.b.z - p.a.z) * t;
+                Num ax = p.a.x + (p.b.x - p.a.x) * t, ay = p.a.y + (p.b.y - p.a.y) * t, az = p.a.z + (p.b.z - p.a.z) * t;
                 nodes.Add(new GNode { key = key, zone = zone, opening = opening, n = n, pos = new V3(ax + n.x * p.r, ay + n.y * p.r, az + n.z * p.r) });
                 return nodes.Count - 1;
             }
@@ -309,7 +309,7 @@ namespace Sting.Core
                 int be = Add("belly", "Torso", 0.35, new V3(0, 0, 1), Zone.Belly, false);
                 int hf = Add("front hem", "Torso", 0.02, new V3(0, 0, 1), Zone.Belly, !suit);
                 Link(collar, acn); Link(collar, ch); Link(acn, lb); Link(lb, hb); Link(ch, be); Link(be, hf);
-                foreach (double sd in new double[] { -1, 1 })
+                foreach (Num sd in new Num[] { -1, 1 })
                 {
                     string S = sd < 0 ? "L" : "R";
                     int ub = Add("upper back " + S, "Torso", 0.65, Norm(0.7 * sd, 0, -0.7), Zone.UpperBack, false);
@@ -336,7 +336,7 @@ namespace Sting.Core
             int bottom = clothing.bottom;
             V3 thighN = sit ? new V3(0, 1, 0) : new V3(0, 0, 1);
             int groin = Add("groin", "Pelvis", 0.5, new V3(0, 0, 1), Zone.Groin, false);
-            foreach (double sd in new double[] { -1, 1 })
+            foreach (Num sd in new Num[] { -1, 1 })
             {
                 string S = sd < 0 ? "L" : "R";
                 int butt = Add("buttock " + S, "Pelvis", sd < 0 ? 0.1 : 0.9, new V3(0, 0, -1), Zone.Buttocks, false);

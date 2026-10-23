@@ -34,6 +34,8 @@ namespace Sting.Core.Tests
                     if (i % 60 == 0) { d.F(lab.Agree(0, 1) ? 1 : 0); foreach (var s in lab.sims) { d.S(s.StateHash()); d.S(s.HumanHash()); } }
                 }
                 Out("net.mesh", d.Hex);
+                Assert("net.mesh", lab.checks.agreed == lab.checks.compared && lab.sims[0].plaus.quarantined.Contains(2) && lab.sims[1].plaus.quarantined.Contains(2),
+                    $"the host rules on the cheater, both honest peers cut it off and agree on every human ({lab.checks.agreed}/{lab.checks.compared})");
             }
         }
 
@@ -54,6 +56,10 @@ namespace Sting.Core.Tests
                 }
             }
             Out($"net.{name}", d.Hex);
+            var c = lab.checks;
+            if (cheat) Assert($"net.{name}", lab.a.plaus.quarantined.Contains(1) && lab.a.remote.Count == 0, $"the cheating peer is quarantined (rejected {lab.a.netStats.rejected})");
+            else Assert($"net.{name}", c.compared > 50 && c.agreed == c.compared, $"peers agree on every human ({c.agreed}/{c.compared})");
+            stats.Add(Stat("net." + name, lab.a));
         }
     }
 }
