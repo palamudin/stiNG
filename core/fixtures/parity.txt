@@ -5,3 +5,7 @@ weather.1234 bc1eac5a
 weather.7 f7a3ca43
 weather.16045690984503098046 3d79161c
 motion bef7e94d
+bodies.1234 ff11d123
+bodies.7 669de839
+bodies.16045690984503098046 f04a242d
+colony 8d87e160

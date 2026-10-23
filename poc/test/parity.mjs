@@ -3,6 +3,8 @@
 import { writeFileSync } from 'node:fs';
 import { generateChunk, dayWeather, humanWindow, flyPos, beePos, birdPos, dragonPos, makeNest, shedSites } from '../sim/world.js';
 import { hash, Domain, u64, datan2, dsin, h32 } from '../sim/rng.js';
+import { newColony, colonyStep, destroyNest, colonyFinished, seasonPhase, sugarCap, proteinCap } from '../sim/colony.js';
+import { humanTraits, humanClothing, suitClothing, bodyParts, segClosest, classify, toWorld, toLocal, resolveSting, ZONES, selfReach, zoneCover, predictedKind, garmentGraph } from '../sim/body.js';
 
 export function Digest() {
   const buf = new Float64Array(1), bytes = new Uint8Array(buf.buffer);
@@ -73,6 +75,66 @@ for (const seed of seeds) {
   for (const site of ['trunk', 'ground', 'branch', 'wall', 'attic']) { const n = makeNest(-3, -2, 4.5, 2.1, 7.25, 0.14, site); for (const v of [n.x, n.y, n.z, n.entrance.x, n.entrance.y, n.entrance.z, n.spawn.x, n.spawn.y, n.spawn.z, n.spawn.yaw]) d.f(v); d.s(n.key); }
   for (const sh of [...generateChunk(1234n, 2, 0).sheds, ...generateChunk(1234n, -3, 1).sheds, ...generateChunk(7n, 1, 1).sheds]) { const ss = shedSites(sh); for (const p of [ss.wall, ss.attic]) for (const k of ['x', 'y', 'z', 'ix', 'iz', 'nx', 'nz']) d.f(p[k]); }
   out('motion', d.hex());
+}
+
+// bodies: traits, clothing, parts, zones, reach, resolution, garment graphs
+for (const seed of seeds) {
+  const d = Digest();
+  for (let i = 0; i < 120; i++) {
+    const id = hash(seed, Domain.WorldGen, u64(i - 60), 7n, 1000n + BigInt(i));
+    const tr = humanTraits(seed, id);
+    for (const k of ['height', 'armRatio', 'flexibility', 'girth', 'ageStiffness', 'reactionTicks', 'style', 'accuracy', 'panicSusceptibility', 'sociability', 'escalation']) d.f(tr[k]);
+    const cls = [humanClothing(seed, id, 0), humanClothing(seed, id, 3), suitClothing(i % 2 === 0), { ...humanClothing(seed, id, 1), topOff: true }];
+    for (const c of cls) { d.f(c.top); d.f(c.bottom); d.f(c.stiffness); for (let z = 0; z < 17; z++) { d.f(zoneCover(c, z)); d.f(selfReach(ZONES[z], tr, c.stiffness)); d.f(predictedKind(z, tr, c)); } }
+    for (const posture of ['stand', 'sit']) {
+      const parts = bodyParts(tr, posture);
+      for (const p of parts) { d.s(p.name); d.f(p.a.x); d.f(p.a.y); d.f(p.a.z); d.f(p.b.x); d.f(p.b.y); d.f(p.b.z); d.f(p.r); d.f(p.side); }
+      const hm = { x: 3 + i * 0.1, z: -2 + i * 0.05, fx: dsin(i), fz: dsin(i + 1.5707963267948966) };
+      for (let k = 0; k < 24; k++) {
+        const wp = { x: hm.x + dsin(k * 1.7) * 0.4, y: 0.2 + (k % 8) * 0.22, z: hm.z + dsin(k * 2.3 + 1) * 0.4 };
+        const lp = toLocal(hm, wp), back = toWorld(hm, lp); d.f(lp.x); d.f(lp.y); d.f(lp.z); d.f(back.x); d.f(back.z);
+        for (const part of parts) {
+          const q = segClosest(part.a, part.b, lp);
+          const nx = lp.x - q.x, ny = lp.y - q.y, nz = lp.z - q.z, nl = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+          d.f(q.t); d.f(q.x); d.f(q.y); d.f(q.z);
+          d.f(classify(part, q, { x: nx / nl, y: ny / nl, z: nz / nl }, lp, tr.height / 1.75));
+        }
+      }
+      for (const c of cls) {
+        const g = garmentGraph(tr, c, posture, parts);
+        d.f(g.length); for (const n of g) { d.s(n.key); d.f(n.zone); d.f(n.opening); d.f(n.n.x); d.f(n.n.y); d.f(n.n.z); d.f(n.pos.x); d.f(n.pos.y); d.f(n.pos.z); d.f(n.links.length); for (const l of n.links) d.f(l); }
+      }
+    }
+    const comp = [{ id: id ^ 5n, distance: 0.5 + (i % 4), style: i % 5, reactionTicks: 11 + (i % 30) }, { id: id ^ 9n, distance: 1.2, style: (i + 2) % 5, reactionTicks: 20 }];
+    for (let z = 0; z < 17; z++) for (const mode of ['jab', 'full', 'touch']) for (const under of [false, true]) {
+      const plan = resolveSting({ contactTick: 1000 + i, mode, under, contactPointBody: { x: 0.01 * z, y: 1.1, z: -0.1 } }, tr, ZONES[z],
+        { clothingStiffness: (i % 3) * 0.15, panic: (i % 7) * 0.1, stung: i % 6, panicMul: i % 4 === 0 ? 0 : 1.3, companions: i % 2 ? comp : null });
+      d.f(plan.panicGain); d.f(plan.flee); d.f(plan.swats.length);
+      for (const sw of plan.swats) { d.f(sw.kind); d.f(sw.start); d.f(sw.window); d.f(sw.radius); d.f(sw.kills); d.f(sw.reach); d.f(sw.center.x); }
+    }
+  }
+  out(`bodies.${seed}`, d.hex());
+}
+
+// colony economy over long runs with changing inputs
+{
+  const d = Digest();
+  const dc = (c) => { for (const k of ['adults', 'eggs', 'larvae', 'pupae', 'cells', 'protein', 'sugar', 'pulp', 'rEggs', 'rLarvae', 'rPupae', 'gynes', 'males', 'mated', 'deficit', 'fed', 'sugarlessDays']) d.f(c[k]); d.f(c.queenAlive); d.f(c.nestAlive); for (const k of ['emerged', 'laid', 'starvedLarvae', 'died', 'gynesRaised', 'sugarSpilled', 'proteinSpilled']) d.f(c.stats[k]); };
+  for (const variant of [0, 1, 2, 3]) {
+    const c = newColony(variant === 1);
+    if (variant === 1) { c.pulp = 3; c.protein = 2; c.sugar = 4; c.adults = 1; }
+    if (variant === 2) c.maxCells = 1800;
+    for (let i = 0; i < 24000; i++) {
+      c.alloc = Math.floor(i / 3000) % 4;
+      if (variant === 3 && i === 9000) { c.protein = 0; c.sugar = 0; }
+      if (variant === 2 && i % 500 === 0) c.pulp += 20;
+      const frac = Math.min(1, 0.3 + i / 24000 * 0.75);
+      colonyStep(c, 1 / 120, i % 7, (i % 1440) < 900, frac, variant === 0 ? 0.2 : 1);
+      if (i % 200 === 0) { dc(c); d.f(sugarCap(c)); d.f(proteinCap(c)); d.f(colonyFinished(c, i % 3)); d.s(seasonPhase(frac)); }
+    }
+    destroyNest(c); dc(c);
+  }
+  out('colony', d.hex());
 }
 
 writeFileSync(new URL('../../core/fixtures/parity.txt', import.meta.url), lines.join('\n') + '\n');

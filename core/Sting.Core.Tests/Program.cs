@@ -21,6 +21,8 @@ namespace Sting.Core.Tests
             foreach (var line in File.ReadAllLines(fixtures)) { if (line.Trim().Length == 0) continue; var p = line.Split(' '); want.Add((p[0], p[1])); }
             var sw = System.Diagnostics.Stopwatch.StartNew();
             WorldParity();
+            BodyParity();
+            ColonyParity();
             Extra();
             int fail = 0, pass = 0, missing = 0;
             foreach (var (name, hex) in want)
