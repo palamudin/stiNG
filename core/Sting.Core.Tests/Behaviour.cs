@@ -213,23 +213,35 @@ namespace Sting.Core.Tests
                 ev = RunS(s2, 900, (sim, i) => Idle(c => c.burst = sim.wasp != null && sim.wasp.state == "balled" ? i % 2 : 0));
                 Ok(Count(ev, "ballEscape") > 0, "mashing burst breaks out of the ball");
             }
-            // 9. exterminator: level 4 near the nest brings him; he destroys the nest unless stopped
+            // 9. exterminator: level 4 near the nest brings him; he searches by flight lines (T1-7) and destroys the nest
+            // unless stopped. A colony lying low gives him fewer lines and is not found in the same time.
             {
-                var s = new Sim(new Settings { seed = 1234 });
-                s.CS("0,0").esc = 30;
-                var ev = RunS(s, 60);
-                Ok(Count(ev, "extScheduled") == 1, "level 4 near the nest schedules the exterminator");
-                ev = RunS(s, 9000);
-                Ok(Count(ev, "extArrive") == 1 && Count(ev, "extTreat") == 1, "he arrives and starts treating the nest");
-                Ok(Count(ev, "nestDestroyed") == 1 && !s.colony.nestAlive, "an unopposed exterminator destroys the nest");
+                (Sim s, List<SimEvent> first, List<SimEvent> ev) Go(int alloc)
+                {
+                    var s = new Sim(new Settings { seed = 1234 });
+                    s.colony.adults = 120;
+                    s.CS("0,0").esc = 30;
+                    var first = RunS(s, 60, (sim, i) => Idle(c => c.alloc = alloc));
+                    return (s, first, RunS(s, 18000, (sim, i) => Idle(c => c.alloc = alloc)));
+                }
+                var a = Go(1);
+                Ok(Count(a.first, "extScheduled") == 1, "level 4 near the nest schedules the exterminator");
+                Ok(Count(a.ev, "extLine") >= 2 && Count(a.ev, "extFound") == 1 && Count(a.ev, "extTreat") == 1,
+                    $"he follows flight lines to the nest ({Count(a.ev, "extLine")} lines over {Count(a.ev, "extArrive")} visits) and starts treating it");
+                Ok(Count(a.ev, "nestDestroyed") == 1 && !a.s.colony.nestAlive, "an unopposed exterminator destroys the nest");
+                var b = Go(5);
+                Ok(b.s.colony.nestAlive && Count(b.ev, "extFound") == 0 && Count(b.ev, "extGiveUp") >= 1,
+                    $"a colony lying low is not found in the same time ({Count(b.ev, "extLine")} lines, gave up {Count(b.ev, "extGiveUp")} times)");
             }
             // 10. exterminator abort: crawl under his collar, sting, keep moving between stings
             {
                 var s = new Sim(new Settings { seed = 1234 });
                 s.CS("0,0").esc = 30;
-                for (int i = 0; i < 4000 && s.ext.hm == null; i++) RunS(s, 1);
+                s.ext.lead = new Lead { x = s.nest.x, z = s.nest.z, nx = s.nest.x, nz = s.nest.z }; // found it on an earlier visit
+                var arr = new List<SimEvent>();
+                for (int i = 0; i < 4000 && s.ext.hm == null; i++) arr.AddRange(RunS(s, 1));
                 var ext = s.ext.hm;
-                Ok(ext != null && s.ext.state == "active", "exterminator on site");
+                Ok(ext != null && s.ext.state == "active" && arr.Any(e => e.type == "extArrive" && e["known"] is bool kb && kb) && ext.state == "arrive", "exterminator on site, and he knows where the nest is from last time");
                 bool entered = false; int stungAt = -1;
                 var ev = RunS(s, 2500, (sim, i) =>
                 {
@@ -313,6 +325,45 @@ namespace Sting.Core.Tests
             Batch1();
             Batch2();
             Batch3();
+            Batch4();
+        }
+
+        // 30-31. Tier 1: fetching spray (T1-6) and the exterminator's search (T1-7)
+        static void Batch4()
+        {
+            {
+                var s = new Sim(new Settings { seed = 1234, dayMinutes = 20 }, new SimOpts { noAI = true });
+                RunS(s, 3);
+                var hm = Seated(s, h => h.tr.escalation >= T.esc.sprayTrait && h.tr.style != Style.Freezer);
+                Ok(hm != null, "someone at a table who would spray");
+                s.CS(hm.chunk).esc = 16;
+                Cmd Front(Sim sim, int i) { if (sim.wasp != null) Place(sim.wasp, Body.ToWorld(hm.F, P(0, 0.3, 1.0))); return Idle(); }
+                var ev = RunS(s, 300, Front);
+                Ok(s.EscAt(hm.x, hm.z) == 3 && Count(ev, "spray") == 0, "at level 3 a wasp in front of him is not sprayed: no can yet");
+                if (s.wasp != null) Place(s.wasp, P(hm.x + 15, 2, hm.z));
+                s.ApplyCommit(new NetEv { type = "sting", peer = s.peer, humanHex = hm.hex, panicGain = 0, driven = false, sx = hm.x, sz = hm.z, zone = 0, flee = false, waspId = 0 });
+                bool away = false;
+                ev = RunS(s, 4500, (sim, i) => { if (hm.state == "fetch" && hm.fetchT > 0) away = true; if (sim.wasp != null) Place(sim.wasp, P(hm.x + 15, 2, hm.z)); return Idle(); });
+                Ok(Count(ev, "fetchSpray") == 1 && away && Count(ev, "armed") == 1, "stung, he goes off for a can and is out of sight a while");
+                Ok(hm.state == "idle" && hm.sprayCount == T.esc.sprayCharges, $"and comes back to his seat with {D(hm.sprayCount)} sprays");
+                ev = RunS(s, 300, Front);
+                Ok(Count(ev, "spray") >= 1 && hm.sprayCount < T.esc.sprayCharges, $"now a wasp in front of him gets sprayed ({D(T.esc.sprayCharges - hm.sprayCount)} used)");
+            }
+            {
+                var s = new Sim(new Settings { seed = 1234 });
+                s.colony.adults = 120;
+                var n = s.nest; var ws = s.wasps;
+                s.wasps = new List<Wasp>();
+                Num At(Num d) => s.ExtSightings(n.x + d, n.z);
+                Num r20 = At(20), r6 = At(6);
+                s.colony.alloc = 4; Num low = At(20); s.colony.alloc = 0;
+                var site = n.site; n.site = "hollow"; Num hid = At(20); n.site = site;
+                Ok(r6 > r20 * 2 && low < r20 * 0.5 && hid < r20, $"lines per second: {D(r6):0.000} at 6 m, {D(r20):0.000} at 20 m, {D(low):0.000} lying low, {D(hid):0.000} in a hollow");
+                s.wasps = ws;
+                var w = s.wasp; Place(w, P(n.x + 20, 1.5, n.z + 2)); w.state = "fly";
+                Num seen = s.ExtSightings(n.x + 20, n.z);
+                Ok(seen >= r20 + T.ext.physPerSec * 0.999, $"and our wasp flying in sight adds a line ({D(seen):0.000})");
+            }
         }
 
         // 26. Tier 1, batch 1: wind, cold, drowning, clothes by the weather, shaking and flailing

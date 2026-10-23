@@ -64,10 +64,12 @@ export const T = {
     sugarCapBase: 6, sugarCapDays: 2.5, proteinCapBase: 6, proteinCapDays: 2, // bio: prey goes straight to larvae; little is held                            // bio: Vespula keep little sugar; a store of a few days of adult need
   },
   alloc: [
-    { name: 'Balanced', sugar: 1, protein: 1, pulp: 1 },
-    { name: 'Protein', sugar: 0.6, protein: 1.8, pulp: 0.6 },
-    { name: 'Sugar', sugar: 1.8, protein: 0.6, pulp: 0.6 },
-    { name: 'Build', sugar: 0.7, protein: 0.7, pulp: 1.6 },
+    // traffic: how many foragers fly, which is also what an exterminator watches for (T1-7)
+    { name: 'Balanced', sugar: 1, protein: 1, pulp: 1, traffic: 1 },
+    { name: 'Protein', sugar: 0.6, protein: 1.8, pulp: 0.6, traffic: 1 },
+    { name: 'Sugar', sugar: 1.8, protein: 0.6, pulp: 0.6, traffic: 1 },
+    { name: 'Build', sugar: 0.7, protein: 0.7, pulp: 1.6, traffic: 1 },
+    { name: 'Lie low', sugar: 1, protein: 1, pulp: 1, traffic: 0.35 },
   ],
 
   ai: { maxPhysical: 12, launchEvery: 90, arrive: 0.05, collectTicks: 150, attackTicks: 600, evadeTicks: 50, canDeficit: 0.35 },
@@ -84,6 +86,7 @@ export const T = {
     sting: 1, full: 1, death: 0.3, nuisance: 0.15,
     headRadius: 0.4, foodRadius: 0.35, faceRadius: 0.2, noticeMul: 1, cooldownTicks: 80,
     sprayTrait: 0.55, sprayRange: 1.5, sprayTicks: 40, trapsPerTable: 1, citronellaDrain: 1.5,
+    sprayCharges: 6, fetchTicks: 900, // T1-6: a stung person at level 3 goes for a can, gone 15 s
   },
 
   under: { moveTicks: 18, noticeMul: 2, compressRadius: 0.06, compressEvery: 25, ripPanic: 0.92, panicMul: 1.5, openingRadius: 0.035 },
@@ -115,7 +118,12 @@ export const T = {
   // bio: real programs use protein baits laced with insecticide; foragers carry them home and poison the brood.
   muni: { level: 5, radius: 1, days: 3, cooldownDays: 4, aftermath: 0.5, baitsPerChunk: 3, baitHeight: 1.2, baitDist: 0.04, baitProtein: 2,
     poisonAdults: 0.03, poisonLarvae: 0.08, abstractKillPerDay: 0.18, aiLure: 6 },
-  ext: { speed: 1.1, treatTicks: 600, arriveMinute: 9 * 60, level: 4, minPanicAbort: 0.8 },
+  ext: {
+    speed: 1.1, treatTicks: 600, arriveMinute: 9 * 60, level: 4, minPanicAbort: 0.8,
+    // the search (T1-7): he watches for flight lines and walks along each one he sees toward the nest
+    sightR: 8, linesPerSec: 0.6, physPerSec: 1.2, trafficFull: 60, stepLen: 7, errFrac: 0.35, findDist: 4,
+    minWatchTicks: 120, parkDist: 10, // he parks this far from where he starts and works until dusk
+  },
 
   bees: {
     guards: 6, foragers: 14, pursueSpeed: 4.2, accel: 30, contact: 0.016, ballMin: 3,

@@ -37,7 +37,7 @@ export function snapshot(sim) {
   out.humans = [...sim.humans.values()].map((hm) => { const o = {}; for (const k of Object.keys(hm)) if (!HUMAN_FIXED.has(k)) o[k] = hm[k]; o.hex = hm.hex; return o; });
   out.active = sim.active.map((hm) => hm.hex);
   const e = sim.ext;
-  out.ext = { visit: e.visit, state: e.state, arriveMinute: e.arriveMinute, hm: e.hm ? Object.fromEntries(Object.entries(e.hm).filter(([k]) => !['id', 'tr', 'parts'].includes(k))) : null };
+  out.ext = { visit: e.visit, state: e.state, arriveMinute: e.arriveMinute, lead: e.lead || null, hm: e.hm ? Object.fromEntries(Object.entries(e.hm).filter(([k]) => !['id', 'tr', 'parts'].includes(k))) : null };
   return JSON.stringify(out, replacer);
 }
 
@@ -77,7 +77,7 @@ export function restore(json) {
     });
   }
   // the exterminator, if one is on the job
-  sim.ext = { visit: d.ext.visit, state: d.ext.state, arriveMinute: d.ext.arriveMinute, hm: null };
+  sim.ext = { visit: d.ext.visit, state: d.ext.state, arriveMinute: d.ext.arriveMinute, lead: d.ext.lead || null, hm: null };
   if (d.ext.hm) {
     const id = hash(sim.seed, Domain.WorldGen, 0xE77n, BigInt(d.ext.visit));
     const tr = { ...humanTraits(sim.seed, id), height: 1.8, armRatio: 1, girth: 0.4, reactionTicks: 12, style: Style.Precise, accuracy: 0.9, panicSusceptibility: 0.45, sociability: 0, escalation: 1 };

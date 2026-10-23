@@ -78,6 +78,10 @@ namespace Sting.Core
         public List<Part> sit, stand;
         /// The stings this person remembers: when and where (T1-18)
         public List<MemRec> mem = new List<MemRec>();
+        /// Fetching spray (T1-6)
+        public int fetchT; public bool wantSpray;
+        /// The exterminator's search (T1-7): where he walks next, how long he has watched, the lines he has seen
+        public Num wpx, wpz, clue; public int watch, lines;
         // the garment graph is a pure function of traits, clothing and posture; clothing is replaced, never edited
         internal List<GNode> gCache; internal Clothing gClothing; internal string gPosture;
         public List<Part> Parts(string posture) => posture == "sit" ? sit : stand;
@@ -162,7 +166,9 @@ namespace Sting.Core
     /// phys: JS object with integer keys, which iterate in ascending order
     public sealed class HiveAlarm { public string key; public int h, target; public Num until; public SortedDictionary<int, BeePhys> phys = new SortedDictionary<int, BeePhys>(); }
     public sealed class HunterState { public string mode; public Num x, y, z, vx, vy, vz, until; public int target; }
-    public sealed class Ext { public int visit; public string state = "none"; public Num arriveMinute; public Human hm; }
+    public sealed class Ext { public int visit; public string state = "none"; public Num arriveMinute; public Human hm; public Lead lead; }
+    /// Where the exterminator's last flight line took him, and for which nest (T1-7)
+    public sealed class Lead { public Num x, z, nx, nz; }
     public sealed class Spray { public string hex; public Num start, end; }
     public sealed class Alarm { public Num x, y, z, until; public string killerHex; }
     public sealed class Season { public int n; public Num startMinute; public string phase; }

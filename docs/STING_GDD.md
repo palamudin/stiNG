@@ -539,7 +539,7 @@ Below `minReachToSwat` *(tune 0.25)* the human cannot strike that zone and conto
 | Freeze | none | — | — | The human goes rigid; panic builds |
 | Run | none | — | — | Flees, with a flailing swat on the way out |
 
-### 8.6 Sting resolution — the core function **[T0] [T1]** (fetch spray)
+### 8.6 Sting resolution — the core function **[T0]**
 
 `ResolveSting(StingEvent, HumanTraits, HumanContext) → ReactionPlan` is a pure function. Given the same inputs it MUST return the same plan on every machine. Appendix A.6.
 
@@ -581,7 +581,7 @@ During each tick of a swat window, the volume is transformed from body frame to 
 - Thresholds: flinch, then swat, then flee or scatter.
 - Panic can knock over tables and drinks. Those are sim events that write chunk deltas, and a spilled drink is a new sugar node. Panic feeds the wasps.
 
-### 8.10 Memory and escalation **[T0] [T1]** (exterminator search; memory by recency and place built)
+### 8.10 Memory and escalation **[T0]**
 
 - Each human remembers stings: count, recency, place.
 - Each neighborhood has an **escalation level** from accumulated memory, decaying over time *(tune)*:
@@ -1038,6 +1038,16 @@ All five are in the C# core with parity: the 22 JS digests still match in the do
 
 **Solo time.** In a solo world the colony view (N) runs time at 1×, 4× or 16× (T cycles). Anything aimed at the driven wasp (a swat, a web, bees, a bird, a drink, a fight) drops it back to 1×. Reflex, an option in the pause menu and on by default, runs the wall clock at a quarter for 0.9 s when a hand is scheduled against the driven wasp, or when its own sting sets swats coming. Both change only how fast the wall clock feeds ticks to the sim: recorded input, replays and saves are untouched, and shared worlds never change speed (7.8).
 
+### 18.22 Fetching spray and the exterminator's search as built (T1-6, T1-7)
+
+**Fetching spray.** Nobody has insecticide on them. At level 3, a person with a high escalation trait who gets stung goes for a can once things calm down: they finish fleeing, sit back down, then get up, walk off to where they came from, are out of sight for 15 s, and come back with a can good for six sprays. Only then do they spray a wasp hovering in front of them. A green can in the hand shows who is armed. The decision to spray is local to each peer, as swats are; the can empties when the spray event commits, so every peer counts the same sprays.
+
+**The exterminator searches.** He no longer walks straight to the nest. He parks near where people were stung most around the nest (or where his last flight line took him on an earlier visit, or the edge of the area) and watches. Flight lines come at a rate set by the colony's foragers in the air (scaled down by a well hidden site, and zero at night, in rain and in cold), and by distance: lines radiate from the nest, so the closer he stands the more cross his view. Any of the colony's wasps flying within 8 m where he can see it is a line of its own. Each line he sees, he walks 7 m along it toward the nest, landing up to a third of the remaining distance off to one side. Within 4 m, the next line shows him the entrance and he treats the nest as before. At dusk he gives up for the day and comes back the next morning to his last line; the escalation decay can cancel the booking in between. A nest he has found once he walks straight to on the next visit.
+
+**Lying low.** A fifth foraging preset, *Lie low*, keeps all three income shares but sends out only 35% of the foragers: income, physical AI foragers, bait taken home during a pest control campaign and the lines the exterminator sees all drop with it. With a large colony at 2-minute days, an unopposed exterminator finds the nest on the second or third visit; lying low, he gives up twice and the booking lapses.
+
+**The exterminator is one colony's business.** His search reads that colony's traffic and wasps, so peers sharing a neighbourhood can see different exterminators doing different things. The lab therefore leaves him out of the agreement check on shared humans, his panic does not spread to shared humans, and the human step runs over a snapshot of the list so his leaving mid-step cannot shift anyone else's step. A shared exterminator, called by the neighbourhood and searching for every colony in it, is a question for the multiplayer design (Q-07).
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1046,7 +1056,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (71 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (73 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -1057,8 +1067,8 @@ Everything in `POC.md` (71 features) and its C# port (18.18), including the Tier
 | T1-3 | **Built (18.19).** Drowning in a drink: a wasp feeding at an open can may fall in and has a few seconds to climb out | 7.5 | S | |
 | T1-4 | **Built (18.19).** Clothing by temperature: jackets and jeans on cool days, tank tops and shorts on hot ones | 8.8 | S | |
 | T1-5 | **Built (18.19).** Shake and flail: a human stung on the head shakes it (dislodges, no kill); runners swat wildly on the way out | 8.5 | S | |
-| T1-6 | Fetching spray: at level 3 a stung human walks off and comes back armed, instead of having spray on hand | 8.6, 8.10 | M | |
-| T1-7 | The exterminator searches: at level 4 he walks the area watching wasp traffic and finds the nest from flight lines; a colony that keeps traffic low near people buys time | 8.10 | M | |
+| T1-6 | **Built (18.22).** Fetching spray: at level 3 a stung human walks off and comes back armed, instead of having spray on hand | 8.6, 8.10 | M | |
+| T1-7 | **Built (18.22).** The exterminator searches: at level 4 he walks the area watching wasp traffic and finds the nest from flight lines; a colony that keeps traffic low near people buys time | 8.10 | M | |
 | T1-8 | Seasonal ecology: flowers bloom and fade by season, nectar is drawn down by bees and wasps and regrows in an ecology tick (0.2 Hz); prey by season; carrion appears | 9.4, 3.3 | M | |
 | T1-9 | Feral hives and robbing: hives in hollow trees and walls; a wasp that gets inside takes honey (sugar) as well as brood | 9.1 | M | |
 | T1-10 | Barbecues: grills as human anchors with meat, a protein source at people's tables and a new kind of conflict | 4.3, 6.2 | M | T1-11 helps |
@@ -1076,7 +1086,7 @@ Everything in `POC.md` (71 features) and its C# port (18.18), including the Tier
 | T1-22 | Tuning as data: the tuning tables as versioned plain-text files read by own parsers in JS and C#, and the tuning hash in the world record | 13 | M | |
 | T1-23 | **Built (18.21).** Solo time: accelerate time in the colony view, and the Reflex slowdown as a solo option | 5.1, 7.8 | S | |
 
-Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, then the other S items: T1-14, T1-17, T1-18, T1-23, all done; T1-20 waits on regions), then the M items; each batch is built in the PoC and then ported to the core with parity.
+Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, then the other S items: T1-14, T1-17, T1-18, T1-23, all done; T1-20 waits on regions), then the M items (T1-6 and T1-7 done); each batch is built in the PoC and then ported to the core with parity.
 
 ### 19.3 Tier 2: later
 

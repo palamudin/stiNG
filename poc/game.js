@@ -626,6 +626,8 @@ function rebuildHuman(view) {
     view.meshes.Veil = veil; view.meshes.Brim = brim;
     group.add(veil, brim);
   }
+  const can = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.19, 12), mat('#2f8f3a')); // a spray can (T1-6), green so it doesn't read as a cup
+  view.meshes.Can = can; group.add(can);
   view.posture = hm.posture;
   view.zonesOn = false;
 }
@@ -666,7 +668,7 @@ function setArm(P, side, tgt) {
 
 function poseHuman(view, t, dt) {
   const { hm, group } = view;
-  group.visible = hm.state !== 'away';
+  group.visible = hm.state !== 'away' && !(hm.state === 'fetch' && hm.fetchT > 0); // indoors fetching a can (T1-6)
   if (!group.visible) return;
   if (view.sig !== JSON.stringify(hm.clothing) + hm.posture) rebuildHuman(view);
   if (ui.zones !== view.zonesOn) applyZoneColors(view, ui.zones);
@@ -679,7 +681,7 @@ function poseHuman(view, t, dt) {
   view.ang += da * Math.min(1, dt * 10);
   view.flinch = Math.max(0, view.flinch - dt * 4);
 
-  const moving = hm.state === 'flee' || hm.state === 'return' || hm.state === 'arrive' || hm.state === 'leave';
+  const moving = hm.state === 'flee' || hm.state === 'return' || hm.state === 'arrive' || hm.state === 'leave' || hm.state === 'fetch' || hm.state === 'seek';
   if (moving) view.walk += dt * (hm.state === 'flee' ? 13 : 7);
 
   const P = {};
@@ -747,10 +749,12 @@ function poseHuman(view, t, dt) {
   const fwd = new THREE.Vector3(Math.sin(twist), 0, Math.cos(twist)), right = new THREE.Vector3(fwd.z, 0, -fwd.x);
   view.meshes.EyeL.position.copy(head).addScaledVector(fwd, r * 0.9).addScaledVector(right, -r * 0.35).add(new THREE.Vector3(0, r * 0.15, 0));
   view.meshes.EyeR.position.copy(head).addScaledVector(fwd, r * 0.9).addScaledVector(right, r * 0.35).add(new THREE.Vector3(0, r * 0.15, 0));
+  view.meshes.Can.visible = hm.sprayCount > 0;
+  if (hm.sprayCount > 0) view.meshes.Can.position.copy(P.ForearmR.b).add(new THREE.Vector3(0, 0.02, 0));
   if (view.meshes.Veil) { view.meshes.Veil.position.copy(head); view.meshes.Brim.position.copy(head).add(new THREE.Vector3(0, r * 0.75, 0)); }
   const jolt = view.flinch > 0 ? Math.sin(view.flinch * 40) * 0.015 * view.flinch : 0;
   group.position.set(view.x + view.lean.x, jolt, view.z + view.lean.z);
-  group.rotation.y = view.ang;
+  group.rotation.y = view.ang + (hm.state === 'watch' ? Math.sin(t * 0.03 + hm.lines) * 0.9 : 0); // scanning for flight lines (T1-7)
 }
 
 // Lab: color every vertex by what the human does if stung there (GDD 8.3-8.5)
@@ -1347,7 +1351,7 @@ function updateHud() {
   $('seasonBar').style.width = (frac * 100).toFixed(1) + '%';
   $('seasonT').textContent = `Season ${sim.season.n} · ${sim.season.phase}${sim.lineage > 0 ? ` · ${sim.lineage} sister nest${sim.lineage === 1 ? '' : 's'}` : ''}`;
   const e = sim.ext;
-  const extT = e.state === 'scheduled' ? `Exterminator due ${dayLabel(e.arriveMinute)}` : e.state === 'active' && e.hm ? (e.hm.state === 'treat' ? 'Exterminator treating the nest' : 'Exterminator on the way') : '';
+  const extT = e.state === 'scheduled' ? `Exterminator due ${dayLabel(e.arriveMinute)}` : e.state === 'active' && e.hm ? (e.hm.state === 'treat' ? 'Exterminator treating the nest' : e.hm.state === 'seek' || e.hm.state === 'watch' ? `Exterminator watching for flight lines, ${Math.round(Math.hypot(e.hm.x - sim.nest.x, e.hm.z - sim.nest.z))} m out` : e.hm.state === 'arrive' ? 'Exterminator heading for the nest' : 'Exterminator leaving') : '';
   const muniT = sim.muni && sim.muni.active ? `Pest control baits out until ${dayLabel(sim.muni.active.until)}` : '';
   $('ext').textContent = [extT, muniT].filter(Boolean).join(' · ');
   const lv = w ? sim.escAt(w.x, w.z) : 0;
@@ -1585,7 +1589,12 @@ function handleEvents(events) {
       case 'muniEnd': logEvent('pest control packed up'); break;
       case 'baitTaken': if (e.driven) toast('Meat from the station', 'var(--yellow)', 1.4); break;
       case 'poisoned': if (e.id === sim.drivenId) toast('The brood is dying. That meat was poisoned.', 'var(--red)', 3.4); else logEvent(`a forager brought poison home · ${fmt(e.adults + e.larvae)} died`); break;
-      case 'extArrive': toast(e.taped ? 'The exterminator is back. Collar taped.' : 'The exterminator is here. Get under his collar.', 'var(--red)', 3.2); break;
+      case 'extArrive': toast(e.known ? 'The exterminator is back and knows where the nest is.' : e.taped ? 'The exterminator is back, watching for flight lines. Collar taped.' : 'The exterminator is here, watching for flight lines. Keep traffic low, or get under his collar.', 'var(--red)', 3.6); break;
+      case 'extLine': logEvent(`exterminator follows a flight line (${e.lines})`); break;
+      case 'extFound': toast('The exterminator has spotted the nest', 'var(--red)', 3); logEvent('exterminator found the nest'); break;
+      case 'extGiveUp': toast('The exterminator calls it a day. He will be back.', 'var(--yellow)', 3); logEvent(`exterminator gave up for today after ${e.lines} line${e.lines === 1 ? '' : 's'}`); break;
+      case 'fetchSpray': logEvent(`#${e.humanHex.slice(0, 4)} goes for a can of spray`); break;
+      case 'armed': logEvent(`#${e.humanHex.slice(0, 4)} is back with spray`); break;
       case 'extAbort': toast('The exterminator gives up for today', 'var(--yellow)', 3); break;
       case 'extCancelled': toast('Exterminator cancelled', 'var(--yellow)', 2.4); break;
       case 'nestDestroyed': toast('The nest is destroyed', 'var(--red)', 4); logEvent(`nest destroyed · ${e.died} inside died`); break;

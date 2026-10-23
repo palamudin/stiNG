@@ -42,7 +42,7 @@ export function colonyStep(c, dtDay, physical, foraging, frac = 0.3, bio = 1, th
 
   if (foraging) {
     const a = T.alloc[c.alloc], wsum = (a.sugar + a.protein + a.pulp) / 3;
-    const f = inside * C.forageShare * dtDay;
+    const f = inside * C.forageShare * a.traffic * dtDay; // 'Lie low' sends fewer out (T1-7)
     c.sugar += f * C.income.sugar * a.sugar / wsum;
     c.protein += f * C.income.protein * a.protein / wsum;
     c.pulp += f * C.income.pulp * a.pulp / wsum;

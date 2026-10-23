@@ -3,7 +3,7 @@
 #pragma warning disable IDE1006 // lower-case names on purpose: they mirror the JS reference
 namespace Sting.Core
 {
-    public sealed class AllocPreset { public string name; public Num sugar, protein, pulp; }
+    public sealed class AllocPreset { public string name; public Num sugar, protein, pulp, traffic = 1; }
     public sealed class SiteType { public string name; public Num maxCells, flood, exposure, discovery, insulation, heat; }
 
     public static class T
@@ -66,6 +66,7 @@ namespace Sting.Core
             new AllocPreset { name = "Protein", sugar = 0.6, protein = 1.8, pulp = 0.6 },
             new AllocPreset { name = "Sugar", sugar = 1.8, protein = 0.6, pulp = 0.6 },
             new AllocPreset { name = "Build", sugar = 0.7, protein = 0.7, pulp = 1.6 },
+            new AllocPreset { name = "Lie low", sugar = 1, protein = 1, pulp = 1, traffic = 0.35 }, // T1-7
         };
         public static class ai { public const int maxPhysical = 12, launchEvery = 90, collectTicks = 150, attackTicks = 600, evadeTicks = 50; public static readonly Num arrive = 0.05, canDeficit = 0.35; }
         public static class prey
@@ -79,7 +80,7 @@ namespace Sting.Core
             public static readonly Num[] levels = { 0, 3, 8, 15, 25, 40 };
             public static readonly Num decayPerDay = 0.25, sting = 1, full = 1, death = 0.3, nuisance = 0.15, headRadius = 0.4, foodRadius = 0.35, faceRadius = 0.2,
                 noticeMul = 1, sprayTrait = 0.55, sprayRange = 1.5, citronellaDrain = 1.5;
-            public const int cooldownTicks = 80, sprayTicks = 40, trapsPerTable = 1;
+            public const int cooldownTicks = 80, sprayTicks = 40, trapsPerTable = 1, sprayCharges = 6, fetchTicks = 900; // T1-6
         }
         public static class under { public const int moveTicks = 18, compressEvery = 25; public static readonly Num noticeMul = 2, compressRadius = 0.06, ripPanic = 0.92, panicMul = 1.5, openingRadius = 0.035; }
         public static class sites
@@ -108,7 +109,14 @@ namespace Sting.Core
             public static readonly Num days = 3, cooldownDays = 4, aftermath = 0.5, baitHeight = 1.2, baitDist = 0.04, baitProtein = 2,
                 poisonAdults = 0.03, poisonLarvae = 0.08, abstractKillPerDay = 0.18, aiLure = 6;
         }
-        public static class ext { public static readonly Num speed = 1.1, arriveMinute = 9 * 60, minPanicAbort = 0.8; public const int treatTicks = 600, level = 4; }
+        public static class ext
+        {
+            public static readonly Num speed = 1.1, arriveMinute = 9 * 60, minPanicAbort = 0.8;
+            public const int treatTicks = 600, level = 4;
+            // the search (T1-7)
+            public static readonly Num sightR = 8, linesPerSec = 0.6, physPerSec = 1.2, trafficFull = 60, stepLen = 7, errFrac = 0.35, findDist = 4, parkDist = 10;
+            public const int minWatchTicks = 120;
+        }
         public static class bees
         {
             public const int guards = 6, foragers = 14, ballMin = 3, alarmTicks = 1200, returnTicks = 90;

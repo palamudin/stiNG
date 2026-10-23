@@ -486,7 +486,7 @@ namespace Sting.Core
             }
             public string Hex => h.ToString("x8");
         }
-        static readonly string[] HSTATES = { "away", "arrive", "idle", "flee", "return", "leave", "treat" };
+        static readonly string[] HSTATES = { "away", "arrive", "idle", "flee", "return", "leave", "treat", "fetch", "seek", "watch" };
 
         public string StateHash()
         {
@@ -508,7 +508,8 @@ namespace Sting.Core
         public string HumanHash()
         {
             var f = new Fnv();
-            foreach (var hm in active) { f.F(hm.x); f.F(hm.z); f.F(hm.panic); f.F(System.Array.IndexOf(HSTATES, hm.state)); f.F(hm.stungCount); f.F(hm.clothing.topOff ? 1 : 0); }
+            // the exterminator works for one colony and searches by what that colony does (T1-7), so he is not a shared human
+            foreach (var hm in active) { if (hm.special) continue; f.F(hm.x); f.F(hm.z); f.F(hm.panic); f.F(System.Array.IndexOf(HSTATES, hm.state)); f.F(hm.stungCount); f.F(hm.clothing.topOff ? 1 : 0); f.F(hm.sprayCount); }
             var list = new List<KeyValuePair<string, ChunkState>>();
             foreach (var kv in chunkState) if (kv.Value.esc > 0) list.Add(kv);
             Stable.Sort(list, (a, b) => Ordinal(a.Key, b.Key) < 0 ? -1 : 1);

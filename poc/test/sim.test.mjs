@@ -204,25 +204,35 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   ok(count(ev, 'ballEscape') > 0, 'mashing burst breaks out of the ball');
 }
 
-// 9. Exterminator: level 4 near the nest brings him; he destroys the nest unless stopped
+// 9. Exterminator: level 4 near the nest brings him; he searches by flight lines (T1-7) and destroys the nest unless
+// stopped. A colony lying low gives him fewer lines and is not found in the same time.
 {
-  const s = new Sim({ seed: 1234 });
-  s.cs(chunkKey(0, 0)).esc = 30;
-  let ev = run(s, 60, () => idle());
-  ok(count(ev, 'extScheduled') === 1, 'level 4 near the nest schedules the exterminator');
-  ev = run(s, 9000, () => idle());
-  ok(count(ev, 'extArrive') === 1 && count(ev, 'extTreat') === 1, 'he arrives and starts treating the nest');
-  ok(count(ev, 'nestDestroyed') === 1 && !s.colony.nestAlive, 'an unopposed exterminator destroys the nest');
+  const go = (alloc) => {
+    const s = new Sim({ seed: 1234 });
+    s.colony.adults = 120;
+    s.cs(chunkKey(0, 0)).esc = 30;
+    const first = run(s, 60, () => idle({ alloc }));
+    return { s, first, ev: run(s, 18000, () => idle({ alloc })) };
+  };
+  const a = go(1);
+  ok(count(a.first, 'extScheduled') === 1, 'level 4 near the nest schedules the exterminator');
+  ok(count(a.ev, 'extLine') >= 2 && count(a.ev, 'extFound') === 1 && count(a.ev, 'extTreat') === 1,
+    `he follows flight lines to the nest (${count(a.ev, 'extLine')} lines over ${count(a.ev, 'extArrive')} visits) and starts treating it`);
+  ok(count(a.ev, 'nestDestroyed') === 1 && !a.s.colony.nestAlive, 'an unopposed exterminator destroys the nest');
+  const b = go(5);
+  ok(b.s.colony.nestAlive && count(b.ev, 'extFound') === 0 && count(b.ev, 'extGiveUp') >= 1,
+    `a colony lying low is not found in the same time (${count(b.ev, 'extLine')} lines, gave up ${count(b.ev, 'extGiveUp')} times)`);
 }
 
 // 10. Exterminator abort: crawl under his collar, sting, keep moving between stings
 {
   const s = new Sim({ seed: 1234 });
   s.cs(chunkKey(0, 0)).esc = 30;
+  s.ext.lead = { x: s.nest.x, z: s.nest.z, nx: s.nest.x, nz: s.nest.z }; // found it on an earlier visit
   let ev = [];
   for (let i = 0; i < 4000 && !s.ext.hm; i++) ev.push(...run(s, 1, () => idle()));
   const ext = s.ext.hm;
-  ok(!!ext && s.ext.state === 'active', 'exterminator on site');
+  ok(!!ext && s.ext.state === 'active' && ev.find((e) => e.type === 'extArrive').known && ext.state === 'arrive', 'exterminator on site, and he knows where the nest is from last time');
   const g = () => garmentGraph(ext.tr, ext.clothing, ext.posture, ext.parts[ext.posture]);
   let entered = false, stungAt = -1;
   ev = run(s, 2500, (sim, i) => {
@@ -791,6 +801,46 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   ok(hot > 0 && at('attic', hot) < at('wall', hot), `a sunny afternoon (${s.airAt(hot).toFixed(1)} °C) bakes an attic nest (${at('attic', hot).toFixed(2)} vs ${at('wall', hot).toFixed(2)} in a wall)`);
   const grow = (k) => { const c = newColony(); for (let i = 0; i < 120 * 6; i++) { c.protein = 1e3; c.sugar = 1e3; colonyStep(c, 1 / 120, 0, false, 0.3, 1, k); } return c.stats.emerged; };
   ok(grow(0.5) < grow(1) * 0.8, `a slowed brood brings fewer workers out (${grow(0.5).toFixed(0)} vs ${grow(1).toFixed(0)} in six days)`);
+}
+
+// 30. Fetching spray (T1-6): at level 3 nobody has a can on them; a stung person with it in them goes for one,
+// is out of sight a while, and comes back armed
+{
+  const s = new Sim({ seed: 1234, dayMinutes: 20 }, { noAI: true });
+  run(s, 3);
+  const hm = seated(s, (h) => h.tr.escalation >= T.esc.sprayTrait && h.tr.style !== Style.Freezer);
+  ok(!!hm, 'someone at a table who would spray');
+  s.cs(hm.chunk).esc = 16;
+  const front = () => { if (s.wasp) place(s.wasp, toWorld(hm, { x: 0, y: 0.3, z: 1.0 })); return idle(); };
+  let ev = run(s, 300, front);
+  ok(s.escAt(hm.x, hm.z) === 3 && count(ev, 'spray') === 0, 'at level 3 a wasp in front of him is not sprayed: no can yet');
+  if (s.wasp) place(s.wasp, { x: hm.x + 15, y: 2, z: hm.z });
+  s._applyCommit({ type: 'sting', peer: s.peer, humanHex: hm.hex, panicGain: 0, driven: false, sx: hm.x, sz: hm.z, zone: 0, flee: false, waspId: 0 });
+  let away = false;
+  ev = run(s, 4500, () => { if (hm.state === 'fetch' && hm.fetchT > 0) away = true; if (s.wasp) place(s.wasp, { x: hm.x + 15, y: 2, z: hm.z }); return idle(); });
+  ok(count(ev, 'fetchSpray') === 1 && away && count(ev, 'armed') === 1, 'stung, he goes off for a can and is out of sight a while');
+  ok(hm.state === 'idle' && hm.sprayCount === T.esc.sprayCharges, `and comes back to his seat with ${hm.sprayCount} sprays`);
+  ev = run(s, 300, front);
+  ok(count(ev, 'spray') >= 1 && hm.sprayCount < T.esc.sprayCharges, `now a wasp in front of him gets sprayed (${T.esc.sprayCharges - hm.sprayCount} used)`);
+}
+
+// 31. What the exterminator sees (T1-7): more flight lines near the nest, fewer when the colony lies low or the
+// site is well hidden, and one of ours flying in sight is a line of its own
+{
+  const s = new Sim({ seed: 1234 });
+  s.colony.adults = 120;
+  const n = s.nest, ws = s.wasps;
+  s.wasps = [];
+  const at = (d) => s.extSightings({ x: n.x + d, z: n.z });
+  const r20 = at(20), r6 = at(6);
+  s.colony.alloc = 4; const low = at(20); s.colony.alloc = 0;
+  const site = n.site; n.site = 'hollow'; const hid = at(20); n.site = site;
+  ok(r6 > r20 * 2 && low < r20 * 0.5 && hid < r20, `lines per second: ${r6.toFixed(3)} at 6 m, ${r20.toFixed(3)} at 20 m, ${low.toFixed(3)} lying low, ${hid.toFixed(3)} in a hollow`);
+  s.wasps = ws;
+  const probe = { x: n.x + 20, z: n.z };
+  const w = s.wasp; place(w, { x: probe.x, y: 1.5, z: probe.z + 2 }); w.state = 'fly';
+  const seen = s.extSightings(probe);
+  ok(seen >= r20 + T.ext.physPerSec * 0.999, `and our wasp flying in sight adds a line (${seen.toFixed(3)})`);
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');

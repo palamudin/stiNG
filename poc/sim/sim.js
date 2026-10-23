@@ -65,7 +65,7 @@ export class Sim {
     this.stats = { stings: 0, aiStings: 0, remoteStings: 0, full: 0, deaths: 0, causes: {}, caught: 0, deposits: 0 };
     this.wasps = [];
     this.nextWaspId = this.peer * 1000000 + 1;
-    this.ext = { visit: 0, state: 'none', arriveMinute: 0, hm: null };
+    this.ext = { visit: 0, state: 'none', arriveMinute: 0, hm: null, lead: null };
     this.prevAct = 0;
     this.pressUsed = false;
     this.respawnAt = 0;
@@ -211,7 +211,7 @@ export class Sim {
             home: { x: hs.x, z: hs.z, fx: hs.fx, fz: hs.fz, posture: hs.posture, ax, az },
             x: hs.x, z: hs.z, fx: hs.fx, fz: hs.fz, posture: hs.posture,
             state: 'idle', panic: 0, fleeSteps: 0, dirX: 0, dirZ: 0, stungCount: 0, winDay: -1, win: null,
-            annoyId: 0, annoy: 0, cooldown: 0, sprayCount: 0, clothesDay: this.day,
+            annoyId: 0, annoy: 0, cooldown: 0, sprayCount: 0, fetchT: 0, wantSpray: false, clothesDay: this.day,
             parts: { sit: bodyParts(tr, 'sit'), stand: bodyParts(tr, 'stand') },
           };
           this.humans.set(hex, hm);
@@ -549,6 +549,8 @@ export class Sim {
         if (!mine) this.stats.remoteStings++; else if (ev.driven) this.stats.stings++; else this.stats.aiStings++;
         this.addEsc(hm.x, hm.z, T.esc.sting);
         this.cs(hm.chunk).lastSting = { x: ev.sx, z: ev.sz };
+        // at level 3 a person with it in them goes for a can once things calm down (T1-6)
+        if (!hm.special && !(hm.sprayCount > 0) && hm.tr.escalation >= T.esc.sprayTrait && this.escAt(hm.x, hm.z) >= 3) hm.wantSpray = true;
         this.emit('sting', { waspId: ev.waspId, remote: !mine, driven: mine && ev.driven, humanHex: hm.hex, zone: ev.zone, first, under: ev.under });
         if (ev.flee && hm.state === 'idle') this._startFlee(hm, { x: ev.sx, z: ev.sz });
         break;
@@ -565,6 +567,12 @@ export class Sim {
       case 'preSwat': {
         const hm = this.humanByHex(ev.humanHex);
         if (hm) this.addEsc(hm.x, hm.z, T.esc.nuisance);
+        break;
+      }
+      case 'spray': {
+        // the can empties on the agreed tick, so every peer counts the same sprays (T1-6)
+        const hm = this.humanByHex(ev.humanHex);
+        if (hm && hm.sprayCount > 0) hm.sprayCount--;
         break;
       }
       case 'rip': {
@@ -599,8 +607,9 @@ export class Sim {
     const buf = new Float64Array(1), bytes = new Uint8Array(buf.buffer);
     let h = 0x811c9dc5;
     const f = (v) => { buf[0] = v; for (let i = 0; i < 8; i++) { h ^= bytes[i]; h = Math.imul(h, 0x01000193); } };
-    const states = ['away', 'arrive', 'idle', 'flee', 'return', 'leave', 'treat'];
-    for (const hm of this.active) { f(hm.x); f(hm.z); f(hm.panic); f(states.indexOf(hm.state)); f(hm.stungCount); f(hm.clothing.topOff ? 1 : 0); }
+    const states = ['away', 'arrive', 'idle', 'flee', 'return', 'leave', 'treat', 'fetch', 'seek', 'watch'];
+    // the exterminator works for one colony and searches by what that colony does (T1-7), so he is not a shared human
+    for (const hm of this.active) { if (hm.special) continue; f(hm.x); f(hm.z); f(hm.panic); f(states.indexOf(hm.state)); f(hm.stungCount); f(hm.clothing.topOff ? 1 : 0); f(hm.sprayCount || 0); }
     // alert points, in key order; chunks a peer never touched count as zero on both sides
     for (const [k, st] of [...this.chunkState].filter(([, x]) => x.esc > 0).sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
       f(k.length); f(st.esc);
@@ -1444,7 +1453,7 @@ export class Sim {
     for (const w of this.wasps.slice()) this._despawn(w);
     for (const s of this.chunkState.values()) s.esc = 0;
     this.swats = []; this.sprays = []; this.alarms = []; this.hiveAlarms.clear();
-    this.ext = { visit: 0, state: 'none', arriveMinute: 0, hm: null };
+    this.ext = { visit: 0, state: 'none', arriveMinute: 0, hm: null, lead: null };
     this.ghost = null;
     const q = this._spawnWasp(true, 'queen');
     this.drivenId = q.id;
@@ -1511,11 +1520,14 @@ export class Sim {
 
   _humans() {
     const P = T.panic;
-    const old = this.active.map((h) => h.panic);
+    // a snapshot: the exterminator leaving rebuilds the list mid-step, and he leaves on different ticks on different
+    // peers (his search is his colony's own business, T1-7), so no one else's step may depend on it
+    const list = this.active.slice();
+    const old = list.map((h) => h.panic);
     const r2 = P.contagionRadius * P.contagionRadius;
     const md = minuteOfDay(this.minute);
-    for (let i = 0; i < this.active.length; i++) {
-      const hm = this.active[i];
+    for (let i = 0; i < list.length; i++) {
+      const hm = list[i];
       if (hm.special) { this._extStep(hm, old[i]); continue; }
       // schedule
       const win = this._window(hm);
@@ -1533,9 +1545,10 @@ export class Sim {
       if (hm.state === 'leave') { if (this._walkTo(hm, hm.home.ax, hm.home.az, P.walkSpeed)) this._goAway(hm); continue; }
       // panic
       let gain = 0;
-      for (let j = 0; j < this.active.length; j++) {
+      for (let j = 0; j < list.length; j++) {
         if (i === j || old[j] < P.contagionMin) continue;
-        const o = this.active[j], dx = o.x - hm.x, dz = o.z - hm.z;
+        const o = list[j], dx = o.x - hm.x, dz = o.z - hm.z;
+        if (o.special) continue; // nor does his panic spread to shared humans
         if (dx * dx + dz * dz <= r2 && this.canSee(hm, o)) gain += P.contagionRate * old[j] * hm.tr.sociability * hm.tr.panicSusceptibility;
       }
       hm.panic = Math.min(1, old[i] * P.decayPerStep + gain);
@@ -1546,8 +1559,21 @@ export class Sim {
       } else if (hm.state === 'return') {
         if (hm.panic >= T.resolve.fleePanic) { this._startFlee(hm, this.cs(hm.chunk).lastSting || null); continue; }
         if (this._walkTo(hm, hm.home.x, hm.home.z, P.walkSpeed)) { this._seat(hm); this.emit('settled', { humanHex: hm.hex }); }
-      } else if (hm.state === 'idle') this._annoyance(hm);
+      } else if (hm.state === 'fetch') this._fetchStep(hm);
+      else if (hm.state === 'idle') {
+        if (hm.wantSpray) { hm.wantSpray = false; hm.state = 'fetch'; hm.posture = 'stand'; hm.fetchT = 0; this.emit('fetchSpray', { humanHex: hm.hex }); }
+        else this._annoyance(hm);
+      }
     }
+  }
+
+  // Off to the house for a can and back (T1-6): out of sight at the exit, then back to the seat armed
+  _fetchStep(hm) {
+    if (!(hm.fetchT > 0) && !this._walkTo(hm, hm.home.ax, hm.home.az, T.panic.walkSpeed)) return;
+    hm.fetchT = (hm.fetchT || 0) + 3;
+    if (hm.fetchT < T.esc.fetchTicks) return;
+    hm.fetchT = 0; hm.sprayCount = T.esc.sprayCharges; hm.state = 'return';
+    this.emit('armed', { humanHex: hm.hex });
   }
 
   // How wary a person is from the stings they remember (GDD 8.10, T1-18): each one fades over a couple of days and
@@ -1624,7 +1650,7 @@ export class Sim {
       if (hd2 < E.faceRadius * E.faceRadius) { target = w; why = 'face'; break; }
       if (lvl >= 1 && hd2 < E.headRadius * E.headRadius) { target = w; why = 'head'; break; }
       if (lvl >= 1 && (w.ai.atFood === 'can' || (w.state === 'landed' && this._nearCan(w))) && dx * dx + dz * dz < 1.5) { target = w; why = 'food'; break; }
-      if (lvl >= 3 && hm.tr.escalation >= E.sprayTrait && lp.z > 0.1 && lp.z < E.sprayRange && Math.abs(lp.x) < lp.z) { target = w; why = 'spray'; break; }
+      if (lvl >= 3 && hm.sprayCount > 0 && lp.z > 0.1 && lp.z < E.sprayRange && Math.abs(lp.x) < lp.z) { target = w; why = 'spray'; break; }
     }
     if (!target) { hm.annoy = 0; hm.annoyId = 0; return; }
     if (hm.annoyId !== target.id) { hm.annoyId = target.id; hm.annoy = 0; }
@@ -1670,17 +1696,20 @@ export class Sim {
       const tr = { ...humanTraits(this.seed, id), height: 1.8, armRatio: 1, girth: 0.4, reactionTicks: 12, style: Style.Precise, accuracy: 0.9, panicSusceptibility: 0.45, sociability: 0, escalation: 1 };
       const ang = h32(e.visit, 9) * 6.28318;
       const n = this.nest, dxn = n.x - n.treeX, dzn = n.z - n.treeZ, dn = Math.sqrt(dxn * dxn + dzn * dzn) || 1;
-      const ax = n.treeX + 30 * dcos(ang), az = n.treeZ + 30 * dsin(ang);
       const goal = { x: n.x + dxn / dn * 0.45, z: n.z + dzn / dn * 0.45 };
+      // he starts where people were stung, or where he left off yesterday (T1-7), and parks nearby
+      const st = this._extStart(n.treeX + 30 * dcos(ang), n.treeZ + 30 * dsin(ang));
+      const ax = st.x + T.ext.parkDist * dcos(ang), az = st.z + T.ext.parkDist * dsin(ang);
+      const near = sq(st.x - n.x) + sq(st.z - n.z) <= T.ext.findDist * T.ext.findDist;
       e.hm = {
         id, hex, short: 'EXT', tr, special: true, clothing: suitClothing(e.visit > 1), chunk: this.nest.key,
         home: { x: goal.x, z: goal.z, fx: -dxn / dn, fz: -dzn / dn, posture: 'stand', ax, az },
-        x: ax, z: az, fx: 0, fz: 1, posture: 'stand', state: 'arrive', panic: 0, fleeSteps: 0, dirX: 0, dirZ: 0, stungCount: 0,
-        annoyId: 0, annoy: 0, cooldown: 0, treat: 0,
+        x: ax, z: az, fx: 0, fz: 1, posture: 'stand', state: near ? 'arrive' : 'seek', panic: 0, fleeSteps: 0, dirX: 0, dirZ: 0, stungCount: 0,
+        annoyId: 0, annoy: 0, cooldown: 0, treat: 0, wpx: st.x, wpz: st.z, watch: 0, clue: 0, lines: 0,
         parts: { sit: bodyParts(tr, 'sit'), stand: bodyParts(tr, 'stand') },
       };
       e.state = 'active';
-      this.emit('extArrive', { visit: e.visit, taped: e.visit > 1 });
+      this.emit('extArrive', { visit: e.visit, taped: e.visit > 1, known: near });
       this._updateChunks(true);
     }
   }
@@ -1701,7 +1730,11 @@ export class Sim {
       return;
     }
     if (hm.panic >= T.ext.minPanicAbort) { this._startFlee(hm, this.cs(this.nest.key).lastSting || null); this.emit('extAbort', { visit: e.visit }); return; }
-    if (hm.state === 'arrive') {
+    if ((hm.state === 'seek' || hm.state === 'watch') && minuteOfDay(this.minute) >= T.time.dusk) { hm.state = 'leave'; this.emit('extGiveUp', { visit: e.visit, lines: hm.lines }); return; }
+    if (hm.state === 'seek') {
+      if (this._walkTo(hm, hm.wpx, hm.wpz, T.ext.speed)) { hm.state = 'watch'; hm.watch = 0; }
+    } else if (hm.state === 'watch') this._extWatch(hm);
+    else if (hm.state === 'arrive') {
       if (this._walkTo(hm, hm.home.x, hm.home.z, T.ext.speed)) { hm.state = 'treat'; hm.fx = hm.home.fx; hm.fz = hm.home.fz; hm.treat = 0; this.emit('extTreat', {}); }
     } else if (hm.state === 'treat') {
       hm.treat += 3;
@@ -1715,6 +1748,62 @@ export class Sim {
         hm.state = 'leave';
       }
     }
+  }
+
+  // Where the search starts: yesterday's last flight line if it was for this nest, else the spot near the nest where
+  // people were stung most (chunk state is read without creating it), else where he came in
+  _extStart(ax, az) {
+    const e = this.ext, n = this.nest;
+    if (e.lead && e.lead.nx === n.x && e.lead.nz === n.z) return { x: e.lead.x, z: e.lead.z };
+    const [cx, cz] = n.key.split(',').map(Number);
+    let best = null, bl = -1;
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+      const st = this.chunkState.get(chunkKey(cx + dx, cz + dz));
+      if (st && st.lastSting && st.esc > bl) { bl = st.esc; best = st.lastSting; }
+    }
+    return best ? { x: best.x, z: best.z } : { x: ax, z: az };
+  }
+
+  // Flight lines he can see from where he stands, per second (T1-7). The colony's foragers fly out along lines from
+  // the nest: the nearer he is, the more of them cross his view. Fewer foragers ('Lie low'), a well hidden site and bad
+  // weather all slow him down. Any of our wasps flying where he can see it gives him a line of its own.
+  extSightings(hm) {
+    const X = T.ext, col = this.colony, n = this.nest;
+    let rate = 0;
+    if (col.nestAlive && isDaylight(this.minute) && !this.raining && this.canFly()) {
+      const foragers = Math.max(0, col.adults - this._own().length) * T.colony.forageShare * T.alloc[col.alloc].traffic;
+      const d = Math.sqrt(sq(hm.x - n.x) + sq(hm.z - n.z));
+      rate = X.linesPerSec * Math.min(1, foragers / X.trafficFull) * Math.min(1, X.sightR / Math.max(d, 0.5)) * T.sites[n.site || 'trunk'].discovery;
+    }
+    for (const w of this.wasps) {
+      if (w.colony !== 'own' || w.state !== 'fly' || sq(w.x - hm.x) + sq(w.z - hm.z) > X.sightR * X.sightR) continue;
+      if (this.canSee(hm, w)) rate += X.physPerSec;
+    }
+    return rate;
+  }
+
+  _extWatch(hm) {
+    const e = this.ext, X = T.ext, n = this.nest;
+    hm.watch += 3;
+    hm.clue += this.extSightings(hm) * 3 * DT;
+    if (hm.watch < X.minWatchTicks || hm.clue < 1) return;
+    hm.clue -= 1;
+    hm.lines++;
+    const dx = hm.x - n.x, dz = hm.z - n.z, d = Math.sqrt(dx * dx + dz * dz);
+    if (d <= X.findDist) {
+      e.lead = { x: n.x, z: n.z, nx: n.x, nz: n.z };
+      hm.state = 'arrive';
+      this.emit('extFound', { visit: e.visit, lines: hm.lines });
+      return;
+    }
+    // follow the line toward the nest; a line is only a direction, so he lands off to one side
+    const nd = Math.max(X.findDist * 0.5, d - X.stepLen);
+    const err = (h32(e.visit, hm.lines, 0xE7) * 2 - 1) * X.errFrac * nd;
+    const ux = dx / d, uz = dz / d;
+    hm.wpx = n.x + ux * nd - uz * err; hm.wpz = n.z + uz * nd + ux * err;
+    e.lead = { x: hm.wpx, z: hm.wpz, nx: n.x, nz: n.z };
+    hm.state = 'seek';
+    this.emit('extLine', { visit: e.visit, lines: hm.lines, x: hm.wpx, z: hm.wpz });
   }
 
   _extGone() {
@@ -2256,7 +2345,7 @@ export class Sim {
     const m = this.muni, col = this.colony;
     if (!col.nestAlive || !m.active.keys.includes(this.nest.key)) return;
     if (!(isDaylight(this.minute) && !this.raining && this.canFly())) return;
-    const a = T.alloc[col.alloc], share = a.protein / ((a.sugar + a.protein + a.pulp) / 3);
+    const a = T.alloc[col.alloc], share = a.protein / ((a.sugar + a.protein + a.pulp) / 3) * a.traffic; // fewer foragers out, less bait brought home
     const dtDay = 60 / this.dayTicks;
     const inside = Math.max(0, col.adults - this._own().length);
     const kill = inside * T.muni.abstractKillPerDay * share * dtDay;
@@ -2470,7 +2559,7 @@ export class Sim {
     const own = this._own().length;
     const inside = col.adults - own;
     const ai = own - (this._driven() ? 1 : 0);
-    const cap = Math.min(T.ai.maxPhysical, Math.floor(col.adults * 0.4));
+    const cap = Math.min(T.ai.maxPhysical, Math.floor(col.adults * 0.4 * T.alloc[col.alloc].traffic));
     if (!this.noAI && daylight && col.nestAlive && inside >= 1 && ai < cap && this.tick % T.ai.launchEvery < 60) this._spawnWasp(false);
   }
 

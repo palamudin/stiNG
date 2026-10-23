@@ -43,7 +43,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 15 | Escalation ladder per chunk: swatting, covered food and citronella, sprays and sugar traps, exterminator | 8.10 | 2 |
 | 16 | Alarm pheromone: a worker killed by a human sends nearby workers after that human | 7.6 | 2 |
 | 17 | Under clothing: openings, garment graph, crawl between nodes, compression, shirt torn off | 8.8 | 2 |
-| 18 | Exterminator: booked at level 4, walks to the nest, treats it; stopped only by stings under his collar | 8.10 | 2 |
+| 18 | Exterminator: booked at level 4, finds the nest (by flight lines since 73), treats it; stopped only by stings under his collar | 8.10 | 2 |
 | 19 | Beehives: guards and foragers on pure paths, alarm and pursuit, heat ball, mash to escape | 9.1, 9.2 | 2 |
 | 20 | Day and night, temperature, rain days, human arrival and departure schedules, rest until morning | 5, 8.2 | 2 |
 | 21 | Yearly cycle: queen cells, young queens mate and leave, autumn collapse, winter survival, sister nests | 2.2, 5.2, 6.7 | 3 |
@@ -97,6 +97,8 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 69 | Memory by recency and place (T1-18): people remember their last stings with time and spot; they react faster and panic more where it happened, less elsewhere, and calm down over two days | 8.10 | 14 |
 | 70 | Hollow trees and nest thermals (T1-14): a third of thick trunks have a hollow a queen can nest in (4,500 cells, well hidden). Each site lets in more or less of the weather: cold snaps slow the brood most in an open branch nest, least in a hollow or a burrow, and an attic bakes on sunny afternoons. Brood speed in the colony view | 6.6 | 14 |
 | 71 | Solo time (T1-23): the colony view runs time at 1×, 4× or 16× (T cycles), dropping to 1× when anything comes for your wasp; Reflex slows the clock to a quarter for a moment when a hand is coming (pause menu option). Presentation only: replays and saves are unaffected | 5.1, 7.8 | 14 |
+| 72 | Fetching spray (T1-6): at level 3 nobody has a can on them. A stung person with it in them goes indoors for one and comes back with six sprays, a green can in hand | 8.6, 8.10 | 14 |
+| 73 | The exterminator searches (T1-7): he parks where people were stung and walks the flight lines he sees toward the nest; traffic, the site and distance set how fast. He gives up at dusk and resumes from his last line. A new foraging preset, Lie low, sends out a third of the foragers to buy time | 8.10 | 14 |
 
 ## Verified
 

@@ -86,7 +86,7 @@ namespace Sting.Core
 
     public static class Persist
     {
-        public const int SAVE_VERSION = 4; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings
+        public const int SAVE_VERSION = 5; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search
         const uint MAGIC = 0x474E4953; // "SING"
 
         // ---------------------------------------------------------------- one Io per type
@@ -178,6 +178,7 @@ namespace Sting.Core
             if (a.Opt(ref h.win)) { a.D(ref h.win.arrive); a.D(ref h.win.leave); }
             a.I(ref h.annoyId); a.D(ref h.annoy); a.D(ref h.cooldown); a.D(ref h.sprayCount); a.D(ref h.treat); a.L(ref h.clothesDay); a.B(ref h.special);
             a.List(ref h.mem, () => new MemRec(), e => { a.D(ref e.m); a.D(ref e.x); a.D(ref e.z); });
+            a.I(ref h.fetchT); a.B(ref h.wantSpray); a.D(ref h.wpx); a.D(ref h.wpz); a.D(ref h.clue); a.I(ref h.watch); a.I(ref h.lines);
         }
 
         static void IoNest(Archive a, Nest n)
@@ -303,6 +304,7 @@ namespace Sting.Core
                 var act = sim.active.ConvertAll(h => h.hex); a.Strings(ref act);
                 // the exterminator, if one is on the job
                 var e = sim.ext; a.I(ref e.visit); a.S(ref e.state); a.D(ref e.arriveMinute);
+                if (a.Opt(ref e.lead)) { a.D(ref e.lead.x); a.D(ref e.lead.z); a.D(ref e.lead.nx); a.D(ref e.lead.nz); }
                 bool hasHm = e.hm != null; a.B(ref hasHm);
                 if (hasHm)
                 {
@@ -358,6 +360,7 @@ namespace Sting.Core
                 }
             List<string> act = null; a.Strings(ref act);
             var e = new Ext(); a.I(ref e.visit); a.S(ref e.state); a.D(ref e.arriveMinute);
+            if (a.Opt(ref e.lead)) { a.D(ref e.lead.x); a.D(ref e.lead.z); a.D(ref e.lead.nx); a.D(ref e.lead.nz); }
             bool hasHm = false; a.B(ref hasHm);
             if (hasHm)
             {

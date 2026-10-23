@@ -285,7 +285,7 @@ namespace Sting.Core
             }
         }
 
-        void ApplyCommit(NetEv ev)
+        internal void ApplyCommit(NetEv ev)
         {
             bool mine = ev.peer == peer;
             switch (ev.type)
@@ -306,6 +306,8 @@ namespace Sting.Core
                     if (!mine) stats.remoteStings++; else if (ev.driven) stats.stings++; else stats.aiStings++;
                     AddEsc(hm.x, hm.z, T.esc.sting);
                     CS(hm.chunk).lastSting = new LastSting { x = ev.sx, z = ev.sz };
+                    // at level 3 a person with it in them goes for a can once things calm down (T1-6)
+                    if (!hm.special && !(hm.sprayCount > 0) && hm.tr.escalation >= T.esc.sprayTrait && EscAt(hm.x, hm.z) >= 3) hm.wantSpray = true;
                     Emit("sting", ("waspId", ev.waspId), ("remote", !mine), ("driven", mine && ev.driven), ("humanHex", hm.hex), ("zone", ev.zone), ("first", first), ("under", ev.under));
                     if (ev.flee && hm.state == "idle") StartFlee(hm, new LastSting { x = ev.sx, z = ev.sz });
                     break;
@@ -324,6 +326,13 @@ namespace Sting.Core
                 {
                     var hm = HumanByHex(ev.humanHex);
                     if (hm != null) AddEsc(hm.x, hm.z, T.esc.nuisance);
+                    break;
+                }
+                case "spray":
+                {
+                    // the can empties on the agreed tick, so every peer counts the same sprays (T1-6)
+                    var hm = HumanByHex(ev.humanHex);
+                    if (hm != null && hm.sprayCount > 0) hm.sprayCount--;
                     break;
                 }
                 case "rip":

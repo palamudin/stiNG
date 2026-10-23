@@ -57,7 +57,7 @@ namespace Sting.Core
             if (foraging)
             {
                 var a = T.alloc[c.alloc]; Num wsum = (a.sugar + a.protein + a.pulp) / 3;
-                Num f = inside * T.colony.forageShare * dtDay;
+                Num f = inside * T.colony.forageShare * a.traffic * dtDay; // 'Lie low' sends fewer out (T1-7)
                 c.sugar += f * T.colony.income.sugar * a.sugar / wsum;
                 c.protein += f * T.colony.income.protein * a.protein / wsum;
                 c.pulp += f * T.colony.income.pulp * a.pulp / wsum;

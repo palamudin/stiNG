@@ -73,15 +73,17 @@ namespace Sting.Core
 
         void Humans()
         {
-            var old = new Num[active.Count];
-            for (int i = 0; i < old.Length; i++) old[i] = active[i].panic;
+            // a snapshot: the exterminator leaving rebuilds the list mid-step, and he leaves on different ticks on different
+            // peers (his search is his colony's own business, T1-7), so no one else's step may depend on it
+            var list = new List<Human>(active);
+            var old = new Num[list.Count];
+            for (int i = 0; i < old.Length; i++) old[i] = list[i].panic;
             Num r2 = T.panic.contagionRadius * T.panic.contagionRadius;
             long md = MinuteOfDay(minute);
-            // active may be replaced inside the loop (the exterminator leaving); like the JS, keep indexing the live list
-            for (int i = 0; i < active.Count; i++)
+            for (int i = 0; i < list.Count; i++)
             {
-                var hm = active[i];
-                Num oldI = i < old.Length ? old[i] : Num.NaN;
+                var hm = list[i];
+                Num oldI = old[i];
                 if (hm.special) { ExtStep(hm, oldI); continue; }
                 // schedule
                 var win = Window(hm);
@@ -101,11 +103,12 @@ namespace Sting.Core
                 if (hm.state == "leave") { if (WalkTo(hm, hm.home.ax, hm.home.az, T.panic.walkSpeed)) GoAway(hm); continue; }
                 // panic
                 Num gain = 0;
-                for (int j = 0; j < active.Count; j++)
+                for (int j = 0; j < list.Count; j++)
                 {
-                    Num oj = j < old.Length ? old[j] : Num.NaN;
+                    Num oj = old[j];
                     if (i == j || oj < T.panic.contagionMin) continue;
-                    var o = active[j]; Num dx = o.x - hm.x, dz = o.z - hm.z;
+                    var o = list[j]; Num dx = o.x - hm.x, dz = o.z - hm.z;
+                    if (o.special) continue; // nor does his panic spread to shared humans
                     if (dx * dx + dz * dz <= r2 && CanSee(hm.x, hm.z, o.x, o.z)) gain += T.panic.contagionRate * oj * hm.tr.sociability * hm.tr.panicSusceptibility;
                 }
                 hm.panic = Min(1, oldI * T.panic.decayPerStep + gain);
@@ -120,8 +123,23 @@ namespace Sting.Core
                     if (hm.panic >= T.resolve.fleePanic) { StartFlee(hm, CS(hm.chunk).lastSting); continue; }
                     if (WalkTo(hm, hm.home.x, hm.home.z, T.panic.walkSpeed)) { Seat(hm); Emit("settled", ("humanHex", hm.hex)); }
                 }
-                else if (hm.state == "idle") Annoyance(hm);
+                else if (hm.state == "fetch") FetchStep(hm);
+                else if (hm.state == "idle")
+                {
+                    if (hm.wantSpray) { hm.wantSpray = false; hm.state = "fetch"; hm.posture = "stand"; hm.fetchT = 0; Emit("fetchSpray", ("humanHex", hm.hex)); }
+                    else Annoyance(hm);
+                }
             }
+        }
+
+        /// Off to the house for a can and back (T1-6): out of sight at the exit, then back to the seat armed
+        void FetchStep(Human hm)
+        {
+            if (!(hm.fetchT > 0) && !WalkTo(hm, hm.home.ax, hm.home.az, T.panic.walkSpeed)) return;
+            hm.fetchT += 3;
+            if (hm.fetchT < T.esc.fetchTicks) return;
+            hm.fetchT = 0; hm.sprayCount = T.esc.sprayCharges; hm.state = "return";
+            Emit("armed", ("humanHex", hm.hex));
         }
 
         /// How wary a person is from the stings they remember (GDD 8.10, T1-18): each one fades over a couple of days and
@@ -201,7 +219,7 @@ namespace Sting.Core
                 if (hd2 < T.esc.faceRadius * T.esc.faceRadius) { target = w; why = "face"; break; }
                 if (lvl >= 1 && hd2 < T.esc.headRadius * T.esc.headRadius) { target = w; why = "head"; break; }
                 if (lvl >= 1 && (w.ai.atFood == "can" || (w.state == "landed" && NearCan(w))) && dx * dx + dz * dz < 1.5) { target = w; why = "food"; break; }
-                if (lvl >= 3 && hm.tr.escalation >= T.esc.sprayTrait && lp.z > 0.1 && lp.z < T.esc.sprayRange && Abs(lp.x) < lp.z) { target = w; why = "spray"; break; }
+                if (lvl >= 3 && hm.sprayCount > 0 && lp.z > 0.1 && lp.z < T.esc.sprayRange && Abs(lp.x) < lp.z) { target = w; why = "spray"; break; }
             }
             if (target == null) { hm.annoy = 0; hm.annoyId = 0; return; }
             if (hm.annoyId != target.id) { hm.annoyId = target.id; hm.annoy = 0; }
@@ -263,17 +281,20 @@ namespace Sting.Core
                 var tr = ExtTraits(seed, id);
                 Num ang = H32(e.visit, 9) * 6.28318;
                 var n = nest; Num dxn = n.x - n.treeX, dzn = n.z - n.treeZ, dn = Sqrt(dxn * dxn + dzn * dzn); if (dn == 0) dn = 1;
-                Num ax = n.treeX + 30 * DCos(ang), az = n.treeZ + 30 * DSin(ang);
                 Num gx = n.x + dxn / dn * 0.45, gz = n.z + dzn / dn * 0.45;
+                // he starts where people were stung, or where he left off yesterday (T1-7), and parks nearby
+                var (sx, sz) = ExtStart(n.treeX + 30 * DCos(ang), n.treeZ + 30 * DSin(ang));
+                Num ax = sx + T.ext.parkDist * DCos(ang), az = sz + T.ext.parkDist * DSin(ang);
+                bool near = Sq(sx - n.x) + Sq(sz - n.z) <= T.ext.findDist * T.ext.findDist;
                 e.hm = new Human
                 {
                     id = id, hex = hex, @short = "EXT", tr = tr, special = true, clothing = Body.SuitClothing(e.visit > 1), chunk = nest.key,
                     home = new Home { x = gx, z = gz, fx = -dxn / dn, fz = -dzn / dn, posture = "stand", ax = ax, az = az },
-                    x = ax, z = az, fx = 0, fz = 1, posture = "stand", state = "arrive",
+                    x = ax, z = az, fx = 0, fz = 1, posture = "stand", state = near ? "arrive" : "seek", wpx = sx, wpz = sz,
                     sit = Body.BodyParts(tr, "sit"), stand = Body.BodyParts(tr, "stand"),
                 };
                 e.state = "active";
-                Emit("extArrive", ("visit", e.visit), ("taped", e.visit > 1));
+                Emit("extArrive", ("visit", e.visit), ("taped", e.visit > 1), ("known", near));
                 UpdateChunks(true);
             }
         }
@@ -297,7 +318,13 @@ namespace Sting.Core
                 return;
             }
             if (hm.panic >= T.ext.minPanicAbort) { StartFlee(hm, CS(nest.key).lastSting); Emit("extAbort", ("visit", e.visit)); return; }
-            if (hm.state == "arrive")
+            if ((hm.state == "seek" || hm.state == "watch") && MinuteOfDay(minute) >= T.time.dusk) { hm.state = "leave"; Emit("extGiveUp", ("visit", e.visit), ("lines", hm.lines)); return; }
+            if (hm.state == "seek")
+            {
+                if (WalkTo(hm, hm.wpx, hm.wpz, T.ext.speed)) { hm.state = "watch"; hm.watch = 0; }
+            }
+            else if (hm.state == "watch") ExtWatch(hm);
+            else if (hm.state == "arrive")
             {
                 if (WalkTo(hm, hm.home.x, hm.home.z, T.ext.speed)) { hm.state = "treat"; hm.fx = hm.home.fx; hm.fz = hm.home.fz; hm.treat = 0; Emit("extTreat"); }
             }
@@ -315,6 +342,66 @@ namespace Sting.Core
                     hm.state = "leave";
                 }
             }
+        }
+
+        /// Where the search starts: yesterday's last flight line if it was for this nest, else the spot near the nest where
+        /// people were stung most (chunk state is read without creating it), else where he came in
+        (Num, Num) ExtStart(Num ax, Num az)
+        {
+            var e = ext; var n = nest;
+            if (e.lead != null && e.lead.nx == n.x && e.lead.nz == n.z) return (e.lead.x, e.lead.z);
+            var (cx, cz) = SplitKey(n.key);
+            LastSting best = null; Num bl = -1;
+            for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++)
+                if (chunkState.TryGet(ChunkKey(cx + dx, cz + dz), out var st) && st.lastSting != null && st.esc > bl) { bl = st.esc; best = st.lastSting; }
+            return best != null ? (best.x, best.z) : (ax, az);
+        }
+
+        /// Flight lines he can see from where he stands, per second (T1-7): the colony's foragers fly out along lines from
+        /// the nest, so the nearer he is the more cross his view; fewer foragers, a hidden site and bad weather slow him.
+        /// Any of our wasps flying where he can see it gives him a line of its own.
+        public Num ExtSightings(Num hx, Num hz)
+        {
+            var col = colony; var n = nest;
+            Num rate = 0;
+            if (col.nestAlive && IsDaylight(minute) && !Raining && CanFly())
+            {
+                Num foragers = Max(0, col.adults - Own().Count) * T.colony.forageShare * T.alloc[col.alloc].traffic;
+                Num d = Sqrt(Sq(hx - n.x) + Sq(hz - n.z));
+                rate = T.ext.linesPerSec * Min(1, foragers / T.ext.trafficFull) * Min(1, T.ext.sightR / Max(d, 0.5)) * T.sites.Of(n.site ?? "trunk").discovery;
+            }
+            foreach (var w in wasps)
+            {
+                if (w.colony != "own" || w.state != "fly" || Sq(w.x - hx) + Sq(w.z - hz) > T.ext.sightR * T.ext.sightR) continue;
+                if (CanSee(hx, hz, w.x, w.z)) rate += T.ext.physPerSec;
+            }
+            return rate;
+        }
+
+        void ExtWatch(Human hm)
+        {
+            var e = ext; var n = nest;
+            hm.watch += 3;
+            hm.clue += ExtSightings(hm.x, hm.z) * 3 * T.DT;
+            if (hm.watch < T.ext.minWatchTicks || hm.clue < 1) return;
+            hm.clue -= 1;
+            hm.lines++;
+            Num dx = hm.x - n.x, dz = hm.z - n.z, d = Sqrt(dx * dx + dz * dz);
+            if (d <= T.ext.findDist)
+            {
+                e.lead = new Lead { x = n.x, z = n.z, nx = n.x, nz = n.z };
+                hm.state = "arrive";
+                Emit("extFound", ("visit", e.visit), ("lines", hm.lines));
+                return;
+            }
+            // follow the line toward the nest; a line is only a direction, so he lands off to one side
+            Num nd = Max(T.ext.findDist * 0.5, d - T.ext.stepLen);
+            Num err = (H32(e.visit, hm.lines, 0xE7) * 2 - 1) * T.ext.errFrac * nd;
+            Num ux = dx / d, uz = dz / d;
+            hm.wpx = n.x + ux * nd - uz * err; hm.wpz = n.z + uz * nd + ux * err;
+            e.lead = new Lead { x = hm.wpx, z = hm.wpz, nx = n.x, nz = n.z };
+            hm.state = "seek";
+            Emit("extLine", ("visit", e.visit), ("lines", hm.lines), ("x", hm.wpx), ("z", hm.wpz));
         }
 
         void ExtGone()
@@ -951,7 +1038,7 @@ namespace Sting.Core
             var m = muni; var col = colony;
             if (!col.nestAlive || !m.active.keys.Contains(nest.key)) return;
             if (!(IsDaylight(minute) && !Raining && CanFly())) return;
-            var a = T.alloc[col.alloc]; Num share = a.protein / ((a.sugar + a.protein + a.pulp) / 3);
+            var a = T.alloc[col.alloc]; Num share = a.protein / ((a.sugar + a.protein + a.pulp) / 3) * a.traffic; // fewer foragers out, less bait brought home
             Num dtDay = (Num)60 / dayTicks;
             Num inside = Max(0, col.adults - Own().Count);
             Num kill = inside * T.muni.abstractKillPerDay * share * dtDay;
@@ -1201,7 +1288,7 @@ namespace Sting.Core
             int own = Own().Count;
             Num inside2 = col.adults - own;
             int ai = own - (Driven() != null ? 1 : 0);
-            Num cap = Min(T.ai.maxPhysical, Floor(col.adults * 0.4));
+            Num cap = Min(T.ai.maxPhysical, Floor(col.adults * 0.4 * T.alloc[col.alloc].traffic));
             if (!noAI && daylight && col.nestAlive && inside2 >= 1 && ai < cap && tick % T.ai.launchEvery < 60) SpawnWasp(false);
         }
     }
