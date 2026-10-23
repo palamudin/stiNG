@@ -86,12 +86,12 @@ namespace Sting.Core
 
     public static class Persist
     {
-        public const int SAVE_VERSION = 1;
+        public const int SAVE_VERSION = 2; // 2: records which number build wrote it
         const uint MAGIC = 0x474E4953; // "SING"
 
         // ---------------------------------------------------------------- one Io per type
 
-        static void Io(Archive a, Settings s)
+        public static void Io(Archive a, Settings s)
         {
             a.U(ref s.seed); a.D(ref s.dayMinutes); a.D(ref s.humanDensity); a.D(ref s.beeAggression); a.D(ref s.seasonDays); a.D(ref s.reaction); a.D(ref s.escalation);
             a.B(ref s.exterminator); a.B(ref s.birds); a.B(ref s.rivals); a.B(ref s.pestControl);
@@ -286,8 +286,8 @@ namespace Sting.Core
             using (var bw = new BinaryWriter(ms))
             {
                 var a = new Archive(bw);
-                uint magic = MAGIC; int v = SAVE_VERSION, gen = T.GEN_VERSION;
-                a.U(ref magic); a.I(ref v); a.I(ref gen);
+                uint magic = MAGIC; int v = SAVE_VERSION, gen = T.GEN_VERSION; bool fixedPoint = Num.Fixed;
+                a.U(ref magic); a.I(ref v); a.I(ref gen); a.B(ref fixedPoint);
                 Io(a, sim.settings);
                 int peer = sim.peer; bool net = sim.net, noAI = sim.noAI; a.I(ref peer); a.B(ref net); a.B(ref noAI);
                 var peers = new List<int>(sim.interest.Keys); a.Ints(ref peers);
@@ -316,11 +316,13 @@ namespace Sting.Core
         {
             using var br = new BinaryReader(new MemoryStream(data));
             var a = new Archive(br);
-            uint magic = 0; int v = 0, gen = 0;
-            a.U(ref magic); a.I(ref v); a.I(ref gen);
+            uint magic = 0; int v = 0, gen = 0; bool fixedPoint = false;
+            a.U(ref magic); a.I(ref v); a.I(ref gen); a.B(ref fixedPoint);
             if (magic != MAGIC) throw new InvalidDataException("not a STING save");
             if (v != SAVE_VERSION) throw new InvalidDataException($"save version {v} is not {SAVE_VERSION}");
             if (gen != T.GEN_VERSION) throw new InvalidDataException($"world generator {gen} differs from {T.GEN_VERSION}");
+            // numbers are saved as their bits, which mean different things in the two builds
+            if (fixedPoint != Num.Fixed) throw new InvalidDataException(fixedPoint ? "this save is from the fixed-point build" : "this save is from the double build");
             var settings = new Settings(); Io(a, settings);
             int peer = 0; bool net = false, noAI = false; a.I(ref peer); a.B(ref net); a.B(ref noAI);
             List<int> peers = null; a.Ints(ref peers);

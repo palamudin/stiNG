@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The headless runner (GDD 14): runs a world from a seed and an input log, writes state hash streams. Zero packages. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AssemblyName>sting-headless</AssemblyName>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(StingFixed)' == 'true'">
+    <DefineConstants>$(DefineConstants);STING_FIXED</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Sting.Core/Sting.Core.csproj" />
+  </ItemGroup>
+</Project>

@@ -817,7 +817,7 @@ On Main the entity count is dominated by AI wasps: one player's colony can hold 
 
 ## 14. Testing and verification
 
-- **Headless runner:** a console application that loads a world seed and a scripted event list, runs N ticks, and writes state hash streams.
+- **Headless runner:** a console application that loads a world seed and a scripted event list, runs N ticks, and writes state hash streams. As built: `core/Sting.Headless` (`sting-headless run | replay | resume | compare`); an input log holds the settings and every tick's command and replays in either number build.
 - **Determinism:** same seed and script MUST give identical hash streams across runs, processes, and machines (Windows x64, Linux x64, ARM).
 - **Golden tests:** fixed human, zone and event → an exact expected `ReactionPlan`.
 - **Property tests:** reach is always in [0, 1]; swat start is always at least the minimum consequence window after contact; generation is identical for the same inputs.
