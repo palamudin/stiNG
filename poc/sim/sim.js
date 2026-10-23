@@ -8,7 +8,7 @@ import {
 } from './body.js';
 import {
   chunkOf, chunkKey, NEST, NEST_ENTRANCE, SPAWN, generateChunk, ticksPerMinute, clockMinutes, dayOf, minuteOfDay,
-  isRaining, tempAt, isDaylight, humanWindow, flyPos, beePos, birdPos, dragonPos, shedSites, makeNest,
+  isRaining, tempAt, windAt, isDaylight, humanWindow, flyPos, beePos, birdPos, dragonPos, shedSites, makeNest,
 } from './world.js';
 import { newColony, colonyStep, destroyNest, colonyFinished, seasonPhase } from './colony.js';
 
@@ -115,7 +115,22 @@ export class Sim {
   }
   escAt(x, z) { return this.escLevel(chunkKey(chunkOf(x), chunkOf(z))); }
   addEsc(x, z, pts) { const k = chunkKey(chunkOf(x), chunkOf(z)); const before = this.escLevel(k); this.cs(k).esc += pts * this.settings.escalation * (this.colony && this.colony.sited && k === this.nest.key ? T.sites[this.nest.site || 'trunk'].discovery : 1); const after = this.escLevel(k); if (after !== before) this.emit('escalation', { key: k, level: after }); }
-  get temperature() { return tempAt(this.seed, this.minute); }
+  // the day's weather plus the season's swing: cold springs for founding queens, cooling autumns (GDD 5.3)
+  get temperature() {
+    const c = this._tc;
+    if (c && c.m === this.minute && c.s === this.season.startMinute) return c.v; // asked by every wasp every tick
+    const W = T.weather, f = this.seasonFrac;
+    const v = tempAt(this.seed, this.minute) - W.springChill * clamp01((0.25 - f) / 0.25) - W.autumnChill * clamp01((f - 0.8) / 0.2);
+    this._tc = { m: this.minute, s: this.season.startMinute, v };
+    return v;
+  }
+  get wind() {
+    const c = this._wc;
+    if (c && c.m === this.minute) return c.v;
+    const v = windAt(this.seed, this.minute);
+    this._wc = { m: this.minute, v };
+    return v;
+  }
   get raining() { return isRaining(this.seed, this.minute); }
   get physicalCount() { return this._own().length; }
   _own() { return this.wasps.filter((w) => w.colony === 'own'); }
@@ -126,7 +141,7 @@ export class Sim {
     const id = this.nextWaspId++;
     const w = {
       id, caste, x: this.nest.spawn.x, y: this.nest.spawn.y, z: this.nest.spawn.z, vx: 0, vy: 0, vz: 0, yaw: this.nest.spawn.yaw, pitch: 0,
-      energy: 1, venom: 1, state: 'fly', stateTicks: 0, attach: null, under: null, ball: null, born: this.minute,
+      energy: 1, venom: 1, bodyT: T.cold.nestTemp, chill: 0, state: 'fly', stateTicks: 0, attach: null, under: null, ball: null, born: this.minute,
       carry: null, groundTicks: 0, chew: 0, role: 'sugar', colony: 'own', web: null, fight: null,
       ai: { mode: 'pick', target: null, timer: 0, humanHex: null, stings: 0, stingHold: 0 },
     };
@@ -717,6 +732,7 @@ export class Sim {
         break;
       }
       case 'webbed': this._webStep(w, cmd, driven); break;
+      case 'drowning': this._drownStep(w, cmd, driven); break;
       case 'perched': this._perchStep(w, cmd, edge, armed, driven); break;
       case 'fighting': if (driven && cmd.sting && !this.pressUsed) { this.pressUsed = true; w.fight.mash += T.rival.mash; } break;
       case 'attached': this._attached(w, cmd, driven); break;
@@ -729,14 +745,41 @@ export class Sim {
         if (driven) { this._ballEscape(w, cmd.burst && !w.ball.prevBurst); if (w.ball) w.ball.prevBurst = cmd.burst; }
         break;
     }
-    if (this.waspById(w.id)) w.venom = Math.min(w.caste === 'queen' ? T.queen.venomMul : 1, w.venom + T.venom.regenPerSec * DT);
+    if (this.waspById(w.id)) {
+      w.venom = Math.min(w.caste === 'queen' ? T.queen.venomMul : 1, w.venom + T.venom.regenPerSec * DT);
+      this._bodyHeat(w);
+    }
+  }
+
+  // Body temperature (GDD 7.1, T1-2): flight muscles heat a flying wasp, a resting one shivers to stay ready
+  // (burning sugar), human skin and a bee ball set it outright. Below the flight temperature a wasp cannot take
+  // off; in cold torpor it dies unless it finds warmth.
+  _bodyHeat(w) {
+    const C = T.cold, air = this.temperature;
+    let target;
+    const flying = (w.state === 'fly' || w.state === 'stunned') && w.energy > 0 && w.bodyT >= C.flyBody;
+    switch (flying ? 'flying' : w.state) {
+      case 'flying': target = air + C.flightHeat; break;
+      case 'attached': case 'perched': case 'under': target = C.skinTemp; break;
+      case 'balled': target = w.ball ? w.ball.temp : air; break;
+      default: {
+        // shivering warms a resting wasp, but not in real cold
+        const shiver = w.energy > 0 && w.bodyT < C.flyBody + 2 && air >= C.shiverMinAir;
+        if (shiver) w.energy = Math.max(0, w.energy - T.energy.cruisePerSec * DT * T.energy.hoverShare * C.shiverCost);
+        target = air + (shiver ? C.shiverHeat : 0);
+      }
+    }
+    w.bodyT += (target - w.bodyT) * C.rate;
+    if (w.bodyT < C.torpor) {
+      if (++w.chill > C.lethalTicks) this._die(w, 'cold', null);
+    } else if (w.chill > 0) w.chill--;
   }
 
   // ---------------- flight (GDD 7.2)
 
   _flight(w, cmd) {
     const W = T.wasp;
-    const powered = w.state === 'fly' && w.energy > 0 && this.canFly();
+    const powered = w.state === 'fly' && w.energy > 0 && w.bodyT >= T.cold.flyBody;
     const rain = this.raining;
     let burst = powered && cmd.burst;
     let dx, dy, dz;
@@ -757,6 +800,9 @@ export class Sim {
       if (w.caste === 'queen') top *= T.queen.speedMul;
       if (rain) top *= T.weather.rainSpeedMul;
       dx *= top; dy *= top; dz *= top;
+      // the air moves: the wasp holds most of its course but drifts with the wind, less near the ground (GDD 5.3)
+      const wd = this._drift(w);
+      dx += wd.x; dz += wd.z;
       let ex = dx - w.vx, ey = dy - w.vy, ez = dz - w.vz;
       const el = Math.sqrt(ex * ex + ey * ey + ez * ez), amax = (burst ? W.burstAccel : W.accel) * DT;
       if (el > amax) { ex *= amax / el; ey *= amax / el; ez *= amax / el; }
@@ -771,7 +817,8 @@ export class Sim {
     } else {
       w.vy -= W.gravity * DT;
       if (w.vy < -W.maxFall) w.vy = -W.maxFall;
-      w.vx *= 0.97; w.vz *= 0.97;
+      const wd = this._drift(w);
+      w.vx = w.vx * 0.97 + wd.x * 0.03; w.vz = w.vz * 0.97 + wd.z * 0.03;
     }
     const n = W.substeps, h = DT / n, p0 = { x: w.x, y: w.y, z: w.z };
     for (let i = 0; i < n; i++) {
@@ -783,6 +830,14 @@ export class Sim {
     if (w.energy <= 0 && w.y <= W.radius + 1e-6) {
       if (++w.groundTicks > W.starveTicks) this._die(w, 'starved', null);
     } else w.groundTicks = 0;
+  }
+
+  // The wind a wasp feels: the day's wind, gusting, falling off toward the ground, times the share it cannot hold against
+  _drift(w) {
+    const W = T.wind, wind = this.wind, t = this.tick;
+    const gust = 1 + W.gust * dsin(t * 0.031) * dsin(t * 0.0137 + 1);
+    const k = W.drift * gust * clamp01(w.y / W.refHeight);
+    return { x: wind.x * k, z: wind.z * k };
   }
 
   _nearCitronella(w) {
@@ -1082,11 +1137,34 @@ export class Sim {
           else if (!driven) w.ai.cargo = Math.min(1, (w.ai.cargo || 0) + add);
           if (driven) this.feeding = true;
           w.ai.atFood = s.kind;
+          // an open can is a trap of its own: a feeding wasp may slip in (GDD 7.5, T1-3)
+          if (s.kind === 'can' && h32(w.id, this.tick, 53) < T.drown.chancePerSec * DT) this._fallIn(w, s, key, driven);
           return;
         }
       }
     }
     w.ai.atFood = null;
+  }
+
+  _fallIn(w, can, key, driven) {
+    w.state = 'drowning'; w.vx = w.vy = w.vz = 0;
+    w.x = can.x; w.y = can.y - 0.03; w.z = can.z;
+    w.drown = { key, until: this.tick + T.drown.ticks, progress: 0, prevBurst: 1 };
+    this.emit('fellIn', { id: w.id, driven });
+  }
+
+  // Mash burst to climb out before the drink takes you; AI wasps get a small chance each tick
+  _drownStep(w, cmd, driven) {
+    const d = w.drown, D = T.drown;
+    if (driven) { if (cmd.burst && !d.prevBurst) d.progress += D.escapePerPress; d.prevBurst = cmd.burst; }
+    else if (h32(w.id, this.tick, 57) < D.aiEscape) d.progress = 1;
+    if (d.progress >= 1) {
+      w.drown = null; w.state = 'stunned'; w.stateTicks = 30; w.vy = 0.6; w.y += 0.04;
+      w.energy = Math.min(1, w.energy + 0.1); // a sticky, sugary escape
+      this.emit('climbedOut', { id: w.id });
+      return;
+    }
+    if (this.tick >= d.until) this._die(w, 'drowned in a drink', null);
   }
 
   _nestTouch(w) {
@@ -2279,8 +2357,8 @@ export class Sim {
   // ---------------- colony tick (1 Hz)
 
   _colonyTick() {
-    if (this.extinct) return; // the line is over: nothing left to tick
-    this._muniTick();
+    this._muniTick(); // the town's campaign runs on whether or not any colony is left
+    if (this.extinct) return; // the line is over: no colony left to tick
     const col = this.colony;
     const daylight = isDaylight(this.minute) && !this.raining && this.canFly();
     const frac = this.seasonFrac;
@@ -2486,7 +2564,7 @@ export class Sim {
     let h = 0x811c9dc5;
     const f = (v) => { buf[0] = v; for (let i = 0; i < 8; i++) { h ^= bytes[i]; h = Math.imul(h, 0x01000193); } };
     f(this.tick); f(this.clockOffset); f(this.drivenId);
-    for (const w of this.wasps) { f(w.id); f(w.x); f(w.y); f(w.z); f(w.vx); f(w.vy); f(w.vz); f(w.energy); f(w.venom); }
+    for (const w of this.wasps) { f(w.id); f(w.x); f(w.y); f(w.z); f(w.vx); f(w.vy); f(w.vz); f(w.energy); f(w.venom); f(w.bodyT); }
     const c = this.colony;
     f(c.adults); f(c.eggs); f(c.larvae); f(c.pupae); f(c.cells); f(c.protein); f(c.sugar); f(c.pulp); f(c.deficit);
     f(c.rEggs); f(c.rLarvae); f(c.rPupae); f(c.gynes); f(c.mated); f(this.season.n); f(this.lineage);

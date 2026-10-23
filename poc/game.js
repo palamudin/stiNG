@@ -129,7 +129,7 @@ const webMat = new THREE.LineBasicMaterial({ color: '#f4f4f4', transparent: true
 function buildChunk(rec) {
   const g = new THREE.Group();
   const c = rec.content;
-  const dyn = { lids: [], traps: [], candles: [], cans: [], puddles: [] };
+  const dyn = { lids: [], traps: [], candles: [], cans: [], puddles: [], crowns: [] };
   // garden sheds: plank walls, a pitched roof, a crack in one wall and a gap under one eave (nest sites)
   for (const sh of c.sheds || []) {
     const walls = new THREE.Mesh(new THREE.BoxGeometry(sh.hw * 2, sh.h, sh.hd * 2), mat('#7a5a3c'));
@@ -157,6 +157,7 @@ function buildChunk(rec) {
     const a = new THREE.Mesh(geoBlob, leaf); a.scale.setScalar(t.cr); a.position.set(t.x, t.h + t.cr * 0.35, t.z);
     const b = new THREE.Mesh(geoBlob, leaf); b.scale.setScalar(t.cr * 0.7); b.position.set(t.x + t.cr * 0.45, t.h - t.cr * 0.1, t.z - t.cr * 0.3);
     a.castShadow = b.castShadow = true;
+    for (const m of [a, b]) dyn.crowns.push({ m, x: m.position.x, z: m.position.z, ph: t.x * 0.7 + t.z * 0.3 });
     g.add(trunk, a, b);
   }
   const wood = mat('#8a6440');
@@ -256,6 +257,15 @@ function syncChunks() {
   const want2 = new Set(sim.active.map((h) => h.hex));
   for (const [k, v] of humanViews) if (!want2.has(k)) { scene.remove(v.group); humanViews.delete(k); }
   for (const hm of sim.active) if (!humanViews.has(hm.hex)) humanViews.set(hm.hex, buildHuman(hm));
+}
+
+// Crowns lean and sway with the wind (presentation only; the sim's wind pushes wasps, GDD 5.3)
+function swayTrees(time) {
+  const w = sim.wind;
+  for (const g of chunkViews.values()) for (const c of g.userData.dyn.crowns) {
+    const s = 0.035 * (1 + 0.45 * Math.sin(time * 1.7 + c.ph));
+    c.m.position.x = c.x + w.x * s; c.m.position.z = c.z + w.z * s;
+  }
 }
 
 function updateChunkDynamics() {
@@ -688,6 +698,7 @@ function poseHuman(view, t, dt) {
     const frame = humanViews.get(an.frameHex);
     if (!frame) continue;
     const impactW = frame.group.localToWorld(V(an.center));
+    if (an.kind === SwatKind.Shake) { twist += Math.sin(t * 1.1) * 0.5 * e; continue; } // a head shake dislodges
     if (an.kind === SwatKind.Contort) {
       twist = Math.sin(t * 1.9) * 0.45 * e;
       for (const side of [-1, 1]) {
@@ -732,6 +743,7 @@ function applyZoneColors(view, on) {
     [-1]: new THREE.Color(css('--slate')), [-2]: new THREE.Color(css('--lilac')),
     [SwatKind.Slap]: new THREE.Color(css('--red')), [SwatKind.Cover]: new THREE.Color(css('--orange')),
     [SwatKind.Brush]: new THREE.Color(css('--yellow')), [SwatKind.Contort]: new THREE.Color(css('--green')),
+    [SwatKind.Shake]: new THREE.Color('#e9d9a8'),
   };
   for (const p of view.rest) {
     const m = view.meshes[p.name];
@@ -1298,7 +1310,8 @@ function updateHud() {
   $('serial').textContent = w ? (w.caste === 'queen' ? 'The queen' : 'Worker ' + w.id) : '-';
   const md = minuteOfDay(sim.minute);
   $('clockT').textContent = `Day ${sim.day + 1} · ${fmtClock(sim.minute)}`;
-  $('clockW').textContent = `${Math.round(sim.temperature)} °C · ${sim.raining ? 'rain' : md < T.time.dawn || md >= T.time.dusk ? 'night' : 'clear'}`;
+  const wnd = sim.wind, ws = Math.hypot(wnd.x, wnd.z);
+  $('clockW').textContent = `${Math.round(sim.temperature)} °C · ${sim.raining ? 'rain' : md < T.time.dawn || md >= T.time.dusk ? 'night' : 'clear'} · ${ws < 0.5 ? 'calm' : `wind ${ws.toFixed(1)} m/s`}`;
   const frac = Math.min(1, Math.max(0, sim.seasonFrac));
   $('seasonBar').style.width = (frac * 100).toFixed(1) + '%';
   $('seasonT').textContent = `Season ${sim.season.n} · ${sim.season.phase}${sim.lineage > 0 ? ` · ${sim.lineage} sister nest${sim.lineage === 1 ? '' : 's'}` : ''}`;
@@ -1312,6 +1325,8 @@ function updateHud() {
   $('venomBar').style.width = (w.venom * 100).toFixed(1) + '%';
   { const life = w.caste === 'queen' ? 0 : Math.min(1, (sim.minute - (w.born ?? sim.minute)) / sim.lifespanMinutes(w)); $('ageRow').hidden = $('ageWrap').hidden = w.caste === 'queen'; $('ageBar').style.width = (life * 100).toFixed(1) + '%'; }
   $('cropBar').style.width = (w.energy * 100).toFixed(1) + '%';
+  { const bt = w.bodyT ?? 30, cold = bt < T.cold.flyBody; // body temperature (GDD 10.2): 0-40 °C
+    $('bodyBar').style.width = Math.max(0, Math.min(100, bt / 40 * 100)).toFixed(1) + '%'; $('bodyWrap').classList.toggle('cold', cold); $('bodyL').textContent = `Body ${Math.round(bt)} °C`; }
   $('cropBar').style.background = w.energy < 0.2 ? 'var(--red)' : '';
   $('ball').hidden = w.state !== 'balled';
   $('tickle').hidden = w.state !== 'perched';
@@ -1328,8 +1343,9 @@ function updateHud() {
   else if (w.state === 'landed') status = 'Resting';
   else if (w.state === 'perched') status = `On #${w.perch.hex.slice(0, 4)} · ${zoneLabel(w.perch.zone)}`;
   else if (w.state === 'fighting') status = 'Fighting a rival wasp';
+  else if (w.state === 'drowning') status = `In the drink · ${Math.max(0, (w.drown.until - sim.tick) / 60).toFixed(1)} s`;
   else if (!sim._driven()) status = '';
-  else if (!sim.canFly()) status = 'Too cold to fly';
+  else if ((w.bodyT ?? 30) < T.cold.flyBody) status = (w.bodyT ?? 30) < T.cold.torpor ? 'Torpid with cold · find warmth or die' : 'Too cold to fly · warm up (rest, sun, a person)';
   else if (sim.feeding) status = 'Feeding';
   else if (w.energy <= 0) status = 'Crop empty · falling';
   else if (w.carry) status = `Carrying ${w.carry.what}`;
@@ -1340,8 +1356,9 @@ function updateHud() {
   const h = sim.hint || {};
   if (w.state === 'balled') hint = `Mash ${kbd('Shift')} to break out`;
   else if (w.state === 'webbed') hint = `Mash ${kbd('Shift')} to tear free`;
+  else if (w.state === 'drowning') hint = `Mash ${kbd('Shift')} to climb out`;
   else if (w.state === 'fighting') hint = `Mash ${kbd('LMB')} to sting it first`;
-  else if (w.state === 'landed') hint = w.walking ? 'Walking · off the edge and you drop into flight' : 'Resting costs no sugar · WASD walk · Space, Shift or sting takes off';
+  else if (w.state === 'landed') hint = w.walking ? 'Walking · off the edge and you drop into flight' : 'Resting costs no sugar in the warmth · WASD walk · Space, Shift or sting takes off';
   else if (w.state === 'perched') hint = `${kbd('W')}${kbd('A')}${kbd('S')}${kbd('D')} crawl (look up or down to climb) · ${kbd('LMB')} sting · ${kbd('Space')} take off · ${kbd('E')} crawl under at an opening`;
   else if (h.rival) hint = `${kbd('E')} steal a larva from the rival nest`;
   else if (w.state === 'under') {
@@ -1436,6 +1453,8 @@ function deathWhy(e) {
   if (e.cause === 'eaten by a spider') return 'Webs hang between trees. Mash Shift the moment you stick.';
   if (e.cause === 'cooked by bees') return 'Bees ball an intruder and heat it. Mash Shift before it reaches 46 °C.';
   if (e.cause === 'drowned in a trap') return 'Sweet-smelling bottles at alert level 3 are traps.';
+  if (e.cause === 'drowned in a drink') return 'Open cans are deep. Feed at the rim and mash Shift the moment you slip in.';
+  if (e.cause === 'cold') return 'Below about 8 °C a wasp goes torpid and dies. Get home before cold nights, or warm up on a person.';
   if (e.cause === 'insecticide') return 'Some people carry spray once the area is alert. Stay out of the cone in front of them.';
   if (e.cause === 'old age') return 'Workers live a few weeks. Take over a younger sister with Q.';
   if (e.cause === 'starved') return 'Your crop ran empty. Feed at flowers, cans or plates before it does.';
@@ -1452,7 +1471,7 @@ function deathWhy(e) {
     default: return '';
   }
 }
-const DEATH_TITLE = { 'eaten by a spider': 'EATEN', 'taken by a bird': 'TAKEN', 'killed by a rival wasp': 'KILLED', slap: 'SWATTED', cover: 'SMOTHERED', 'crushed under clothing': 'CRUSHED', insecticide: 'SPRAYED', 'drowned in a trap': 'DROWNED', 'cooked by bees': 'COOKED', starved: 'STARVED', 'old age': 'SPENT', 'taken by a dragonfly': 'TAKEN' };
+const DEATH_TITLE = { 'eaten by a spider': 'EATEN', 'taken by a bird': 'TAKEN', 'killed by a rival wasp': 'KILLED', slap: 'SWATTED', cover: 'SMOTHERED', 'crushed under clothing': 'CRUSHED', insecticide: 'SPRAYED', 'drowned in a trap': 'DROWNED', 'cooked by bees': 'COOKED', starved: 'STARVED', 'old age': 'SPENT', 'taken by a dragonfly': 'TAKEN', cold: 'CHILLED', 'drowned in a drink': 'DROWNED' };
 
 function pushSwatAnims(list, frameHex, contactTick) {
   const frame = sim.humanByHex(frameHex);
@@ -1543,6 +1562,8 @@ function handleEvents(events) {
       case 'queenDied': toast('The queen is dead', 'var(--red)', 3); logEvent(`the queen died · ${e.cause}`); break;
       case 'webbed': if (e.driven) { toast('Stuck in a web · mash Shift', 'var(--red)', 2); blip(300, 260, 0.2, 0.05, 'triangle'); } break;
       case 'webEscape': if (e.id === sim.drivenId) toast('Tore free', 'var(--yellow)', 1.2); break;
+      case 'fellIn': if (e.driven) { toast('Slipped into the drink · mash Shift', 'var(--red)', 2); blip(420, 180, 0.25, 0.05, 'sine'); } break;
+      case 'climbedOut': if (e.id === sim.drivenId) toast('Climbed out, sticky', 'var(--yellow)', 1.2); break;
       case 'birdDive': if (e.driven) { toast('A bird is diving at you · get low or under a tree', 'var(--red)', 2.4); blip(2600, 1800, 0.3, 0.06, 'sine'); } break;
       case 'birdMiss': toast('The bird missed', 'var(--yellow)', 1.2); break;
       case 'fight': if (e.driven) toast('Grappling a rival wasp · mash LMB', 'var(--red)', 1.8); break;
@@ -1765,6 +1786,7 @@ function frame(now) {
     updateScents(dt);
     if (tm) { tm('wasps+cam', t0); t0 = performance.now(); }
     renderCritters(t);
+    swayTrees(t / 60);
     renderBaits();
     renderSites();
     renderFruit();

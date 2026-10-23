@@ -45,7 +45,7 @@ namespace Sting.Core
     }
 
     public sealed class ShedSite { public Num x, y, z, ix, iz, nx, nz; }
-    public sealed class DayWeather { public long day; public bool rain; public Num rainStart, rainEnd, @base; }
+    public sealed class DayWeather { public long day; public bool rain; public Num rainStart, rainEnd, @base, wind, windDir; }
     public sealed class HumanWin { public Num arrive, leave; }
 
     public static class World
@@ -87,7 +87,8 @@ namespace Sting.Core
             ulong H(ulong i) => Hash(seed, Domain.Weather, U64(day), i);
             bool rain = day > 0 && Unit(H(0)) < T.weather.rainChance;
             Num rainStart = 11 * 60 + RangeInt(H(1), 0, 6 * 60);
-            var w = new DayWeather { day = day, rain = rain, rainStart = rainStart, rainEnd = rainStart + 60 + RangeInt(H(2), 0, 120), @base = Range(H(3), T.weather.baseMin, T.weather.baseMax) };
+            var w = new DayWeather { day = day, rain = rain, rainStart = rainStart, rainEnd = rainStart + 60 + RangeInt(H(2), 0, 120), @base = Range(H(3), T.weather.baseMin, T.weather.baseMax),
+                wind = Range(H(4), T.wind.min, T.wind.max) * (rain ? T.wind.rainMul : 1), windDir = Range(H(5), 0, TAU) };
             lock (weatherCache) weatherCache[key] = w;
             return w;
         }
@@ -96,6 +97,13 @@ namespace Sting.Core
         {
             var w = Weather(seed, DayOf(m)); long d = MinuteOfDay(m);
             return w.@base + T.weather.diurnalAmp * DSin(TAU * (d - 540) / 1440) - (IsRaining(seed, m) ? 4 : 0);
+        }
+        /// The wind at a minute, as a velocity (m/s) in the open at reference height: calm at night and dawn, strongest mid-afternoon
+        public static V3 WindAt(ulong seed, long m)
+        {
+            var w = Weather(seed, DayOf(m)); long d = MinuteOfDay(m);
+            Num s = w.wind * (0.35 + 0.65 * Max(0, DSin(TAU * (d - 540) / 1440)));
+            return new V3(s * DSin(w.windDir), 0, s * DCos(w.windDir));
         }
         public static bool IsDaylight(long m) { long d = MinuteOfDay(m); return d >= T.time.dawn && d < T.time.dusk; }
 

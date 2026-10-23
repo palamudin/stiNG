@@ -117,7 +117,8 @@ namespace Sting.Core.Tests
             foreach (var seed in Seeds)
             {
                 var d = new Digest();
-                for (int day = 0; day < 60; day++) { var w = World.Weather(seed, day); d.F(w.rain); d.F(w.rainStart); d.F(w.rainEnd); d.F(w.@base); }
+                for (int day = 0; day < 60; day++) { var w = World.Weather(seed, day); d.F(w.rain); d.F(w.rainStart); d.F(w.rainEnd); d.F(w.@base); d.F(w.wind); d.F(w.windDir); }
+                for (int m = 0; m < 1440 * 4; m += 37) { var v = World.WindAt(seed, m); d.F(v.x); d.F(v.z); }
                 for (int i = 0; i < 40; i++)
                 {
                     ulong id = Hash(seed, Domain.WorldGen, U64(i), 3, 1000);

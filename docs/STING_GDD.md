@@ -301,7 +301,7 @@ Rules:
 | Peak | Aug – Sep | Thousands of workers, queen cells, males, brood winding down |
 | Collapse | Sep – Oct | Reproductives leave, workers die |
 
-### 5.3 Temperature and weather **[T0] [T1]** (wind, cloud)
+### 5.3 Temperature and weather **[T0] [T1]** (cloud)
 
 - Daily weather is a pure function: `Hash(worldSeed, Weather, dayIndex)` drives temperature offset, cloud, rain and wind.
 - Temperature affects: whether wasps can fly and forage, human outdoor density (picnics need warm dry days), resource availability and nest thermals.
@@ -401,7 +401,7 @@ Economy step in Appendix A.4.
 - Temperature: below the flight threshold the wasp cannot take off *(tune)*.
 - Health: a single solid hit (swat, crush) kills. Grazes stun.
 
-### 7.2 Flight **[T0] [T1]** (wind)
+### 7.2 Flight **[T0]**
 
 - A steered kinematic model in fixed-point: desired velocity from input, limited by max acceleration and turn rate, plus wind and gravity when not producing lift.
 - Collision is **swept** against world geometry every tick (at burst speed a wasp crosses a thin twig in one tick). Uses the deterministic collision developed in the Tarmac Lab pilot.
@@ -426,7 +426,7 @@ Economy step in Appendix A.4.
 
 - Both count toward the counter. Full stings are a risk/reward choice: the human's swat clock starts at contact, not at withdrawal.
 
-### 7.5 Death causes **[T0] [T1]** (cold, drowning in a drink)
+### 7.5 Death causes **[T0]**
 
 Swat, crush under clothing, insecticide spray, bee balling, bird, spider web, drowning in a drink or a trap, cold, starvation, old age, rival wasps.
 
@@ -527,7 +527,7 @@ clamped to [0, 1]
 
 Below `minReachToSwat` *(tune 0.25)* the human cannot strike that zone and contorts instead. Appendix A.5.
 
-### 8.5 Response styles **[T0] [T1]** (shake, the runner's flail)
+### 8.5 Response styles **[T0]**
 
 | Style | Force | Volume radius | Window | Notes |
 |---|---|---|---|---|
@@ -561,7 +561,7 @@ The skill the game teaches falls straight out of this: sting, and be gone before
 
 During each tick of a swat window, the volume is transformed from body frame to world frame and tested against the wasp's position (sphere vs sphere, swept over the tick). A hit kills (slap, cover) or stuns (brush, contort). Authority for this check is covered in Section 11.5. Appendix A.7.
 
-### 8.8 Clothing **[T0] [T1]** (by temperature)
+### 8.8 Clothing **[T0]**
 
 | Cover | Effect |
 |---|---|
@@ -642,7 +642,7 @@ Birds (perch and hunt flying insects), spiders (static webs), dragonflies, rival
 - **Drive:** you are one wasp.
 - **Colony:** the nest cutaway and the map.
 
-### 10.2 Drive HUD **[T0] [T1]** (body temperature)
+### 10.2 Drive HUD **[T0]**
 
 - Crop sugar, venom, health, body temperature.
 - Scent cues: sugar, protein, alarm.
@@ -1010,6 +1010,20 @@ The PoC's 105 headless sim checks are ported too (`Behaviour.cs`), and so are th
 
 Porting found three bugs, fixed in both: a line that went extinct kept ticking its colony and could come back the next autumn, alarm pheromone kept relaunching attacks on a human who had gone home; and the small per-decision hash reads four inputs, so calls that passed five or six (burrow positions, branch sites, fruit, bait stations) silently ignored the rest: both coordinates of a burrow came from the same number, every fruit of a tree fell on the same day, and only early in the windfall weeks. Such calls now chain two rounds of the hash.
 
+### 18.19 Weather and bodies as built (T1-1 to T1-5)
+
+**Wind.** Each day's weather now also draws a wind strength (0–3 m/s, ×1.4 on rainy days) and direction. Through the day it runs from 35% of that at dawn to full strength mid-afternoon, and gusts by up to 40%. A wasp in the air drifts with 35% of it, scaled by height up to full at 3 m, so a wasp hugging the grass is barely moved and one crossing open air at head height must aim upwind. AI wasps steer the same way and simply correct their heading each tick. Falling wasps are carried a little. Wind is a pure function of seed and clock, so peers agree without sending it.
+
+**Body temperature.** Flight is now gated by the wasp's own temperature, not the air's (POC.md design change 8). Body temperature relaxes toward a target over about five seconds: the air plus 12 °C in powered flight, 31 °C on human skin or under clothing, the ball's heat inside a bee ball, and otherwise the air, plus 8 °C when the wasp shivers. Shivering costs half the sugar of hovering and only works above 8 °C of air. Take-off needs 18 °C. Below 8 °C the wasp is torpid; 90 s of torpor kills it ("cold"), and it recovers if it warms first. The season adds its own swing to the daily weather: springs start up to 6 °C colder (fading out over the first quarter of the season) and autumns cool by up to 7 °C over the last fifth. Body temperature is part of the state hash and the save.
+
+**Drowning in a drink.** Feeding at an open can carries a 3% chance per second of slipping in. The wasp has 4 s; each burst press climbs 30% of the way, and an AI wasp gets out with a small chance each tick. Climbing out leaves it stunned and slightly fuller. Cans are lidded from alert level 2, which also ends this risk.
+
+**Clothing by temperature.** The day's base temperature picks the mix: on cool days (below 20 °C) 35% jackets and 65% jeans; on hot days (25 °C and up) 3% jackets, 50% tank tops and 55% shorts; between, the old mix. Still `Hash(seed, Clothing, id, day)`, now read through the day's weather, so every peer dresses everyone the same.
+
+**Shake and flail.** A new swat kind, Shake: 16 cm around the contact point, a 10-tick window, stuns and never kills. Flailers and runners shake where others brush (face) or slap (scalp). A runner who flees also flails: a 20 cm sweep 8 ticks after the first swat, 12 ticks long, that stuns. Both are part of the pure resolver, so the plan stays identical on every peer.
+
+All five are in the C# core with parity: the 22 JS digests still match in the double build, the fixed-point build's lock is regenerated, and 130 properties hold in both (13 new).
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1018,17 +1032,17 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (62 features) and its C# port (18.18). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (67 features) and its C# port (18.18), including the first Tier 1 batch, now built (18.19): T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail. In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
 | # | Feature | GDD | Size | Depends on |
 |---|---|---|---|---|
-| T1-1 | Wind: a daily wind field from the weather hash, pushing wasps in flight and swaying trees; calm in the morning, stronger in the afternoon | 5.3, 7.2 | S | |
-| T1-2 | Cold: a wasp grounded below the flight temperature away from the nest chills and dies; body temperature on the HUD | 7.1, 7.5, 10.2 | S | |
-| T1-3 | Drowning in a drink: a wasp feeding at an open can may fall in and has a few seconds to climb out | 7.5 | S | |
-| T1-4 | Clothing by temperature: jackets and jeans on cool days, tank tops and shorts on hot ones | 8.8 | S | |
-| T1-5 | Shake and flail: a human stung on the head shakes it (dislodges, no kill); runners swat wildly on the way out | 8.5 | S | |
+| T1-1 | **Built (18.19).** Wind: a daily wind field from the weather hash, pushing wasps in flight and swaying trees; calm in the morning, stronger in the afternoon | 5.3, 7.2 | S | |
+| T1-2 | **Built (18.19).** Cold: a wasp grounded below the flight temperature away from the nest chills and dies; body temperature on the HUD | 7.1, 7.5, 10.2 | S | |
+| T1-3 | **Built (18.19).** Drowning in a drink: a wasp feeding at an open can may fall in and has a few seconds to climb out | 7.5 | S | |
+| T1-4 | **Built (18.19).** Clothing by temperature: jackets and jeans on cool days, tank tops and shorts on hot ones | 8.8 | S | |
+| T1-5 | **Built (18.19).** Shake and flail: a human stung on the head shakes it (dislodges, no kill); runners swat wildly on the way out | 8.5 | S | |
 | T1-6 | Fetching spray: at level 3 a stung human walks off and comes back armed, instead of having spray on hand | 8.6, 8.10 | M | |
 | T1-7 | The exterminator searches: at level 4 he walks the area watching wasp traffic and finds the nest from flight lines; a colony that keeps traffic low near people buys time | 8.10 | M | |
 | T1-8 | Seasonal ecology: flowers bloom and fade by season, nectar is drawn down by bees and wasps and regrows in an ecology tick (0.2 Hz); prey by season; carrion appears | 9.4, 3.3 | M | |
@@ -1048,7 +1062,7 @@ Everything in `POC.md` (62 features) and its C# port (18.18). In short: the 60 H
 | T1-22 | Tuning as data: the tuning tables as versioned plain-text files read by own parsers in JS and C#, and the tuning hash in the world record | 13 | M | |
 | T1-23 | Solo time: accelerate time in the colony view, and the Reflex slowdown as a solo option | 5.1, 7.8 | S | |
 
-Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5), then the M items; each batch is built in the PoC and then ported to the core with parity.
+Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, done), then the M items; each batch is built in the PoC and then ported to the core with parity.
 
 ### 19.3 Tier 2: later
 

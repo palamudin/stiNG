@@ -28,7 +28,7 @@ const reviver = (k, v) => {
 };
 
 const HUMAN_FIXED = new Set(['id', 'hex', 'short', 'tr', 'chunk', 'home', 'parts']);
-const SKIP = new Set(['events', 'outbox', 'remote', 'log', 'logLen', 'hint', 'feeding', 'humans', 'active', 'activeChunks', 'records', 'ext', 'netStats', '_baitCache', '_siteCache', '_fruitCache']);
+const SKIP = new Set(['events', 'outbox', 'remote', 'log', 'logLen', 'hint', 'feeding', 'humans', 'active', 'activeChunks', 'records', 'ext', 'netStats', '_baitCache', '_siteCache', '_fruitCache', '_tc', '_wc']);
 
 export function snapshot(sim) {
   const out = { v: SAVE_VERSION, gen: GEN_VERSION, opts: { peer: sim.peer, net: sim.net, noAI: sim.noAI, peers: [...sim.interest.keys()] } };
@@ -57,6 +57,8 @@ export function restore(json) {
   }
   // plain state
   for (const k of Object.keys(d)) if (!['v', 'gen', 'opts', 'records', 'humans', 'active', 'ext'].includes(k)) sim[k] = d[k];
+  // saves from before body temperature (T1-2): wasps come out warm
+  for (const w of [...sim.wasps, ...(sim.ghost ? [sim.ghost] : [])]) if (w.bodyT === undefined) { w.bodyT = T.cold.nestTemp; w.chill = 0; }
   // humans: fixed parts come from the world, mutable parts from the save
   sim.humans = new Map();
   const byHex = new Map(d.humans.map((h) => [h.hex, h]));

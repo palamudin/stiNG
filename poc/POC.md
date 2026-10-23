@@ -88,6 +88,11 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 60 | Garden sheds (about a third of chunks): solid wood to chew and land on, and two nest sites, a crack in a wall (4,000 cells) and a gap under the eaves (6,000 cells, best shelter). World generator 3; older saves are refused with a message | 6.6 | 13 |
 | 61 | Colony view workers list: the nest panel lists the workers that are out, nearest first, with role, what she is doing, what she carries and how far; Drive switches to her (instant within 30 m, relayed beyond). The pick travels as a recorded command, so replays stay exact | 10.3 | 13 |
 | 62 | Host rulings: every peer drops implausible events, but only the host quarantines, as a committed event; all honest peers cut the cheater off on the same tick, purge its uncommitted events and drop its interest window. Proven with a three-peer mesh lab (host, honest, cheater) on a bad link | 11.8, 11.11 | 13 |
+| 63 | Wind (T1-1): one direction and strength per day from the weather hash (0–3 m/s, stronger on rainy days), calm at dawn and strongest mid-afternoon, gusting. A flying wasp drifts with about a third of it, falling off toward the ground, so low flight is sheltered; tree crowns sway with it; the weather line shows it | 5.3, 7.2 | 14 |
+| 64 | Cold (T1-2): every wasp has a body temperature. Flight muscles keep a flying wasp 12 °C above the air, a resting one shivers (burning sugar) to stay ready, human skin holds it at 31 °C. Take-off needs 18 °C; below 8 °C it goes torpid and dies after 90 s unless it finds warmth. Springs start 6 °C colder and autumns cool by 7 °C, so founding queens and late workers feel it. Body bar on the HUD | 7.1, 7.5, 10.2, 5.3 | 14 |
+| 65 | Drowning in a drink (T1-3): a wasp feeding at an open can may slip in (about 3% per second of feeding) and has 4 s to climb out by mashing burst; AI wasps sometimes make it. Lidded drinks at alert level 2 are safe and closed anyway | 7.5 | 14 |
+| 66 | Clothing by temperature (T1-4): the day's clothes follow the day's weather. Cool days put a third of people in jackets and most in jeans; hot days bring tank tops and shorts, and more bare skin to sting | 8.8 | 14 |
+| 67 | Shake and flail (T1-5): flailers and runners stung on the scalp or face shake their head, which dislodges and stuns but never kills; a runner who flees also flails on the way out, a wide late sweep that stuns | 8.5 | 14 |
 
 ## Verified
 
@@ -103,14 +108,15 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 4. **No live wasp positions in shared decisions.** Fleeing humans run from the stinger's position recorded in the event, not from wherever a wasp is now.
 5. **Biological time scales with season length.** `bio = seasonDays / 200`. A 40-day season runs brood development and worker lifespans five times faster than nature, so a season fits in about an hour of play.
 6. **Founding queens build their own cells** directly from pulp they deliver.
-7. **Doubles in the PoC, Fix64 in Unity.** The JS sim is deterministic because it uses only IEEE-exact operations and its own trig. The C# core switches to Fix64 with the same structure.
+7. **Doubles in the PoC, fixed point in the core.** The JS sim is deterministic because it uses only IEEE-exact operations and its own trig. The C# core is written against one number type that builds as a double (bit-identical to the JS) or as Q32.32 fixed point (GDD 18.18).
+8. **Flight is gated by body temperature, not air temperature.** A warm wasp flies on a cool day; a cold one on a warm morning must warm up first. The colony still sends foragers out only when the air is warm enough.
 
 ## Known limits
 
 - The colony economy is tuned against one simulated season with an idle player; it needs real play data.
 - Shed roofs are drawn pitched but collide as a flat top.
 - Walking is on horizontal surfaces only; tree trunks and walls are obstacles, not surfaces.
-- Two players' colonies never fight each other: whether players are co-op, rivals or both is still open (Q-07).
+- Two players' colonies never fight each other yet. Q-07 is settled (rivals by default, co-op opt-in); guards that attack other players' wasps come with T1-13.
 
 ## Controls
 

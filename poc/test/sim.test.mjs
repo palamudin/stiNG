@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, NEST, chunkKey, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, CMD_FIELDS,
+  garmentGraph, Top, NEST_ENTRANCE, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, CMD_FIELDS,
 } from '../sim/index.js';
 
 let failures = 0;
@@ -642,6 +642,88 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
     ev = run(t, 2, (sim, i) => idle({ act: i === 1 ? Act.Interact : 0 }));
     ok(count(ev, 'nestFounded') === 1 && t.nest.site === type && t.colony.maxCells === T.sites[type].maxCells, `E at the ${type === 'wall' ? 'crack in the wall' : 'gap under the eaves'} founds a nest ${T.sites[type].name}`);
   }
+}
+
+// 26. Tier 1, batch 1: wind, cold, drowning, clothes by the weather, shaking and flailing
+{
+  // wind: a pure function of the day, calm at dawn, stronger in the afternoon; it carries a hovering wasp off
+  let seed = 1, day0 = null;
+  for (; seed < 200; seed++) { const w = dayWeather(BigInt(seed), 0); if (!w.rain && w.wind > 2.2) { day0 = w; break; } }
+  const at = (m) => { const v = windAt(BigInt(seed), m); return Math.hypot(v.x, v.z); };
+  ok(day0 && at(15 * 60) > at(7 * 60) * 1.5 && at(15 * 60) === at(15 * 60), `wind is calm at dawn and stronger mid-afternoon (${at(7 * 60).toFixed(2)} -> ${at(15 * 60).toFixed(2)} m/s)`);
+  const drift = (y) => {
+    const s = new Sim({ seed, birds: false });
+    const p0 = { x: 40, y, z: 40 }; // open grass in chunk (1,1)? place far from the nest
+    const w = s.wasp; place(w, p0);
+    run(s, 180, () => idle());
+    const v = s.wind, n = Math.hypot(v.x, v.z);
+    return ((w.x - p0.x) * v.x + (w.z - p0.z) * v.z) / n;
+  };
+  const high = drift(3), low = drift(0.3);
+  ok(high > 0.3 && low < high * 0.3, `a hovering wasp drifts downwind, less near the ground (${high.toFixed(2)} m at 3 m, ${low.toFixed(2)} m at 30 cm in 3 s)`);
+
+  // cold: a resting wasp shivers to stay ready; in the cold it cannot fly, and in torpor it dies unless it finds warmth
+  const s = new Sim({ seed: 1234, birds: false });
+  ok(s.wasp.bodyT >= T.cold.flyBody, `a wasp leaves the nest warm (${s.wasp.bodyT.toFixed(1)} °C)`);
+  const spring = new Sim({ seed: 1234 }); spring.season.startMinute = spring.minute;
+  ok(Math.abs((s.temperature - spring.temperature) - T.weather.springChill) < 1e-9, `spring is colder than summer by ${T.weather.springChill} °C`);
+  const chilly = (f) => { const t = new Sim({ seed: 1234, birds: false }); Object.defineProperty(t, 'temperature', { get: () => 4 }); f(t); return t; };
+  let ev;
+  const c1 = chilly((t) => place(t.wasp, { x: 4, y: 1.5, z: 4 }));
+  ev = run(c1, 900);
+  ok(c1.wasp.bodyT < T.cold.flyBody && c1.wasp.y < 0.05, `at 4 °C a flying wasp cools, loses power and drops (${c1.wasp.bodyT.toFixed(1)} °C)`);
+  ev = run(c1, 9000);
+  const frozen = ev.find((e) => e.type === 'waspDied' && e.driven);
+  ok(frozen && frozen.cause === 'cold', `left on the cold ground it dies of cold (${frozen && frozen.cause})`);
+  const c2 = chilly((t) => {
+    const hm = seated(t, (h) => h.tr.style !== 3);
+    const fa = hm.parts.sit.find((p) => p.name === 'ForearmR');
+    place(t.wasp, toWorld(hm, { x: (fa.a.x + fa.b.x) / 2, y: (fa.a.y + fa.b.y) / 2 + fa.r + 0.008, z: (fa.a.z + fa.b.z) / 2 }));
+  });
+  run(c2, 3);
+  const perched = c2.wasp.state === 'perched';
+  run(c2, 900, (sim) => { const w = sim._driven(); if (w && w.state === 'perched') w.perch.quietUntil = sim.tick + 10; return idle(); });
+  ok(perched && c2._driven() && c2.wasp.bodyT > 25, `perched on a person it stays warm in the cold (${c2.wasp.bodyT.toFixed(1)} °C)`);
+
+  // drowning in a drink: feed long enough at an open can and you may slip in; mash to climb out
+  const intoCan = (mash) => {
+    const t = new Sim({ seed: 1234, birds: false });
+    const can = t.records.get('0,0').content.sugar.find((x) => x.kind === 'can');
+    let fell = false;
+    const ev2 = run(t, 9000, (sim, i) => {
+      const w = sim._driven();
+      if (!w) return idle();
+      if (w.state === 'drowning') { fell = true; return idle({ burst: mash ? i % 2 : 0 }); }
+      if (!fell && (w.state === 'fly' || w.state === 'landed')) { place(w, { x: can.x, y: can.y + 0.01, z: can.z }); w.energy = 0.3; }
+      return idle();
+    });
+    return { fell, ev: ev2 };
+  };
+  const a = intoCan(false), b = intoCan(true);
+  const drowned = a.ev.find((e) => e.type === 'waspDied' && e.driven);
+  ok(a.fell && drowned && drowned.cause === 'drowned in a drink', `a wasp feeding at an open can slips in and drowns (${drowned && drowned.cause})`);
+  ok(b.fell && count(b.ev, 'climbedOut') >= 1, 'mashing burst climbs out of the drink');
+
+  // clothes follow the weather: more jackets on cool days, more tank tops on hot ones
+  const share = (pred) => {
+    const days = []; for (let d = 1; d < 200 && days.length < 6; d++) if (pred(dayWeather(1234n, d).base)) days.push(d);
+    let jacket = 0, tank = 0, n = 0;
+    for (const d of days) for (let i = 1n; i <= 300n; i++) { const c = humanClothing(1234n, i, d); n++; if (c.top === Top.Jacket) jacket++; if (c.top === Top.Tank) tank++; }
+    return { jacket: jacket / n, tank: tank / n };
+  };
+  const cool = share((b) => b < 20), hot = share((b) => b >= 25);
+  ok(cool.jacket > hot.jacket * 3 && hot.tank > cool.tank * 2, `clothes follow the weather (jackets ${(cool.jacket * 100).toFixed(0)}% cool vs ${(hot.jacket * 100).toFixed(0)}% hot; tank tops ${(cool.tank * 100).toFixed(0)}% vs ${(hot.tank * 100).toFixed(0)}%)`);
+
+  // head shakes and the runner's flail
+  const base = humanTraits(1234n, 5n), as = (style) => ({ ...base, style, reactionTicks: 20 });
+  const plan = (style, zone) => resolveSting({ contactTick: 0, zone, contactPointBody: { x: 0, y: 1.6, z: 0 }, mode: 'jab' }, as(style), ZONES[zone], { clothingStiffness: 0, panic: 0, companions: [] });
+  const sc = plan(Style.Flailer, Zone.Scalp).swats[0], sp = plan(Style.Precise, Zone.Scalp).swats[0];
+  ok(sc.kind === SwatKind.Shake && !sc.kills && sp.kind === SwatKind.Slap, 'stung on the scalp a flailer shakes the head (dislodges) where a precise person slaps');
+  const fc = plan(Style.Runner, Zone.Face).swats[0], fb = plan(Style.Brusher, Zone.Face).swats[0];
+  ok(fc.kind === SwatKind.Shake && fb.kind === SwatKind.Brush, 'stung on the face a runner shakes, a brusher brushes');
+  const run1 = plan(Style.Runner, Zone.Forearms);
+  const flail = run1.swats[1];
+  ok(run1.flee && flail && flail.kind === SwatKind.Brush && !flail.kills && flail.radius >= 0.2 && flail.start > run1.swats[0].start, 'a runner flails on the way out: a wide, late sweep that stuns');
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');

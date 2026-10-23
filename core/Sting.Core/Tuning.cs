@@ -15,7 +15,17 @@ namespace Sting.Core
         public static readonly Num population = 8200000000;
         public static class chunk { public static readonly Num size = 64; public const int activeRadius = 1, discoverRadius = 2; }
         public static class time { public static readonly Num startMinute = 11 * 60, dawn = 7 * 60, dusk = 20 * 60 + 30; }
-        public static class weather { public static readonly Num rainChance = 0.2, baseMin = 17, baseMax = 29, diurnalAmp = 6, flyMinTemp = 11, rainSpeedMul = 0.35, rainDrainMul = 3; }
+        public static class weather { public static readonly Num rainChance = 0.2, baseMin = 17, baseMax = 29, diurnalAmp = 6, flyMinTemp = 11, rainSpeedMul = 0.35, rainDrainMul = 3, springChill = 6, autumnChill = 7; }
+        /// Wind (GDD 5.3, T1-1)
+        public static class wind { public static readonly Num min = 0, max = 3, rainMul = 1.4, drift = 0.35, refHeight = 3, gust = 0.4; }
+        /// Body temperature (GDD 7.1, 10.2, T1-2)
+        public static class cold
+        {
+            public static readonly Num flightHeat = 12, shiverHeat = 8, shiverMinAir = 8, skinTemp = 31, nestTemp = 30, flyBody = 18, torpor = 8, rate = 1.0 / 300, shiverCost = 0.5;
+            public const int lethalTicks = 5400;
+        }
+        /// Drowning in a drink (GDD 7.5, T1-3)
+        public static class drown { public static readonly Num chancePerSec = 0.03, escapePerPress = 0.3, aiEscape = 0.006; public const int ticks = 240; }
         public static class wasp
         {
             public static readonly Num radius = 0.007, cruise = 3.0, burst = 6.0, accel = 14, burstAccel = 24, climb = 1.6, contactGap = 0.02,
@@ -30,7 +40,8 @@ namespace Sting.Core
         public static class resolve
         {
             public static readonly Num jabPain = 0.3, fullPain = 1.0, preciseRadius = 0.04, flailerRadius = 0.10, brushRadius = 0.08, coverRadius = 0.12,
-                contortRadius = 0.15, helperRange = 2.0, fleePanic = 0.8;
+                contortRadius = 0.15, helperRange = 2.0, fleePanic = 0.8, shakeRadius = 0.16, flailRadius = 0.2;
+            public const int flailDelay = 8;
             public const int contortExtraTicks = 12, helperNoticeTicks = 8, minConsequenceTicks = 11;
         }
         public static class panic

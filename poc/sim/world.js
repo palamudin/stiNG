@@ -37,7 +37,10 @@ export function dayWeather(seed, day) {
   const H = (i) => hash(seed, Domain.Weather, BigInt(day), BigInt(i));
   const rain = day > 0 && unit(H(0)) < T.weather.rainChance;
   const rainStart = 11 * 60 + rangeInt(H(1), 0, 6 * 60);
-  w = { day, rain, rainStart, rainEnd: rainStart + 60 + rangeInt(H(2), 0, 120), base: range(H(3), T.weather.baseMin, T.weather.baseMax) };
+  w = {
+    day, rain, rainStart, rainEnd: rainStart + 60 + rangeInt(H(2), 0, 120), base: range(H(3), T.weather.baseMin, T.weather.baseMax),
+    wind: range(H(4), T.wind.min, T.wind.max) * (rain ? T.wind.rainMul : 1), windDir: range(H(5), 0, TAU),
+  };
   weatherCache.set(key, w);
   return w;
 }
@@ -48,6 +51,13 @@ export function isRaining(seed, m) {
 export function tempAt(seed, m) {
   const w = dayWeather(seed, dayOf(m)), d = minuteOfDay(m);
   return w.base + T.weather.diurnalAmp * dsin(TAU * (d - 540) / 1440) - (isRaining(seed, m) ? 4 : 0);
+}
+// The wind at a minute, as a velocity (m/s) in the open at reference height: calm at night and dawn,
+// strongest mid-afternoon. Gusts and the drop near the ground are applied where the wind meets a wasp.
+export function windAt(seed, m) {
+  const w = dayWeather(seed, dayOf(m)), d = minuteOfDay(m);
+  const s = w.wind * (0.35 + 0.65 * Math.max(0, dsin(TAU * (d - 540) / 1440)));
+  return { x: s * dsin(w.windDir), z: s * dcos(w.windDir) };
 }
 export function isDaylight(m) { const d = minuteOfDay(m); return d >= T.time.dawn && d < T.time.dusk; }
 

@@ -52,6 +52,7 @@ namespace Sting.Core
                     Hints(w);
                     break;
                 case "webbed": WebStep(w, cmd, driven); break;
+                case "drowning": DrownStep(w, cmd, driven); break;
                 case "perched": PerchStep(w, cmd, edge, armed, driven); break;
                 case "fighting": if (driven && cmd.sting != 0 && !pressUsed) { pressUsed = true; w.fight.mash += T.rival.mash; } break;
                 case "attached": Attached(w, cmd, driven); break;
@@ -64,14 +65,47 @@ namespace Sting.Core
                     if (driven) { BallEscape(w, cmd.burst != 0 && w.ball.prevBurst == 0); if (w.ball != null) w.ball.prevBurst = cmd.burst; }
                     break;
             }
-            if (WaspById(w.id) != null) w.venom = Min(w.caste == "queen" ? T.queen.venomMul : 1, w.venom + T.venom.regenPerSec * T.DT);
+            if (WaspById(w.id) != null)
+            {
+                w.venom = Min(w.caste == "queen" ? T.queen.venomMul : 1, w.venom + T.venom.regenPerSec * T.DT);
+                BodyHeat(w);
+            }
+        }
+
+        /// Body temperature (GDD 7.1, T1-2): flight muscles heat a flying wasp, a resting one shivers to stay ready
+        /// (burning sugar), human skin and a bee ball set it outright. Below the flight temperature a wasp cannot take
+        /// off; in cold torpor it dies unless it finds warmth.
+        void BodyHeat(Wasp w)
+        {
+            Num air = Temperature, target;
+            bool flying = (w.state == "fly" || w.state == "stunned") && w.energy > 0 && w.bodyT >= T.cold.flyBody;
+            switch (flying ? "flying" : w.state)
+            {
+                case "flying": target = air + T.cold.flightHeat; break;
+                case "attached": case "perched": case "under": target = T.cold.skinTemp; break;
+                case "balled": target = w.ball != null ? w.ball.temp : air; break;
+                default:
+                {
+                    // shivering warms a resting wasp, but not in real cold
+                    bool shiver = w.energy > 0 && w.bodyT < T.cold.flyBody + 2 && air >= T.cold.shiverMinAir;
+                    if (shiver) w.energy = Max(0, w.energy - T.energy.cruisePerSec * T.DT * T.energy.hoverShare * T.cold.shiverCost);
+                    target = air + (shiver ? T.cold.shiverHeat : 0);
+                    break;
+                }
+            }
+            w.bodyT += (target - w.bodyT) * T.cold.rate;
+            if (w.bodyT < T.cold.torpor)
+            {
+                if (++w.chill > T.cold.lethalTicks) Die(w, "cold", null);
+            }
+            else if (w.chill > 0) w.chill--;
         }
 
         // ---------------- flight (GDD 7.2)
 
         void Flight(Wasp w, Cmd cmd)
         {
-            bool powered = w.state == "fly" && w.energy > 0 && CanFly();
+            bool powered = w.state == "fly" && w.energy > 0 && w.bodyT >= T.cold.flyBody;
             bool rain = Raining;
             bool burst = powered && cmd.burst != 0;
             Num dx, dy, dz;
@@ -96,6 +130,9 @@ namespace Sting.Core
                 if (w.caste == "queen") top *= T.queen.speedMul;
                 if (rain) top *= T.weather.rainSpeedMul;
                 dx *= top; dy *= top; dz *= top;
+                // the air moves: the wasp holds most of its course but drifts with the wind, less near the ground (GDD 5.3)
+                var wd = Drift(w);
+                dx += wd.x; dz += wd.z;
                 Num ex = dx - w.vx, ey = dy - w.vy, ez = dz - w.vz;
                 Num el = Sqrt(ex * ex + ey * ey + ez * ez), amax = (burst ? T.wasp.burstAccel : T.wasp.accel) * T.DT;
                 if (el > amax) { ex *= amax / el; ey *= amax / el; ez *= amax / el; }
@@ -111,7 +148,8 @@ namespace Sting.Core
             {
                 w.vy -= T.wasp.gravity * T.DT;
                 if (w.vy < -T.wasp.maxFall) w.vy = -T.wasp.maxFall;
-                w.vx *= 0.97; w.vz *= 0.97;
+                var wd = Drift(w);
+                w.vx = w.vx * 0.97 + wd.x * 0.03; w.vz = w.vz * 0.97 + wd.z * 0.03;
             }
             int n = T.wasp.substeps; Num h = T.DT / n; var p0 = w.P;
             for (int i = 0; i < n; i++)
@@ -127,6 +165,15 @@ namespace Sting.Core
                 if (++w.groundTicks > T.wasp.starveTicks) Die(w, "starved", null);
             }
             else w.groundTicks = 0;
+        }
+
+        /// The wind a wasp feels: the day's wind, gusting, falling off toward the ground, times the share it cannot hold against
+        V3 Drift(Wasp w)
+        {
+            var wind = Wind; int t = tick;
+            Num gust = 1 + T.wind.gust * DSin((Num)t * 0.031) * DSin((Num)t * 0.0137 + 1);
+            Num k = T.wind.drift * gust * Clamp01(w.y / T.wind.refHeight);
+            return new V3(wind.x * k, 0, wind.z * k);
         }
 
         bool NearCitronella(Wasp w)
@@ -488,15 +535,15 @@ namespace Sting.Core
                 {
                     var s = c.sugar[i];
                     if (s.kind == "can" && (lvl >= 2 || CanSpilled(key, i))) continue; // food covered (GDD 8.10) or knocked over
-                    if (FeedAt(w, driven, s.x, s.y, s.z, s.rate, s.kind, d2max)) return;
+                    if (FeedAt(w, driven, s.x, s.y, s.z, s.rate, s.kind, d2max, key)) return;
                 }
-                foreach (var s in SpillsIn(key)) if (FeedAt(w, driven, s.x, s.y, s.z, s.rate, s.kind, d2max)) return;
-                foreach (var s in FruitIn(rec)) if (FeedAt(w, driven, s.x, s.y, s.z, s.rate, s.kind, d2max)) return;
+                foreach (var s in SpillsIn(key)) if (FeedAt(w, driven, s.x, s.y, s.z, s.rate, s.kind, d2max, key)) return;
+                foreach (var s in FruitIn(rec)) if (FeedAt(w, driven, s.x, s.y, s.z, s.rate, s.kind, d2max, key)) return;
             }
             w.ai.atFood = null;
         }
 
-        bool FeedAt(Wasp w, bool driven, Num x, Num y, Num z, Num rate, string kind, Num d2max)
+        bool FeedAt(Wasp w, bool driven, Num x, Num y, Num z, Num rate, string kind, Num d2max, string key)
         {
             if (D2(w, new V3(x, y, z)) > d2max) return false;
             Num add = T.energy.refuelPerSec * rate * T.DT;
@@ -504,7 +551,33 @@ namespace Sting.Core
             else if (!driven) w.ai.cargo = Min(1, w.ai.cargo + add);
             if (driven) feeding = true;
             w.ai.atFood = kind;
+            // an open can is a trap of its own: a feeding wasp may slip in (GDD 7.5, T1-3)
+            if (kind == "can" && H32(w.id, tick, 53) < T.drown.chancePerSec * T.DT) FallIn(w, x, y, z, key, driven);
             return true;
+        }
+
+        void FallIn(Wasp w, Num x, Num y, Num z, string key, bool driven)
+        {
+            w.state = "drowning"; w.vx = w.vy = w.vz = 0;
+            w.x = x; w.y = y - 0.03; w.z = z;
+            w.drown = new Drown { key = key, until = tick + T.drown.ticks, progress = 0, prevBurst = 1 };
+            Emit("fellIn", ("id", w.id), ("driven", driven));
+        }
+
+        /// Mash burst to climb out before the drink takes you; AI wasps get a small chance each tick
+        void DrownStep(Wasp w, Cmd cmd, bool driven)
+        {
+            var d = w.drown;
+            if (driven) { if (cmd.burst != 0 && d.prevBurst == 0) d.progress += T.drown.escapePerPress; d.prevBurst = cmd.burst; }
+            else if (H32(w.id, tick, 57) < T.drown.aiEscape) d.progress = 1;
+            if (d.progress >= 1)
+            {
+                w.drown = null; w.state = "stunned"; w.stateTicks = 30; w.vy = 0.6; w.y += 0.04;
+                w.energy = Min(1, w.energy + 0.1); // a sticky, sugary escape
+                Emit("climbedOut", ("id", w.id));
+                return;
+            }
+            if (tick >= d.until) Die(w, "drowned in a drink", null);
         }
 
         void AddDeposited(string kind, Num amt)

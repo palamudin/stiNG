@@ -310,6 +310,86 @@ namespace Sting.Core.Tests
             Predators();
             People();
             SavesAndWorld();
+            Batch1();
+        }
+
+        // 26. Tier 1, batch 1: wind, cold, drowning, clothes by the weather, shaking and flailing
+        static void Batch1()
+        {
+            ulong seed = 1; DayWeather day0 = null;
+            for (; seed < 200; seed++) { var w = World.Weather(seed, 0); if (!w.rain && w.wind > 2.2) { day0 = w; break; } }
+            double At(long m) { var v = World.WindAt(seed, m); return Hypot(v.x, v.z); }
+            Ok(day0 != null && At(15 * 60) > At(7 * 60) * 1.5, $"wind is calm at dawn and stronger mid-afternoon ({At(7 * 60):0.00} -> {At(15 * 60):0.00} m/s)");
+            double Drift(Num y)
+            {
+                var s = new Sim(new Settings { seed = seed, birds = false });
+                var p0 = P(40, y, 40); var w = s.wasp; Place(w, p0);
+                RunS(s, 180);
+                var v = s.Wind; double n = Hypot(v.x, v.z);
+                return (D(w.x - p0.x) * D(v.x) + D(w.z - p0.z) * D(v.z)) / n;
+            }
+            double high = Drift(3), low = Drift(0.3);
+            Ok(high > 0.3 && low < high * 0.3, $"a hovering wasp drifts downwind, less near the ground ({high:0.00} m at 3 m, {low:0.00} m at 30 cm in 3 s)");
+
+            var s0 = new Sim(new Settings { seed = 1234, birds = false });
+            Ok(s0.wasp.bodyT >= T.cold.flyBody, $"a wasp leaves the nest warm ({D(s0.wasp.bodyT):0.0} °C)");
+            var spring = new Sim(new Settings { seed = 1234 }); spring.season.startMinute = spring.minute;
+            Ok(Abs((s0.Temperature - spring.Temperature) - T.weather.springChill) < 1e-9, $"spring is colder than summer by {D(T.weather.springChill)} °C");
+            Sim Chilly(Action<Sim> f) { var t = new Sim(new Settings { seed = 1234, birds = false }); t.tempOverride = 4; f(t); return t; }
+            var c1 = Chilly(t => Place(t.wasp, P(4, 1.5, 4)));
+            RunS(c1, 900);
+            Ok(c1.wasp.bodyT < T.cold.flyBody && c1.wasp.y < 0.05, $"at 4 °C a flying wasp cools, loses power and drops ({D(c1.wasp.bodyT):0.0} °C)");
+            var ev = RunS(c1, 9000);
+            var frozen = ev.FirstOrDefault(e => e.type == "waspDied" && (bool)e["driven"]);
+            Ok(Cause(frozen) == "cold", $"left on the cold ground it dies of cold ({Cause(frozen)})");
+            var c2 = Chilly(t =>
+            {
+                var hm = Seated(t, h => h.tr.style != Style.Freezer);
+                var fa = hm.sit.First(p => p.name == "ForearmR");
+                Place(t.wasp, Body.ToWorld(hm.F, P((fa.a.x + fa.b.x) / 2, (fa.a.y + fa.b.y) / 2 + fa.r + 0.008, (fa.a.z + fa.b.z) / 2)));
+            });
+            RunS(c2, 3);
+            bool perched = c2.wasp.state == "perched";
+            RunS(c2, 900, (sim, i) => { var w = sim.Driven(); if (w != null && w.state == "perched") w.perch.quietUntil = sim.tick + 10; return Idle(); });
+            Ok(perched && c2.Driven() != null && c2.wasp.bodyT > 25, $"perched on a person it stays warm in the cold ({D(c2.wasp.bodyT):0.0} °C)");
+
+            (bool fell, List<SimEvent> ev) IntoCan(bool mash)
+            {
+                var t = new Sim(new Settings { seed = 1234, birds = false });
+                var can = t.records.Get("0,0").content.sugar.First(x => x.kind == "can");
+                bool fell = false;
+                var e2 = RunS(t, 9000, (sim, i) =>
+                {
+                    var w = sim.Driven();
+                    if (w == null) return Idle();
+                    if (w.state == "drowning") { fell = true; return Idle(c => c.burst = mash ? i % 2 : 0); }
+                    if (!fell && (w.state == "fly" || w.state == "landed")) { Place(w, P(can.x, can.y + 0.01, can.z)); w.energy = 0.3; }
+                    return Idle();
+                });
+                return (fell, e2);
+            }
+            var a = IntoCan(false); var b = IntoCan(true);
+            var drowned = a.ev.FirstOrDefault(e => e.type == "waspDied" && (bool)e["driven"]);
+            Ok(a.fell && Cause(drowned) == "drowned in a drink", $"a wasp feeding at an open can slips in and drowns ({Cause(drowned)})");
+            Ok(b.fell && Count(b.ev, "climbedOut") >= 1, "mashing burst climbs out of the drink");
+
+            (double jacket, double tank) Share(Func<Num, bool> pred)
+            {
+                var days = new List<int>(); for (int d = 1; d < 200 && days.Count < 6; d++) if (pred(World.Weather(1234, d).@base)) days.Add(d);
+                int jacket = 0, tank = 0, n = 0;
+                foreach (var d in days) for (ulong i = 1; i <= 300; i++) { var c = Body.HumanClothing(1234, i, d); n++; if (c.top == Top.Jacket) jacket++; if (c.top == Top.Tank) tank++; }
+                return ((double)jacket / n, (double)tank / n);
+            }
+            var cool = Share(x => x < 20); var hot = Share(x => x >= 25);
+            Ok(cool.jacket > hot.jacket * 3 && hot.tank > cool.tank * 2, $"clothes follow the weather (jackets {cool.jacket:P0} cool vs {hot.jacket:P0} hot; tank tops {cool.tank:P0} vs {hot.tank:P0})");
+
+            Traits As(Num style) { var t = Body.HumanTraits(1234, 5); t.style = style; t.reactionTicks = 20; return t; }
+            Plan Pl(Num style, int zone) => Body.ResolveSting(new StingIn { contactTick = 0, contactPointBody = P(0, 1.6, 0), mode = "jab" }, As(style), Body.ZONES[zone], new StingCtx { companions = new List<Companion>() });
+            var sc = Pl(Style.Flailer, Zone.Scalp).swats[0]; var sp = Pl(Style.Precise, Zone.Scalp).swats[0];
+            Ok(sc.kind == SwatKind.Shake && !sc.kills && sp.kind == SwatKind.Slap, "stung on the scalp a flailer shakes the head (dislodges) where a precise person slaps");
+            Ok(Pl(Style.Runner, Zone.Face).swats[0].kind == SwatKind.Shake && Pl(Style.Brusher, Zone.Face).swats[0].kind == SwatKind.Brush, "stung on the face a runner shakes, a brusher brushes");
+            var r1 = Pl(Style.Runner, Zone.Forearms);
+            Ok(r1.flee && r1.swats.Count > 1 && r1.swats[1].kind == SwatKind.Brush && !r1.swats[1].kills && r1.swats[1].radius >= 0.2 && r1.swats[1].start > r1.swats[0].start, "a runner flails on the way out: a wide, late sweep that stuns");
         }
 
         // 14. predators, landing, walking, rivals

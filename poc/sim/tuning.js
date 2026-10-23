@@ -13,7 +13,17 @@ export const T = {
   weather: {
     rainChance: 0.2, baseMin: 17, baseMax: 29, diurnalAmp: 6, flyMinTemp: 11,
     rainSpeedMul: 0.35, rainDrainMul: 3,
+    // the season's own swing on top of the daily weather: cold springs for founding queens, cooling autumns
+    springChill: 6, autumnChill: 7,
   },
+  // Wind (GDD 5.3, T1-1): one direction and strength per day, calm at dawn, strongest mid-afternoon, gusting.
+  // A wasp flies in the moving air: drift is the share of the wind it cannot hold against, less near the ground.
+  wind: { min: 0, max: 3, rainMul: 1.4, drift: 0.35, refHeight: 3, gust: 0.4 },
+  // Body temperature (GDD 7.1, 10.2, T1-2). bio: Vespula warm their flight muscles before take-off and fly from
+  // about 18-20 °C thorax temperature; on human skin they sit near 31 °C; cold torpor below about 8 °C.
+  cold: { flightHeat: 12, shiverHeat: 8, shiverMinAir: 8, skinTemp: 31, nestTemp: 30, flyBody: 18, torpor: 8, rate: 1 / 300, lethalTicks: 5400, shiverCost: 0.5 },
+  // Drowning in a drink (GDD 7.5, T1-3): feeding at an open can, a wasp may slip in and has a few seconds to climb out
+  drown: { chancePerSec: 0.03, ticks: 240, escapePerPress: 0.3, aiEscape: 0.006 },
 
   wasp: {
     radius: 0.007, cruise: 3.0, burst: 6.0, accel: 14, burstAccel: 24,
@@ -31,6 +41,7 @@ export const T = {
     jabPain: 0.3, fullPain: 1.0,
     preciseRadius: 0.04, flailerRadius: 0.10, brushRadius: 0.08, coverRadius: 0.12, contortRadius: 0.15,
     contortExtraTicks: 12, helperNoticeTicks: 8, minConsequenceTicks: 11,
+    shakeRadius: 0.16, flailRadius: 0.2, flailDelay: 8, // GDD 8.5 (T1-5): head shakes dislodge; runners flail as they go
     helperRange: 2.0, fleePanic: 0.8,
   },
   panic: {

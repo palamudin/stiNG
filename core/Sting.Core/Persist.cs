@@ -86,7 +86,7 @@ namespace Sting.Core
 
     public static class Persist
     {
-        public const int SAVE_VERSION = 2; // 2: records which number build wrote it
+        public const int SAVE_VERSION = 3; // 2: records which number build wrote it; 3: body temperature and drowning
         const uint MAGIC = 0x474E4953; // "SING"
 
         // ---------------------------------------------------------------- one Io per type
@@ -128,7 +128,7 @@ namespace Sting.Core
         static Wasp Io(Archive a, Wasp w)
         {
             a.I(ref w.id); a.S(ref w.caste); a.D(ref w.x); a.D(ref w.y); a.D(ref w.z); a.D(ref w.vx); a.D(ref w.vy); a.D(ref w.vz); a.S(ref w.state);
-            a.D(ref w.yaw); a.D(ref w.pitch); a.D(ref w.energy); a.D(ref w.venom); a.I(ref w.stateTicks);
+            a.D(ref w.yaw); a.D(ref w.pitch); a.D(ref w.energy); a.D(ref w.venom); a.D(ref w.bodyT); a.I(ref w.chill); a.I(ref w.stateTicks);
             if (a.Opt(ref w.attach)) { var t = w.attach; a.S(ref t.hex); a.S(ref t.posture); a.V(ref t.local); a.V(ref t.n); a.I(ref t.start); a.B(ref t.deepened); a.I(ref t.zone); }
             if (a.Opt(ref w.under))
             {
@@ -141,6 +141,7 @@ namespace Sting.Core
             if (a.Opt(ref w.carry)) { var c = w.carry; a.S(ref c.kind); a.S(ref c.what); a.D(ref c.amount); a.B(ref c.poison); }
             a.I(ref w.groundTicks); a.I(ref w.chew); a.S(ref w.role); a.S(ref w.colony);
             if (a.Opt(ref w.web)) { var b = w.web; a.S(ref b.key); a.I(ref b.i); a.D(ref b.progress); a.D(ref b.prevBurst); a.I(ref b.start); a.D(ref b.spiderAt); }
+            if (a.Opt(ref w.drown)) { var d = w.drown; a.S(ref d.key); a.I(ref d.until); a.D(ref d.progress); a.D(ref d.prevBurst); }
             if (a.Opt(ref w.fight))
             {
                 var f = w.fight; a.I(ref f.other); a.B(ref f.remote); a.B(ref f.starter); a.I(ref f.peer);

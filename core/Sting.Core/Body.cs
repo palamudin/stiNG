@@ -11,8 +11,8 @@ namespace Sting.Core
             LowerBack = 8, Chest = 9, Belly = 10, Groin = 11, Buttocks = 12, UpperArms = 13, Forearms = 14, Shins = 15, Thighs = 16;
         public static readonly string[] Name = { "Scalp", "Face", "Ears", "NeckFront", "NeckBack", "Shoulders", "UpperBack", "Acnestis", "LowerBack", "Chest", "Belly", "Groin", "Buttocks", "UpperArms", "Forearms", "Shins", "Thighs" };
     }
-    public static class Policy { public const int Slap = 0, BrushOrShake = 1, Brush = 2, Contort = 3, CoverSwipe = 4, SlapOppositeHand = 5; }
-    public static class SwatKind { public const int Slap = 0, Brush = 1, Cover = 2, Contort = 3, Compress = 4, Spray = 5; }
+    public static class Policy { public const int Slap = 0, BrushOrShake = 1, Brush = 2, Contort = 3, CoverSwipe = 4, SlapOppositeHand = 5, SlapOrShake = 6; }
+    public static class SwatKind { public const int Slap = 0, Brush = 1, Cover = 2, Contort = 3, Compress = 4, Spray = 5, Shake = 6; }
     public static class Style { public const int Precise = 0, Flailer = 1, Brusher = 2, Freezer = 3, Runner = 4; }
     public static class Top { public const int TShirt = 0, Tank = 1, Jacket = 2, Suit = 3; }
     public static class Bottom { public const int Jeans = 0, Shorts = 1, Skirt = 2, Suit = 3; }
@@ -48,7 +48,7 @@ namespace Sting.Core
         static ZoneDef Z(Num @base, Num back, Num girth, Num stiff, Num sens, int policy, bool helper, Num extra = default) =>
             new ZoneDef { @base = @base, back = back, girth = girth, stiff = stiff, sens = sens, policy = policy, helper = helper, extra = extra };
         public static readonly ZoneDef[] ZONES = {
-            Z(0.90, 0.2, 0.0, 0.3, 0.9, Policy.Slap, true),
+            Z(0.90, 0.2, 0.0, 0.3, 0.9, Policy.SlapOrShake, true),
             Z(1.00, 0.0, 0.0, 0.0, 1.6, Policy.BrushOrShake, false),
             Z(0.95, 0.1, 0.0, 0.2, 1.2, Policy.Brush, true),
             Z(0.95, 0.1, 0.2, 0.3, 1.2, Policy.Slap, true),
@@ -89,12 +89,16 @@ namespace Sting.Core
             };
         }
 
+        /// The day's clothes, by the day's weather (GDD 8.8, T1-4)
         public static Clothing HumanClothing(ulong seed, ulong id, long day = 0)
         {
             int a = RangeInt(Hash(seed, Domain.Clothing, id, U64(day), 0), 0, 100);
             int b = RangeInt(Hash(seed, Domain.Clothing, id, U64(day), 1), 0, 100);
-            int top = a < 15 ? Top.Jacket : a < 45 ? Top.Tank : Top.TShirt;
-            int bottom = b < 40 ? Bottom.Jeans : b < 75 ? Bottom.Shorts : Bottom.Skirt;
+            Num bse = World.Weather(seed, day).@base; bool hot = bse >= 25, cool = bse < 20;
+            int jacket = cool ? 35 : hot ? 3 : 12, tank = jacket + (hot ? 50 : cool ? 15 : 30);
+            int jeans = cool ? 65 : hot ? 15 : 40, shorts = jeans + (hot ? 55 : cool ? 20 : 35);
+            int top = a < jacket ? Top.Jacket : a < tank ? Top.Tank : Top.TShirt;
+            int bottom = b < jeans ? Bottom.Jeans : b < shorts ? Bottom.Shorts : Bottom.Skirt;
             return new Clothing { top = top, bottom = bottom, stiffness = top == Top.Jacket ? 0.3 : 0 };
         }
         public static Clothing SuitClothing(bool taped) => new Clothing { top = Top.Suit, bottom = Bottom.Suit, stiffness = 0.35, collarTaped = taped };
@@ -206,12 +210,15 @@ namespace Sting.Core
         public static V3 ToLocal(Frame hm, V3 w) { Num dx = w.x - hm.x, dz = w.z - hm.z; return new V3(dx * hm.fz - dz * hm.fx, w.y, dx * hm.fx + dz * hm.fz); }
         public static V3 DirToWorld(Frame hm, V3 d) => new V3(hm.fz * d.x + hm.fx * d.z, d.y, -hm.fx * d.x + hm.fz * d.z);
 
-        static int KindFor(int policy, Num reach)
+        /// Flailers and runners shake their head where others brush or slap it (GDD 8.5)
+        static bool Shaker(Num style) => style == Style.Flailer || style == Style.Runner;
+        static int KindFor(int policy, Num reach, Num style)
         {
             if (reach < T.reach.minReachToSwat) return SwatKind.Contort;
             switch (policy)
             {
-                case Policy.BrushOrShake:
+                case Policy.BrushOrShake: return Shaker(style) ? SwatKind.Shake : SwatKind.Brush;
+                case Policy.SlapOrShake: return Shaker(style) ? SwatKind.Shake : SwatKind.Slap;
                 case Policy.Brush: return SwatKind.Brush;
                 case Policy.CoverSwipe: return SwatKind.Cover;
                 case Policy.Contort: return SwatKind.Contort;
@@ -224,6 +231,7 @@ namespace Sting.Core
             if (k == SwatKind.Brush) return T.resolve.brushRadius;
             if (k == SwatKind.Cover) return T.resolve.coverRadius;
             if (k == SwatKind.Contort) return T.resolve.contortRadius;
+            if (k == SwatKind.Shake) return T.resolve.shakeRadius;
             Num b = style == Style.Precise ? T.resolve.preciseRadius : T.resolve.flailerRadius;
             return b * (1 + (1 - accuracy) * 0.5) * (1 + (1 - reach) * 0.5);
         }
@@ -232,7 +240,7 @@ namespace Sting.Core
         {
             if (ZoneCover(clothing, zone) == 2) return -1;
             if (h.style == Style.Freezer) return -2;
-            return KindFor(ZONES[zone].policy, SelfReach(ZONES[zone], h, clothing.stiffness));
+            return KindFor(ZONES[zone].policy, SelfReach(ZONES[zone], h, clothing.stiffness), h.style);
         }
 
         /// Pure function. Same inputs, same plan on every machine. e.under: the wasp is under clothing (compression).
@@ -254,7 +262,7 @@ namespace Sting.Core
             if (h.style != Style.Freezer)
             {
                 Num reach = SelfReach(z, h, ctx.clothingStiffness);
-                int kind = KindFor(z.policy, reach);
+                int kind = KindFor(z.policy, reach, h.style);
                 Num delay = Rnd((h.reactionTicks + z.extra + (kind == SwatKind.Contort ? T.resolve.contortExtraTicks : 0)) * quick);
                 if (delay < T.resolve.minConsequenceTicks) delay = T.resolve.minConsequenceTicks;
                 plan.swats.Add(new Swat
@@ -262,6 +270,13 @@ namespace Sting.Core
                     actorId = h.id, kind = kind, start = e.contactTick + delay, window = WindowFor(kind), center = e.contactPointBody,
                     radius = RadiusFor(kind, h.style, h.accuracy, reach), kills = kind == SwatKind.Slap || kind == SwatKind.Cover, reach = reach,
                 });
+                // a runner flails on the way out: a wide, late sweep that stuns rather than kills (GDD 8.5)
+                if (h.style == Style.Runner && plan.flee)
+                    plan.swats.Add(new Swat
+                    {
+                        actorId = h.id, kind = SwatKind.Brush, start = e.contactTick + delay + T.resolve.flailDelay, window = 12,
+                        center = e.contactPointBody, radius = T.resolve.flailRadius, kills = false, reach = 1,
+                    });
             }
             if (z.helper && ctx.companions != null)
             {

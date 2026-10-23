@@ -2,15 +2,16 @@
 // and the space under clothing (GDD 8.1-8.8, A.5-A.7, A.10).
 import { Domain, hash, unit, range, rangeInt, clamp01, rnd } from './rng.js';
 import { T } from './tuning.js';
+import { dayWeather } from './world.js';
 
 export const Zone = {
   Scalp: 0, Face: 1, Ears: 2, NeckFront: 3, NeckBack: 4, Shoulders: 5, UpperBack: 6, Acnestis: 7,
   LowerBack: 8, Chest: 9, Belly: 10, Groin: 11, Buttocks: 12, UpperArms: 13, Forearms: 14, Shins: 15, Thighs: 16,
 };
 export const ZoneName = Object.keys(Zone);
-export const Policy = { Slap: 0, BrushOrShake: 1, Brush: 2, Contort: 3, CoverSwipe: 4, SlapOppositeHand: 5 };
+export const Policy = { Slap: 0, BrushOrShake: 1, Brush: 2, Contort: 3, CoverSwipe: 4, SlapOppositeHand: 5, SlapOrShake: 6 };
 export const PolicyName = Object.keys(Policy);
-export const SwatKind = { Slap: 0, Brush: 1, Cover: 2, Contort: 3, Compress: 4, Spray: 5 };
+export const SwatKind = { Slap: 0, Brush: 1, Cover: 2, Contort: 3, Compress: 4, Spray: 5, Shake: 6 };
 export const SwatKindName = Object.keys(SwatKind);
 export const Style = { Precise: 0, Flailer: 1, Brusher: 2, Freezer: 3, Runner: 4 };
 export const StyleName = Object.keys(Style);
@@ -19,7 +20,7 @@ function Z(base, back, girth, stiff, sens, policy, helper, extra = 0) {
   return { base, back, girth, stiff, sens, policy, helper, extra };
 }
 export const ZONES = [
-  Z(0.90, 0.2, 0.0, 0.3, 0.9, Policy.Slap, true),             // Scalp
+  Z(0.90, 0.2, 0.0, 0.3, 0.9, Policy.SlapOrShake, true),      // Scalp
   Z(1.00, 0.0, 0.0, 0.0, 1.6, Policy.BrushOrShake, false),    // Face
   Z(0.95, 0.1, 0.0, 0.2, 1.2, Policy.Brush, true),            // Ears
   Z(0.95, 0.1, 0.2, 0.3, 1.2, Policy.Slap, true),             // NeckFront
@@ -76,11 +77,15 @@ export const Bottom = { Jeans: 0, Shorts: 1, Skirt: 2, Suit: 3 };
 export const TopName = ['T-shirt', 'Tank top', 'Jacket', 'Bee suit'];
 export const BottomName = ['Jeans', 'Shorts', 'Skirt', 'Bee suit'];
 
+// The day's clothes, by the day's weather (GDD 8.8, T1-4): jackets and jeans when it is cool, tank tops and shorts when hot
 export function humanClothing(seed, id, day = 0) {
   const a = rangeInt(hash(seed, Domain.Clothing, id, BigInt(day), 0n), 0, 100);
   const b = rangeInt(hash(seed, Domain.Clothing, id, BigInt(day), 1n), 0, 100);
-  const top = a < 15 ? Top.Jacket : a < 45 ? Top.Tank : Top.TShirt;
-  const bottom = b < 40 ? Bottom.Jeans : b < 75 ? Bottom.Shorts : Bottom.Skirt;
+  const base = dayWeather(seed, day).base, hot = base >= 25, cool = base < 20;
+  const jacket = cool ? 35 : hot ? 3 : 12, tank = jacket + (hot ? 50 : cool ? 15 : 30);
+  const jeans = cool ? 65 : hot ? 15 : 40, shorts = jeans + (hot ? 55 : cool ? 20 : 35);
+  const top = a < jacket ? Top.Jacket : a < tank ? Top.Tank : Top.TShirt;
+  const bottom = b < jeans ? Bottom.Jeans : b < shorts ? Bottom.Shorts : Bottom.Skirt;
   return { top, bottom, stiffness: top === Top.Jacket ? 0.3 : 0, topOff: false, collarTaped: false };
 }
 
@@ -200,10 +205,13 @@ export function dirToWorld(hm, d) {
 
 // ---------------------------------------------------------------- sting resolution (GDD 8.6, A.6)
 
-function kindFor(policy, reach) {
+// Flailers and runners shake their head where others brush or slap it (GDD 8.5)
+const shaker = (style) => style === Style.Flailer || style === Style.Runner;
+function kindFor(policy, reach, style) {
   if (reach < T.reach.minReachToSwat) return SwatKind.Contort;
   switch (policy) {
-    case Policy.BrushOrShake:
+    case Policy.BrushOrShake: return shaker(style) ? SwatKind.Shake : SwatKind.Brush;
+    case Policy.SlapOrShake: return shaker(style) ? SwatKind.Shake : SwatKind.Slap;
     case Policy.Brush: return SwatKind.Brush;
     case Policy.CoverSwipe: return SwatKind.Cover;
     case Policy.Contort: return SwatKind.Contort;
@@ -211,13 +219,14 @@ function kindFor(policy, reach) {
   }
 }
 export function windowFor(k) {
-  return k === SwatKind.Slap ? 4 : k === SwatKind.Brush ? 6 : k === SwatKind.Cover ? 8 : k === SwatKind.Compress ? 8 : 10;
+  return k === SwatKind.Slap ? 4 : k === SwatKind.Brush ? 6 : k === SwatKind.Cover ? 8 : k === SwatKind.Compress ? 8 : 10; // contort, shake: 10
 }
 function radiusFor(k, style, accuracy, reach) {
   const t = T.resolve;
   if (k === SwatKind.Brush) return t.brushRadius;
   if (k === SwatKind.Cover) return t.coverRadius;
   if (k === SwatKind.Contort) return t.contortRadius;
+  if (k === SwatKind.Shake) return t.shakeRadius;
   const base = style === Style.Precise ? t.preciseRadius : t.flailerRadius;
   return base * (1 + (1 - accuracy) * 0.5) * (1 + (1 - reach) * 0.5);
 }
@@ -225,7 +234,7 @@ function radiusFor(k, style, accuracy, reach) {
 export function predictedKind(zone, h, clothing) {
   if (zoneCover(clothing, zone) === 2) return -1;
   if (h.style === Style.Freezer) return -2;
-  return kindFor(ZONES[zone].policy, selfReach(ZONES[zone], h, clothing.stiffness));
+  return kindFor(ZONES[zone].policy, selfReach(ZONES[zone], h, clothing.stiffness), h.style);
 }
 
 // Pure function. Same inputs -> same plan on every machine.
@@ -252,7 +261,7 @@ export function resolveSting(e, h, z, ctx) {
   }
   if (h.style !== Style.Freezer) {
     const reach = selfReach(z, h, ctx.clothingStiffness);
-    const kind = kindFor(z.policy, reach);
+    const kind = kindFor(z.policy, reach, h.style);
     let delay = rnd((h.reactionTicks + z.extra + (kind === SwatKind.Contort ? t.contortExtraTicks : 0)) * quick);
     if (delay < t.minConsequenceTicks) delay = t.minConsequenceTicks;
     plan.swats.push({
@@ -260,6 +269,13 @@ export function resolveSting(e, h, z, ctx) {
       center: e.contactPointBody, radius: radiusFor(kind, h.style, h.accuracy, reach),
       kills: kind === SwatKind.Slap || kind === SwatKind.Cover, reach,
     });
+    // a runner flails on the way out: a wide, late sweep that stuns rather than kills (GDD 8.5)
+    if (h.style === Style.Runner && plan.flee) {
+      plan.swats.push({
+        actorId: h.id, kind: SwatKind.Brush, start: e.contactTick + delay + t.flailDelay, window: 12,
+        center: e.contactPointBody, radius: t.flailRadius, kills: false, reach: 1,
+      });
+    }
   }
   if (z.helper && ctx.companions) {
     for (const c of ctx.companions) {

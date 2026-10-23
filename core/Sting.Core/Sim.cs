@@ -157,7 +157,24 @@ namespace Sting.Core
             int after = EscLevel(k);
             if (after != before) Emit("escalation", ("key", k), ("level", after));
         }
-        public Num Temperature => TempAt(seed, minute);
+        /// The day's weather plus the season's swing: cold springs for founding queens, cooling autumns (GDD 5.3)
+        long tcMinute = long.MinValue; Num tcStart, tcVal;
+        /// Debug and test hook: force the air temperature; null follows the weather and the season
+        public Num? tempOverride;
+        public Num Temperature
+        {
+            get
+            {
+                if (tempOverride.HasValue) return tempOverride.Value;
+                if (tcMinute == minute && tcStart == season.startMinute) return tcVal; // asked by every wasp every tick
+                Num f = SeasonFrac;
+                tcVal = TempAt(seed, minute) - T.weather.springChill * Clamp01((0.25 - f) / 0.25) - T.weather.autumnChill * Clamp01((f - 0.8) / 0.2);
+                tcMinute = minute; tcStart = season.startMinute;
+                return tcVal;
+            }
+        }
+        long wcMinute = long.MinValue; V3 wcVal;
+        public V3 Wind { get { if (wcMinute != minute) { wcVal = WindAt(seed, minute); wcMinute = minute; } return wcVal; } }
         /// Debug and test hook: force rain on (true) or off (false); null follows the weather
         public bool? rainOverride;
         public bool Raining => rainOverride ?? IsRaining(seed, minute);
@@ -459,7 +476,7 @@ namespace Sting.Core
         {
             var f = new Fnv();
             f.F(tick); f.F(clockOffset); f.F(drivenId);
-            foreach (var w in wasps) { f.F(w.id); f.F(w.x); f.F(w.y); f.F(w.z); f.F(w.vx); f.F(w.vy); f.F(w.vz); f.F(w.energy); f.F(w.venom); }
+            foreach (var w in wasps) { f.F(w.id); f.F(w.x); f.F(w.y); f.F(w.z); f.F(w.vx); f.F(w.vy); f.F(w.vz); f.F(w.energy); f.F(w.venom); f.F(w.bodyT); }
             var c = colony;
             f.F(c.adults); f.F(c.eggs); f.F(c.larvae); f.F(c.pupae); f.F(c.cells); f.F(c.protein); f.F(c.sugar); f.F(c.pulp); f.F(c.deficit);
             f.F(c.rEggs); f.F(c.rLarvae); f.F(c.rPupae); f.F(c.gynes); f.F(c.mated); f.F(season.n); f.F(lineage);

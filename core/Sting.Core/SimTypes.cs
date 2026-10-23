@@ -25,6 +25,7 @@ namespace Sting.Core
     public sealed class UnderMove { public int to, t; }
     public sealed class Under { public string hex, posture, key; public int node, sel, entered; public UnderMove move; public Num nextPress; public bool mxHeld, mzHeld; }
     public sealed class Ball { public Num temp, progress, prevBurst, bees; }
+    public sealed class Drown { public string key; public int until; public Num progress, prevBurst; }
     public sealed class WebHold { public string key; public int i; public Num progress, prevBurst; public int start; public Num spiderAt; }
     public sealed class Fight
     {
@@ -51,11 +52,11 @@ namespace Sting.Core
 
     public sealed class Wasp : WaspBase
     {
-        public Num yaw, pitch, energy = 1, venom = 1;
+        public Num yaw, pitch, energy = 1, venom = 1, bodyT = T.cold.nestTemp; public int chill;
         public int stateTicks;
         public Attach attach; public Under under; public Ball ball; public Num born;
         public Carry carry; public int groundTicks, chew; public string role = "sugar", colony = "own";
-        public WebHold web; public Fight fight; public Ai ai = new Ai(); public Contact contact; public Perch perch;
+        public WebHold web; public Drown drown; public Fight fight; public Ai ai = new Ai(); public Contact contact; public Perch perch;
         public bool walking; public Num fightReqUntil;
         public Wasp Ghost() { var g = (Wasp)MemberwiseClone(); g.state = "dead"; return g; }
     }

@@ -1091,8 +1091,8 @@ namespace Sting.Core
 
         void ColonyTick()
         {
-            if (extinct) return; // the line is over: nothing left to tick
-            MuniTick();
+            MuniTick(); // the town's campaign runs on whether or not any colony is left
+            if (extinct) return; // the line is over: no colony left to tick
             var col = colony;
             bool daylight = IsDaylight(minute) && !Raining && CanFly();
             Num frac = SeasonFrac;

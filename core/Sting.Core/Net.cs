@@ -13,7 +13,7 @@ namespace Sting.Core
     // Positions are chunk-relative, 16 bits per axis (1 mm horizontally, 0.6 mm vertically); velocity 8 bits per axis.
     public static class Wire
     {
-        static readonly string[] STATES = { "fly", "stunned", "attached", "under", "chewing", "trapped", "balled", "landed", "webbed", "fighting", "dead", "perched" };
+        static readonly string[] STATES = { "fly", "stunned", "attached", "under", "chewing", "trapped", "balled", "landed", "webbed", "fighting", "dead", "perched", "drowning" };
         static readonly string[] CARRY = { null, "fly", "caterpillar", "bee", "pulp", "larva" };
         static readonly Num CS = T.chunk.size, YMAX = 40, VMAX = 8;
         public const int BYTES_PER_WASP = 19;

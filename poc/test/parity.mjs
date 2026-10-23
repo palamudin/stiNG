@@ -1,7 +1,7 @@
 // Writes core/fixtures/parity.txt: digests of the JS reference that the C# port (core/) must reproduce bit for bit.
 // Each digest is FNV-1a over the IEEE-754 bytes of numbers in a fixed order. Run: node test/parity.mjs
 import { writeFileSync } from 'node:fs';
-import { generateChunk, dayWeather, humanWindow, flyPos, beePos, birdPos, dragonPos, makeNest, shedSites } from '../sim/world.js';
+import { generateChunk, dayWeather, windAt, humanWindow, flyPos, beePos, birdPos, dragonPos, makeNest, shedSites } from '../sim/world.js';
 import { hash, Domain, u64, datan2, dsin, h32 } from '../sim/rng.js';
 import { newColony, colonyStep, destroyNest, colonyFinished, seasonPhase, sugarCap, proteinCap } from '../sim/colony.js';
 import { Sim } from '../sim/sim.js';
@@ -58,7 +58,8 @@ for (const seed of seeds) {
 // weather and schedules
 for (const seed of seeds) {
   const d = Digest();
-  for (let day = 0; day < 60; day++) { const w = dayWeather(seed, day); d.f(w.rain); d.f(w.rainStart); d.f(w.rainEnd); d.f(w.base); }
+  for (let day = 0; day < 60; day++) { const w = dayWeather(seed, day); d.f(w.rain); d.f(w.rainStart); d.f(w.rainEnd); d.f(w.base); d.f(w.wind); d.f(w.windDir); }
+  for (let m = 0; m < 1440 * 4; m += 37) { const v = windAt(seed, m); d.f(v.x); d.f(v.z); }
   for (let i = 0; i < 40; i++) {
     const id = hash(seed, Domain.WorldGen, u64(i), 3n, 1000n);
     for (let day = 0; day < 20; day++) { const w = humanWindow(seed, id, day, 1 - (i % 3) * 0.15); d.f(w ? 1 : 0); if (w) { d.f(w.arrive); d.f(w.leave); } }
