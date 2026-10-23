@@ -12,6 +12,7 @@ An open-world, multiplayer wasp colony simulator. You run a colony through its y
 |---|---|
 | [`docs/STING_GDD.md`](docs/STING_GDD.md) | The game design document: pillars, simulation architecture, world, colony, wasp, humans, bees, multiplayer, Unity contract, decisions, open questions, and findings from the PoC |
 | [`poc/`](poc/) | The three.js proof of concept. A deterministic simulation core (`poc/sim/`) that owns every outcome, and a presentation layer (`poc/game.js`) that only draws. See [`poc/POC.md`](poc/POC.md) for the feature list and what has been verified |
+| [`core/`](core/) | `Sting.Core`, the simulation in C# for the Unity port: the whole PoC sim, network lab and saves, bit-identical to the JS reference (22 parity digests). Doubles for now; Fix64 next |
 | [`protocode/`](protocode/) | C# protocode for the Unity port (`Sting.Core`): Fix64, the counter-based RNG, human traits, the sting resolver, reach, chunk storage and authority, colony economy. Compiles with zero packages |
 | [`art/keyart/`](art/keyart/) | Key art sources: the stare, the standoff, the logo lockup and a Steam capsule (Design canvas `.dc.html` files) |
 
@@ -36,6 +37,13 @@ node test/sim.test.mjs   # simulation: determinism, replay, colony, humans, swat
 node test/net.test.mjs   # two peers over simulated links: agreement on every human, late join, rival fights
 ```
 
+**C# core** (.NET 8 SDK):
+
+```sh
+cd poc && node test/parity.mjs                          # writes core/fixtures/parity.txt from the JS reference
+cd core/Sting.Core.Tests && dotnet run -c Release       # must reproduce every digest bit for bit
+```
+
 **C# protocode** (.NET 8 SDK):
 
 ```sh
@@ -43,7 +51,7 @@ cd protocode/check  && dotnet run -c Release   # Fix64 arithmetic, resolver inva
 cd protocode/parity && dotnet run -c Release   # must match poc/test/cs_parity.txt bit for bit
 ```
 
-`protocode/nuget.config` clears every package source, so a build cannot pull anything from the network.
+`core/nuget.config` and `protocode/nuget.config` clear every package source, so a build cannot pull anything from the network.
 
 ## Ground rules
 

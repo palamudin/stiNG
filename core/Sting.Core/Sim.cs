@@ -89,6 +89,16 @@ namespace Sting.Core
             UpdateChunks(true);
         }
 
+        /// After a join from a snapshot: a fresh driven wasp of this peer's own colony, and an interest change to publish
+        public void JoinSpawn()
+        {
+            var w = SpawnWasp(true);
+            drivenId = w.id;
+            activeKey = "";
+            UpdateChunks();
+            DrainEvents();
+        }
+
         // ---------------------------------------------------------------- basics
 
         public void Emit(string type, params (string k, object v)[] data)

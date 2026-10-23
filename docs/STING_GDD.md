@@ -992,6 +992,16 @@ The choice is the founding queen's main decision: a burrow grows the biggest col
 
 A dragonfly patrols a low loop (0.6–1.4 m) in about half the chunks. It darts at a wasp flying in the open below 2.5 m within 2.5 m of it, at 7.5 m/s (faster than a wasp's 6 m/s burst) but with only 14 m/s² of steering, so a hard turn breaks the chase; landed, perched or canopy-covered wasps are ignored. After 1.5 s it gives up and cools off for 7 s. Birds and dragonflies run through one hunter routine with different parameters, so together they make the air layered: high and open belongs to birds, low and open to dragonflies, and cover is safe from both.
 
+### 18.18 The C# core, ported (D-11, R-04)
+
+`core/Sting.Core` is the whole PoC simulation in C#: world generation, weather, bodies and the sting resolver, colony economy, the `Sim` itself (wasps, humans, bees, hunters, rivals, the exterminator, pest control, the yearly cycle, the AI), the network lab with its wire format and plausibility checks, and saves. It is bit-identical to the JS reference: `core/fixtures/parity.txt` holds 22 digests written by `poc/test/parity.mjs` (world, bodies, colony, five whole-game scenarios, a save and restore mid-run, two-peer labs on good and awful links, a late joiner, a cheater, and a three-peer mesh where the host rules), and the C# runner reproduces every one. The scenario digests cover every sim event and the state and human hashes once a second, so a single differing bit anywhere fails the run.
+
+Two rules made the port mechanical: the JS sim may use only operations that are exact in IEEE doubles (its own sine, arctangent and rounding, no `Math.round`, `hypot` or `atan2`), and every map whose order can change a result is an insertion-ordered map in C# (`OrderedMap`), every sort is stable, every string sort is ordinal.
+
+The port keeps doubles so that parity with the PoC can be proven first. R-04 still stands for Unity: the swap to `Fix64` is the next step, done behind the same parity harness so that what changes is only rounding, measured against the double reference rather than guessed. The C# save is binary and exact (each double as its 8 bytes); it is not interchangeable with the PoC's JSON saves, and does not need to be.
+
+Porting found two bugs, fixed in both: a line that went extinct kept ticking its colony and could come back the next autumn, and alarm pheromone kept relaunching attacks on a human who had gone home.
+
 ---
 
 ## Appendix A — Protocode

@@ -4,21 +4,23 @@ The tier-0 slice of the GDD, built in the browser so it can move to Unity. Same 
 
 | Path | Role | Unity counterpart |
 |---|---|---|
-| `sim/rng.js` | Counter-based RNG (bit-identical to the C# protocode), own sin/cos, hashes | `Sting.Core/Rng.cs`, `Fix64.cs` |
-| `sim/tuning.js` | Every tuning number, with biology notes | data files (GDD 13) |
-| `sim/body.js` | Traits, clothing, body capsules, 17 zones, reach, `resolveSting`, garment graphs | `Sting.Core/Humans/*` |
-| `sim/world.js` | Chunk generation, clock, weather, schedules, pure motion of flies and bees | `Sting.Core/World/*` |
-| `sim/colony.js` | Colony economy and the yearly cycle | `Sting.Core/Colony/*` |
-| `sim/sim.js` | The sim: wasps, humans, swats, bees, escalation, exterminator, networking | `Sting.Core/Sim.cs` |
-| `sim/net.js` | Simulated link, the two-peer lab and an N-peer mesh lab | `Sting.Net` + transport |
-| `sim/persist.js` | Exact snapshot and restore, replay from a snapshot, joining a world in progress | `Sting.Core/Persistence` |
-| `sim/bots.js` | Scripted pilots that produce ordinary input commands | test harness |
+| `sim/rng.js` | Counter-based RNG, own sin/cos/atan2 and rounding, hashes | `core/Sting.Core/Rng.cs` (ported) |
+| `sim/tuning.js` | Every tuning number, with biology notes | `core/Sting.Core/Tuning.cs` (ported); data files later (GDD 13) |
+| `sim/body.js` | Traits, clothing, body capsules, 17 zones, reach, `resolveSting`, garment graphs | `core/Sting.Core/Body.cs` (ported) |
+| `sim/world.js` | Chunk generation, clock, weather, schedules, pure motion of flies and bees | `core/Sting.Core/World.cs` (ported) |
+| `sim/colony.js` | Colony economy and the yearly cycle | `core/Sting.Core/Colony.cs` (ported) |
+| `sim/sim.js` | The sim: wasps, humans, swats, bees, escalation, exterminator, networking | `core/Sting.Core/Sim*.cs` (ported) |
+| `sim/net.js` | Simulated link, the two-peer lab and an N-peer mesh lab | `core/Sting.Core/Net.cs` (ported); real transport later |
+| `sim/persist.js` | Exact snapshot and restore, replay from a snapshot, joining a world in progress | `core/Sting.Core/Persist.cs` (ported, binary) |
+| `sim/bots.js` | Scripted pilots that produce ordinary input commands | `core/Sting.Core/Bots.cs` (ported) |
 | `game.js` | three.js rendering, animation, camera, input, HUD, sound | Unity scene, Animator, UI |
 | `index.html` | Page shell, HUD markup and styles | UI Toolkit |
 | `test/sim.test.mjs` | 106 headless sim checks | `Sting.Core.Tests` |
 | `test/net.test.mjs` | 31 network checks | `Sting.Net.Tests` |
 
-Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 18+, no packages). Play locally with `node serve.mjs`.
+| `test/parity.mjs` | Writes `core/fixtures/parity.txt`: 22 digests the C# core must reproduce bit for bit | `core/Sting.Core.Tests` |
+
+Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 18+, no packages). Play locally with `node serve.mjs`. Any change to `sim/` that changes behaviour must be made in `core/` too: rerun `node test/parity.mjs`, then `dotnet run -c Release` in `core/Sting.Core.Tests`.
 
 ## Feature list
 

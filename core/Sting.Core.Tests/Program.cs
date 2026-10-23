@@ -24,6 +24,7 @@ namespace Sting.Core.Tests
             BodyParity();
             ColonyParity();
             SimParity();
+            NetParity();
             Extra();
             int fail = 0, pass = 0, missing = 0;
             foreach (var (name, hex) in want)

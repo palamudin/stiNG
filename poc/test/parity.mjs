@@ -5,6 +5,8 @@ import { generateChunk, dayWeather, humanWindow, flyPos, beePos, birdPos, dragon
 import { hash, Domain, u64, datan2, dsin, h32 } from '../sim/rng.js';
 import { newColony, colonyStep, destroyNest, colonyFinished, seasonPhase, sugarCap, proteinCap } from '../sim/colony.js';
 import { Sim } from '../sim/sim.js';
+import { NetLab, MeshLab } from '../sim/net.js';
+import { snapshot, restore } from '../sim/persist.js';
 import { stingBot, idleCmd } from '../sim/bots.js';
 import { humanTraits, humanClothing, suitClothing, bodyParts, segClosest, classify, toWorld, toLocal, resolveSting, ZONES, selfReach, zoneCover, predictedKind, garmentGraph } from '../sim/body.js';
 
@@ -157,6 +159,55 @@ for (const sc of SIM_SCENARIOS) {
   }
   d.s(sim.stateHash()); d.s(sim.humanHash());
   out(`sim.${sc.name}`, d.hex());
+}
+
+// a world saved and restored mid-run carries on exactly (the C# save format is its own; the state must match)
+{
+  const d = Digest();
+  let sim = new Sim({ seed: 1234, escalation: 3 }), bot = stingBot({ plan: 'full', rest: 50 });
+  for (let t = 0; t < 6000; t++) {
+    if (t === 3000) { sim = restore(snapshot(sim)); bot = stingBot({ plan: 'full', rest: 50 }); }
+    sim.step(bot(sim));
+    for (const e of sim.drainEvents()) { d.s(e.type); d.f(e.t); }
+    if (sim.tick % 60 === 0) { d.s(sim.stateHash()); d.s(sim.humanHash()); }
+  }
+  out('sim.restored', d.hex());
+}
+
+// networked labs: two peers over simulated links, a late joiner, a cheater, and a three-peer mesh with a host ruling
+export const NET_SCENARIOS = [
+  { name: 'good', link: 'good', ticks: 9000 },
+  { name: 'awful', link: 'awful', ticks: 6000 },
+  { name: 'join', link: 'good', ticks: 9000, joinAt: 3000 },
+  { name: 'cheat', link: 'good', ticks: 9000, cheat: true },
+];
+for (const sc of NET_SCENARIOS) {
+  const d = Digest(), lab = new NetLab({ seed: 1234 }, sc.link, {}, sc.joinAt || 0), botA = stingBot({ plan: 'jab', rest: 200 });
+  if (sc.cheat) {
+    const o = lab._out.bind(lab);
+    lab._out = (sim, link, dir) => { if (dir === 'ba' && sim.tick > 1200) for (const m of sim.outbox) if (m.type === 'sting') for (const sw of m.swats) sw.start += 1000; o(sim, link, dir); };
+  }
+  for (let i = 0; i < sc.ticks; i++) {
+    lab.step(botA(lab.a));
+    for (const e of lab.a.drainEvents()) { d.s(e.type); d.f(e.t); }
+    for (const e of lab.bEvents || []) { d.s(e.type); d.f(e.t); }
+    if (i % 60 === 0) {
+      d.f(lab.check() ? 1 : 0);
+      d.s(lab.a.stateHash()); if (lab.b) d.s(lab.b.stateHash());
+      d.f(lab.a.remote.size); const e = lab.remoteError(); d.f(e === null ? -1 : e);
+    }
+  }
+  out(`net.${sc.name}`, d.hex());
+}
+{
+  const d = Digest(), lab = new MeshLab({ seed: 1234 }, 3, 'bad'), botA = stingBot({ plan: 'jab', rest: 200 });
+  lab.tamper = (from, m, sim) => { if (from === 2 && sim.tick > 1500 && m.type === 'sting') for (const sw of m.swats) sw.start += 1000; };
+  for (let i = 0; i < 17400; i++) { // the host cuts the cheater off near tick 16656
+    lab.step(botA(lab.sims[0]));
+    for (const s of lab.sims) for (const e of s.drainEvents()) { d.s(e.type); d.f(e.t); }
+    if (i % 60 === 0) { d.f(lab.agree([0, 1]) ? 1 : 0); for (const s of lab.sims) { d.s(s.stateHash()); d.s(s.humanHash()); } }
+  }
+  out('net.mesh', d.hex());
 }
 
 writeFileSync(new URL('../../core/fixtures/parity.txt', import.meta.url), lines.join('\n') + '\n');

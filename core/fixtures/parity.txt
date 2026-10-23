@@ -14,3 +14,9 @@ sim.full 4d0d8780
 sim.idle7 3401a33a
 sim.season c2299191
 sim.hot ff096ba4
+sim.restored e9533383
+net.good 2a5d3411
+net.awful 869e30da
+net.join d9edacf5
+net.cheat 5762a08e
+net.mesh a32336c6

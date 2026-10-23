@@ -99,6 +99,20 @@ namespace Sting.Core
             if (swats != null) { e.swats = new List<Swat>(); foreach (var s in swats) e.swats.Add(s.Clone()); }
             return e;
         }
+        static double Z(double v) => v == 0 ? 0 : v; // -0 arrives as 0 (the JS lab serializes events as JSON)
+        static V3 Z(V3 v) => new V3(Z(v.x), Z(v.y), Z(v.z));
+        /// A copy as it arrives at another peer
+        public NetEv WireCopy()
+        {
+            var e = Copy();
+            e.panicGain = Z(e.panicGain); e.sx = Z(e.sx); e.sz = Z(e.sz); e.extra = Z(e.extra); e.radius = Z(e.radius);
+            e.x = Z(e.x); e.y = Z(e.y); e.z = Z(e.z); e.start = Z(e.start); e.end = Z(e.end); e.window = Z(e.window); e.center = Z(e.center);
+            e.venom = Z(e.venom); e.mash = Z(e.mash);
+            if (e.swats != null) foreach (var s in e.swats) { s.start = Z(s.start); s.window = Z(s.window); s.radius = Z(s.radius); s.reach = Z(s.reach); s.contactTick = Z(s.contactTick); s.center = Z(s.center); }
+            return e;
+        }
+        /// Rough size of the event as JSON, for the lab's bandwidth figures
+        public int ApproxJsonLength() => 64 + type.Length + (humanHex != null ? 32 : 0) + (key != null ? key.Length + 8 : 0) + (swats?.Count ?? 0) * 112 + 48;
     }
 
     public sealed class StateMsg : Msg { public List<RemoteWasp> wasps = new List<RemoteWasp>(); public StateMsg() { mk = "state"; } }
