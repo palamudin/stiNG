@@ -39,7 +39,7 @@ namespace Sting.Core
     }
     public sealed class Plan { public List<Swat> swats = new List<Swat>(); public double panicGain; public bool flee; }
     public sealed class StingIn { public double contactTick; public string mode = "jab"; public bool under; public V3 contactPointBody; }
-    public sealed class Companion { public ulong id; public double distance, reactionTicks; public double style; }
+    public sealed class Companion { public ulong id; public string hex; public double distance, reactionTicks; public double style; }
     public sealed class StingCtx { public double clothingStiffness, panic, stung, panicMul; public List<Companion> companions; }
     public sealed class GNode { public string key; public int zone; public bool opening; public V3 n, pos; public List<int> links = new List<int>(); }
 

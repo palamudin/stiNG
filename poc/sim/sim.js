@@ -2279,6 +2279,7 @@ export class Sim {
   // ---------------- colony tick (1 Hz)
 
   _colonyTick() {
+    if (this.extinct) return; // the line is over: nothing left to tick
     this._muniTick();
     const col = this.colony;
     const daylight = isDaylight(this.minute) && !this.raining && this.canFly();
@@ -2335,7 +2336,8 @@ export class Sim {
     // alarm pheromone pulls nearby workers into an attack
     if (ai.mode !== 'attack' && ai.mode !== 'evade') {
       for (const a of this.alarms) {
-        if (dist2(w, a) < T.alarm.radius * T.alarm.radius && this.humanByHex(a.killerHex)) { this._aiAttack(w, a.killerHex); break; }
+        const k = this.humanByHex(a.killerHex);
+        if (dist2(w, a) < T.alarm.radius * T.alarm.radius && k && k.state !== 'away') { this._aiAttack(w, a.killerHex); break; }
       }
     }
     const daylight = isDaylight(this.minute) && !this.raining;

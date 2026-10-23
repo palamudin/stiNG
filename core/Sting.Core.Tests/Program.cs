@@ -23,6 +23,7 @@ namespace Sting.Core.Tests
             WorldParity();
             BodyParity();
             ColonyParity();
+            SimParity();
             Extra();
             int fail = 0, pass = 0, missing = 0;
             foreach (var (name, hex) in want)

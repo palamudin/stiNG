@@ -9,3 +9,8 @@ bodies.1234 ff11d123
 bodies.7 669de839
 bodies.16045690984503098046 f04a242d
 colony 8d87e160
+sim.jab e157fabd
+sim.full 4d0d8780
+sim.idle7 3401a33a
+sim.season c2299191
+sim.hot ff096ba4

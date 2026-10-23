@@ -125,7 +125,7 @@ namespace Sting.Core
     /// World settings and modifiers (GDD 4.8)
     public sealed class Settings
     {
-        public ulong seed = 0;
+        public ulong seed = 1234;
         public double dayMinutes = 2, humanDensity = 1, beeAggression = 1, seasonDays = 40, reaction = 1, escalation = 1;
         public bool exterminator = true, birds = true, rivals = true, pestControl = true;
         public Settings Clone() => (Settings)MemberwiseClone();

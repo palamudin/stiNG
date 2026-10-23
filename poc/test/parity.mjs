@@ -4,6 +4,8 @@ import { writeFileSync } from 'node:fs';
 import { generateChunk, dayWeather, humanWindow, flyPos, beePos, birdPos, dragonPos, makeNest, shedSites } from '../sim/world.js';
 import { hash, Domain, u64, datan2, dsin, h32 } from '../sim/rng.js';
 import { newColony, colonyStep, destroyNest, colonyFinished, seasonPhase, sugarCap, proteinCap } from '../sim/colony.js';
+import { Sim } from '../sim/sim.js';
+import { stingBot, idleCmd } from '../sim/bots.js';
 import { humanTraits, humanClothing, suitClothing, bodyParts, segClosest, classify, toWorld, toLocal, resolveSting, ZONES, selfReach, zoneCover, predictedKind, garmentGraph } from '../sim/body.js';
 
 export function Digest() {
@@ -135,6 +137,26 @@ for (const seed of seeds) {
     destroyNest(c); dc(c);
   }
   out('colony', d.hex());
+}
+
+// whole simulations: input from scripted pilots, digests of the state and human hashes and every event type.
+// The C# runner (core/Sting.Core.Tests/SimParity.cs) builds the same scenarios.
+export const SIM_SCENARIOS = [
+  { name: 'jab', settings: { seed: 1234 }, ticks: 7200, bot: () => stingBot({ plan: 'jab' }) },
+  { name: 'full', settings: { seed: 1234 }, ticks: 7200, bot: () => stingBot({ plan: 'full', rest: 60 }) },
+  { name: 'idle7', settings: { seed: 7 }, ticks: 12000, bot: () => (sim) => idleCmd({ alloc: sim.tick < 4000 ? 0 : sim.tick < 8000 ? 2 : 4 }) },
+  { name: 'season', settings: { seed: 99, dayMinutes: 0.4, seasonDays: 10 }, ticks: 30000, bot: () => () => idleCmd() },
+  { name: 'hot', settings: { seed: 1234, escalation: 6, reaction: 1.5 }, ticks: 20000, bot: () => stingBot({ plan: 'full', pick: () => true, rest: 40 }) },
+];
+for (const sc of SIM_SCENARIOS) {
+  const d = Digest(), sim = new Sim(sc.settings), bot = sc.bot();
+  for (let t = 0; t < sc.ticks; t++) {
+    sim.step(bot(sim));
+    for (const e of sim.drainEvents()) { d.s(e.type); d.f(e.t); }
+    if (sim.tick % 60 === 0) { d.s(sim.stateHash()); d.s(sim.humanHash()); }
+  }
+  d.s(sim.stateHash()); d.s(sim.humanHash());
+  out(`sim.${sc.name}`, d.hex());
 }
 
 writeFileSync(new URL('../../core/fixtures/parity.txt', import.meta.url), lines.join('\n') + '\n');
