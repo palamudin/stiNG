@@ -4,7 +4,7 @@
 namespace Sting.Core
 {
     public sealed class AllocPreset { public string name; public Num sugar, protein, pulp; }
-    public sealed class SiteType { public string name; public Num maxCells, flood, exposure, discovery; }
+    public sealed class SiteType { public string name; public Num maxCells, flood, exposure, discovery, insulation, heat; }
 
     public static class T
     {
@@ -84,13 +84,21 @@ namespace Sting.Core
         public static class under { public const int moveTicks = 18, compressEvery = 25; public static readonly Num noticeMul = 2, compressRadius = 0.06, ripPanic = 0.92, panicMul = 1.5, openingRadius = 0.035; }
         public static class sites
         {
-            public static readonly SiteType trunk = new SiteType { name = "against a trunk", maxCells = 3500, flood = 0, exposure = 1, discovery = 1 };
-            public static readonly SiteType ground = new SiteType { name = "in an old burrow", maxCells = 5000, flood = 0.25, exposure = 0.4, discovery = 1.6 };
-            public static readonly SiteType branch = new SiteType { name = "hanging from a branch", maxCells = 1800, flood = 0, exposure = 2, discovery = 0.5 };
-            public static readonly SiteType wall = new SiteType { name = "in a shed wall", maxCells = 4000, flood = 0, exposure = 0.3, discovery = 1.2 };
-            public static readonly SiteType attic = new SiteType { name = "under a shed roof", maxCells = 6000, flood = 0, exposure = 0.2, discovery = 0.8 };
-            public static readonly Num rainMortality = 0.06; public const int holesPerChunk = 2;
-            public static SiteType Of(string site) => site switch { "ground" => ground, "branch" => branch, "wall" => wall, "attic" => attic, _ => trunk };
+            // insulation (T1-14): how much of the outside cold and heat reaches the brood; heat: extra °C under a sunny roof
+            public static readonly SiteType trunk = new SiteType { name = "against a trunk", maxCells = 3500, flood = 0, exposure = 1, discovery = 1, insulation = 0.4, heat = 0 };
+            public static readonly SiteType ground = new SiteType { name = "in an old burrow", maxCells = 5000, flood = 0.25, exposure = 0.4, discovery = 1.6, insulation = 0.8, heat = 0 };
+            public static readonly SiteType branch = new SiteType { name = "hanging from a branch", maxCells = 1800, flood = 0, exposure = 2, discovery = 0.5, insulation = 0.15, heat = 0 };
+            public static readonly SiteType wall = new SiteType { name = "in a shed wall", maxCells = 4000, flood = 0, exposure = 0.3, discovery = 1.2, insulation = 0.6, heat = 0 };
+            public static readonly SiteType attic = new SiteType { name = "under a shed roof", maxCells = 6000, flood = 0, exposure = 0.2, discovery = 0.8, insulation = 0.55, heat = 7 };
+            public static readonly SiteType hollow = new SiteType { name = "in a hollow tree", maxCells = 4500, flood = 0, exposure = 0.25, discovery = 0.7, insulation = 0.85, heat = 0 };
+            public static readonly Num rainMortality = 0.06, hollowShare = 0.3, hollowMinR = 0.22; public const int holesPerChunk = 2;
+            public static SiteType Of(string site) => site switch { "ground" => ground, "branch" => branch, "wall" => wall, "attic" => attic, "hollow" => hollow, _ => trunk };
+        }
+        /// Nest thermals (GDD 6.6, T1-14): brood develops at full speed between these temperatures; outside them it slows,
+        /// as much as the site lets the weather in
+        public static class thermal
+        {
+            public static readonly Num coldFrom = 18, coldSpan = 12, hotFrom = 31, hotSpan = 8, hotWeight = 0.7, minSpeed = 0.15;
         }
         public static class possess { public static readonly Num freeRange = 30; public const int relayTicks = 240; }
         public static class fruit { public static readonly Num treeShare = 0.3, startFrac = 0.55, rate = 0.8, spread = 1.6; public const int perTree = 6, rotDays = 6; }

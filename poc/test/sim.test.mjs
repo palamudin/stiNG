@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, CMD_FIELDS,
+  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, CMD_FIELDS,
 } from '../sim/index.js';
 
 let failures = 0;
@@ -762,6 +762,35 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   hm.mem[0].m -= T.memory.forgetMinutes * 0.75; const later = s.wary(hm);
   ok(away < here * 0.5 && later < here * 0.3, `wary where it happened (${here.toFixed(2)}), calmer 10 m away (${away.toFixed(2)}) and after a day and a half (${later.toFixed(2)})`);
   ok(hm.tr.style === 3 || plan(here).swats[0].start <= plan(away).swats[0].start, 'and the hand comes sooner where they were stung');
+}
+
+// 29. Hollow trees and nest thermals (GDD 6.6, T1-14)
+{
+  const spring = () => { const t = new Sim({ seed: 1234 }); t.colony.mated = 200; t.season.startMinute -= 0.71 * t.settings.seasonDays * 1440; run(t, 120); return t; };
+  const t = spring();
+  const hol = t.activeChunks.flatMap((r) => t.sitesIn(r).hollows);
+  ok(hol.length > 3 && hol.every((h) => h.t.r >= T.sites.hollowMinR && h.y > 0.6 && h.y < h.t.h), `some thick trees have a hollow in the trunk (${hol.length} near home)`);
+  const h = hol[0];
+  const out = Math.hypot(h.x - h.t.x, h.z - h.t.z);
+  place(t.wasp, { x: h.x + (h.x - h.t.x) / out * 0.05, y: h.y, z: h.z + (h.z - h.t.z) / out * 0.05 });
+  const ev = run(t, 2, (sim, i) => idle({ act: i === 1 ? Act.Interact : 0 }));
+  ok(count(ev, 'nestFounded') === 1 && t.nest.site === 'hollow' && t.colony.maxCells === T.sites.hollow.maxCells && Math.hypot(t.nest.entrance.x - h.x, t.nest.entrance.z - h.z) < 1e-9,
+    'E at a hollow founds a nest inside the tree');
+  // the same cold morning in different sites
+  const s = new Sim({ seed: 1234 });
+  let cold = -1, hot = -1;
+  for (let m = s.minute; m < s.minute + 1440 * 30 && (cold < 0 || hot < 0); m += 10) {
+    const a = s.airAt(m);
+    if (cold < 0 && a < 11) cold = m;
+    if (hot < 0 && a > 29 && !isRaining(s.seed, m)) hot = m;
+  }
+  const at = (site, m) => { s.nest.site = site; return s.broodSpeed(m); };
+  const sp = Object.fromEntries(['branch', 'trunk', 'ground', 'hollow'].map((k) => [k, at(k, cold)]));
+  ok(cold > 0 && sp.branch < sp.trunk && sp.trunk < sp.ground && sp.ground < sp.hollow && sp.hollow < 1,
+    `on a cold morning (${s.airAt(cold).toFixed(1)} °C) the brood slows most in an open nest and least in a hollow tree (branch ${sp.branch.toFixed(2)}, trunk ${sp.trunk.toFixed(2)}, burrow ${sp.ground.toFixed(2)}, hollow ${sp.hollow.toFixed(2)})`);
+  ok(hot > 0 && at('attic', hot) < at('wall', hot), `a sunny afternoon (${s.airAt(hot).toFixed(1)} °C) bakes an attic nest (${at('attic', hot).toFixed(2)} vs ${at('wall', hot).toFixed(2)} in a wall)`);
+  const grow = (k) => { const c = newColony(); for (let i = 0; i < 120 * 6; i++) { c.protein = 1e3; c.sugar = 1e3; colonyStep(c, 1 / 120, 0, false, 0.3, 1, k); } return c.stats.emerged; };
+  ok(grow(0.5) < grow(1) * 0.8, `a slowed brood brings fewer workers out (${grow(0.5).toFixed(0)} vs ${grow(1).toFixed(0)} in six days)`);
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');

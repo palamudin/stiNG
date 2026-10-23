@@ -570,7 +570,7 @@ namespace Sting.Core
             return null;
         }
 
-        public sealed class Sites { public List<V3> holes = new List<V3>(); public List<(V3 p, Tree t)> branches = new List<(V3, Tree)>(); }
+        public sealed class Sites { public List<V3> holes = new List<V3>(); public List<(V3 p, Tree t)> branches = new List<(V3, Tree)>(), hollows = new List<(V3, Tree)>(); }
 
         /// Candidate nest sites around the queen (GDD 6.6). Burrows and branch points are derived from the seed and the
         /// chunk's frozen content, so they cost nothing to store and every peer sees the same ones.
@@ -590,6 +590,14 @@ namespace Sting.Core
                 var t = trees[i];
                 Num a = HSeq(sd, rec.cx, rec.cz, i, 915) * 6.28318, d = t.cr * 0.55;
                 o.branches.Add((new V3(t.x + d * DCos(a), Max(1.8, t.h - t.cr * 0.7), t.z + d * DSin(a)), t));
+            }
+            // hollow trees (T1-14): some thick trunks have a hole a wasp can nest in
+            for (int i = 0; i < trees.Count; i++)
+            {
+                var t = trees[i];
+                if (t.r < T.sites.hollowMinR || HSeq(sd, rec.cx, rec.cz, i, 916) >= T.sites.hollowShare) continue;
+                Num a = HSeq(sd, rec.cx, rec.cz, i, 917) * 6.28318, y = Min(t.h - 0.5, 0.7 + HSeq(sd, rec.cx, rec.cz, i, 918) * 1.2);
+                o.hollows.Add((new V3(t.x + (t.r + 0.015) * DCos(a), y, t.z + (t.r + 0.015) * DSin(a)), t));
             }
             rec.sites = o;
             return o;
@@ -627,6 +635,7 @@ namespace Sting.Core
             {
                 if (!Near(rec, w.x, w.z)) continue;
                 var s = SitesIn(rec);
+                foreach (var (h, t) in s.hollows) if (D2(w, h) < 0.12 * 0.12) return new SiteHit { type = "hollow", x = h.x, y = h.y, z = h.z, t = t };
                 foreach (var h in s.holes) if (w.y < 0.3 && Sq(w.x - h.x) + Sq(w.z - h.z) < 0.12 * 0.12) return new SiteHit { type = "ground", x = h.x, z = h.z };
                 foreach (var (b, t) in s.branches) if (D2(w, b) < 0.15 * 0.15) return new SiteHit { type = "branch", x = b.x, y = b.y, z = b.z, t = t };
                 foreach (var sh in rec.content.sheds)
@@ -644,6 +653,7 @@ namespace Sting.Core
         {
             if (site.type == "ground") nest = MakeNest(site.x - 0.5, site.z, site.x, -0.25, site.z, NEST.r, "ground");
             else if (site.type == "wall" || site.type == "attic") nest = MakeNest(site.ix, site.iz, site.x, site.y, site.z, NEST.r, site.type);
+            else if (site.type == "hollow") nest = MakeNest(site.t.x, site.t.z, site.x, site.y, site.z, NEST.r, "hollow");
             else if (site.type == "branch") nest = MakeNest(site.t.x, site.t.z, site.x, site.y - NEST.r * 1.3, site.z, NEST.r, "branch");
             else
             {
@@ -1163,7 +1173,7 @@ namespace Sting.Core
                 colony.maxCells = T.sites.Of(nest.site).maxCells;
                 Emit("nestFounded", ("x", nest.x), ("y", nest.y), ("z", nest.z), ("key", nest.key), ("auto", true));
             }
-            Colony.Step(col, (Num)60 / dayTicks, OwnWorkers(), daylight, frac, bio);
+            Colony.Step(col, (Num)60 / dayTicks, OwnWorkers(), daylight, frac, bio, BroodSpeed());
             if (Raining && col.nestAlive && col.sited)
             {
                 // the site decides what rain costs: burrows flood, open nests chill (GDD 6.6)

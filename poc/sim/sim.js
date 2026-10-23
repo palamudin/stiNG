@@ -1,6 +1,6 @@
 // STING simulation core (iteration 2). Mirrors Sting.Core: no rendering, no wall clock.
 // Every wasp, driven or AI, goes through the same flight, contact, sting and swat code.
-import { Domain, hash, unit, rangeInt, u64, h32, hseq, dsin, dcos, clamp, clamp01, fnv32, hex64, rnd, sq, datan2 } from './rng.js';
+import { Domain, hash, unit, rangeInt, u64, h32, hseq, dsin, dcos, clamp, clamp01, fnv32, hex64, rnd, sq, datan2, TAU } from './rng.js';
 import { T, DT, GEN_VERSION, DEFAULT_SETTINGS } from './tuning.js';
 import {
   Zone, ZONES, SwatKind, SwatKindName, Style, humanTraits, humanClothing, suitClothing, zoneCover, bodyParts,
@@ -119,10 +119,21 @@ export class Sim {
   get temperature() {
     const c = this._tc;
     if (c && c.m === this.minute && c.s === this.season.startMinute) return c.v; // asked by every wasp every tick
-    const W = T.weather, f = this.seasonFrac;
-    const v = tempAt(this.seed, this.minute) - W.springChill * clamp01((0.25 - f) / 0.25) - W.autumnChill * clamp01((f - 0.8) / 0.2);
+    const v = this.airAt(this.minute);
     this._tc = { m: this.minute, s: this.season.startMinute, v };
     return v;
+  }
+  airAt(m) {
+    const W = T.weather, f = (m - this.season.startMinute) / (this.settings.seasonDays * 1440);
+    return tempAt(this.seed, m) - W.springChill * clamp01((0.25 - f) / 0.25) - W.autumnChill * clamp01((f - 0.8) / 0.2);
+  }
+  // How fast the brood develops at a minute (GDD 6.6, T1-14): full speed in a comfortable nest; cold snaps and heat
+  // slow it, as much as the site lets the weather in. An attic heats up on sunny afternoons.
+  broodSpeed(m = this.minute) {
+    const H = T.thermal, S = T.sites[this.nest.site || 'trunk'], d = minuteOfDay(m);
+    const air = this.airAt(m) + S.heat * Math.max(0, dsin(TAU * (d - 540) / 1440)) * (isRaining(this.seed, m) ? 0 : 1);
+    const cold = clamp01((H.coldFrom - air) / H.coldSpan), hot = clamp01((air - H.hotFrom) / H.hotSpan) * H.hotWeight;
+    return Math.max(H.minSpeed, 1 - (1 - S.insulation) * (cold + hot));
   }
   get wind() {
     const c = this._wc;
@@ -685,7 +696,8 @@ export class Sim {
     this.clockOffset += skipTicks;
     // the colony lives through the skipped time
     const steps = Math.floor(skipTicks / 60), dtDay = 60 / this.dayTicks;
-    for (let i = 0; i < steps; i++) colonyStep(this.colony, dtDay, this.wasps.length, false, this.seasonFrac, this.bio);
+    const m0 = this.minute, frac0 = this.seasonFrac;
+    for (let i = 0; i < steps; i++) colonyStep(this.colony, dtDay, this.wasps.length, false, frac0, this.bio, this.broodSpeed(m0 + Math.floor(i * 60 / this.tpm)));
     for (const w of this.wasps.slice()) if (w !== d) this._despawn(w);
     this._minute(clockMinutes(this.tick + this.clockOffset, this.settings));
     for (const hm of this.active) this._catchUpHuman(hm);
@@ -1933,7 +1945,14 @@ export class Sim {
       const a = hseq(sd, rec.cx, rec.cz, i, 915) * 6.28318, d = t.cr * 0.55;
       return { x: t.x + d * dcos(a), y: Math.max(1.8, t.h - t.cr * 0.7), z: t.z + d * dsin(a), t };
     });
-    const out = { holes, branches };
+    // hollow trees (T1-14): some thick trunks have a hole a wasp can nest in
+    const hollows = [];
+    rec.content.trees.forEach((t, i) => {
+      if (t.r < S.hollowMinR || hseq(sd, rec.cx, rec.cz, i, 916) >= S.hollowShare) return;
+      const a = hseq(sd, rec.cx, rec.cz, i, 917) * 6.28318, y = Math.min(t.h - 0.5, 0.7 + hseq(sd, rec.cx, rec.cz, i, 918) * 1.2);
+      hollows.push({ x: t.x + (t.r + 0.015) * dcos(a), y, z: t.z + (t.r + 0.015) * dsin(a), t });
+    });
+    const out = { holes, branches, hollows };
     if (cache.size > 64) cache.clear();
     cache.set(key, out);
     return out;
@@ -1964,7 +1983,8 @@ export class Sim {
 
   _siteNear(w) {
     for (const rec of this.activeChunks) {
-      const { holes, branches } = this.sitesIn(rec);
+      const { holes, branches, hollows } = this.sitesIn(rec);
+      for (const h of hollows) if (dist2(w, h) < 0.12 * 0.12) return { type: 'hollow', x: h.x, y: h.y, z: h.z, t: h.t };
       for (const h of holes) if (w.y < 0.3 && sq(w.x - h.x) + sq(w.z - h.z) < 0.12 * 0.12) return { type: 'ground', x: h.x, z: h.z };
       for (const b of branches) if (dist2(w, b) < 0.15 * 0.15) return { type: 'branch', x: b.x, y: b.y, z: b.z, t: b.t };
       for (const sh of rec.content.sheds) {
@@ -1982,6 +2002,8 @@ export class Sim {
       this.nest = makeNest(site.x - 0.5, site.z, site.x, -0.25, site.z, NEST.r, 'ground');
     } else if (site.type === 'wall' || site.type === 'attic') {
       this.nest = makeNest(site.ix, site.iz, site.x, site.y, site.z, NEST.r, site.type);
+    } else if (site.type === 'hollow') {
+      this.nest = makeNest(site.t.x, site.t.z, site.x, site.y, site.z, NEST.r, 'hollow');
     } else if (site.type === 'branch') {
       this.nest = makeNest(site.t.x, site.t.z, site.x, site.y - NEST.r * 1.3, site.z, NEST.r, 'branch');
     } else {
@@ -2423,7 +2445,7 @@ export class Sim {
       this.colony.maxCells = T.sites[this.nest.site].maxCells;
       this.emit('nestFounded', { x: this.nest.x, y: this.nest.y, z: this.nest.z, key: this.nest.key, auto: true });
     }
-    colonyStep(col, 60 / this.dayTicks, this._own().filter((w) => w.caste !== 'queen').length, daylight, frac, this.bio);
+    colonyStep(col, 60 / this.dayTicks, this._own().filter((w) => w.caste !== 'queen').length, daylight, frac, this.bio, this.broodSpeed());
     if (this.raining && col.nestAlive && col.sited) {
       // the site decides what rain costs: burrows flood, open nests chill (GDD 6.6)
       const st = T.sites[this.nest.site || 'trunk'], dt = 60 / this.dayTicks;

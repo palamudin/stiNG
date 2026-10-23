@@ -167,12 +167,27 @@ namespace Sting.Core
             {
                 if (tempOverride.HasValue) return tempOverride.Value;
                 if (tcMinute == minute && tcStart == season.startMinute) return tcVal; // asked by every wasp every tick
-                Num f = SeasonFrac;
-                tcVal = TempAt(seed, minute) - T.weather.springChill * Clamp01((0.25 - f) / 0.25) - T.weather.autumnChill * Clamp01((f - 0.8) / 0.2);
+                tcVal = AirAt(minute);
                 tcMinute = minute; tcStart = season.startMinute;
                 return tcVal;
             }
         }
+        /// The air at a minute: the day's weather plus the season's swing
+        public Num AirAt(long m)
+        {
+            Num f = (m - season.startMinute) / (settings.seasonDays * 1440);
+            return TempAt(seed, m) - T.weather.springChill * Clamp01((0.25 - f) / 0.25) - T.weather.autumnChill * Clamp01((f - 0.8) / 0.2);
+        }
+        /// How fast the brood develops at a minute (GDD 6.6, T1-14): full speed in a comfortable nest; cold snaps and heat
+        /// slow it, as much as the site lets the weather in. An attic heats up on sunny afternoons.
+        public Num BroodSpeed(long m)
+        {
+            var S = T.sites.Of(nest.site); long d = MinuteOfDay(m);
+            Num air = AirAt(m) + S.heat * Max(0, DSin(TAU * (d - 540) / 1440)) * (IsRaining(seed, m) ? 0 : 1);
+            Num cold = Clamp01((T.thermal.coldFrom - air) / T.thermal.coldSpan), hot = Clamp01((air - T.thermal.hotFrom) / T.thermal.hotSpan) * T.thermal.hotWeight;
+            return Max(T.thermal.minSpeed, 1 - (1 - S.insulation) * (cold + hot));
+        }
+        public Num BroodSpeed() => BroodSpeed(minute);
         long wcMinute = long.MinValue; V3 wcVal;
         public V3 Wind { get { if (wcMinute != minute) { wcVal = WindAt(seed, minute); wcMinute = minute; } return wcVal; } }
         /// Debug and test hook: force rain on (true) or off (false); null follows the weather
@@ -450,7 +465,8 @@ namespace Sting.Core
             clockOffset += (long)skipTicks;
             // the colony lives through the skipped time
             Num steps = Floor(skipTicks / 60), dtDay = (Num)60 / dayTicks;
-            for (int i = 0; i < steps; i++) Colony.Step(colony, dtDay, wasps.Count, false, SeasonFrac, bio);
+            long m0 = minute; Num frac0 = SeasonFrac;
+            for (int i = 0; i < steps; i++) Colony.Step(colony, dtDay, wasps.Count, false, frac0, bio, BroodSpeed(m0 + i * 60 / tpm));
             foreach (var w in new List<Wasp>(wasps)) if (w != d) Despawn(w);
             Minute(ClockMinutes(tick + clockOffset, settings));
             foreach (var hm in active) CatchUpHuman(hm);

@@ -215,6 +215,11 @@
     <p class="label" style="margin:8px 0 0">Drive is instant within 30 m; farther, the colony relays you in 4 s.</p>
   </section>
   <section>
+    <h3>Time</h3>
+    <div class="row" id="nSpeed"></div>
+    <p class="label" style="margin:8px 0 0" id="nSpeedNote">Solo worlds only. Speeds up while this panel is open; anything coming for your wasp drops it back to 1×. <kbd>T</kbd> cycles.</p>
+  </section>
+  <section>
     <h3>Foraging</h3>
     <div class="row" id="nAlloc"></div>
     <p class="label" style="margin:8px 0 0">Shifts what idle workers bring home.</p>
@@ -320,6 +325,7 @@
       <label for="optSens"><span class="label">Mouse sensitivity</span><output id="optSensOut" for="optSens">1.00×</output></label>
       <input type="range" id="optSens" min="25" max="300" step="5" value="100">
       <label class="check" for="optInvert"><input type="checkbox" id="optInvert"><span class="label">Invert look up / down</span></label>
+      <label class="check" for="optReflex"><input type="checkbox" id="optReflex"><span class="label">Reflex: slow time when a hand is coming (solo)</span></label>
     </div>
     <div class="row" style="justify-content:center">
       <button id="bResume">Return to game</button>

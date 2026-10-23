@@ -34,7 +34,8 @@ export function reproShare(frac) { const C = T.season; return clamp01((frac - C.
 
 // One step of `dtDay` in-game days. `physical` = adults outside as agents.
 // `foraging` = abstract foragers can work now. `frac` = season fraction. `bio` = biological time scale.
-export function colonyStep(c, dtDay, physical, foraging, frac = 0.3, bio = 1) {
+// thermal: brood development speed from the nest's temperature (T1-14), 1 when comfortable
+export function colonyStep(c, dtDay, physical, foraging, frac = 0.3, bio = 1, thermal = 1) {
   const C = T.colony, S = T.season;
   if (!c.nestAlive) return;
   const inside = Math.max(0, c.adults - physical);
@@ -79,7 +80,7 @@ export function colonyStep(c, dtDay, physical, foraging, frac = 0.3, bio = 1) {
   // Brood pipeline (GDD 6.4); durations scale with the season length
   const eD = C.eggDays * bio, lD = C.larvaDays * bio, pD = C.pupaDays * bio;
   const step = (eggs, larvae, pupae) => {
-    const e2l = c[eggs] / eD * dtDay, l2p = c[larvae] / lD * dtDay * fed, p2a = c[pupae] / pD * dtDay;
+    const e2l = c[eggs] / eD * dtDay * thermal, l2p = c[larvae] / lD * dtDay * fed * thermal, p2a = c[pupae] / pD * dtDay * thermal;
     const ls = c[larvae] * (1 - fed) * C.larvaStarve * dtDay;
     c[eggs] -= e2l; c[larvae] += e2l - l2p - ls; c[pupae] += l2p - p2a;
     c.stats.starvedLarvae += ls;

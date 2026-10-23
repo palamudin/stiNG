@@ -14,7 +14,7 @@ export const SPAWN = { x: -3, y: 2.05, z: -1.25, yaw: 0.98 };
 // site: 'trunk' (paper nest against a trunk), 'ground' (old burrow, entrance in the grass), 'branch' (hanging in the canopy)
 // 'wall' and 'attic' are inside a shed: (x, y, z) is the entrance on the outside face, (treeX, treeZ) a point inside.
 export function makeNest(treeX, treeZ, x, y, z, r = NEST.r, site = 'trunk') {
-  const inside = site === 'wall' || site === 'attic';
+  const inside = site === 'wall' || site === 'attic' || site === 'hollow';
   const entrance = site === 'ground' ? { x, y: 0.02, z } : inside ? { x, y, z } : { x, y: y - r * 1.25, z };
   let spawn = site === 'ground' ? { x, y: 0.3, z: z + 0.3, yaw: 0.98 } : { x, y: entrance.y - 0.1, z: z + 0.3, yaw: 0.98 };
   if (inside) { const dx = x - treeX, dz = z - treeZ, d = Math.sqrt(dx * dx + dz * dz) || 1; spawn = { x: x + dx / d * 0.3, y, z: z + dz / d * 0.3, yaw: datan2(dx, dz) }; }

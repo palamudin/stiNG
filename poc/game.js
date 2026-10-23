@@ -101,14 +101,26 @@ let sim = null, settings = { seed: 1234, dayMinutes: 2, humanDensity: 1, beeAggr
 let running = false, paused = false;
 const input = { pick: 0, keys: new Set(), lmb: false, yaw: 0, pitch: 0, alloc: 1, autopilot: null, free: { yaw: 0, pitch: 0, held: false } };
 // Player options from the Esc menu, kept per browser
-const opts = { volume: 0.7, sens: 1, invert: false };
+const opts = { volume: 0.7, sens: 1, invert: false, reflex: true };
 try { Object.assign(opts, JSON.parse(localStorage.getItem('sting.options') || '{}')); } catch { /* optional */ }
 const saveOpts = () => { try { localStorage.setItem('sting.options', JSON.stringify(opts)); } catch { /* optional */ } };
 const ySign = () => (opts.invert ? -1 : 1);
 const chunkViews = new Map(), humanViews = new Map(), waspViews = new Map();
 const pos = new Map(); // wasp id -> {p: prev, c: current}
 const anims = [];
-const ui = { lab: false, nest: false, zones: false, swats: true, log: [] };
+const ui = { lab: false, nest: false, zones: false, swats: true, log: [], speed: 1, reflexUntil: 0 };
+// Solo time (GDD 5.1, 7.8, T1-23). Both only change how fast the wall clock feeds ticks to the sim, never the sim:
+// replays and saves are unaffected. A shared world's clock never changes speed.
+const SPEEDS = [1, 4, 16];
+const solo = () => !lab && sim && !sim.net;
+const timeScale = () => {
+  if (!solo()) return 1;
+  const reflex = opts.reflex && performance.now() < ui.reflexUntil ? 0.25 : 1;
+  return (ui.nest ? ui.speed : 1) * reflex;
+};
+function setSpeed(s) { ui.speed = s; SPEEDS.forEach((v) => { const b = $('speed' + v); if (b) b.setAttribute('aria-pressed', v === s); }); }
+function calmTime(why) { if (ui.speed !== 1) { setSpeed(1); toast(why + ' · back to normal time', 'var(--yellow)', 1.6); } }
+function reflex() { if (solo() && opts.reflex) ui.reflexUntil = performance.now() + 900; }
 let deathSpot = null, deadUntil = 0, toastTimer = 0, bumpTimer = 0;
 const camPos = new THREE.Vector3();
 let camDist = 0.1, eyeBlend = 0;
@@ -288,7 +300,7 @@ function updateChunkDynamics() {
 
 function buildNestMesh(n, abandoned) {
   const g = new THREE.Group();
-  if (n.site === 'wall' || n.site === 'attic') {
+  if (n.site === 'wall' || n.site === 'attic' || n.site === 'hollow') {
     // the nest is inside the shed; outside you see papery comb pushing out of the gap
     const dx = n.x - n.treeX, dz = n.z - n.treeZ, d = Math.hypot(dx, dz) || 1;
     const rim = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 8), new THREE.MeshLambertMaterial({ map: paperTex, color: abandoned ? '#857a68' : '#ffffff' }));
@@ -379,19 +391,27 @@ function renderFruit() {
 }
 
 // Burrows are always there; branch points show only while a queen is choosing a site
-const holePool = [], knobPool = [];
+const holePool = [], knobPool = [], hollowPool = [];
+const hollowGeo = new THREE.CircleGeometry(0.045, 14);
 const holeGeo = new THREE.CircleGeometry(0.035, 12), knobGeo = new THREE.SphereGeometry(0.035, 8, 6);
 function renderSites() {
-  const holes = [], knobs = [];
+  const holes = [], knobs = [], hollows = [];
   const choosing = sim.colony.sited === false && sim.wasp && sim.wasp.caste === 'queen';
   for (const rec of sim.activeChunks) {
     const st = sim.sitesIn(rec);
     holes.push(...st.holes);
+    hollows.push(...st.hollows);
     if (choosing) knobs.push(...st.branches);
   }
   while (holePool.length < holes.length) { const m = new THREE.Mesh(holeGeo, mat('#15100a')); m.rotation.x = -Math.PI / 2; scene.add(m); holePool.push(m); }
   while (knobPool.length < knobs.length) { const m = new THREE.Mesh(knobGeo, mat('#7a5a3c')); scene.add(m); knobPool.push(m); }
   holePool.forEach((m, i) => { const h = holes[i]; m.visible = !!h && !(sim.nest.site === 'ground' && Math.hypot(h.x - sim.nest.x, h.z - sim.nest.z) < 0.01); if (h) m.position.set(h.x, 0.004, h.z); });
+  // hollow trees (T1-14): a dark knot-hole on the trunk, always there
+  while (hollowPool.length < hollows.length) { const m = new THREE.Mesh(hollowGeo, mat('#120d08', { side: THREE.DoubleSide })); m.scale.set(0.7, 1.3, 1); scene.add(m); hollowPool.push(m); }
+  hollowPool.forEach((m, i) => {
+    const h = hollows[i]; m.visible = !!h && !(sim.nest.site === 'hollow' && Math.hypot(h.x - sim.nest.x, h.z - sim.nest.z) < 0.01);
+    if (h) { m.position.set(h.x, h.y, h.z); m.lookAt(h.x + (h.x - h.t.x), h.y, h.z + (h.z - h.t.z)); }
+  });
   knobPool.forEach((m, i) => { const k = knobs[i]; m.visible = !!k; if (k) m.position.set(k.x, k.y + 0.06, k.z); });
 }
 
@@ -1095,6 +1115,7 @@ addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   if (e.code === 'Tab') { e.preventDefault(); toggleLab(); return; }
   if (e.code === 'KeyN' && !e.repeat) { toggleNest(); return; }
+  if (e.code === 'KeyT' && !e.repeat && ui.nest && solo()) { setSpeed(SPEEDS[(SPEEDS.indexOf(ui.speed) + 1) % SPEEDS.length]); return; }
   if (e.code === 'KeyM' && !e.repeat) { audio.on = !audio.on; toast(audio.on ? 'Sound on' : 'Sound off', 'var(--muted)', 1.2); return; }
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
   input.keys.add(e.code);
@@ -1139,6 +1160,7 @@ function showOpts() {
   $('optVol').value = Math.round(opts.volume * 100); $('optVolOut').textContent = Math.round(opts.volume * 100) + '%';
   $('optSens').value = Math.round(opts.sens * 100); $('optSensOut').textContent = opts.sens.toFixed(2) + '×';
   $('optInvert').checked = opts.invert;
+  $('optReflex').checked = opts.reflex;
 }
 showOpts();
 $('optVol').addEventListener('input', (e) => {
@@ -1147,6 +1169,7 @@ $('optVol').addEventListener('input', (e) => {
 });
 $('optSens').addEventListener('input', (e) => { opts.sens = +e.target.value / 100; saveOpts(); showOpts(); });
 $('optInvert').addEventListener('change', (e) => { opts.invert = e.target.checked; saveOpts(); });
+$('optReflex').addEventListener('change', (e) => { opts.reflex = e.target.checked; saveOpts(); });
 $('bQuit').addEventListener('click', () => {
   if (!lab) saveWorld(true);
   paused = false; running = false; input.keys.clear(); input.lmb = false;
@@ -1181,6 +1204,13 @@ $('bVerify').addEventListener('click', () => {
     ? `<span class="ok">Match</span> · replayed ${fmt(ticks)} ticks in ${took} ms · ${replayed}`
     : `<span class="bad">Mismatch</span> · live ${live} · replay ${replayed}`;
 });
+SPEEDS.forEach((v) => {
+  const b = document.createElement('button');
+  b.className = 'ghost'; b.textContent = v + '×'; b.id = 'speed' + v;
+  b.addEventListener('click', () => setSpeed(v));
+  $('nSpeed').appendChild(b);
+});
+setSpeed(1);
 T.alloc.forEach((a, i) => {
   const b = document.createElement('button');
   b.className = 'ghost'; b.textContent = a.name; b.id = 'alloc' + i;
@@ -1222,6 +1252,7 @@ function updateNest() {
     ['Adults inside / out', `${fmt(Math.max(0, c.adults - out))} / ${out}`],
     ['Protein', `${c.protein.toFixed(1)} / ${proteinCap(c).toFixed(0)}`], ['Sugar', `${c.sugar.toFixed(1)} / ${sugarCap(c).toFixed(0)}`], ['Pulp', c.pulp.toFixed(1)],
     ['Cells used', `${fmt(broodTotal(c))} / ${fmt(c.cells)}`], ['Larvae fed', Math.round(c.fed * 100) + '%'],
+    ...(c.sited !== false ? [['Brood speed', (() => { const v = sim.broodSpeed(); return `${Math.round(v * 100)}%${v < 0.98 ? (sim.temperature < T.thermal.coldFrom ? ' · too cold' : ' · too hot') : ''}`; })()]] : []),
     ['Emerged · laid', `${fmt(c.stats.emerged)} · ${fmt(c.stats.laid)}`],
     ...(sim.muni && sim.muni.active ? [['Pest control', `${sim.muni.active.keys.includes(sim.nest.key) ? 'baits around the nest' : 'baits nearby'} · until ${dayLabel(sim.muni.active.until)}`]] : []),
     ...(c.stats.poisoned ? [['Lost to poison', fmt(c.stats.poisoned)]] : []),
@@ -1309,7 +1340,7 @@ function updateHud() {
   $('brood').textContent = fmt(broodTotal(c));
   $('serial').textContent = w ? (w.caste === 'queen' ? 'The queen' : 'Worker ' + w.id) : '-';
   const md = minuteOfDay(sim.minute);
-  $('clockT').textContent = `Day ${sim.day + 1} · ${fmtClock(sim.minute)}`;
+  { const sc = timeScale(); $('clockT').textContent = `Day ${sim.day + 1} · ${fmtClock(sim.minute)}${sc > 1 ? ` · ${sc}×` : sc < 1 ? ' · REFLEX' : ''}`; }
   const wnd = sim.wind, ws = Math.hypot(wnd.x, wnd.z);
   $('clockW').textContent = `${Math.round(sim.temperature)} °C · ${sim.raining ? 'rain' : md < T.time.dawn || md >= T.time.dusk ? 'night' : 'clear'} · ${ws < 0.5 ? 'calm' : `wind ${ws.toFixed(1)} m/s`}`;
   const frac = Math.min(1, Math.max(0, sim.seasonFrac));
@@ -1443,7 +1474,8 @@ const SITE_NOTE = {
   ground: 'biggest nest, floods in rain, people notice it fastest',
   branch: 'small nest, cold in rain, hardest to find',
   wall: 'big nest, sheltered, people use the shed',
-  attic: 'biggest nest, best shelter, rare',
+  attic: 'biggest nest, best shelter, rare, hot on sunny afternoons',
+  hollow: 'big nest, warmest in a cold snap, people rarely notice it',
 };
 
 function deathWhy(e) {
@@ -1484,8 +1516,19 @@ function pushSwatAnims(list, frameHex, contactTick) {
   }
 }
 
+// Anything aimed at the driven wasp: Reflex slows time when a hand is scheduled, and a sped-up clock drops to 1×
+const HAND = new Set(['preSwat', 'notice', 'press']);
+const DANGER = new Set(['webbed', 'balled', 'fellIn', 'birdDive', 'dragonDive', 'stunned', 'fight', 'trapped', 'waspDied']);
+function threatCue(e) {
+  const me = sim.drivenId;
+  if (HAND.has(e.type) && e.waspId === me) { reflex(); calmTime('Someone is swatting at you'); return; }
+  if (e.type === 'stingContact' && e.driven && e.swats && e.swats.length) { reflex(); calmTime('You stung someone'); return; }
+  if (DANGER.has(e.type) && (e.driven || e.id === me || e.target === me)) calmTime('Danger');
+}
+
 function handleEvents(events) {
   for (const e of events) {
+    threatCue(e);
     switch (e.type) {
       case 'chunksActive':
       case 'humansActive': syncChunks(); break;
@@ -1761,16 +1804,17 @@ function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
   if (running && !paused) {
-    acc += dt;
+    const scale = timeScale(), cap = Math.max(8, Math.ceil(8 * scale));
+    acc += dt * scale;
     let n = 0;
-    while (acc >= DT && n < 8) {
+    while (acc >= DT && n < cap) {
       for (const w of sim.wasps) { const e = pos.get(w.id); if (e) e.p.copy(e.c); }
       if (lab) { lab.step(buildCmd()); if (sim.tick % 30 === 0) lab.check(); } else sim.step(buildCmd());
       for (const w of sim.wasps) { const e = pos.get(w.id); if (e) e.c.set(w.x, w.y, w.z); else pos.set(w.id, { p: V(w), c: V(w) }); }
       handleEvents(sim.drainEvents());
       acc -= DT; n++;
     }
-    if (n === 8) acc = 0;
+    if (n === cap) acc = 0;
   }
   if (sim) {
     const P = window.__prof, tm = P ? (k, t0) => { P[k] = (P[k] || 0) + performance.now() - t0; } : null;

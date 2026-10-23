@@ -48,7 +48,9 @@ namespace Sting.Core
         /// One step of dtDay in-game days (colony.js colonyStep)
         public static void Step(ColonyState c, Num dtDay, Num physical, bool foraging) => Step(c, dtDay, physical, foraging, 0.3, 1);
         public static void Step(ColonyState c, Num dtDay, Num physical, bool foraging, Num frac) => Step(c, dtDay, physical, foraging, frac, 1);
-        public static void Step(ColonyState c, Num dtDay, Num physical, bool foraging, Num frac, Num bio)
+        public static void Step(ColonyState c, Num dtDay, Num physical, bool foraging, Num frac, Num bio) => Step(c, dtDay, physical, foraging, frac, bio, 1);
+        /// thermal: brood development speed from the nest's temperature (T1-14), 1 when comfortable
+        public static void Step(ColonyState c, Num dtDay, Num physical, bool foraging, Num frac, Num bio, Num thermal)
         {
             if (!c.nestAlive) return;
             Num inside = Max(0, c.adults - physical);
@@ -93,7 +95,7 @@ namespace Sting.Core
             Num eD = T.colony.eggDays * bio, lD = T.colony.larvaDays * bio, pD = T.colony.pupaDays * bio;
             Num Pipe(ref Num eggs, ref Num larvae, ref Num pupae)
             {
-                Num e2l = eggs / eD * dtDay, l2p = larvae / lD * dtDay * fed, p2a = pupae / pD * dtDay;
+                Num e2l = eggs / eD * dtDay * thermal, l2p = larvae / lD * dtDay * fed * thermal, p2a = pupae / pD * dtDay * thermal;
                 Num ls = larvae * (1 - fed) * T.colony.larvaStarve * dtDay;
                 eggs -= e2l; larvae += e2l - l2p - ls; pupae += l2p - p2a;
                 c.stats.starvedLarvae += ls;

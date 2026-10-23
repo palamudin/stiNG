@@ -285,7 +285,7 @@ Rules:
 
 ## 5. Time, seasons, weather
 
-### 5.1 Clock **[T0] [T1]** (time acceleration)
+### 5.1 Clock **[T0]**
 
 - World time = ticks since the world epoch.
 - In-game day length: 2 real minutes by default, chosen when the world is created (2, 6 or 12) *(tune)* **[Q] Q-02 settled for day length**. Seasons are 20–200 days, also chosen at creation; the default 40-day season is about 80 minutes of play.
@@ -369,7 +369,7 @@ Economy step in Appendix A.4.
 - **Role allocation:** the player sets target ratios; the colony assigns idle workers to fill them.
 - **Default allocation by age:** young workers nurse and build inside; older workers forage; the oldest guard the entrance *(bio-inspired)*.
 
-### 6.6 Nest **[T0] [T1]** (hollow tree, thermals)
+### 6.6 Nest **[T0]**
 
 - Nest sites: underground cavity, wall cavity, attic, shed, hollow tree, open branch.
 - Each site type has: exposure to weather, thermal stability, human discovery chance, flood risk and maximum size.
@@ -443,7 +443,7 @@ Swat, crush under clothing, insecticide spray, bee balling, bird, spider web, dr
 
 ---
 
-### 7.8 Reflex (skill tree, later) **[T1] [T2]** (solo slowdown T1, skill tree T2)
+### 7.8 Reflex (skill tree, later) **[T0] [T2]** (solo slowdown built; skill tree T2)
 
 A slowdown on detection in the manner of Metal Gear Solid V's Reflex mode, unlocked through wasp progression. It triggers when a swat, spray or press is scheduled against your driven wasp (a `preSwat`, `notice`, `press` or own-sting swat), because that is the moment the sim already knows the hand is coming and exactly when it lands.
 
@@ -1030,6 +1030,14 @@ All five are in the C# core with parity: the 22 JS digests still match in the do
 
 **Memory by recency and place.** Each person keeps their last eight stings with the minute and the spot. How wary they are is the sum over those stings of a weight that falls linearly to zero over two days, counted in full within 4 m of where it happened and at 35% elsewhere. The sting resolver reads that wariness where it used to read the plain sting count, so the hand comes faster and the panic higher at the table where they were stung, and less on the far side of the park or two days later. Remembered stings are shared human state: they are written at the sting's commit tick on every peer, and they travel in saves (save version 4).
 
+### 18.21 Hollow trees, nest thermals and solo time as built (T1-14, T1-23)
+
+**Hollow trees.** About a third of trunks at least 22 cm thick have a hollow 0.7–1.9 m up, derived from the seed like burrows and branch points, so it costs nothing to store and every peer sees the same ones. A queen founds a nest in one with E: up to 4,500 cells, little exposure to rain, rarely noticed (discovery ×0.7). The PoC draws hollows as dark knot-holes on the trunk.
+
+**Nest thermals.** Every site has an insulation value (branch 0.15, trunk 0.4, attic 0.55, wall 0.6, burrow 0.8, hollow 0.85). Brood develops at full speed between 18 and 31 °C; below, it slows by up to the whole share over 12 °C, above by up to 70% over 8 °C, scaled by how much of the weather the site lets in, with a floor of 15% speed. An attic gains up to 7 °C under a sunny afternoon roof, so the biggest site is also the one that bakes. A wasp nest regulates its own temperature, so this is a slowdown of the brood rather than a death: cold springs hold a founding queen back, hot spells cost an attic colony. The colony view shows brood speed. When the player rests through the night, each skipped step uses that step's temperature.
+
+**Solo time.** In a solo world the colony view (N) runs time at 1×, 4× or 16× (T cycles). Anything aimed at the driven wasp (a swat, a web, bees, a bird, a drink, a fight) drops it back to 1×. Reflex, an option in the pause menu and on by default, runs the wall clock at a quarter for 0.9 s when a hand is scheduled against the driven wasp, or when its own sting sets swats coming. Both change only how fast the wall clock feeds ticks to the sim: recorded input, replays and saves are untouched, and shared worlds never change speed (7.8).
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1038,7 +1046,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (69 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (71 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -1057,7 +1065,7 @@ Everything in `POC.md` (69 features) and its C# port (18.18), including the Tier
 | T1-11 | Human days: walk and lie postures, people strolling on paths, sunbathers lying on the grass, gardeners; the schedule picks the activity by weather and traits | 8.2, 8.3 | L | Q-06 for the paths |
 | T1-12 | Regions: an 8×8 chunk layout pass (park, gardens, houses with fences, farmland, forest edge) under the chunk pass, with pulp from fences that runs out (a chunk delta) | 4.2, 4.3, 4.5 | L | Q-06 |
 | T1-13 | Worker ages and guards: young workers stay in, older ones forage, the oldest guard the entrance and attack intruders (rivals, raiders, other players' wasps) | 6.5 | M | Q-07 for players |
-| T1-14 | Hollow-tree nest site and nest thermals: site insulation sets how cold snaps and heat slow the brood | 6.6 | S | |
+| T1-14 | **Built (18.21).** Hollow-tree nest site and nest thermals: site insulation sets how cold snaps and heat slow the brood | 6.6 | S | |
 | T1-15 | Winter with choices: gynes pick hibernation sites whose quality sets winter survival; in spring the player chooses which surviving queen to continue | 6.7 | M | |
 | T1-16 | Senses for AI wasps: scent fields (sugar, protein, alarm) as decaying point sources and a vision cone, replacing the AI's perfect knowledge of every food source | 7.3 | M | |
 | T1-17 | **Built (18.20).** Line of sight for panic: contagion only between humans who can see each other | 8.9 | S | |
@@ -1066,9 +1074,9 @@ Everything in `POC.md` (69 features) and its C# port (18.18), including the Tier
 | T1-20 | Remaining plausibility checks: carry limits, positions inside solid geometry, chunk deltas consistent with their cause | 11.8 | S | T1-12 for deltas |
 | T1-21 | Relevance tiers in the lab: near, mid and far wasps at different rates, swarm packets; measure bandwidth with a 200-worker colony | 11.12 | M | |
 | T1-22 | Tuning as data: the tuning tables as versioned plain-text files read by own parsers in JS and C#, and the tuning hash in the world record | 13 | M | |
-| T1-23 | Solo time: accelerate time in the colony view, and the Reflex slowdown as a solo option | 5.1, 7.8 | S | |
+| T1-23 | **Built (18.21).** Solo time: accelerate time in the colony view, and the Reflex slowdown as a solo option | 5.1, 7.8 | S | |
 
-Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, done), then the M items; each batch is built in the PoC and then ported to the core with parity.
+Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, then the other S items: T1-14, T1-17, T1-18, T1-23, all done; T1-20 waits on regions), then the M items; each batch is built in the PoC and then ported to the core with parity.
 
 ### 19.3 Tier 2: later
 

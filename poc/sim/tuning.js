@@ -92,12 +92,20 @@ export const T = {
   // maxCells caps nest size; flood is brood lost per rainy day; exposure scales adult deaths in rain;
   // discovery scales the alert points people add in the nest's chunk (they notice traffic at their feet).
   sites: {
-    trunk: { name: 'against a trunk', maxCells: 3500, flood: 0, exposure: 1, discovery: 1 },
-    ground: { name: 'in an old burrow', maxCells: 5000, flood: 0.25, exposure: 0.4, discovery: 1.6 },
-    branch: { name: 'hanging from a branch', maxCells: 1800, flood: 0, exposure: 2, discovery: 0.5 },
-    wall: { name: 'in a shed wall', maxCells: 4000, flood: 0, exposure: 0.3, discovery: 1.2 },
-    attic: { name: 'under a shed roof', maxCells: 6000, flood: 0, exposure: 0.2, discovery: 0.8 },
+    // insulation (T1-14): how much of the outside cold and heat reaches the brood; heat: extra °C under a sunny roof
+    trunk: { name: 'against a trunk', maxCells: 3500, flood: 0, exposure: 1, discovery: 1, insulation: 0.4, heat: 0 },
+    ground: { name: 'in an old burrow', maxCells: 5000, flood: 0.25, exposure: 0.4, discovery: 1.6, insulation: 0.8, heat: 0 },
+    branch: { name: 'hanging from a branch', maxCells: 1800, flood: 0, exposure: 2, discovery: 0.5, insulation: 0.15, heat: 0 },
+    wall: { name: 'in a shed wall', maxCells: 4000, flood: 0, exposure: 0.3, discovery: 1.2, insulation: 0.6, heat: 0 },
+    attic: { name: 'under a shed roof', maxCells: 6000, flood: 0, exposure: 0.2, discovery: 0.8, insulation: 0.55, heat: 7 },
+    hollow: { name: 'in a hollow tree', maxCells: 4500, flood: 0, exposure: 0.25, discovery: 0.7, insulation: 0.85, heat: 0 },
     rainMortality: 0.06, holesPerChunk: 2,
+    hollowShare: 0.3, hollowMinR: 0.22, // trees thick enough, and the share of them with a hollow
+  },
+  // Nest thermals (GDD 6.6, T1-14): brood develops at full speed between these temperatures; outside them it slows,
+  // as much as the site lets the weather in
+  thermal: {
+    coldFrom: 18, coldSpan: 12, hotFrom: 31, hotSpan: 8, hotWeight: 0.7, minSpeed: 0.15,
   },
   // Switching wasps (GDD 7.7, Q-03): free within 30 m, otherwise the colony relays you after a delay
   possess: { freeRange: 30, relayTicks: 240 },

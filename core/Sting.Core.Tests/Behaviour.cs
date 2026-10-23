@@ -312,6 +312,7 @@ namespace Sting.Core.Tests
             SavesAndWorld();
             Batch1();
             Batch2();
+            Batch3();
         }
 
         // 26. Tier 1, batch 1: wind, cold, drowning, clothes by the weather, shaking and flailing
@@ -429,6 +430,33 @@ namespace Sting.Core.Tests
             Ok(hm.tr.style == Style.Freezer || Pl(here).swats[0].start <= Pl(away).swats[0].start, "and the hand comes sooner where they were stung");
             var r = Persist.Restore(Persist.Snapshot(s2));
             Ok(r.HumanByHex(hm.hex).mem.Count == 1 && r.HumanHash() == s2.HumanHash(), "remembered stings survive save and restore");
+        }
+
+        // T1-14 hollow trees and nest thermals
+        static void Batch3()
+        {
+            var t = Spring();
+            var hol = t.activeChunks.SelectMany(r => t.SitesIn(r).hollows).ToList();
+            Ok(hol.Count > 3 && hol.All(x => x.t.r >= T.sites.hollowMinR && x.p.y > 0.6 && x.p.y < x.t.h), $"some thick trees have a hollow in the trunk ({hol.Count} near home)");
+            var (h, tr) = hol[0];
+            Num o = Sqrt(Sq(h.x - tr.x) + Sq(h.z - tr.z));
+            Place(t.wasp, P(h.x + (h.x - tr.x) / o * 0.05, h.y, h.z + (h.z - tr.z) / o * 0.05));
+            var ev = RunS(t, 2, (sim, i) => Idle(c => c.act = i == 1 ? Act.Interact : 0));
+            Ok(Count(ev, "nestFounded") == 1 && t.nest.site == "hollow" && t.colony.maxCells == T.sites.hollow.maxCells && Hypot(t.nest.entrance.x - h.x, t.nest.entrance.z - h.z) < 1e-9, "E at a hollow founds a nest inside the tree");
+            var s = new Sim(new Settings { seed = 1234 });
+            long cold = -1, hot = -1;
+            for (long m = s.minute; m < s.minute + 1440 * 30 && (cold < 0 || hot < 0); m += 10)
+            {
+                Num a = s.AirAt(m);
+                if (cold < 0 && a < 11) cold = m;
+                if (hot < 0 && a > 29 && !World.IsRaining(s.seed, m)) hot = m;
+            }
+            Num At(string site, long m) { s.nest.site = site; return s.BroodSpeed(m); }
+            Num br = At("branch", cold), tk = At("trunk", cold), gr = At("ground", cold), ho = At("hollow", cold);
+            Ok(cold > 0 && br < tk && tk < gr && gr < ho && ho < 1, $"on a cold morning the brood slows most in an open nest and least in a hollow tree (branch {D(br):0.00}, trunk {D(tk):0.00}, burrow {D(gr):0.00}, hollow {D(ho):0.00})");
+            Ok(hot > 0 && At("attic", hot) < At("wall", hot), $"a sunny afternoon bakes an attic nest ({D(At("attic", hot)):0.00} vs {D(At("wall", hot)):0.00})");
+            Num Grow(Num k) { var c = Colony.New(); for (int i = 0; i < 120 * 6; i++) { c.protein = 1e3; c.sugar = 1e3; Colony.Step(c, (Num)1 / 120, 0, false, 0.3, 1, k); } return c.stats.emerged; }
+            Ok(Grow(0.5) < Grow(1) * 0.8, $"a slowed brood brings fewer workers out ({D(Grow(0.5)):0} vs {D(Grow(1)):0} in six days)");
         }
 
         static void Predators()

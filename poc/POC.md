@@ -95,6 +95,8 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 67 | Shake and flail (T1-5): flailers and runners stung on the scalp or face shake their head, which dislodges and stuns but never kills; a runner who flees also flails on the way out, a wide late sweep that stuns | 8.5 | 14 |
 | 68 | Panic by line of sight (T1-17): contagion only between people who can see each other; sheds and tree trunks block it | 8.9 | 14 |
 | 69 | Memory by recency and place (T1-18): people remember their last stings with time and spot; they react faster and panic more where it happened, less elsewhere, and calm down over two days | 8.10 | 14 |
+| 70 | Hollow trees and nest thermals (T1-14): a third of thick trunks have a hollow a queen can nest in (4,500 cells, well hidden). Each site lets in more or less of the weather: cold snaps slow the brood most in an open branch nest, least in a hollow or a burrow, and an attic bakes on sunny afternoons. Brood speed in the colony view | 6.6 | 14 |
+| 71 | Solo time (T1-23): the colony view runs time at 1×, 4× or 16× (T cycles), dropping to 1× when anything comes for your wasp; Reflex slows the clock to a quarter for a moment when a hand is coming (pause menu option). Presentation only: replays and saves are unaffected | 5.1, 7.8 | 14 |
 
 ## Verified
 
@@ -122,4 +124,4 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 
 ## Controls
 
-Mouse look · hold RMB look from the wasp's eyes · WASD fly · Space / C up and down · Shift burst, mash to break free · hold LMB or F to sting · E catch, chew, crawl under clothes · Q take over nearest worker · R rest at night · N nest panel · Tab lab · M sound · Arrows look · WASD walk when landed · Esc pause (Save world is on the pause screen; Continue appears on the start screen once a save exists).
+Mouse look · hold RMB look from the wasp's eyes · WASD fly · Space / C up and down · Shift burst, mash to break free · hold LMB or F to sting · E catch, chew, crawl under clothes · Q take over nearest worker · R rest at night · N nest panel (T speeds up time there, solo) · Tab lab · M sound · Arrows look · WASD walk when landed · Esc pause (Save world is on the pause screen; Continue appears on the start screen once a save exists).
