@@ -373,9 +373,12 @@ namespace Sting.Core.Tests
             }
             // 33. winter with choices (T1-15)
             {
+                // a world with a free hollow tree near home to winter in (some hold wild bees, T1-9)
+                ulong hseed = 1234;
+                for (ulong sd = 1234; sd < 1300; sd++) { var t0 = new Sim(new Settings { seed = sd }); if (t0.HiberSites().Any(x => x.kind == "hollow")) { hseed = sd; break; } }
                 (Sim s, HiberSite site, int scouted, SimEvent win) Late(string scout)
                 {
-                    var s = new Sim(new Settings { seed = 1234 });
+                    var s = new Sim(new Settings { seed = hseed });
                     s.colony.mated = 300;
                     s.season.startMinute -= 0.66 * s.settings.seasonDays * 1440;
                     RunS(s, 2);
@@ -434,6 +437,44 @@ namespace Sting.Core.Tests
                 RunS(s, 2, (sim, i) => Idle(c => c.act = i == 1 ? Act.Interact : 0));
                 var left = s.CarrionIn(crRec).FirstOrDefault(x => x.d == cr.d);
                 Ok(w2.carry != null && w2.carry.what == "carrion" && (left?.left ?? 0) == cr.left - 1, $"E at the carcass takes a load of meat ({w2.carry?.what}, {left?.left ?? 0} left)");
+            }
+            // 35. feral hives and robbing (T1-9)
+            {
+                var s = new Sim(new Settings { seed = 1234, birds = false });
+                var wild = new List<(ChunkRec r, Hive hv, int h, string key)>();
+                foreach (var r in s.activeChunks) { var hs = s.HivesIn(r); for (int h = 0; h < hs.Count; h++) if (hs[h].feral) wild.Add((r, hs[h], h, r.key)); }
+                Ok(wild.Count >= 2 && wild.All(x => x.hv.bees.Count == T.feral.guards + T.feral.foragers), $"wild bee colonies live in hollow trees and shed walls near home ({wild.Count})");
+                Ok(!s.HiberSites().Any(x => wild.Any(y => Hypot(x.x - y.hv.x, x.z - y.hv.z) < 0.05)), "a hollow or a wall crack that bees hold is not a winter site");
+                var (_, hv, hh, key) = wild[0]; var w = s.wasp;
+                T.feral.killOverride = 0;
+                List<SimEvent> Rob(bool mash)
+                {
+                    w.carry = null; w.energy = 0.3; w.state = "fly"; Place(w, P(hv.ex, hv.ey, hv.ez));
+                    var ev = new List<SimEvent>();
+                    for (int i = 0; i < 400; i++) { int ii = i; ev.AddRange(RunS(s, 1, (sim, j) => Idle(c => { c.act = ii == 1 ? Act.Interact : 0; c.sting = mash && ii % 2 != 0 ? 1 : 0; }))); if (i > 2 && w.state != "robbing") break; }
+                    return ev;
+                }
+                var e1 = Rob(true);
+                var done = Find(e1, "robbed"); var start = Find(e1, "robStart");
+                Ok(start != null && done != null && done.t - start.t < D(T.feral.robSecs) * 60, $"E at the entrance goes in, and mashing sting grabs faster ({(done != null && start != null ? (done.t - start.t) / 60.0 : 0):0.0} s)");
+                Ok(w.carry != null && w.carry.what == "bee brood" && w.energy == 1 && s.hiveAlarms.Get(key + "#" + hh) != null, "out with honey in the crop and a larva, into an alarmed hive");
+                for (int k = 1; k < T.feral.loadsPerDay; k++) Rob(true);
+                var e2 = Rob(true);
+                Ok(Count(e2, "hiveEmpty") == 1 && w.carry == null, $"a hive gives {T.feral.loadsPerDay} loads a day, then nothing");
+                w.carry = null; w.state = "fly"; Place(w, P(hv.ex, hv.ey, hv.ez));
+                var e3 = RunS(s, 30, (sim, i) => Idle(c => { c.act = i == 1 ? Act.Interact : 0; c.burst = i == 20 ? 1 : 0; }));
+                Ok(Count(e3, "robAbort") == 1 && w.state != "robbing" && w.carry == null, "Shift bails out empty-handed");
+                T.feral.killOverride = 1000;
+                var s2 = new Sim(new Settings { seed = 1234, birds = false }); var w2 = s2.wasp;
+                Place(w2, P(hv.ex, hv.ey, hv.ez));
+                var e4 = RunS(s2, 10, (sim, i) => Idle(c => c.act = i == 1 ? Act.Interact : 0));
+                Ok(Cause(e4.FirstOrDefault(e => e.type == "waspDied")) == "stung inside a hive", $"the bees inside can kill a robber ({Cause(e4.FirstOrDefault(e => e.type == "waspDied"))})");
+                T.feral.killOverride = null;
+                var s3 = new Sim(new Settings { seed = 1234, birds = false });
+                s3.colony.deficit = 0.9;
+                int picks = 0;
+                for (int k = 0; k < 40; k++) { var a = s3.SpawnWasp(false); a.role = "sugar"; Place(a, P(hv.ex + 0.5, hv.ey, hv.ez)); s3.AiPick(a); if (a.ai.target != null && a.ai.target.kind == "hive") picks++; }
+                Ok(picks > 0, $"short of sugar, AI foragers go for hives ({picks} of 40 near one)");
             }
             // 32. worker ages and guards (T1-13)
             {
@@ -858,8 +899,8 @@ namespace Sting.Core.Tests
                 for (ulong seed = 1; seed < 60 && sh == null; seed++)
                 {
                     var t = Spring(seed);
-                    var rec = t.activeChunks.FirstOrDefault(r => r.content.sheds.Count > 0);
-                    if (rec != null) { shedSeed = seed; sh = rec.content.sheds[0]; }
+                    // a shed whose wall crack is free (some hold wild bees, T1-9)
+                    foreach (var rec in t.activeChunks) { int si = rec.content.sheds.FindIndex(x => !t.FeralWall(rec, rec.content.sheds.IndexOf(x))); if (si >= 0 && sh == null) { shedSeed = seed; sh = rec.content.sheds[si]; } }
                 }
                 Ok(sh != null, "some chunks near home have a garden shed");
                 var sites = World.ShedSites(sh);

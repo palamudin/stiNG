@@ -607,7 +607,7 @@ During each tick of a swat window, the volume is transformed from body frame to 
 
 ## 9. Bees and ecology
 
-### 9.1 Honeybee hives **[T0] [T1]** (feral hives, robbing)
+### 9.1 Honeybee hives **[T0]**
 
 - Managed hives (beekeepers' boxes in gardens) and feral hives (tree hollows, walls).
 - Bees forage flowers and compete with wasps for nectar.
@@ -1082,6 +1082,12 @@ Every can on a table is a hollow cup: a 3 mm wall, open at the top, holding a dr
 
 **The abstract colony.** Abstract foraging income follows the same calendar: sugar ×(0.5 + 0.9 × share of flower kinds in bloom, + 0.35 once fruit falls), protein ×(0.5 + 0.35 while caterpillars are about + 0.4 × the fly share). Averaged over the season both are about 1; late in the season both drop, which is when real colonies turn to people's food. The colony view shows the current multipliers.
 
+### 18.28 Feral hives and robbing as built (T1-9)
+
+**Wild colonies.** One hollow tree in five and one shed-wall crack in four hold a wild honeybee colony, derived from the seed at the sim level like the nest sites (the chunk generator and old worlds are unchanged). A wild hive behaves like a managed box: six guards circle the entrance, ten foragers work the chunk's flowers (and drain them, 18.27), and anything at the entrance rouses it. A hollow or crack the bees hold is not a nest site or a winter site. The PoC marks a wild entrance with a smear of amber comb.
+
+**Robbing.** E at any hive entrance, wild or managed, takes the wasp inside and rouses the whole hive. The grab fills over three seconds, a twentieth faster for each sting press; every second inside there is a 15% chance the bees inside kill it ("stung inside a hive"). Space or Shift bails out with nothing. Done, the wasp comes out with a full crop of honey (sugar for the colony on deposit) and a bee larva (2 protein), into a hive whose guards are already in the air, so the balling of 9.2 is the price of getting home. A hive gives three loads a day (shared between peers through the `caught` event). AI sugar foragers rob only when the colony is short of sugar; a wasp inside a hive cannot be balled until it comes out.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1090,7 +1096,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (78 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (79 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -1104,7 +1110,7 @@ Everything in `POC.md` (78 features) and its C# port (18.18), including the Tier
 | T1-6 | **Built (18.22).** Fetching spray: at level 3 a stung human walks off and comes back armed, instead of having spray on hand | 8.6, 8.10 | M | |
 | T1-7 | **Built (18.22).** The exterminator searches: at level 4 he walks the area watching wasp traffic and finds the nest from flight lines; a colony that keeps traffic low near people buys time | 8.10 | M | |
 | T1-8 | **Built (18.27).** Seasonal ecology: flowers bloom and fade by season, nectar is drawn down by bees and wasps and regrows in an ecology tick (0.2 Hz); prey by season; carrion appears | 9.4, 3.3 | M | |
-| T1-9 | Feral hives and robbing: hives in hollow trees and walls; a wasp that gets inside takes honey (sugar) as well as brood | 9.1 | M | |
+| T1-9 | **Built (18.28).** Feral hives and robbing: hives in hollow trees and walls; a wasp that gets inside takes honey (sugar) as well as brood | 9.1 | M | |
 | T1-10 | Barbecues: grills as human anchors with meat, a protein source at people's tables and a new kind of conflict | 4.3, 6.2 | M | T1-11 helps |
 | T1-11 | Human days: walk and lie postures, people strolling on paths, sunbathers lying on the grass, gardeners; the schedule picks the activity by weather and traits | 8.2, 8.3 | L | Q-06 for the paths |
 | T1-12 | Regions: an 8×8 chunk layout pass (park, gardens, houses with fences, farmland, forest edge) under the chunk pass, with pulp from fences that runs out (a chunk delta) | 4.2, 4.3, 4.5 | L | Q-06 |
@@ -1120,7 +1126,7 @@ Everything in `POC.md` (78 features) and its C# port (18.18), including the Tier
 | T1-22 | Tuning as data: the tuning tables as versioned plain-text files read by own parsers in JS and C#, and the tuning hash in the world record | 13 | M | |
 | T1-23 | **Built (18.21).** Solo time: accelerate time in the colony view, and the Reflex slowdown as a solo option | 5.1, 7.8 | S | |
 
-Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, then the other S items: T1-14, T1-17, T1-18, T1-23, all done; T1-20 waits on regions), then the M items (T1-6, T1-7, T1-8, T1-13 and T1-15 done); each batch is built in the PoC and then ported to the core with parity.
+Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, then the other S items: T1-14, T1-17, T1-18, T1-23, all done; T1-20 waits on regions), then the M items (T1-6 to T1-9, T1-13 and T1-15 done); each batch is built in the PoC and then ported to the core with parity.
 
 ### 19.3 Tier 2: later
 

@@ -397,7 +397,7 @@ namespace Sting.Core
                 day = newDay;
                 Num k = 1;
                 for (long i = 0; i < days; i++) k *= 1 - T.esc.decayPerDay;
-                foreach (var s in chunkState.Values) { s.esc *= k; s.beeLost = new Dictionary<int, Dictionary<int, int>>(); s.caughtCat = new Dictionary<int, int>(); }
+                foreach (var s in chunkState.Values) { s.esc *= k; s.beeLost = new Dictionary<int, Dictionary<int, int>>(); s.caughtCat = new Dictionary<int, int>(); s.robbed = new Dictionary<int, int>(); }
                 Emit("newDay", ("day", newDay));
             }
         }

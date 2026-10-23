@@ -113,6 +113,9 @@ namespace Sting.Core
             public static readonly Num coldFrom = 18, coldSpan = 12, hotFrom = 31, hotSpan = 8, hotWeight = 0.7, minSpeed = 0.15;
         }
         public static class possess { public static readonly Num freeRange = 30; public const int relayTicks = 240; }
+        /// feral hives and robbing (GDD 9.1, T1-9)
+        public static class feral { internal static Num? killOverride; // tests only
+            public static readonly Num hollowShare = 0.2, wallShare = 0.25, robReach = 0.06, robSecs = 3, pressGain = 0.05, insideKill = 0.15, broodProtein = 2, honeyCargo = 1; public const int guards = 6, foragers = 10, loadsPerDay = 3; }
         /// seasonal ecology (GDD 9.4, T1-8)
         public static class eco
         {

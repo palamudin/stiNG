@@ -19,7 +19,7 @@ namespace Sting.Core
     /// A sugar source: a can, a flower, a puddle ('spill') or fallen 'fruit'. i identifies spills and fruit.
     public sealed class SugarNode { public Num x, y, z, rate; public string kind; public int table = -1, i; }
     public sealed class Bee { public bool guard; public Num p, w, tx, ty, tz; public int period, phase; }
-    public sealed class Hive { public Num x, z, fx, fz, ex, ey, ez; public int slot; public List<Bee> bees = new List<Bee>(); }
+    public sealed class Hive { public Num x, z, fx, fz, ex, ey, ez; public int slot; public List<Bee> bees = new List<Bee>(); public bool feral; }
     public sealed class Trap { public Num x, y, z; public int table; }
     public sealed class Web { public Num x, y, z, nx, nz, r; public int tree; }
     /// Birds and dragonflies: a patrol loop

@@ -120,6 +120,10 @@ export const T = {
   // Switching wasps (GDD 7.7, Q-03): free within 30 m, otherwise the colony relays you after a delay
   possess: { freeRange: 30, relayTicks: 240 },
   // Fallen fruit (GDD 9.4). bio: windfall apples and plums are a major late-summer sugar source for Vespula.
+  // Feral hives and robbing (GDD 9.1, T1-9): some hollow trees and shed-wall cracks hold a wild bee colony. A wasp
+  // that gets inside any hive (E at the entrance) grabs honey and brood while the bees inside go for it; the hive
+  // gives a few loads a day and comes out alarmed.
+  feral: { hollowShare: 0.2, wallShare: 0.25, guards: 6, foragers: 10, robReach: 0.06, robSecs: 3, pressGain: 0.05, insideKill: 0.15, loadsPerDay: 3, broodProtein: 2, honeyCargo: 1 },
   // Seasonal ecology (GDD 9.4, T1-8). Each flower kind (by colour) blooms in its own part of the season; nectar
   // runs down as wasps sip and as the local bees forage, and regrows over the day. Caterpillars are about early to
   // mid summer, flies grow commoner through it, carrion turns up now and then. The abstract colony forages on the

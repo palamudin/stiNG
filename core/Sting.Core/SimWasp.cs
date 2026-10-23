@@ -65,6 +65,7 @@ namespace Sting.Core
                     break;
                 case "webbed": WebStep(w, cmd, driven); break;
                 case "drowning": DrownStep(w, cmd, driven); break;
+                case "robbing": RobStep(w, cmd, driven); break;
                 case "perched": PerchStep(w, cmd, edge, armed, driven); break;
                 case "fighting": if (driven && cmd.sting != 0 && !pressUsed) { pressUsed = true; w.fight.mash += T.rival.mash; } break;
                 case "attached": Attached(w, cmd, driven); break;
@@ -436,6 +437,8 @@ namespace Sting.Core
                 var hs = HiberNear(w);
                 if (hs != null) { hiberPick = new HiberPick { season = season.n, x = hs.x, z = hs.z, kind = hs.kind }; Emit("hiberScouted", ("kind", hs.kind), ("q", hs.q)); return; }
             }
+            var hb = w.carry == null && w.caste != "queen" ? HiveEntranceNear(w) : null;
+            if (hb != null) { StartRob(w, hb.Value.key, hb.Value.h); return; }
             var rv = RivalNestNear(w);
             if (rv != null && w.carry == null) { Raid(w, rv); return; }
             var c = w.contact;
@@ -461,6 +464,7 @@ namespace Sting.Core
                 nest = D2(w, nest.entrance) < 0.4 * 0.4,
                 site = w.caste == "queen" && !colony.sited ? SiteNear(w)?.type : null,
                 rival = w.carry == null && RivalNestNear(w) != null,
+                hive = w.carry == null && w.caste != "queen" && HiveEntranceNear(w) != null,
                 hiber = w.caste != "queen" && SeasonFrac >= T.season.reproStart && colony.mated + colony.gynes >= 1 ? HiberNear(w)?.kind : null,
             };
         }
@@ -484,9 +488,10 @@ namespace Sting.Core
                     if (D2(w, new V3(cp.x, cp.y, cp.z)) <= r2 * 2) return new PreyHit { kind = "caterpillar", key = key, i = i, protein = T.prey.caterpillarProtein };
                 }
                 foreach (var cr in CarrionIn(rec)) if (D2(w, new V3(cr.x, cr.y, cr.z)) <= T.eco.carrionReach * T.eco.carrionReach) return new PreyHit { kind = "carrion", key = key, i = (int)cr.d, protein = T.eco.carrionProtein };
-                for (int h = 0; h < c.hives.Count; h++)
+                var hives = HivesIn(rec);
+                for (int h = 0; h < hives.Count; h++)
                 {
-                    var hv = c.hives[h]; st.beeLost.TryGetValue(h, out var lost); var al = hiveAlarms.Get(rec.Sub(h));
+                    var hv = hives[h]; st.beeLost.TryGetValue(h, out var lost); var al = hiveAlarms.Get(rec.Sub(h));
                     for (int k = T.bees.guards; k < hv.bees.Count; k++)
                     {
                         if ((lost != null && lost.ContainsKey(k)) || (al != null && al.phys.ContainsKey(k))) continue;
@@ -636,6 +641,90 @@ namespace Sting.Core
             return true;
         }
 
+        // ---------------- feral hives and robbing (GDD 9.1, T1-9)
+
+        public bool FeralHollow(ChunkRec rec, int j) => HSeq((long)(seed & 0xffffffffUL), rec.cx, rec.cz, j, 981) < T.feral.hollowShare;
+        public bool FeralWall(ChunkRec rec, int si) => HSeq((long)(seed & 0xffffffffUL), rec.cx, rec.cz, si, 982) < T.feral.wallShare;
+        /// The chunk's hives: the managed boxes from the generator, then wild colonies in hollow trees and shed walls,
+        /// derived from the seed like the nest sites. Indices are stable.
+        public List<Hive> HivesIn(ChunkRec rec)
+        {
+            if (rec.hives != null) return rec.hives;
+            long sd = (long)(seed & 0xffffffffUL); var c = rec.content; var list = new List<Hive>(c.hives);
+            Num U(long a, long b) => HSeq(sd, rec.cx, rec.cz, a, b, 983);
+            void Wild(Num x, Num y, Num z, Num nx, Num nz, int slot)
+            {
+                var hv = new Hive { x = x, z = z, fx = nx, fz = nz, ex = x + nx * 0.03, ey = y, ez = z + nz * 0.03, slot = slot, feral = true };
+                for (int k = 0; k < T.feral.guards + T.feral.foragers; k++)
+                {
+                    long s = slot * 64 + k * 6;
+                    if (k < T.feral.guards) { hv.bees.Add(new Bee { guard = true, p = U(s, 0) * 6.28, w = (1.5 + 1.5 * U(s, 1)) * (k % 2 != 0 ? 1 : -1) }); continue; }
+                    Num fx, fy, fz;
+                    if (c.flowers.Count > 0) { var f = c.flowers[(int)Floor(U(s, 2) * c.flowers.Count)]; fx = f.x; fy = f.y; fz = f.z; } else { fx = x + 8; fy = 0.4; fz = z + 8; }
+                    hv.bees.Add(new Bee { guard = false, tx = fx, ty = fy, tz = fz, period = 1500 + (int)Floor(U(s, 3) * 1500), phase = (int)Floor(U(s, 4) * 3000), p = U(s, 5) * 6.28 });
+                }
+                list.Add(hv);
+            }
+            var hol = SitesIn(rec).hollows;
+            for (int j = 0; j < hol.Count; j++)
+            {
+                if (!FeralHollow(rec, j)) continue;
+                var (h, t) = hol[j];
+                Num dx = h.x - t.x, dz = h.z - t.z, d = Sqrt(dx * dx + dz * dz); if (d == 0) d = 1;
+                Wild(h.x, h.y, h.z, dx / d, dz / d, 100 + j);
+            }
+            for (int si = 0; si < c.sheds.Count; si++)
+            {
+                if (!FeralWall(rec, si)) continue;
+                var p = World.ShedSites(c.sheds[si]).wall;
+                Wild(p.x, p.y, p.z, p.nx, p.nz, 200 + si);
+            }
+            return rec.hives = list;
+        }
+        public int HiveLoadsLeft(string key, int h) => T.feral.loadsPerDay - (chunkState.TryGet(key, out var st) && st.robbed != null && st.robbed.TryGetValue(h, out var n) ? n : 0);
+        (string key, int h)? HiveEntranceNear(Wasp w)
+        {
+            Num r2 = T.feral.robReach * T.feral.robReach;
+            foreach (var rec in activeChunks)
+            {
+                var hives = HivesIn(rec);
+                for (int h = 0; h < hives.Count; h++) if (D2(w, new V3(hives[h].ex, hives[h].ey, hives[h].ez)) <= r2) return (rec.key, h);
+            }
+            return null;
+        }
+        /// in through the entrance: the whole hive is roused
+        internal void StartRob(Wasp w, string key, int h)
+        {
+            var hv = HivesIn(records.Get(key))[h];
+            w.state = "robbing"; w.vx = w.vy = w.vz = 0; w.land = null;
+            w.x = hv.ex; w.y = hv.ey; w.z = hv.ez;
+            w.rob = new Rob { key = key, h = h, progress = 0, prevSting = 1 };
+            AlarmHive(key, h, w, T.bees.hiveAlarmRadius);
+            Emit("robStart", ("id", w.id), ("driven", w.id == drivenId), ("key", key), ("h", h), ("feral", hv.feral));
+        }
+        /// Inside: the grab fills over a few seconds, faster for each sting press; any tick the bees may get you;
+        /// Space or Shift bails out empty-handed. Out with honey in the crop and a larva, into an alarmed hive's air.
+        void RobStep(Wasp w, Cmd cmd, bool driven)
+        {
+            var r = w.rob; var hv = HivesIn(records.Get(r.key))[r.h];
+            void Out() { w.rob = null; w.state = "fly"; w.x = hv.ex + hv.fx * 0.05; w.z = hv.ez + hv.fz * 0.05; w.vx = hv.fx * 1.5; w.vz = hv.fz * 1.5; w.vy = 0.3; w.noLandUntil = tick + T.land.afterTakeoff; }
+            if (driven && (cmd.burst != 0 || cmd.my > 0)) { Out(); Emit("robAbort", ("id", w.id)); return; }
+            if (H32(w.id, tick, 87) < (T.feral.killOverride ?? T.feral.insideKill) * T.DT) { w.rob = null; Die(w, "stung inside a hive", null); return; }
+            r.progress += T.DT / T.feral.robSecs;
+            if (driven) { if (cmd.sting != 0 && r.prevSting == 0) r.progress += T.feral.pressGain; r.prevSting = cmd.sting != 0 ? 1 : 0; }
+            if (r.progress < 1) return;
+            Out();
+            if (HiveLoadsLeft(r.key, r.h) <= 0) { Emit("hiveEmpty", ("id", w.id), ("key", r.key), ("h", r.h)); if (!driven) { w.ai.mode = "return"; w.ai.target = null; } return; }
+            var st = CS(r.key); st.robbed ??= new Dictionary<int, int>();
+            st.robbed[r.h] = (st.robbed.TryGetValue(r.h, out var n) ? n : 0) + 1;
+            w.energy = 1; w.ai.cargo = Max(w.ai.cargo, T.feral.honeyCargo);
+            w.carry = new Carry { kind = "protein", amount = T.feral.broodProtein, what = "bee brood" };
+            Publish(new NetEv { type = "caught", key = r.key, what = "honey", i = r.h });
+            stats.caught++;
+            Emit("robbed", ("id", w.id), ("driven", driven), ("key", r.key), ("h", r.h));
+            if (!driven) { w.ai.mode = "return"; w.ai.target = null; }
+        }
+
         // ---------------- seasonal ecology (GDD 9.4, T1-8): pure functions of the seed, the chunk and the clock, plus the
         // sips taken (chunk state). The ecology tick of GDD 3.3 is evaluated lazily from the last sip.
         public bool InBloom(ChunkRec rec, int i)
@@ -649,7 +738,7 @@ namespace Sting.Core
         {
             if (rec.beeLoad != null) return rec.beeLoad;
             var c = rec.content; var l = new int[c.flowers.Count];
-            for (int i = 0; i < l.Length; i++) { var f = c.flowers[i]; int n = 0; foreach (var hv in c.hives) foreach (var b in hv.bees) if (!b.guard && b.tx == f.x && b.tz == f.z) n++; l[i] = n; }
+            for (int i = 0; i < l.Length; i++) { var f = c.flowers[i]; int n = 0; foreach (var hv in HivesIn(rec)) foreach (var b in hv.bees) if (!b.guard && b.tx == f.x && b.tz == f.z) n++; l[i] = n; }
             return rec.beeLoad = l;
         }
         public Num NectarAt(ChunkRec rec, int i)
@@ -1098,8 +1187,8 @@ namespace Sting.Core
                 {
                     var rc = new ChunkRec { cx = cx + dx, cz = cz + dz, content = Content(cx + dx, cz + dz) };
                     var s = SitesIn(rc);
-                    foreach (var sh in rc.content.sheds) { var p = World.ShedSites(sh).wall; Add("shed", p.x, p.y, p.z); }
-                    foreach (var h in s.hollows) Add("hollow", h.p.x, h.p.y, h.p.z);
+                    for (int si = 0; si < rc.content.sheds.Count; si++) if (!FeralWall(rc, si)) { var p = World.ShedSites(rc.content.sheds[si]).wall; Add("shed", p.x, p.y, p.z); }
+                    for (int j = 0; j < s.hollows.Count; j++) if (!FeralHollow(rc, j)) Add("hollow", s.hollows[j].p.x, s.hollows[j].p.y, s.hollows[j].p.z);
                     var trees = rc.content.trees;
                     for (int i = 0; i < trees.Count; i++)
                     {

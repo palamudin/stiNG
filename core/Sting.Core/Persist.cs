@@ -86,7 +86,7 @@ namespace Sting.Core
 
     public static class Persist
     {
-        public const int SAVE_VERSION = 10; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology
+        public const int SAVE_VERSION = 11; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing
         const uint MAGIC = 0x474E4953; // "SING"
 
         // ---------------------------------------------------------------- one Io per type
@@ -161,6 +161,7 @@ namespace Sting.Core
             a.B(ref w.walking); a.D(ref w.fightReqUntil);
             if (a.Opt(ref w.land)) { a.D(ref w.land.nx); a.D(ref w.land.ny); a.D(ref w.land.nz); a.S(ref w.land.kind); a.B(ref w.land.hasH); a.D(ref w.land.hx); a.D(ref w.land.hy); a.D(ref w.land.hz); a.I(ref w.land.yawQ); }
             a.I(ref w.noLandUntil); a.S(ref w.trapCause);
+            if (a.Opt(ref w.rob)) { a.S(ref w.rob.key); a.I(ref w.rob.h); a.D(ref w.rob.progress); a.D(ref w.rob.prevSting); }
             return w;
         }
 
@@ -213,6 +214,7 @@ namespace Sting.Core
             a.Dict(ref s.cover, () => 0, v => { a.I(ref v); return v; });
             a.Dict(ref s.nectar, () => null, v => { v ??= new Nectar(); a.D(ref v.lv); a.L(ref v.m); return v; });
             a.Dict(ref s.carrion, () => 0, v => { a.I(ref v); return v; });
+            a.Dict(ref s.robbed, () => 0, v => { a.I(ref v); return v; });
             return s;
         }
 

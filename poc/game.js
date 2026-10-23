@@ -399,6 +399,8 @@ const baitBoxGeo = new THREE.BoxGeometry(0.07, 0.1, 0.05), baitMeatGeo = new THR
 // Windfall fruit in the grass late in the season (apples and plums)
 const carrionMesh = new THREE.InstancedMesh(new THREE.CapsuleGeometry(0.022, 0.06, 4, 8).rotateZ(Math.PI / 2), mat('#4a3a30'), 64);
 carrionMesh.count = 0; carrionMesh.frustumCulled = false; scene.add(carrionMesh);
+const honeyMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.03, 8, 6).scale(1, 1.3, 0.5), mat('#c98a1b'), 64);
+honeyMesh.count = 0; honeyMesh.frustumCulled = false; scene.add(honeyMesh);
 const fruitMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.032, 10, 8), new THREE.MeshLambertMaterial({ color: '#ffffff' }), 400);
 fruitMesh.count = 0; fruitMesh.frustumCulled = false; fruitMesh.castShadow = true; scene.add(fruitMesh);
 const FRUIT_COLORS = ['#b8322a', '#c9a227', '#6e2a4a', '#9a3a1e'].map((c) => new THREE.Color(c));
@@ -465,7 +467,7 @@ function renderBaits() {
 }
 
 function renderCritters(t) {
-  let nf = 0, nc = 0, nb = 0;
+  let nf = 0, nc = 0, nb = 0, nh = 0;
   for (const rec of sim.activeChunks) {
     const c = rec.content, key = chunkKey(rec.cx, rec.cz), st = sim.cs(key);
     c.flies.forEach((f, i) => {
@@ -478,8 +480,9 @@ function renderCritters(t) {
       _q.setFromAxisAngle(new THREE.Vector3(0, 0, 1), 0.2);
       catMesh.setMatrixAt(nc++, _m4.compose(_p.set(cp.x, cp.y, cp.z), _q, _s));
     });
-    c.hives.forEach((hv, h) => {
+    sim.hivesIn(rec).forEach((hv, h) => {
       const lost = st.beeLost[h] || {}, al = sim.hiveAlarms.get(key + '#' + h);
+      if (hv.feral && nh < 64) honeyMesh.setMatrixAt(nh++, _m4.compose(_p.set(hv.ex, hv.ey, hv.ez), _q.identity(), _s)); // a smear of comb at a wild entrance (T1-9)
       for (let k = 0; k < hv.bees.length && nb < MAXI; k++) {
         if (lost[k]) continue;
         const ph = al && al.phys[k];
@@ -498,6 +501,7 @@ function renderCritters(t) {
     carrionMesh.setMatrixAt(nk++, _m4.compose(_p.set(cr.x, 0.02, cr.z), _q, _s));
   }
   carrionMesh.count = nk; carrionMesh.instanceMatrix.needsUpdate = true;
+  honeyMesh.count = nh; honeyMesh.instanceMatrix.needsUpdate = true;
   flyMesh.count = nf; catMesh.count = nc; beeMesh.count = nb;
   flyMesh.instanceMatrix.needsUpdate = catMesh.instanceMatrix.needsUpdate = beeMesh.instanceMatrix.needsUpdate = true;
 }
@@ -912,7 +916,7 @@ function renderWasps(alpha, t, dt) {
     const driven = w.id === sim.drivenId;
     if (driven) drivenPos = p;
     // looking out of its own eyes: the body is not drawn (compound eyes see nearly all the way round)
-    g.visible = w.state !== 'under' && !(driven && eyeBlend > 0.5);
+    g.visible = w.state !== 'under' && w.state !== 'robbing' && !(driven && eyeBlend > 0.5); // inside clothes or a hive
     g.position.copy(p);
     g.scale.setScalar(w.caste === 'queen' ? 1.3 : 1);
     g.rotation.order = 'YXZ';
@@ -1456,6 +1460,7 @@ function updateHud() {
   else if (w.state === 'landed') status = sim.feeding ? 'Feeding' : 'Resting';
   else if (w.state === 'perched') status = `On #${w.perch.hex.slice(0, 4)} · ${zoneLabel(w.perch.zone)}`;
   else if (w.state === 'fighting') status = 'Fighting a rival wasp';
+  else if (w.state === 'robbing') status = `Inside the hive · ${Math.round(Math.min(1, w.rob.progress) * 100)}% · mash LMB · Space bails out`;
   else if (w.state === 'drowning') status = `In the drink · ${Math.max(0, (w.drown.until - sim.tick) / 60).toFixed(1)} s`;
   else if (!sim._driven()) status = '';
   else if ((w.bodyT ?? 30) < T.cold.flyBody) status = (w.bodyT ?? 30) < T.cold.torpor ? 'Torpid with cold · find warmth or die' : 'Too cold to fly · warm up (rest, sun, a person)';
@@ -1474,6 +1479,7 @@ function updateHud() {
   else if (w.state === 'landed') hint = w.walking ? 'Walking · it follows the surface round edges, up trunks and under tables · look where you want to go' : `Resting costs no sugar in the warmth · mouse turns · ${kbd('W')}${kbd('A')}${kbd('S')}${kbd('D')} walk on any surface · ${kbd('LMB')} sting someone within reach · ${kbd('Space')} or ${kbd('Shift')} take off`;
   else if (w.state === 'perched') hint = `${kbd('W')}${kbd('A')}${kbd('S')}${kbd('D')} crawl (look up or down to climb) · ${kbd('LMB')} sting · ${kbd('Space')} take off · ${kbd('E')} crawl under at an opening`;
   else if (h.rival) hint = `${kbd('E')} steal a larva from the rival nest`;
+  else if (h.hive) hint = `${kbd('E')} get into the hive for honey and brood · the bees inside fight back`;
   else if (h.hiber) hint = `${kbd('E')} scout this winter site for the young queens: ${T.hiber.name[h.hiber]}, shelter ${Math.round(T.hiber.q[h.hiber] * 100)}%`;
   else if (w.state === 'under') {
     const hm = sim.humanByHex(w.under.hex);
@@ -1528,7 +1534,7 @@ function drawMap() {
       ctx.fillStyle = 'rgba(243,238,226,.4)';
       for (const t of rec.content.tables) { const [x, y] = toS(t.x, t.z); ctx.fillRect(x - 2, y - 2, 4, 4); }
       ctx.fillStyle = '#ece8dc';
-      for (const hv of rec.content.hives) { const [x, y] = toS(hv.x, hv.z); ctx.fillRect(x - 3, y - 3, 6, 6); }
+      for (const hv of sim.hivesIn(rec)) { const [x, y] = toS(hv.x, hv.z); ctx.fillRect(x - 3, y - 3, 6, 6); }
       if (rec.content.rival) { const [x, y] = toS(rec.content.rival.x, rec.content.rival.z); ctx.strokeStyle = css('--orange'); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.stroke(); }
     } else { ctx.strokeStyle = 'rgba(165,157,138,.2)'; ctx.strokeRect(sx + 1.5, sy + 1.5, cell - 3, cell - 3); }
     if (Math.abs(dx) <= T.chunk.activeRadius && Math.abs(dz) <= T.chunk.activeRadius) { ctx.strokeStyle = 'rgba(246,199,0,.3)'; ctx.strokeRect(sx + 0.5, sy + 0.5, cell - 1, cell - 1); }
@@ -1569,6 +1575,7 @@ function deathWhy(e) {
   if (e.cause === 'cooked by bees') return 'Bees ball an intruder and heat it. Mash Shift before it reaches 46 °C.';
   if (e.cause === 'drowned in a trap') return 'Sweet-smelling bottles at alert level 3 are traps.';
   if (e.cause === 'drowned in a drink') return 'Cups are deep. Feed just above the drink without touching it, and mash Shift the moment you slip in.';
+  if (e.cause === 'stung inside a hive') return 'Every second inside a hive is a chance for the bees to get you. Mash to grab fast, or bail out with Space.';
   if (e.cause === 'drowned under a lid') return 'Someone saw you go into their drink and covered it. Don\'t linger inside a cup in front of people.';
   if (e.cause === 'cold') return 'Below about 8 °C a wasp goes torpid and dies. Get home before cold nights, or warm up on a person.';
   if (e.cause === 'insecticide') return 'Some people carry spray once the area is alert. Stay out of the cone in front of them.';
@@ -1587,7 +1594,7 @@ function deathWhy(e) {
     default: return '';
   }
 }
-const DEATH_TITLE = { 'eaten by a spider': 'EATEN', 'taken by a bird': 'TAKEN', 'killed by a rival wasp': 'KILLED', slap: 'SWATTED', cover: 'SMOTHERED', 'crushed under clothing': 'CRUSHED', insecticide: 'SPRAYED', 'drowned in a trap': 'DROWNED', 'cooked by bees': 'COOKED', starved: 'STARVED', 'old age': 'SPENT', 'taken by a dragonfly': 'TAKEN', cold: 'CHILLED', 'drowned in a drink': 'DROWNED', 'drowned under a lid': 'SHUT IN' };
+const DEATH_TITLE = { 'eaten by a spider': 'EATEN', 'taken by a bird': 'TAKEN', 'killed by a rival wasp': 'KILLED', slap: 'SWATTED', cover: 'SMOTHERED', 'crushed under clothing': 'CRUSHED', insecticide: 'SPRAYED', 'drowned in a trap': 'DROWNED', 'cooked by bees': 'COOKED', starved: 'STARVED', 'old age': 'SPENT', 'taken by a dragonfly': 'TAKEN', cold: 'CHILLED', 'drowned in a drink': 'DROWNED', 'drowned under a lid': 'SHUT IN', 'stung inside a hive': 'STUNG' };
 
 function pushSwatAnims(list, frameHex, contactTick) {
   const frame = sim.humanByHex(frameHex);
@@ -1698,6 +1705,10 @@ function handleEvents(events) {
       case 'webEscape': if (e.id === sim.drivenId) toast('Tore free', 'var(--yellow)', 1.2); break;
       case 'fellIn': if (e.driven) { toast('Slipped into the drink · mash Shift', 'var(--red)', 2); blip(420, 180, 0.25, 0.05, 'sine'); } break;
       case 'climbedOut': if (e.id === sim.drivenId) toast('Climbed out, sticky', 'var(--yellow)', 1.2); break;
+      case 'robStart': if (e.driven) { toast(e.feral ? 'Into the wild hive · mash LMB to grab' : 'Into the hive · mash LMB to grab', 'var(--red)', 1.8); } break;
+      case 'robbed': if (e.driven) toast('Honey and brood · now get out, the hive is up', 'var(--yellow)', 2.2); else logEvent(`worker ${e.id} robbed a hive`); break;
+      case 'hiveEmpty': if (e.id === sim.drivenId) toast('Nothing left in this hive today', 'var(--muted)', 2); break;
+      case 'robAbort': if (e.id === sim.drivenId) toast('Bailed out', 'var(--muted)', 1.2); break;
       case 'cover': logEvent(`#${e.humanHex.slice(0, 4)} covers a drink`); break;
       case 'coveredIn': if (e.driven) toast('Covered! Shut in the cup', 'var(--red)', 2); break;
       case 'takeoff':
@@ -1816,7 +1827,7 @@ function nearestScents(w) {
     c.caterpillars.forEach((f, i) => { if (!st.caughtCat[i]) take('protein', f); });
   }
   for (const a of sim.alarms) take('alarm', a);
-  for (const al of sim.hiveAlarms.values()) { const rec = sim.records.get(al.key); const hv = rec && rec.content.hives[al.h]; if (hv) take('alarm', hv); }
+  for (const al of sim.hiveAlarms.values()) { const rec = sim.records.get(al.key); const hv = rec && sim.hivesIn(rec)[al.h]; if (hv) take('alarm', hv); }
   return { best, d2 };
 }
 let scentTimer = 0, scentCache = null;

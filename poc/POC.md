@@ -104,6 +104,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 76 | Landing on any surface: hover still near a trunk, a flower stalk, the side of a box or under a table and the wasp grips it, belly to the surface. Walking follows the surface round edges and up trunks; only Space or Shift take off; a sting from a surface reaches someone within 4 cm | 7.2 | 14 |
 | 77 | Hollow cups: the walls keep you out from the side; in over the rim to reach the drink, which you must not touch. Someone who sees you go in covers the cup with a hand and you drown inside; lids at level 2 do the same. On a surface, the mouse turns you about it as on the ground | 7.2, 7.5 | 14 |
 | 78 | Seasonal ecology (T1-8): flowers bloom by kind through the season (bud, bloom, faded); nectar runs down as you and the bees drink and regrows over the day; caterpillars early, flies late; carrion turns up for a few days with loads of meat. The colony's off-screen foraging follows the same calendar | 9.4 | 14 |
+| 79 | Feral hives and robbing (T1-9): wild bee colonies in some hollow trees and shed walls; E at any hive entrance goes inside for honey and a larva (mash LMB to grab faster, Space to bail), with the bees inside able to kill you and the hive roused when you come out. Three loads a hive a day; AI foragers rob when the colony is short of sugar | 9.1, 9.2 | 14 |
 
 ## Verified
 

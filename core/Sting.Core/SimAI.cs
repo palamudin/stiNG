@@ -82,6 +82,11 @@ namespace Sting.Core
                         if (p != null) { Catch(w, p); ai.mode = "return"; ai.target = null; }
                         else if (tick > ai.timer) ai.mode = "pick";
                     }
+                    else if (t.kind == "hive")
+                    {
+                        if (w.carry == null && HiveLoadsLeft(t.key, t.i) > 0) { StartRob(w, t.key, t.i); return cmd; }
+                        ai.mode = "return"; ai.target = null;
+                    }
                     else if (t.kind == "wood")
                     {
                         if (tick > ai.timer) { w.carry = new Carry { kind = "pulp", amount = T.pulp.amount, what = "pulp" }; ai.mode = "return"; ai.target = null; Emit("chewed", ("id", w.id)); }
@@ -121,7 +126,7 @@ namespace Sting.Core
             return cmd;
         }
 
-        void AiPick(Wasp w)
+        internal void AiPick(Wasp w)
         {
             var ai = w.ai; var col = colony;
             AiTarget best = null; Num bs = Num.MaxValue;
@@ -144,6 +149,8 @@ namespace Sting.Core
                         Consider(new AiTarget { kind = "sugar", key = key, i = i, c = ri }, new V3(s.x, s.y, s.z));
                     }
                     if (lvl >= 3 && col.deficit >= T.ai.canDeficit) for (int i = 0; i < c.traps.Count; i++) { var tr = c.traps[i]; Consider(new AiTarget { kind = "trap", key = key, i = i, c = ri + 50 }, new V3(tr.x, tr.y, tr.z)); }
+                    // short of sugar, a forager will rob a hive (T1-9)
+                    if (col.deficit >= T.ai.canDeficit) { var hvs = HivesIn(rec); for (int h = 0; h < hvs.Count; h++) if (HiveLoadsLeft(key, h) > 0) Consider(new AiTarget { kind = "hive", key = key, i = h, c = ri + 100 }, new V3(hvs[h].ex, hvs[h].ey, hvs[h].ez)); }
                     foreach (var sp in SpillsIn(key)) Consider(new AiTarget { kind = "spill", key = key, i = sp.i, c = ri + 60 }, new V3(sp.x, sp.y, sp.z));
                     foreach (var f in FruitIn(rec)) Consider(new AiTarget { kind = "fruit", key = key, i = f.i, c = ri + 80 }, new V3(f.x, f.y, f.z));
                 }
@@ -188,6 +195,7 @@ namespace Sting.Core
                 return new V3(s.x, s.y + 0.012, s.z);
             }
             if (t.kind == "trap") { var tr = c.traps[t.i]; return new V3(tr.x, tr.y, tr.z); }
+            if (t.kind == "hive") { var hvs = HivesIn(rec); return t.i < hvs.Count ? new V3(hvs[t.i].ex, hvs[t.i].ey, hvs[t.i].ez) : (V3?)null; }
             if (t.kind == "fruit") { foreach (var f in FruitIn(rec)) if (f.i == t.i) return new V3(f.x, f.y + 0.015, f.z); return null; }
             if (t.kind == "spill") { foreach (var sp in SpillsIn(t.key)) if (sp.i == t.i) return new V3(sp.x, sp.y + 0.012, sp.z); return null; }
             if (t.kind == "bait") { var bs = BaitsIn(t.key); return t.i < bs.Count ? new V3(bs[t.i].x, bs[t.i].y, bs[t.i].z) : (V3?)null; }

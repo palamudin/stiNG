@@ -28,6 +28,7 @@ namespace Sting.Core
     public sealed class Drown { public string key; public int until, i = -1; public Num progress, prevBurst; }
     public sealed class Cup { public Num x, z, level; public int i; }
     public sealed class Nectar { public Num lv; public long m; }
+    public sealed class Rob { public string key; public int h; public Num progress, prevSting; }
     public sealed class Carrion { public Num x, y, z; public long d; public int left; }
     public sealed class SipPend { public string key; public int i; public Num amount; }
     public sealed class WebHold { public string key; public int i; public Num progress, prevBurst; public int start; public Num spiderAt; }
@@ -65,6 +66,7 @@ namespace Sting.Core
         /// the surface a landed wasp holds on to, and a short window after takeoff before it can settle again
         public Land land; public int noLandUntil; public string trapCause;
         internal SipPend sipPend; // net only: sips not yet told to the other peers
+        public Rob rob;
         public Wasp Ghost() { var g = (Wasp)MemberwiseClone(); g.state = "dead"; return g; }
     }
 
@@ -151,7 +153,7 @@ namespace Sting.Core
         // caches of pure functions of the seed, the chunk and the clock (never saved, never hashed)
         internal object sites; internal List<Food> fruit; internal long fruitDay = long.MinValue; internal int fruitSeason;
         internal List<Bait> baits; internal int baitsCampaign = -1;
-        internal List<Cup> cups; internal int[] beeLoad, flowerIdx;
+        internal List<Cup> cups; internal int[] beeLoad, flowerIdx; internal List<Hive> hives;
         string[] _sub = new string[0];
         /// "cx,cz#i": the key of the i-th hive or hunter in this chunk
         public string Sub(int i)
@@ -174,6 +176,8 @@ namespace Sting.Core
         public Dictionary<int, int> cover;
         /// nectar at the last sip and when (T1-8); carrion loads taken, by the day it appeared
         public Dictionary<int, Nectar> nectar; public Dictionary<int, int> carrion;
+        /// loads robbed from each hive today (T1-9)
+        public Dictionary<int, int> robbed;
     }
 
     public sealed class BeePhys { public Num x, y, z, vx, vy, vz, stun; public string mode; }
@@ -197,7 +201,7 @@ namespace Sting.Core
         public Dictionary<int, int> lastSeq = new Dictionary<int, int>(); public Dictionary<string, List<int>> stingTicks = new Dictionary<string, List<int>>();
         public List<int> ruled = new List<int>();
     }
-    public sealed class Hint { public string opening, prey, site, hiber; public bool bait, wood, nest, rival; }
+    public sealed class Hint { public string opening, prey, site, hiber; public bool bait, wood, nest, rival, hive; }
     /// A hibernation site and the queens waking there (T1-15)
     public sealed class HiberSite { public string kind; public Num x, y, z, q; public int n; public bool scouted; }
     public sealed class Winter { public string why; public List<HiberSite> sites = new List<HiberSite>(); public Num survivors, lineage; public int until; }

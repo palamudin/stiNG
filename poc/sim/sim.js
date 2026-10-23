@@ -520,6 +520,7 @@ export class Sim {
         if (ev.what === 'fly') st.caughtFly[ev.i] = ev.tick + T.prey.flyRespawnTicks;
         else if (ev.what === 'caterpillar') st.caughtCat[ev.i] = 1;
         else if (ev.what === 'carrion') { const cr = st.carrion || (st.carrion = {}); cr[ev.i] = (cr[ev.i] || 0) + 1; }
+        else if (ev.what === 'honey') { const rb = st.robbed || (st.robbed = {}); rb[ev.i] = (rb[ev.i] || 0) + 1; }
         else (st.beeLost[ev.hive] || (st.beeLost[ev.hive] = {}))[ev.i] = 1;
         break;
       }
@@ -654,7 +655,7 @@ export class Sim {
       this.day = newDay;
       let k = 1;
       for (let i = 0; i < days; i++) k *= 1 - T.esc.decayPerDay;
-      for (const s of this.chunkState.values()) { s.esc *= k; s.beeLost = {}; s.caughtCat = {}; }
+      for (const s of this.chunkState.values()) { s.esc *= k; s.beeLost = {}; s.caughtCat = {}; s.robbed = {}; }
       this.emit('newDay', { day: newDay });
     }
   }
@@ -782,6 +783,7 @@ export class Sim {
       }
       case 'webbed': this._webStep(w, cmd, driven); break;
       case 'drowning': this._drownStep(w, cmd, driven); break;
+      case 'robbing': this._robStep(w, cmd, driven); break;
       case 'perched': this._perchStep(w, cmd, edge, armed, driven); break;
       case 'fighting': if (driven && cmd.sting && !this.pressUsed) { this.pressUsed = true; w.fight.mash += T.rival.mash; } break;
       case 'attached': this._attached(w, cmd, driven); break;
@@ -1093,6 +1095,8 @@ export class Sim {
       const hs = this._hiberNear(w);
       if (hs) { this.hiberPick = { season: this.season.n, x: hs.x, z: hs.z, kind: hs.kind }; this.emit('hiberScouted', { kind: hs.kind, q: hs.q }); return; }
     }
+    const hb = !w.carry && w.caste !== 'queen' ? this._hiveEntranceNear(w) : null;
+    if (hb) { this._startRob(w, hb.key, hb.h); return; }
     const rv = this._rivalNestNear(w);
     if (rv && !w.carry) { this._raid(w, rv); return; }
     const c = w.contact;
@@ -1115,6 +1119,7 @@ export class Sim {
       nest: dist2(w, this.nest.entrance) < 0.4 * 0.4,
       site: w.caste === 'queen' && !this.colony.sited ? (this._siteNear(w) || {}).type || null : null,
       rival: !w.carry && !!this._rivalNestNear(w),
+      hive: !w.carry && w.caste !== 'queen' && !!this._hiveEntranceNear(w),
       hiber: w.caste !== 'queen' && this.seasonFrac >= T.season.reproStart && this.colony.mated + this.colony.gynes >= 1 ? (this._hiberNear(w) || {}).kind || null : null,
     };
   }
@@ -1132,8 +1137,9 @@ export class Sim {
         if (dist2(w, c.caterpillars[i]) <= r2 * 2) return { kind: 'caterpillar', key, i, protein: T.prey.caterpillarProtein };
       }
       for (const cr of this.carrionIn(rec)) if (dist2(w, cr) <= T.eco.carrionReach * T.eco.carrionReach) return { kind: 'carrion', key, i: cr.d, protein: T.eco.carrionProtein };
-      for (let h = 0; h < c.hives.length; h++) {
-        const hv = c.hives[h], lost = st.beeLost[h] || {}, al = this.hiveAlarms.get(key + '#' + h);
+      const hives = this.hivesIn(rec);
+      for (let h = 0; h < hives.length; h++) {
+        const hv = hives[h], lost = st.beeLost[h] || {}, al = this.hiveAlarms.get(key + '#' + h);
         for (let k = T.bees.guards; k < hv.bees.length; k++) {
           if (lost[k] || (al && al.phys[k])) continue;
           if (dist2(w, beePos(hv, k, this.tick)) <= r2) return { kind: 'bee', key, i: k, hive: h, protein: T.prey.beeProtein };
@@ -1568,8 +1574,8 @@ export class Sim {
     const add = (kind, x, y, z) => { if (sq(x - n.x) + sq(z - n.z) <= H.range * H.range) list.push({ kind, x, y, z, q: H.q[kind] }); };
     for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
       const rc = { cx: cx + dx, cz: cz + dz, content: this._content(cx + dx, cz + dz) }, s = this.sitesIn(rc);
-      for (const sh of rc.content.sheds) { const p = shedSites(sh).wall; add('shed', p.x, p.y, p.z); }
-      for (const h of s.hollows) add('hollow', h.x, h.y, h.z);
+      rc.content.sheds.forEach((sh, si) => { if (!this.feralWall(rc, si)) { const p = shedSites(sh).wall; add('shed', p.x, p.y, p.z); } });
+      s.hollows.forEach((h, j) => { if (!this.feralHollow(rc, j)) add('hollow', h.x, h.y, h.z); });
       rc.content.trees.forEach((t, i) => {
         if (t.r < H.barkMinR) return;
         const a = hseq(sd, rc.cx, rc.cz, i, 941) * 6.28318;
@@ -2027,7 +2033,7 @@ export class Sim {
   // ---------------- bees (GDD 9.2)
 
   _alarmHive(key, h, w, radius, fromRemote = false) {
-    const rec = this.records.get(key), hv = rec.content.hives[h];
+    const rec = this.records.get(key), hv = this.hivesIn(rec)[h];
     const k = key + '#' + h;
     let al = this.hiveAlarms.get(k);
     if (!fromRemote && (!al || al.target !== w.id)) this._publish({ type: 'beeAlarm', key, h, target: w.id, radius });
@@ -2047,7 +2053,7 @@ export class Sim {
     // entrance guard check for every active hive
     for (const rec of this.activeChunks) {
       const key = chunkKey(rec.cx, rec.cz);
-      rec.content.hives.forEach((hv, h) => {
+      this.hivesIn(rec).forEach((hv, h) => {
         for (const w of this.wasps) {
           if (w.state !== 'fly' && w.state !== 'chewing' && w.state !== 'landed') continue;
           const dx = w.x - hv.ex, dy = w.y - hv.ey, dz = w.z - hv.ez;
@@ -2059,7 +2065,7 @@ export class Sim {
     const B = T.bees, agg = this.settings.beeAggression;
     const attached = new Map();
     for (const [k, al] of this.hiveAlarms) {
-      const rec = this.records.get(al.key), hv = rec.content.hives[al.h];
+      const rec = this.records.get(al.key), hv = this.hivesIn(rec)[al.h];
       const target = this._anyWasp(al.target);
       if (target && dist2(target, { x: hv.ex, y: hv.ey, z: hv.ez }) < 15 * 15 && target.state !== 'dead') al.until = Math.max(al.until, this.tick + 60);
       const ending = this.tick > al.until || !target;
@@ -2098,7 +2104,7 @@ export class Sim {
     for (const [id, n] of attached) {
       const w = this.waspById(id);
       if (!w) continue;
-      if (w.state !== 'balled' && n >= B.ballMin && w.state !== 'under' && w.state !== 'trapped') {
+      if (w.state !== 'balled' && n >= B.ballMin && w.state !== 'under' && w.state !== 'trapped' && w.state !== 'robbing') { // inside the hive it is the bees inside that count (T1-9)
         if (w.state === 'attached') this._detach(w, 'balled');
         w.state = 'balled'; w.ball = { temp: B.startTemp, progress: 0, prevBurst: 0 }; w.vx = w.vy = w.vz = 0;
         this.emit('balled', { id: w.id, driven: w.id === this.drivenId });
@@ -2253,6 +2259,79 @@ export class Sim {
     return out;
   }
 
+  // ---------------- feral hives and robbing (GDD 9.1, T1-9)
+
+  feralHollow(rec, j) { return hseq(Number(this.seed & 0xffffffffn), rec.cx, rec.cz, j, 981) < T.feral.hollowShare; }
+  feralWall(rec, si) { return hseq(Number(this.seed & 0xffffffffn), rec.cx, rec.cz, si, 982) < T.feral.wallShare; }
+  // The chunk's hives: the managed boxes from the generator, then wild colonies in hollow trees and shed walls,
+  // derived from the seed like the nest sites (so old worlds keep their frozen content). Indices are stable.
+  hivesIn(rec) {
+    if (rec._hives) return rec._hives;
+    const F = T.feral, sd = Number(this.seed & 0xffffffffn), c = rec.content, list = c.hives.slice();
+    const u = (a, b) => hseq(sd, rec.cx, rec.cz, a, b, 983);
+    const wild = (x, y, z, nx, nz, slot) => {
+      const hv = { x, z, fx: nx, fz: nz, ex: x + nx * 0.03, ey: y, ez: z + nz * 0.03, bees: [], slot, feral: true };
+      for (let k = 0; k < F.guards + F.foragers; k++) {
+        const s = slot * 64 + k * 6;
+        if (k < F.guards) { hv.bees.push({ guard: true, p: u(s, 0) * 6.28, w: (1.5 + 1.5 * u(s, 1)) * (k % 2 ? 1 : -1) }); continue; }
+        const f = c.flowers.length ? c.flowers[Math.floor(u(s, 2) * c.flowers.length)] : { x: x + 8, y: 0.4, z: z + 8 };
+        hv.bees.push({ guard: false, tx: f.x, ty: f.y, tz: f.z, period: 1500 + Math.floor(u(s, 3) * 1500), phase: Math.floor(u(s, 4) * 3000), p: u(s, 5) * 6.28 });
+      }
+      list.push(hv);
+    };
+    this.sitesIn(rec).hollows.forEach((h, j) => {
+      if (!this.feralHollow(rec, j)) return;
+      const dx = h.x - h.t.x, dz = h.z - h.t.z, d = Math.sqrt(dx * dx + dz * dz) || 1;
+      wild(h.x, h.y, h.z, dx / d, dz / d, 100 + j);
+    });
+    c.sheds.forEach((sh, si) => {
+      if (!this.feralWall(rec, si)) return;
+      const p = shedSites(sh).wall;
+      wild(p.x, p.y, p.z, p.nx, p.nz, 200 + si);
+    });
+    rec._hives = list;
+    return list;
+  }
+  hiveLoadsLeft(key, h) { const st = this.chunkState.get(key); return T.feral.loadsPerDay - ((st && st.robbed && st.robbed[h]) || 0); }
+  _hiveEntranceNear(w) {
+    const r2 = T.feral.robReach * T.feral.robReach;
+    for (const rec of this.activeChunks) {
+      const key = chunkKey(rec.cx, rec.cz), hives = this.hivesIn(rec);
+      for (let h = 0; h < hives.length; h++) if (dist2(w, { x: hives[h].ex, y: hives[h].ey, z: hives[h].ez }) <= r2) return { key, h };
+    }
+    return null;
+  }
+  // in through the entrance: the whole hive is roused
+  _startRob(w, key, h) {
+    const hv = this.hivesIn(this.records.get(key))[h];
+    w.state = 'robbing'; w.vx = w.vy = w.vz = 0; w.land = null;
+    w.x = hv.ex; w.y = hv.ey; w.z = hv.ez;
+    w.rob = { key, h, progress: 0, prevSting: 1 };
+    this._alarmHive(key, h, w, T.bees.hiveAlarmRadius);
+    this.emit('robStart', { id: w.id, driven: w.id === this.drivenId, key, h, feral: !!hv.feral });
+  }
+  // Inside: the grab fills over a few seconds, faster for each sting press; any tick the bees may get you; Space or
+  // Shift bails out empty-handed. Out with honey in the crop and a larva in the jaws, into an alarmed hive's air.
+  _robStep(w, cmd, driven) {
+    const r = w.rob, F = T.feral, hv = this.hivesIn(this.records.get(r.key))[r.h];
+    const out = () => { w.rob = null; w.state = 'fly'; w.x = hv.ex + hv.fx * 0.05; w.z = hv.ez + hv.fz * 0.05; w.vx = hv.fx * 1.5; w.vz = hv.fz * 1.5; w.vy = 0.3; w.noLandUntil = this.tick + T.land.afterTakeoff; };
+    if (driven && (cmd.burst || cmd.my > 0)) { out(); this.emit('robAbort', { id: w.id }); return; }
+    if (h32(w.id, this.tick, 87) < F.insideKill * DT) { w.rob = null; this._die(w, 'stung inside a hive', null); return; }
+    r.progress += DT / F.robSecs;
+    if (driven) { if (cmd.sting && !r.prevSting) r.progress += F.pressGain; r.prevSting = cmd.sting ? 1 : 0; }
+    if (r.progress < 1) return;
+    out();
+    if (this.hiveLoadsLeft(r.key, r.h) <= 0) { this.emit('hiveEmpty', { id: w.id, key: r.key, h: r.h }); if (!driven) { w.ai.mode = 'return'; w.ai.target = null; } return; }
+    const st = this.cs(r.key), rb = st.robbed || (st.robbed = {});
+    rb[r.h] = (rb[r.h] || 0) + 1;
+    w.energy = 1; w.ai.cargo = Math.max(w.ai.cargo || 0, F.honeyCargo);
+    w.carry = { kind: 'protein', amount: F.broodProtein, what: 'bee brood' };
+    this._publish({ type: 'caught', key: r.key, what: 'honey', i: r.h });
+    this.stats.caught++;
+    this.emit('robbed', { id: w.id, driven, key: r.key, h: r.h });
+    if (!driven) { w.ai.mode = 'return'; w.ai.target = null; }
+  }
+
   // ---------------- seasonal ecology (GDD 9.4, T1-8): pure functions of the seed, the chunk and the clock, plus the
   // sips taken (chunk state). The ecology tick of GDD 3.3 is evaluated lazily: a flower's nectar is its level at the
   // last sip plus regrowth (less what the local bees take) since, so nothing has to run while nobody looks.
@@ -2265,7 +2344,8 @@ export class Sim {
   _beeLoad(rec) {
     if (rec._beeLoad) return rec._beeLoad;
     const c = rec.content;
-    rec._beeLoad = c.flowers.map((f) => { let n = 0; for (const hv of c.hives) for (const b of hv.bees) if (!b.guard && b.tx === f.x && b.tz === f.z) n++; return n; });
+    const hives = this.hivesIn(rec);
+    rec._beeLoad = c.flowers.map((f) => { let n = 0; for (const hv of hives) for (const b of hv.bees) if (!b.guard && b.tx === f.x && b.tz === f.z) n++; return n; });
     return rec._beeLoad;
   }
   nectarAt(rec, i) {
@@ -2342,12 +2422,12 @@ export class Sim {
   _siteNear(w) {
     for (const rec of this.activeChunks) {
       const { holes, branches, hollows } = this.sitesIn(rec);
-      for (const h of hollows) if (dist2(w, h) < 0.12 * 0.12) return { type: 'hollow', x: h.x, y: h.y, z: h.z, t: h.t };
+      for (let j = 0; j < hollows.length; j++) { const h = hollows[j]; if (!this.feralHollow(rec, j) && dist2(w, h) < 0.12 * 0.12) return { type: 'hollow', x: h.x, y: h.y, z: h.z, t: h.t }; } // bees already live in some (T1-9)
       for (const h of holes) if (w.y < 0.3 && sq(w.x - h.x) + sq(w.z - h.z) < 0.12 * 0.12) return { type: 'ground', x: h.x, z: h.z };
       for (const b of branches) if (dist2(w, b) < 0.15 * 0.15) return { type: 'branch', x: b.x, y: b.y, z: b.z, t: b.t };
-      for (const sh of rec.content.sheds) {
-        const ss = shedSites(sh);
-        for (const type of ['wall', 'attic']) { const p = ss[type]; if (dist2(w, p) < 0.14 * 0.14) return { type, ...p }; }
+      for (let si = 0; si < rec.content.sheds.length; si++) {
+        const ss = shedSites(rec.content.sheds[si]);
+        for (const type of ['wall', 'attic']) { if (type === 'wall' && this.feralWall(rec, si)) continue; const p = ss[type]; if (dist2(w, p) < 0.14 * 0.14) return { type, ...p }; }
       }
     }
     const t = this._trunkNear(w);
@@ -3020,6 +3100,9 @@ export class Sim {
           const p = this._preyNear(w);
           if (p) { this._catch(w, p); ai.mode = 'return'; ai.target = null; }
           else if (this.tick > ai.timer) ai.mode = 'pick';
+        } else if (t.kind === 'hive') {
+          if (!w.carry && this.hiveLoadsLeft(t.key, t.i) > 0) { this._startRob(w, t.key, t.i); return cmd; }
+          ai.mode = 'return'; ai.target = null;
         } else if (t.kind === 'wood') {
           if (this.tick > ai.timer) { w.carry = { kind: 'pulp', amount: T.pulp.amount, what: 'pulp' }; ai.mode = 'return'; ai.target = null; this.emit('chewed', { id: w.id }); }
         } else if ((ai.cargo || 0) >= 0.95 || this.tick > ai.timer + 300) { ai.mode = 'return'; ai.target = null; }
@@ -3094,6 +3177,8 @@ export class Sim {
           consider({ kind: 'sugar', key, i, c: ri }, s);
         });
         if (lvl >= 3 && col.deficit >= T.ai.canDeficit) c.traps.forEach((tr, i) => consider({ kind: 'trap', key, i, c: ri + 50 }, tr));
+        // short of sugar, a forager will rob a hive (T1-9)
+        if (col.deficit >= T.ai.canDeficit) this.hivesIn(rec).forEach((hv, h) => { if (this.hiveLoadsLeft(key, h) > 0) consider({ kind: 'hive', key, i: h, c: ri + 100 }, { x: hv.ex, y: hv.ey, z: hv.ez }); });
         this.spillsIn(key).forEach((sp) => consider({ kind: 'spill', key, i: sp.i, c: ri + 60 }, sp));
         this.fruitIn(rec).forEach((f) => consider({ kind: 'fruit', key, i: f.i, c: ri + 80 }, f));
       } else if (w.role === 'protein') {
@@ -3128,6 +3213,7 @@ export class Sim {
       return { x: s.x, y: s.y + 0.012, z: s.z };
     }
     if (t.kind === 'trap') return c.traps[t.i];
+    if (t.kind === 'hive') { const hv = this.hivesIn(rec)[t.i]; return hv ? { x: hv.ex, y: hv.ey, z: hv.ez } : null; }
     if (t.kind === 'fruit') { const f = this.fruitIn(rec).find((x) => x.i === t.i); return f ? { x: f.x, y: f.y + 0.015, z: f.z } : null; }
     if (t.kind === 'spill') { const sp = this.spillsIn(t.key).find((x) => x.i === t.i); return sp ? { x: sp.x, y: sp.y + 0.012, z: sp.z } : null; }
     if (t.kind === 'bait') return this._baitsIn(t.key)[t.i] || null;

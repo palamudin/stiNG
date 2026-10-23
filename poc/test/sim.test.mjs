@@ -324,8 +324,11 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
 // 33. Winter with choices (T1-15): a worker scouts a winter site in late season and most gynes winter there; a good
 // site wakes more queens than a poor one; with no choice made, the strongest site wakes on its own
 {
+  // a world with a free hollow tree near home to winter in (some hold wild bees, T1-9)
+  let hseed = 1234;
+  for (let sd = 1234; sd < 1300; sd++) { const t = new Sim({ seed: sd }); if (t.hiberSites().some((x) => x.kind === 'hollow')) { hseed = sd; break; } }
   const late = (scout) => {
-    const s = new Sim({ seed: 1234 });
+    const s = new Sim({ seed: hseed });
     s.colony.mated = 300;
     s.season.startMinute -= 0.66 * s.settings.seasonDays * 1440;
     run(s, 2);
@@ -726,8 +729,8 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   for (let seed = 1; seed < 60 && !ss; seed++) {
     const t = new Sim({ seed });
     t.colony.mated = 200; t.season.startMinute -= 0.71 * t.settings.seasonDays * 1440; run(t, 120); run(t, 1, () => idle({ pick: 1 }));
-    const rec = t.activeChunks.find((r) => r.content.sheds.length);
-    if (rec) ss = { t, sh: rec.content.sheds[0] };
+    // a shed whose wall crack is free (some hold wild bees, T1-9)
+    for (const rec of t.activeChunks) { const si = rec.content.sheds.findIndex((sh, i) => !t.feralWall(rec, i)); if (si >= 0 && !ss) ss = { t, sh: rec.content.sheds[si] }; }
   }
   ok(!!ss && ss.t.records.size > 0, 'some chunks near home have a garden shed');
   const sites = shedSites(ss.sh);
@@ -1046,6 +1049,48 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   const ev = run(s, 2, (sim, i) => idle({ act: i === 1 ? Act.Interact : 0 }));
   const left = s.carrionIn(crRec).find((x) => x.d === cr.d);
   ok(w2.carry && w2.carry.what === 'carrion' && (left ? left.left : 0) === cr.left - 1, `E at the carcass takes a load of meat (${w2.carry && w2.carry.what}, ${left ? left.left : 0} left)`);
+}
+
+// 35. Feral hives and robbing (T1-9): wild colonies in hollow trees and shed walls; E at any hive entrance goes in,
+// a few seconds (faster mashing sting) grab honey and brood while the bees inside may kill you; a hive gives a few
+// loads a day and comes out alarmed; short of sugar, AI foragers rob too
+{
+  const s = new Sim({ seed: 1234, birds: false });
+  const wild = []; for (const r of s.activeChunks) s.hivesIn(r).forEach((hv, h) => { if (hv.feral) wild.push({ r, hv, h, key: chunkKey(r.cx, r.cz) }); });
+  ok(wild.length >= 2 && wild.every((x) => x.hv.bees.length === T.feral.guards + T.feral.foragers), `wild bee colonies live in hollow trees and shed walls near home (${wild.length})`);
+  ok(!s.hiberSites().some((x) => wild.some((y) => Math.hypot(x.x - y.hv.x, x.z - y.hv.z) < 0.05)), 'a hollow or a wall crack that bees hold is not a winter site');
+  const kill = T.feral.insideKill;
+  T.feral.insideKill = 0;
+  const { hv, h, key } = wild[0], w = s.wasp;
+  const rob = (mash) => { // until it comes out
+    w.carry = null; w.energy = 0.3; w.state = 'fly'; place(w, { x: hv.ex, y: hv.ey, z: hv.ez });
+    const ev = [];
+    for (let i = 0; i < 400; i++) { ev.push(...run(s, 1, () => idle({ act: i === 1 ? Act.Interact : 0, sting: mash && i % 2 }))); if (i > 2 && w.state !== 'robbing') break; }
+    return ev;
+  };
+  let ev = rob(true);
+  const done = ev.find((e) => e.type === 'robbed'), start = ev.find((e) => e.type === 'robStart');
+  ok(start && done && done.t - start.t < T.feral.robSecs * 60, `E at the entrance goes in, and mashing sting grabs faster (${done && start ? ((done.t - start.t) / 60).toFixed(1) : '-'} s)`);
+  ok(w.carry && w.carry.what === 'bee brood' && w.energy === 1 && s.hiveAlarms.has(key + '#' + h), 'out with honey in the crop and a larva, into an alarmed hive');
+  for (let k = 1; k < T.feral.loadsPerDay; k++) rob(true);
+  ev = rob(true);
+  ok(count(ev, 'hiveEmpty') === 1 && !w.carry, `a hive gives ${T.feral.loadsPerDay} loads a day, then nothing`);
+  w.carry = null; w.state = 'fly'; place(w, { x: hv.ex, y: hv.ey, z: hv.ez });
+  ev = run(s, 30, (sim, i) => idle({ act: i === 1 ? Act.Interact : 0, burst: i === 20 ? 1 : 0 }));
+  ok(count(ev, 'robAbort') === 1 && w.state !== 'robbing' && !w.carry, 'Shift bails out empty-handed');
+  T.feral.insideKill = 1000;
+  const s2 = new Sim({ seed: 1234, birds: false }), w2 = s2.wasp;
+  place(w2, { x: hv.ex, y: hv.ey, z: hv.ez });
+  ev = run(s2, 10, (sim, i) => idle({ act: i === 1 ? Act.Interact : 0 }));
+  const died = ev.find((e) => e.type === 'waspDied');
+  ok(died && died.cause === 'stung inside a hive', `the bees inside can kill a robber (${died && died.cause})`);
+  T.feral.insideKill = kill;
+  // AI foragers rob when the colony is short of sugar
+  const s3 = new Sim({ seed: 1234, birds: false });
+  s3.colony.deficit = 0.9;
+  let picks = 0;
+  for (let k = 0; k < 40; k++) { const a = s3._spawnWasp(false); a.role = 'sugar'; place(a, { x: hv.ex + 0.5, y: hv.ey, z: hv.ez }); s3._aiPick(a); if (a.ai.target && a.ai.target.kind === 'hive') picks++; }
+  ok(picks > 0, `short of sugar, AI foragers go for hives (${picks} of 40 near one)`);
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');

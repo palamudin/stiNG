@@ -431,7 +431,7 @@ namespace Sting.Core
 
         void AlarmHive(string key, int h, WaspBase w, Num radius, bool fromRemote = false)
         {
-            var rec = records.Get(key); var hv = rec.content.hives[h];
+            var rec = records.Get(key); var hv = HivesIn(rec)[h];
             string k = key + "#" + h;
             var al = hiveAlarms.Get(k);
             if (!fromRemote && (al == null || al.target != w.id)) Publish(new NetEv { type = "beeAlarm", key = key, h = h, target = w.id, radius = radius });
@@ -454,7 +454,7 @@ namespace Sting.Core
             foreach (var rec in activeChunks)
             {
                 string key = rec.key;
-                var hives = rec.content.hives;
+                var hives = HivesIn(rec);
                 for (int h = 0; h < hives.Count; h++)
                 {
                     var hv = hives[h];
@@ -472,7 +472,7 @@ namespace Sting.Core
             foreach (var kv in hiveAlarms)
             {
                 var al = kv.Value;
-                var rec = records.Get(al.key); var hv = rec.content.hives[al.h];
+                var rec = records.Get(al.key); var hv = HivesIn(rec)[al.h];
                 var target = AnyWasp(al.target);
                 if (target != null && D2(target, new V3(hv.ex, hv.ey, hv.ez)) < 15 * 15 && target.state != "dead") al.until = Max(al.until, tick + 60);
                 bool ending = tick > al.until || target == null;
@@ -518,7 +518,7 @@ namespace Sting.Core
                 int n = kv.Value;
                 var w = WaspById(kv.Key);
                 if (w == null) continue;
-                if (w.state != "balled" && n >= T.bees.ballMin && w.state != "under" && w.state != "trapped")
+                if (w.state != "balled" && n >= T.bees.ballMin && w.state != "under" && w.state != "trapped" && w.state != "robbing") // inside the hive it is the bees inside that count (T1-9)
                 {
                     if (w.state == "attached") Detach(w, "balled");
                     w.state = "balled"; w.ball = new Ball { temp = T.bees.startTemp, progress = 0, prevBurst = 0 }; w.vx = w.vy = w.vz = 0;
@@ -730,14 +730,14 @@ namespace Sting.Core
             {
                 if (!Near(rec, w.x, w.z)) continue;
                 var s = SitesIn(rec);
-                foreach (var (h, t) in s.hollows) if (D2(w, h) < 0.12 * 0.12) return new SiteHit { type = "hollow", x = h.x, y = h.y, z = h.z, t = t };
+                for (int j = 0; j < s.hollows.Count; j++) { var (h, t) = s.hollows[j]; if (!FeralHollow(rec, j) && D2(w, h) < 0.12 * 0.12) return new SiteHit { type = "hollow", x = h.x, y = h.y, z = h.z, t = t }; } // bees already live in some (T1-9)
                 foreach (var h in s.holes) if (w.y < 0.3 && Sq(w.x - h.x) + Sq(w.z - h.z) < 0.12 * 0.12) return new SiteHit { type = "ground", x = h.x, z = h.z };
                 foreach (var (b, t) in s.branches) if (D2(w, b) < 0.15 * 0.15) return new SiteHit { type = "branch", x = b.x, y = b.y, z = b.z, t = t };
-                foreach (var sh in rec.content.sheds)
+                for (int si = 0; si < rec.content.sheds.Count; si++)
                 {
-                    var ss = ShedSites(sh);
+                    var ss = ShedSites(rec.content.sheds[si]);
                     foreach (var (type, p) in new[] { ("wall", ss.wall), ("attic", ss.attic) })
-                        if (D2(w, new V3(p.x, p.y, p.z)) < 0.14 * 0.14) return new SiteHit { type = type, x = p.x, y = p.y, z = p.z, ix = p.ix, iz = p.iz, nx = p.nx, nz = p.nz };
+                        if (!(type == "wall" && FeralWall(rec, si)) && D2(w, new V3(p.x, p.y, p.z)) < 0.14 * 0.14) return new SiteHit { type = type, x = p.x, y = p.y, z = p.z, ix = p.ix, iz = p.iz, nx = p.nx, nz = p.nz };
                 }
             }
             var tr = TrunkNear(w);
