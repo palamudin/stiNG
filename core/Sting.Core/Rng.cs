@@ -52,6 +52,19 @@ namespace Sting.Core
         /// Small 32-bit hash for per-tick decisions (rng.js h32). Returns [0, 1).
         public static Num H32(long a, long b = 0, long c = 0, long d = 0)
         {
+            uint h = H32U(a, b, c, d);
+#if STING_FIXED
+            return Num.FromRaw(h);
+#else
+            return h / 4294967296.0;
+#endif
+        }
+        /// h32 reads four inputs; for five or six, hash the first four and feed that into a second round (rng.js hseq)
+        public static Num HSeq(long a, long b, long c, long d, long e, long f = 0) => H32(unchecked((int)H32U(a, b, c, d)), e, f);
+
+        /// The 32-bit hash as an unsigned integer (rng.js h32u)
+        public static uint H32U(long a, long b = 0, long c = 0, long d = 0)
+        {
             unchecked
             {
                 int h = (int)0x9e3779b9 ^ (int)a;
@@ -61,11 +74,7 @@ namespace Sting.Core
                 h ^= (int)((uint)h >> 15);
                 h = (int)((uint)h * 0x2c1b3c6du);
                 h ^= (int)((uint)h >> 12);
-#if STING_FIXED
-                return Num.FromRaw((long)(uint)h);
-#else
-                return (uint)h / 4294967296.0;
-#endif
+                return (uint)h;
             }
         }
         public static Num H32(Num a, Num b, Num c = default, Num d = default) => H32(I32(a), I32(b), I32(c), I32(d));

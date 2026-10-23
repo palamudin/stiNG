@@ -1,6 +1,6 @@
 // STING simulation core (iteration 2). Mirrors Sting.Core: no rendering, no wall clock.
 // Every wasp, driven or AI, goes through the same flight, contact, sting and swat code.
-import { Domain, hash, unit, rangeInt, u64, h32, dsin, dcos, clamp, clamp01, fnv32, hex64, rnd, sq, datan2 } from './rng.js';
+import { Domain, hash, unit, rangeInt, u64, h32, hseq, dsin, dcos, clamp, clamp01, fnv32, hex64, rnd, sq, datan2 } from './rng.js';
 import { T, DT, GEN_VERSION, DEFAULT_SETTINGS } from './tuning.js';
 import {
   Zone, ZONES, SwatKind, SwatKindName, Style, humanTraits, humanClothing, suitClothing, zoneCover, bodyParts,
@@ -1794,11 +1794,11 @@ export class Sim {
     const S = T.sites, CS = T.chunk.size, sd = Number(this.seed & 0xffffffffn);
     const holes = [];
     for (let i = 0; i < S.holesPerChunk; i++) {
-      const x = (rec.cx + (h32(sd, rec.cx, rec.cz, i, 913) - 0.5) * 0.8) * CS, z = (rec.cz + (h32(sd, rec.cx, rec.cz, i, 914) - 0.5) * 0.8) * CS;
+      const x = (rec.cx + (hseq(sd, rec.cx, rec.cz, i, 913) - 0.5) * 0.8) * CS, z = (rec.cz + (hseq(sd, rec.cx, rec.cz, i, 914) - 0.5) * 0.8) * CS;
       holes.push({ x, z });
     }
     const branches = rec.content.trees.map((t, i) => {
-      const a = h32(sd, rec.cx, rec.cz, i, 915) * 6.28318, d = t.cr * 0.55;
+      const a = hseq(sd, rec.cx, rec.cz, i, 915) * 6.28318, d = t.cr * 0.55;
       return { x: t.x + d * dcos(a), y: Math.max(1.8, t.h - t.cr * 0.7), z: t.z + d * dsin(a), t };
     });
     const out = { holes, branches };
@@ -1817,11 +1817,11 @@ export class Sim {
     if (cache.has(ck)) return cache.get(ck);
     const out = [], span = 1 - F.startFrac, days = this.settings.seasonDays * span;
     rec.content.trees.forEach((t, ti) => {
-      if (h32(sd, rec.cx, rec.cz, ti, 931) >= F.treeShare) return;
+      if (hseq(sd, rec.cx, rec.cz, ti, 931) >= F.treeShare) return;
       for (let k = 0; k < F.perTree; k++) {
-        const fall = Math.floor(this.season.startMinute / 1440 + this.settings.seasonDays * (F.startFrac + span * h32(sd, rec.cx, rec.cz, ti, k, 932)));
+        const fall = Math.floor(this.season.startMinute / 1440 + this.settings.seasonDays * (F.startFrac + span * hseq(sd, rec.cx, rec.cz, ti, k, 932)));
         if (today < fall || today >= fall + F.rotDays) continue;
-        const a = h32(sd, ti, k, 933) * 6.28318, d = t.r + 0.2 + F.spread * h32(sd, ti, k, 934);
+        const a = hseq(sd, rec.cx, rec.cz, ti, k, 933) * 6.28318, d = t.r + 0.2 + F.spread * hseq(sd, rec.cx, rec.cz, ti, k, 934);
         out.push({ x: t.x + d * dcos(a), y: 0.03, z: t.z + d * dsin(a), rate: F.rate, kind: 'fruit', i: ti * 16 + k });
       }
     });
@@ -2063,7 +2063,7 @@ export class Sim {
     if (!rec) return [];
     const cache = this._baitCache || (this._baitCache = new Map()), ck = m.active.n + '|' + key;
     if (cache.has(ck)) return cache.get(ck);
-    const trees = rec.content.trees.map((t, i) => ({ t, h: h32(m.active.n, rec.cx, rec.cz, i, 77) })).sort((a, b) => a.h - b.h).slice(0, T.muni.baitsPerChunk);
+    const trees = rec.content.trees.map((t, i) => ({ t, h: hseq(m.active.n, rec.cx, rec.cz, i, 77) })).sort((a, b) => a.h - b.h).slice(0, T.muni.baitsPerChunk);
     const out = trees.map(({ t, h }) => {
       const a = h * 6.28318, r = t.r + 0.03;
       return { x: t.x + r * dcos(a), y: T.muni.baitHeight, z: t.z + r * dsin(a), key };

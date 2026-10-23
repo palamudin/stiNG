@@ -12,9 +12,9 @@ colony 1de18358
 sim.jab e063d0bf
 sim.full 66d8fd32
 sim.idle7 e58aac7a
-sim.season f1e909b7
+sim.season eb45e7ba
 sim.hot 4da4b648
-sim.restored 8a8098f2
+sim.restored 321911f5
 net.good fd52774b
 net.awful e4370454
 net.join df4dd20c

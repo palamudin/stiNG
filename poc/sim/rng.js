@@ -32,7 +32,7 @@ export const u64 = (n) => BigInt.asUintN(64, BigInt(n));
 
 // Small, fast 32-bit hash for per-tick decisions that do not need the full 64-bit chain.
 // Deterministic (integer ops only). Returns [0, 1).
-export function h32(a, b = 0, c = 0, d = 0) {
+export function h32u(a, b = 0, c = 0, d = 0) {
   let h = 0x9e3779b9 ^ a;
   h = Math.imul(h ^ (h >>> 16), 0x85ebca6b) ^ b;
   h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35) ^ c;
@@ -40,8 +40,11 @@ export function h32(a, b = 0, c = 0, d = 0) {
   h ^= h >>> 15;
   h = Math.imul(h, 0x2c1b3c6d);
   h ^= h >>> 12;
-  return (h >>> 0) / 4294967296;
+  return h >>> 0;
 }
+export const h32 = (a, b = 0, c = 0, d = 0) => h32u(a, b, c, d) / 4294967296;
+// h32 reads four inputs; for five or six, hash the first four and feed that into a second round
+export const hseq = (a, b, c, d, e = 0, f = 0) => h32(h32u(a, b, c, d) | 0, e, f);
 
 const PI = 3.141592653589793, TAU = 2 * PI, HALF_PI = PI / 2;
 export { PI, TAU };

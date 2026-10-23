@@ -518,19 +518,18 @@ namespace Sting.Core
         public Sites SitesIn(ChunkRec rec)
         {
             if (rec.sites is Sites hit) return hit;
-            Num CSz = T.chunk.size, sd = seed & 0xffffffffUL;
+            Num CSz = T.chunk.size; long sd = (long)(seed & 0xffffffffUL);
             var o = new Sites();
-            // h32 reads four arguments; the JS passes a fifth that it ignores, kept so both sides agree
             for (int i = 0; i < T.sites.holesPerChunk; i++)
             {
-                Num x = (rec.cx + (H32(sd, rec.cx, rec.cz, i) - 0.5) * 0.8) * CSz, z = (rec.cz + (H32(sd, rec.cx, rec.cz, i) - 0.5) * 0.8) * CSz;
+                Num x = (rec.cx + (HSeq(sd, rec.cx, rec.cz, i, 913) - 0.5) * 0.8) * CSz, z = (rec.cz + (HSeq(sd, rec.cx, rec.cz, i, 914) - 0.5) * 0.8) * CSz;
                 o.holes.Add(new V3(x, 0, z));
             }
             var trees = rec.content.trees;
             for (int i = 0; i < trees.Count; i++)
             {
                 var t = trees[i];
-                Num a = H32(sd, rec.cx, rec.cz, i) * 6.28318, d = t.cr * 0.55;
+                Num a = HSeq(sd, rec.cx, rec.cz, i, 915) * 6.28318, d = t.cr * 0.55;
                 o.branches.Add((new V3(t.x + d * DCos(a), Max(1.8, t.h - t.cr * 0.7), t.z + d * DSin(a)), t));
             }
             rec.sites = o;
@@ -543,19 +542,19 @@ namespace Sting.Core
         {
             Num frac = SeasonFrac;
             if (frac < T.fruit.startFrac) return NoFood;
-            Num sd = seed & 0xffffffffUL; long today = day;
+            long sd = (long)(seed & 0xffffffffUL); long today = day;
             if (rec.fruit != null && rec.fruitDay == today && rec.fruitSeason == season.n) return rec.fruit;
             var o = new List<Food>(); Num span = 1 - T.fruit.startFrac;
             var trees = rec.content.trees;
             for (int ti = 0; ti < trees.Count; ti++)
             {
                 var t = trees[ti];
-                if (H32(sd, rec.cx, rec.cz, ti) >= T.fruit.treeShare) continue;
+                if (HSeq(sd, rec.cx, rec.cz, ti, 931) >= T.fruit.treeShare) continue;
                 for (int k = 0; k < T.fruit.perTree; k++)
                 {
-                    Num fall = Floor(season.startMinute / 1440 + settings.seasonDays * (T.fruit.startFrac + span * H32(sd, rec.cx, rec.cz, ti)));
+                    Num fall = Floor(season.startMinute / 1440 + settings.seasonDays * (T.fruit.startFrac + span * HSeq(sd, rec.cx, rec.cz, ti, k, 932)));
                     if (today < fall || today >= fall + T.fruit.rotDays) continue;
-                    Num a = H32(sd, ti, k, 933) * 6.28318, d = t.r + 0.2 + T.fruit.spread * H32(sd, ti, k, 934);
+                    Num a = HSeq(sd, rec.cx, rec.cz, ti, k, 933) * 6.28318, d = t.r + 0.2 + T.fruit.spread * HSeq(sd, rec.cx, rec.cz, ti, k, 934);
                     o.Add(new Food { x = t.x + d * DCos(a), y = 0.03, z = t.z + d * DSin(a), rate = T.fruit.rate, kind = "fruit", i = ti * 16 + k });
                 }
             }
@@ -831,7 +830,7 @@ namespace Sting.Core
             if (!records.TryGet(key, out var rec)) return NoBaits;
             if (rec.baits != null && rec.baitsCampaign == m.active.n) return rec.baits;
             var trees = new List<(Tree t, Num h)>();
-            for (int i = 0; i < rec.content.trees.Count; i++) trees.Add((rec.content.trees[i], H32(m.active.n, rec.cx, rec.cz, i)));
+            for (int i = 0; i < rec.content.trees.Count; i++) trees.Add((rec.content.trees[i], HSeq(m.active.n, rec.cx, rec.cz, i, 77)));
             Stable.Sort(trees, (a, b) => Stable.Sign(a.h - b.h));
             var o = new List<Bait>();
             for (int i = 0; i < trees.Count && i < T.muni.baitsPerChunk; i++)

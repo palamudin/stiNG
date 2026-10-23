@@ -1006,7 +1006,7 @@ The C# save is binary and exact (each number as its 8 bytes, a double's or a fix
 
 The PoC's 105 headless sim checks are ported too (`Behaviour.cs`), and so are the network checks the lab digests do not already cover (`NetBehaviour.cs`: peers far apart, rival fights and a raid across peers, pest control across peers, the wire format). All 117 pass in both builds: under clothing, perching, bees, webs, birds and dragonflies, landing and walking, rivals and raids, the exterminator, pest control, spills, fruit, nest sites, seasons, switching, saves and world modifiers. In the fixed build they are the proof that every mechanic still works in Q32.32.
 
-Porting found two bugs, fixed in both: a line that went extinct kept ticking its colony and could come back the next autumn, and alarm pheromone kept relaunching attacks on a human who had gone home.
+Porting found three bugs, fixed in both: a line that went extinct kept ticking its colony and could come back the next autumn, alarm pheromone kept relaunching attacks on a human who had gone home; and the small per-decision hash reads four inputs, so calls that passed five or six (burrow positions, branch sites, fruit, bait stations) silently ignored the rest: both coordinates of a burrow came from the same number, every fruit of a tree fell on the same day, and only early in the windfall weeks. Such calls now chain two rounds of the hash.
 
 ---
 
