@@ -4,6 +4,11 @@ import {
   Sim, Act, hash, Domain, humanTraits, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
   garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, CMD_FIELDS,
 } from '../sim/index.js';
+import { applyTuning, parseTuning, tuningHash, tuningLeaves, TUNE } from '../sim/tunefile.js';
+
+// Tuning as data (T1-22): the tests run the shipped file, not the built-in defaults
+const TUNE_TEXT = readFileSync(new URL('../../tuning/sting.tune', import.meta.url), 'utf8');
+const TUNE_RESULT = applyTuning(T, TUNE_TEXT);
 
 let failures = 0;
 const ok = (cond, msg) => { console.log((cond ? 'PASS ' : 'FAIL ') + msg); if (!cond) failures++; };
@@ -1091,6 +1096,27 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   let picks = 0;
   for (let k = 0; k < 40; k++) { const a = s3._spawnWasp(false); a.role = 'sugar'; place(a, { x: hv.ex + 0.5, y: hv.ey, z: hv.ez }); s3._aiPick(a); if (a.ai.target && a.ai.target.kind === 'hive') picks++; }
   ok(picks > 0, `short of sugar, AI foragers go for hives (${picks} of 40 near one)`);
+}
+
+// Tuning as data (GDD 13, T1-22): one plain-text file feeds both sims
+{
+  const { unknown, missing } = TUNE_RESULT;
+  ok(unknown.length === 0 && missing.length === 0, `tuning/sting.tune sets every key of T and nothing else (${unknown.length} unknown, ${missing.length} missing)`);
+  ok(TUNE.hash === tuningHash(TUNE_TEXT) && TUNE.hash !== 'built-in' && tuningHash(TUNE_TEXT.replace(/\n/g, '\r\n')) === TUNE.hash, `the tuning hash is the file's (${TUNE.hash}), line endings aside`);
+  const vals = new Map(parseTuning(TUNE_TEXT));
+  ok(tuningLeaves(T).every(([p, v]) => JSON.stringify(vals.get(p)) === JSON.stringify(v)), 'every value in T is the one the file holds');
+  let threw = 0;
+  for (const bad of ['[wasp]\nradius = ', '[wasp]\nradius 3', '[wasp]\nradius = "x', '[wasp]\nradius = [1, 2', '[chunk]\nsize = 99']) { try { applyTuning(structuredClone(T), bad); } catch { threw++; } }
+  ok(threw === 5, `a malformed file or a change to a world-format key is refused (${threw}/5)`);
+  const r = applyTuning(structuredClone(T), '[wasp]\nradius = "big"\nnope = 1');
+  ok(r.unknown.join() === 'wasp.radius,wasp.nope', 'a value of the wrong kind or an unknown key is reported, not applied');
+  applyTuning(T, TUNE_TEXT); // put the shipped hash back
+  const s = new Sim({ seed: 1234, birds: false }), snap = snapshot(s), d = JSON.parse(snap);
+  ok(d.tune === TUNE.hash && restore(snap), 'a save records the tuning it was made with, and loads under it');
+  let refused = ''; try { restore(JSON.stringify({ ...d, tune: 'deadbeef' })); } catch (e) { refused = e.message; }
+  ok(/tuning deadbeef/.test(refused), `a save made with other tuning will not load (${refused})`);
+  const h0 = rulesHash({}); const keep = TUNE.hash; TUNE.hash = 'deadbeef'; const h1 = rulesHash({}); TUNE.hash = keep;
+  ok(h0 !== h1, 'peers with different tuning files do not match rules');
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');

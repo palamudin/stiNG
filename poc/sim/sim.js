@@ -2519,7 +2519,7 @@ export class Sim {
   _dragonflies() {
     if (!this.settings.birds) return;
     const D = T.dragon;
-    this._hunters('dragonflies', dragonPos, { ...D, diveTicks: D.dartTicks }, this.dragonState || (this.dragonState = new Map()), (w) => w.y <= D.maxY, (t) => t.y > D.maxY + 0.5, 'taken by a dragonfly', 'dragon', 4);
+    this._hunters('dragonflies', dragonPos, D, this.dragonState || (this.dragonState = new Map()), (w) => w.y <= D.maxY, (t) => t.y > D.maxY + 0.5, 'taken by a dragonfly', 'dragon', 4);
   }
 
   // One code path for every aerial hunter: patrol a pure-function loop, pick a flying wasp in sight, chase it with a

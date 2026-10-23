@@ -86,7 +86,7 @@ namespace Sting.Core
 
     public static class Persist
     {
-        public const int SAVE_VERSION = 11; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing
+        public const int SAVE_VERSION = 12; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash
         const uint MAGIC = 0x474E4953; // "SING"
 
         // ---------------------------------------------------------------- one Io per type
@@ -305,6 +305,7 @@ namespace Sting.Core
                 var a = new Archive(bw);
                 uint magic = MAGIC; int v = SAVE_VERSION, gen = T.GEN_VERSION; bool fixedPoint = Num.Fixed;
                 a.U(ref magic); a.I(ref v); a.I(ref gen); a.B(ref fixedPoint);
+                string tune = Tune.Hash; a.S(ref tune);
                 Io(a, sim.settings);
                 int peer = sim.peer; bool net = sim.net, noAI = sim.noAI; a.I(ref peer); a.B(ref net); a.B(ref noAI);
                 var peers = new List<int>(sim.interest.Keys); a.Ints(ref peers);
@@ -341,6 +342,8 @@ namespace Sting.Core
             if (gen != T.GEN_VERSION) throw new InvalidDataException($"world generator {gen} differs from {T.GEN_VERSION}");
             // numbers are saved as their bits, which mean different things in the two builds
             if (fixedPoint != Num.Fixed) throw new InvalidDataException(fixedPoint ? "this save is from the fixed-point build" : "this save is from the double build");
+            string tune = null; a.S(ref tune);
+            if (tune != Tune.Hash) throw new InvalidDataException($"world was made with tuning {tune}, this game runs {Tune.Hash}"); // T1-22
             var settings = new Settings(); Io(a, settings);
             int peer = 0; bool net = false, noAI = false; a.I(ref peer); a.B(ref net); a.B(ref noAI);
             List<int> peers = null; a.Ints(ref peers);

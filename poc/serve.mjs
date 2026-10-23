@@ -7,16 +7,18 @@ import { resolve, sep, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(fileURLToPath(new URL('.', import.meta.url)));
+const TUNING = resolve(ROOT, '../tuning');
 const PORT = Number(process.argv[2]) || 8080;
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.json': 'application/json', '.md': 'text/markdown; charset=utf-8', '.txt': 'text/plain; charset=utf-8' };
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.json': 'application/json', '.md': 'text/markdown; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '.tune': 'text/plain; charset=utf-8' };
 const HEAD = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>STING</title></head><body>';
 
 createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://local');
     const rel = decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname);
-    const file = resolve(ROOT, '.' + rel);
-    if (file !== ROOT && !file.startsWith(ROOT + sep)) { res.writeHead(403).end(); return; } // stay inside this folder
+    // tuning/ lives at the repo root (GDD 13) and is served next to the page, as the published game has it
+    const base = rel.startsWith('/tuning/') ? TUNING : ROOT, file = resolve(base, '.' + (base === TUNING ? rel.slice(7) : rel));
+    if (file !== base && !file.startsWith(base + sep)) { res.writeHead(403).end(); return; } // stay inside these folders
     let body = await readFile(file);
     if (rel === '/index.html') body = HEAD + body + '</body></html>';
     res.writeHead(200, { 'content-type': TYPES[extname(file)] || 'application/octet-stream', 'cache-control': 'no-store' });

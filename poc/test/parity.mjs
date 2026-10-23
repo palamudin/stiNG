@@ -1,6 +1,9 @@
 // Writes core/fixtures/parity.txt: digests of the JS reference that the C# port (core/) must reproduce bit for bit.
 // Each digest is FNV-1a over the IEEE-754 bytes of numbers in a fixed order. Run: node test/parity.mjs
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, readFileSync } from 'node:fs';
+import { T } from '../sim/tuning.js';
+import { applyTuning } from '../sim/tunefile.js';
+applyTuning(T, readFileSync(new URL('../../tuning/sting.tune', import.meta.url), 'utf8')); // T1-22: the shipped tuning
 import { generateChunk, dayWeather, windAt, humanWindow, flyPos, beePos, birdPos, dragonPos, makeNest, shedSites } from '../sim/world.js';
 import { hash, Domain, u64, datan2, dsin, h32 } from '../sim/rng.js';
 import { newColony, colonyStep, destroyNest, colonyFinished, seasonPhase, sugarCap, proteinCap } from '../sim/colony.js';

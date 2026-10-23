@@ -23,8 +23,12 @@ namespace Sting.Core.Tests
         static string Fixtures(string f) => Path.Combine(AppContext.BaseDirectory, "../../../../fixtures/" + f);
         static string FixturesOut(string f) => Path.GetFullPath(Fixtures(f));
 
+        // the tuning file every build runs with (T1-22): applied before anything else
+        internal static string TuningPath => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../tuning/sting.tune"));
+        internal static (List<string> unknown, List<string> missing) TuneResult;
         static int Main(string[] args)
         {
+            TuneResult = Tune.Apply(File.ReadAllText(TuningPath));
             if (args.Length >= 1 && args[0] == "--opbench")
             {
                 Num acc = 0.5, x = 1.2345, y = 0.987; int n = 5000000;

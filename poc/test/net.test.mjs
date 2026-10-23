@@ -1,5 +1,7 @@
 // Two peers over a simulated link must agree on every shared human (GDD 11.5). Run: node test/net.test.mjs
-import { NetLab, MeshLab, Sim, stingBot, idleCmd, encodeState, decodeState, BYTES_PER_WASP } from '../sim/index.js';
+import { readFileSync } from 'node:fs';
+import { NetLab, MeshLab, Sim, stingBot, idleCmd, encodeState, decodeState, BYTES_PER_WASP, T, applyTuning } from '../sim/index.js';
+applyTuning(T, readFileSync(new URL('../../tuning/sting.tune', import.meta.url), 'utf8')); // T1-22: the shipped tuning
 
 let failures = 0;
 const ok = (cond, msg) => { console.log((cond ? 'PASS ' : 'FAIL ') + msg); if (!cond) failures++; };

@@ -1,6 +1,8 @@
 // Tuning tables (GDD 13). Every number here is a starting value for tuning.
 // Biology-derived values are noted; see GDD Appendix C.
 
+import { TUNE } from './tunefile.js';
+
 export const TICK_RATE = 60;
 export const DT = 1 / TICK_RATE;
 export const GEN_VERSION = 3; // 3: sheds and dragonflies
@@ -173,7 +175,7 @@ export const T = {
   // Predators and rivals (GDD 9.3)
   web: { spiderSpeed: 0.06, spiderDelay: 60, escapePerPress: 0.22, aiEscape: 0.004 },
   // Dragonflies hunt low over open ground (GDD 9.3): faster than a wasp's burst, worse at turning
-  dragon: { sight: 2.5, maxY: 2.5, speed: 7.5, accel: 14, catch: 0.04, dartTicks: 90, coolTicks: 420 },
+  dragon: { sight: 2.5, maxY: 2.5, speed: 7.5, accel: 14, catch: 0.04, diveTicks: 90, coolTicks: 420 },
   bird: { sight: 7, minY: 1.5, abortY: 0.8, speed: 9, accel: 26, catch: 0.06, diveTicks: 150, coolTicks: 600 },
   // bio: Vespula walk a few cm/s and hold on at any angle. A slow wasp with no input settles on the nearest surface
   // within reach (any face, trunk, stalk, underside); walking follows the surface round edges; only Space or Shift
@@ -204,7 +206,7 @@ const RULE_KEYS = ['dayMinutes', 'humanDensity', 'beeAggression', 'seasonDays', 
 export function rulesHash(settings) {
   const s = { ...DEFAULT_SETTINGS, ...settings };
   let h = 0x811c9dc5;
-  const str = 'gen' + GEN_VERSION + '|' + RULE_KEYS.map((k) => k + '=' + s[k]).join('|');
+  const str = 'gen' + GEN_VERSION + '|' + RULE_KEYS.map((k) => k + '=' + s[k]).join('|') + '|tune=' + TUNE.hash; // peers must share the tuning file too (T1-22)
   for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
   return (h >>> 0).toString(16).padStart(8, '0');
 }

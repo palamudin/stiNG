@@ -338,6 +338,20 @@ namespace Sting.Core.Tests
         // 30-31. Tier 1: fetching spray (T1-6) and the exterminator's search (T1-7)
         static void Batch4()
         {
+            // 36. tuning as data (T1-22): the file sets every tunable value of T and nothing else
+            {
+                var (unknown, missing) = TuneResult;
+                Ok(unknown.Count == 0 && missing.Count == 0 && Tune.Hash != "built-in", $"the tuning file sets every value of T ({Tune.Keys().Count} keys, hash {Tune.Hash}; unknown {string.Join(", ", unknown)}; missing {string.Join(", ", missing)})");
+                Ok(T.hiber.name.hollow == "in a hollow tree" && T.alloc[0].name.Length > 0, "strings and tables of tables land too");
+                Ok(Tune.HashOf("a = 1\r\n") == Tune.HashOf("a = 1\n"), "the tuning hash ignores carriage returns");
+                bool threw = false; try { Tune.Parse("x = [1, 2"); } catch (FormatException) { threw = true; }
+                Ok(threw, "a malformed tuning file is refused");
+                var snap = Persist.Snapshot(new Sim(new Settings { seed = 1234 }, new SimOpts { noAI = true }));
+                string keep = Tune.Hash, why = ""; Tune.Hash = "deadbeef";
+                try { Persist.Restore(snap); } catch (System.IO.InvalidDataException e) { why = e.Message; }
+                Tune.Hash = keep;
+                Ok(why.Contains("tuning " + keep) && Persist.Restore(snap) != null, $"a save made with other tuning will not load ({why})");
+            }
             {
                 var s = new Sim(new Settings { seed = 1234, dayMinutes = 20 }, new SimOpts { noAI = true });
                 RunS(s, 3);

@@ -12,6 +12,7 @@ An open-world, multiplayer wasp colony simulator. You run a colony through its y
 |---|---|
 | [`docs/STING_GDD.md`](docs/STING_GDD.md) | The game design document: pillars, simulation architecture, world, colony, wasp, humans, bees, multiplayer, Unity contract, decisions, open questions, and findings from the PoC |
 | [`poc/`](poc/) | The three.js proof of concept. A deterministic simulation core (`poc/sim/`) that owns every outcome, and a presentation layer (`poc/game.js`) that only draws. See [`poc/POC.md`](poc/POC.md) for the feature list and what has been verified |
+| [`tuning/`](tuning/) | `sting.tune`: every tuning value of the sim as plain text, read by the PoC and the C# core with their own parsers (GDD 13). Edit it to retune; its hash goes into saves and the rules peers compare |
 | [`core/`](core/) | `Sting.Core`, the simulation in C# for the Unity port: the whole PoC sim, network lab and saves. One source, two builds: doubles (bit-identical to the JS, 22 digests) and Q32.32 fixed point (the shipping build, GDD R-04). `Sting.Core.Tests` is the parity and behaviour runner, `Sting.Headless` the headless runner |
 | [`protocode/`](protocode/) | C# protocode for the Unity port (`Sting.Core`): Fix64, the counter-based RNG, human traits, the sting resolver, reach, chunk storage and authority, colony economy. Compiles with zero packages |
 | [`art/keyart/`](art/keyart/) | Key art sources: the stare, the standoff, the logo lockup and a Steam capsule (Design canvas `.dc.html` files) |
@@ -56,6 +57,8 @@ H=bin/Release/net8.0/sting-headless
 $H run --seed 1234 --ticks 36000 --bot full --set escalation=3 --out a.txt --log input.stl
 $H replay --log input.stl --out b.txt                  # on another machine, or the other build
 $H compare a.txt b.txt                                 # "identical: 602 lines", or the first line that differs
+                                                        # reads tuning/sting.tune from above the working folder,
+                                                        # or --tune file; logs record its hash
 ```
 
 An input log carries the world's settings and every tick's command, and replays in either build. Saves (`--save`, `--save-at`, `resume`) hold numbers as their bits, so a save loads only in the build that wrote it.

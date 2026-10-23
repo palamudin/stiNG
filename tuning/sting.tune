@@ -1,0 +1,573 @@
+# STING tuning tables (GDD 13, T1-22). Read by the PoC (poc/sim/tunefile.js) and the C# core (Tune.cs).
+# Edit values here; both read this file at start. A world records the hash of the file it was made with and will not
+# load under different tuning, and peers must share it. Units: metres, seconds, ticks (60 per second), game minutes
+# and days where the key says so. Lists in [brackets]; strings in "quotes".
+version = 1
+
+[]
+population = 8200000000
+stunTicks = 70
+respawnTicks = 150
+
+[chunk]
+size = 64
+activeRadius = 1
+discoverRadius = 2
+
+[time]
+startMinute = 660
+dawn = 420
+dusk = 1230
+
+[weather]
+rainChance = 0.2
+baseMin = 17
+baseMax = 29
+diurnalAmp = 6
+flyMinTemp = 11
+rainSpeedMul = 0.35
+rainDrainMul = 3
+springChill = 6
+autumnChill = 7
+
+[wind]
+min = 0
+max = 3
+rainMul = 1.4
+drift = 0.35
+refHeight = 3
+gust = 0.4
+
+[cold]
+flightHeat = 12
+shiverHeat = 8
+shiverMinAir = 8
+skinTemp = 31
+nestTemp = 30
+flyBody = 18
+torpor = 8
+rate = 0.0033333333333333335
+lethalTicks = 5400
+shiverCost = 0.5
+
+[drown]
+chancePerSec = 0.03
+ticks = 240
+escapePerPress = 0.3
+aiEscape = 0.006
+
+[cup]
+r = 0.033
+wall = 0.003
+base = 0.75
+rim = 0.87
+fillMin = 0.3
+fillSpan = 0.6
+coverTicks = 600
+drownTicks = 300
+noticeMul = 2
+noticeDist = 1
+
+[wasp]
+radius = 0.007
+cruise = 3
+burst = 6
+accel = 14
+burstAccel = 24
+climb = 1.6
+contactGap = 0.02
+pushOff = 0.9
+gravity = 9.81
+maxFall = 4.5
+substeps = 3
+ceiling = 40
+carrySpeedMul = 0.8
+starveTicks = 900
+
+[venom]
+jab = 0.12
+deepen = 0.2
+regenPerSec = 0.011111111111111112
+
+[energy]
+cruisePerSec = 0.004166666666666667
+hoverShare = 0.45
+burstMul = 2.6
+refuelPerSec = 0.35
+feedDist = 0.045
+nestRefill = 0.6
+
+[sting]
+jabTicks = 6
+fullTicks = 30
+
+[reach]
+arm = 0.5
+flex = 0.3
+girth = 0.2
+age = 0.1
+minReachToSwat = 0.25
+
+[resolve]
+jabPain = 0.3
+fullPain = 1
+preciseRadius = 0.04
+flailerRadius = 0.1
+brushRadius = 0.08
+coverRadius = 0.12
+contortRadius = 0.15
+contortExtraTicks = 12
+helperNoticeTicks = 8
+minConsequenceTicks = 11
+shakeRadius = 0.16
+flailRadius = 0.2
+flailDelay = 8
+helperRange = 2
+fleePanic = 0.8
+
+[panic]
+decayPerStep = 0.993
+contagionRadius = 5
+contagionRate = 0.03
+contagionMin = 0.3
+spillChance = 0.6
+spillReach = 0.75
+spillRate = 1.6
+spillMinutes = 240
+calm = 0.2
+fleeSpeed = 3.2
+walkSpeed = 1.3
+sightHeight = 1.3
+fleeStepsMin = 60
+fleeStepsMax = 120
+approachDist = 26
+
+[colony]
+adultSugar = 0.1
+larvaProtein = 0.12
+larvaSecretion = 0.06
+eggDays = 5
+larvaDays = 13
+pupaDays = 12
+larvaStarve = 0.25
+adultMortality = 0.045454545454545456
+layBase = 20
+layPerAdult = 0.8
+layMax = 250
+cellsPerPulp = 8
+buildPerDay = 1.5
+forageShare = 0.55
+deficitSmoothing = 0.1
+queenStarveDays = 1
+youngDays = 4
+sugarCapBase = 6
+sugarCapDays = 2.5
+proteinCapBase = 6
+proteinCapDays = 2
+
+[colony.start]
+adults = 30
+eggs = 30
+larvae = 45
+pupae = 30
+cells = 160
+protein = 6
+sugar = 8
+pulp = 2
+
+[colony.income]
+sugar = 0.3
+protein = 0.35
+pulp = 0.15
+
+[alloc.0]
+name = "Balanced"
+sugar = 1
+protein = 1
+pulp = 1
+traffic = 1
+
+[alloc.1]
+name = "Protein"
+sugar = 0.6
+protein = 1.8
+pulp = 0.6
+traffic = 1
+
+[alloc.2]
+name = "Sugar"
+sugar = 1.8
+protein = 0.6
+pulp = 0.6
+traffic = 1
+
+[alloc.3]
+name = "Build"
+sugar = 0.7
+protein = 0.7
+pulp = 1.6
+traffic = 1
+
+[alloc.4]
+name = "Lie low"
+sugar = 1
+protein = 1
+pulp = 1
+traffic = 0.35
+
+[guard]
+minAdults = 25
+count = 2
+radius = 0.6
+chase = 2.5
+huntTicks = 300
+ring = 0.09
+humanRadius = 1.5
+
+[ai]
+maxPhysical = 12
+launchEvery = 90
+arrive = 0.05
+collectTicks = 150
+attackTicks = 600
+evadeTicks = 50
+canDeficit = 0.35
+
+[prey]
+fliesPerTable = 3
+flyOrbit = 0.32
+catchDist = 0.03
+flyRespawnTicks = 2400
+caterpillarChance = 0.25
+flyProtein = 1
+caterpillarProtein = 2
+beeProtein = 1.5
+
+[pulp]
+chewTicks = 120
+amount = 1
+reach = 0.018
+
+[esc]
+levels = [0, 3, 8, 15, 25, 40]
+decayPerDay = 0.25
+sting = 1
+full = 1
+death = 0.3
+nuisance = 0.15
+headRadius = 0.4
+foodRadius = 0.35
+faceRadius = 0.2
+noticeMul = 1
+cooldownTicks = 80
+sprayTrait = 0.55
+sprayRange = 1.5
+sprayTicks = 40
+trapsPerTable = 1
+citronellaDrain = 1.5
+sprayCharges = 6
+fetchTicks = 900
+
+[under]
+moveTicks = 18
+noticeMul = 2
+compressRadius = 0.06
+compressEvery = 25
+ripPanic = 0.92
+panicMul = 1.5
+openingRadius = 0.035
+
+[sites]
+rainMortality = 0.06
+holesPerChunk = 2
+hollowShare = 0.3
+hollowMinR = 0.22
+
+[sites.trunk]
+name = "against a trunk"
+maxCells = 3500
+flood = 0
+exposure = 1
+discovery = 1
+insulation = 0.4
+heat = 0
+
+[sites.ground]
+name = "in an old burrow"
+maxCells = 5000
+flood = 0.25
+exposure = 0.4
+discovery = 1.6
+insulation = 0.8
+heat = 0
+
+[sites.branch]
+name = "hanging from a branch"
+maxCells = 1800
+flood = 0
+exposure = 2
+discovery = 0.5
+insulation = 0.15
+heat = 0
+
+[sites.wall]
+name = "in a shed wall"
+maxCells = 4000
+flood = 0
+exposure = 0.3
+discovery = 1.2
+insulation = 0.6
+heat = 0
+
+[sites.attic]
+name = "under a shed roof"
+maxCells = 6000
+flood = 0
+exposure = 0.2
+discovery = 0.8
+insulation = 0.55
+heat = 7
+
+[sites.hollow]
+name = "in a hollow tree"
+maxCells = 4500
+flood = 0
+exposure = 0.25
+discovery = 0.7
+insulation = 0.85
+heat = 0
+
+[thermal]
+coldFrom = 18
+coldSpan = 12
+hotFrom = 31
+hotSpan = 8
+hotWeight = 0.7
+minSpeed = 0.15
+
+[possess]
+freeRange = 30
+relayTicks = 240
+
+[feral]
+hollowShare = 0.2
+wallShare = 0.25
+guards = 6
+foragers = 10
+robReach = 0.06
+robSecs = 3
+pressGain = 0.05
+insideKill = 0.15
+loadsPerDay = 3
+broodProtein = 2
+honeyCargo = 1
+
+[eco]
+bloom = [[0, 0.45], [0.15, 0.6], [0.3, 0.75], [0.45, 0.88], [0.6, 0.95]]
+bloomJitter = 0.06
+flowerRate = 0.35
+sipPerSec = 0.25
+regenPerDay = 3
+beeDrawPerDay = 1.5
+catFrom = 0.15
+catTo = 0.7
+catJitter = 0.08
+flyBase = 0.35
+flySlope = 0.65
+carrionChance = 0.2
+carrionDays = 3
+carrionLoads = 4
+carrionProtein = 1.5
+carrionReach = 0.05
+sugarBase = 0.5
+sugarBloom = 0.9
+sugarFruit = 0.35
+protBase = 0.5
+protCat = 0.35
+protFly = 0.4
+
+[fruit]
+treeShare = 0.3
+startFrac = 0.55
+perTree = 6
+rate = 0.8
+spread = 1.6
+rotDays = 6
+
+[muni]
+level = 5
+radius = 1
+days = 3
+cooldownDays = 4
+aftermath = 0.5
+baitsPerChunk = 3
+baitHeight = 1.2
+baitDist = 0.04
+baitProtein = 2
+poisonAdults = 0.03
+poisonLarvae = 0.08
+abstractKillPerDay = 0.18
+aiLure = 6
+
+[ext]
+speed = 1.1
+treatTicks = 600
+arriveMinute = 540
+level = 4
+minPanicAbort = 0.8
+sightR = 8
+linesPerSec = 0.6
+physPerSec = 1.2
+trafficFull = 60
+stepLen = 7
+errFrac = 0.35
+findDist = 4
+minWatchTicks = 120
+parkDist = 10
+
+[bees]
+guards = 6
+foragers = 14
+pursueSpeed = 4.2
+accel = 30
+contact = 0.016
+ballMin = 3
+heatPerBeeSec = 0.13
+startTemp = 35
+lethal = 46
+entranceAlarm = 0.5
+alarmTicks = 1200
+catchAlarmRadius = 3
+hiveAlarmRadius = 8
+escapePerPress = 0.35
+returnTicks = 90
+
+[alarm]
+radius = 6
+ticks = 600
+nestRadius = 3
+
+[season]
+startFrac = 0.3
+reproStart = 0.55
+reproFull = 0.72
+reproProtein = 3
+gyneShare = 0.6
+matePerDay = 0.5
+mateSuccess = 0.7
+collapseFrom = 0.82
+collapseMul = 5
+queenDiesAt = 0.95
+winterSurvival = 0.03
+lineageSurvival = 0.3
+winterShare = 0.5
+
+[queen]
+speedMul = 0.8
+venomMul = 1.5
+
+[hiber]
+range = 40
+spread = 5
+pickShare = 0.6
+survival = 0.06
+chooseTicks = 1800
+reach = 0.15
+barkMinR = 0.15
+
+[hiber.q]
+shed = 0.85
+hollow = 0.75
+bark = 0.5
+litter = 0.3
+sister = 0.5
+
+[hiber.name]
+shed = "in a shed wall"
+hollow = "in a hollow tree"
+bark = "under loose bark"
+litter = "in the leaf litter"
+sister = "in a sister nest"
+
+[web]
+spiderSpeed = 0.06
+spiderDelay = 60
+escapePerPress = 0.22
+aiEscape = 0.004
+
+[dragon]
+sight = 2.5
+maxY = 2.5
+speed = 7.5
+accel = 14
+catch = 0.04
+diveTicks = 90
+coolTicks = 420
+
+[bird]
+sight = 7
+minY = 1.5
+abortY = 0.8
+speed = 9
+accel = 26
+catch = 0.06
+diveTicks = 150
+coolTicks = 600
+
+[land]
+maxSpeed = 0.25
+walkSpeed = 0.05
+afterTakeoff = 30
+reach = 0.012
+stick = 0.03
+stingReach = 0.04
+stalkR = 0.0035
+headR = 0.022
+
+[perch]
+crawlSpeed = 0.06
+tickleBase = 4
+bareMul = 1
+thinMul = 2
+backMul = 1.5
+faceMul = 0.4
+movingMul = 2
+cooldown = 90
+panic = 0.05
+
+[memory]
+fasterPerSting = 0.08
+minFactor = 0.6
+panicPerSting = 0.15
+maxStings = 4
+keep = 8
+forgetMinutes = 2880
+nearDist = 4
+farShare = 0.35
+
+[rival]
+maxPhysical = 3
+fightRange = 0.025
+remoteFightRange = 0.06
+remoteFightTimeout = 240
+fightTicks = 40
+guardRadius = 1.5
+raidProtein = 2
+huntTicks = 600
+mash = 0.15
+
+[net]
+commitTicks = 30
+stateEvery = 3
+remoteTimeout = 45
+
+[plaus]
+futureTicks = 120
+stingReach = 1.6
+humanDrift = 3
+maxSwatDelay = 240
+maxSwats = 4
+rateWindow = 120
+rateMax = 6
+maxSpeed = 12
+strikes = 3

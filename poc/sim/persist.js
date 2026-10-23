@@ -3,6 +3,7 @@
 // are regenerated from seed and checked against their stored content hash, and every Map keeps its order.
 import { Domain, hash, u64, fnv32, dcos, dsin } from './rng.js';
 import { T, GEN_VERSION } from './tuning.js';
+import { TUNE } from './tunefile.js';
 import { humanTraits, bodyParts, Style } from './body.js';
 import { generateChunk, makeNest, NEST } from './world.js';
 import { newColony } from './colony.js';
@@ -31,7 +32,7 @@ const HUMAN_FIXED = new Set(['id', 'hex', 'short', 'tr', 'chunk', 'home', 'parts
 const SKIP = new Set(['events', 'outbox', 'remote', 'log', 'logLen', 'hint', 'feeding', 'humans', 'active', 'activeChunks', 'records', 'ext', 'netStats', '_baitCache', '_siteCache', '_fruitCache', '_tc', '_wc', '_genCache', '_hiberCache']);
 
 export function snapshot(sim) {
-  const out = { v: SAVE_VERSION, gen: GEN_VERSION, opts: { peer: sim.peer, net: sim.net, noAI: sim.noAI, peers: [...sim.interest.keys()] } };
+  const out = { v: SAVE_VERSION, gen: GEN_VERSION, tune: TUNE.hash, opts: { peer: sim.peer, net: sim.net, noAI: sim.noAI, peers: [...sim.interest.keys()] } };
   for (const k of Object.keys(sim)) if (!SKIP.has(k)) out[k] = sim[k];
   out.records = [...sim.records.values()].map((r) => ({ cx: r.cx, cz: r.cz, genVersion: r.genVersion, discoveredTick: r.discoveredTick, contentHash: r.contentHash }));
   out.humans = [...sim.humans.values()].map((hm) => { const o = {}; for (const k of Object.keys(hm)) if (!HUMAN_FIXED.has(k)) o[k] = hm[k]; o.hex = hm.hex; return o; });
@@ -45,6 +46,7 @@ export function restore(json) {
   const d = JSON.parse(json, reviver);
   if (d.v !== SAVE_VERSION) throw new Error(`save version ${d.v} is not ${SAVE_VERSION}`);
   if (d.gen !== GEN_VERSION) throw new Error(`world generator ${d.gen} differs from ${GEN_VERSION}`);
+  if (d.tune && d.tune !== TUNE.hash) throw new Error(`world was made with tuning ${d.tune}, this game runs ${TUNE.hash}`); // T1-22
   const sim = new Sim(d.settings, d.opts);
   sim.drainEvents();
   // frozen chunks: regenerate and verify (GDD 4.4)
@@ -56,7 +58,7 @@ export function restore(json) {
     sim.records.set(r.cx + ',' + r.cz, { ...r, content });
   }
   // plain state
-  for (const k of Object.keys(d)) if (!['v', 'gen', 'opts', 'records', 'humans', 'active', 'ext'].includes(k)) sim[k] = d[k];
+  for (const k of Object.keys(d)) if (!['v', 'gen', 'tune', 'opts', 'records', 'humans', 'active', 'ext'].includes(k)) sim[k] = d[k];
   if (sim.colony.young === undefined) sim.colony.young = 0; // saves from before worker ages (T1-13)
   // saves from before body temperature (T1-2): wasps come out warm
   for (const w of [...sim.wasps, ...(sim.ghost ? [sim.ghost] : [])]) if (w.bodyT === undefined) { w.bodyT = T.cold.nestTemp; w.chill = 0; }

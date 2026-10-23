@@ -5,12 +5,14 @@
 // that holds on any CPU and compiler.
 //
 //   sting-headless run [--seed N] [--ticks N] [--bot jab|full|idle] [--set key=value ...] [--every N]
-//                      [--out hashes.txt] [--log input.stl] [--save world.sav [--save-at TICK]]
+//                      [--out hashes.txt] [--log input.stl] [--save world.sav [--save-at TICK]] [--tune file]
 //   sting-headless replay --log input.stl [--out hashes.txt] [--every N]
 //   sting-headless resume --save world.sav --log input.stl [--ticks N] [--out hashes.txt]
 //   sting-headless compare a.txt b.txt
 //
-// An input log (.stl) holds the world's settings and every tick's command, so a replay needs nothing else.
+// An input log (.stl) holds the world's settings, the tuning hash and every tick's command, so a replay needs nothing
+// else but the same tuning file. Every command reads tuning/sting.tune (GDD 13), found by --tune or by looking up from
+// the working folder and from the program's folder; without one it runs the built-in values and says so.
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -22,13 +24,14 @@ namespace Sting.Headless
     static class Program
     {
         const uint LOG_MAGIC = 0x4C4E5453; // "STNL"
-        const int LOG_VERSION = 1;
+        const int LOG_VERSION = 2; // 2: the tuning hash
 
         static int Main(string[] args)
         {
             if (args.Length == 0) return Usage();
             try
             {
+                if (args[0] != "compare") LoadTuning(Array.IndexOf(args, "--tune") is int ti && ti > 0 && ti + 1 < args.Length ? args[ti + 1] : null);
                 switch (args[0])
                 {
                     case "run": return Run(Opts(args));
@@ -48,7 +51,7 @@ namespace Sting.Headless
         static int Usage()
         {
             Console.Error.WriteLine(@"sting-headless " + Build + @"
-  run [--seed N] [--ticks N] [--bot jab|full|idle] [--set key=value ...] [--every N] [--out file] [--log file] [--save file [--save-at TICK]]
+  run [--seed N] [--ticks N] [--bot jab|full|idle] [--set key=value ...] [--every N] [--out file] [--log file] [--save file [--save-at TICK]] [--tune file]
   replay --log file [--out file] [--every N]
   resume --save file --log file [--ticks N] [--out file] [--every N]
   compare a.txt b.txt
@@ -85,10 +88,25 @@ settings keys: dayMinutes humanDensity beeAggression seasonDays reaction escalat
                     case "--log": o.log = Next(); break;
                     case "--save": o.save = Next(); break;
                     case "--save-at": o.saveAt = int.Parse(Next(), CultureInfo.InvariantCulture); break;
+                    case "--tune": Next(); break; // read before the options, in LoadTuning
                     default: throw new ArgumentException("unknown option " + a[i]);
                 }
             }
             return o;
+        }
+
+        static void LoadTuning(string file)
+        {
+            if (file == null)
+                foreach (var start in new[] { Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
+                {
+                    for (var d = new DirectoryInfo(start); d != null && file == null; d = d.Parent)
+                        if (File.Exists(Path.Combine(d.FullName, "tuning", "sting.tune"))) file = Path.Combine(d.FullName, "tuning", "sting.tune");
+                    if (file != null) break;
+                }
+            if (file == null) { Console.Error.WriteLine("note: no tuning/sting.tune found, running the built-in tuning"); return; }
+            var (unknown, missing) = Tune.Apply(File.ReadAllText(file));
+            if (unknown.Count > 0 || missing.Count > 0) Console.Error.WriteLine($"note: tuning {Tune.Hash}: {unknown.Count} unknown keys, {missing.Count} left built-in");
         }
 
         static Settings MakeSettings(O o)
@@ -212,6 +230,7 @@ settings keys: dayMinutes humanDensity beeAggression seasonDays reaction escalat
         {
             using var w = new BinaryWriter(File.Create(file));
             w.Write(LOG_MAGIC); w.Write(LOG_VERSION);
+            w.Write(Tune.Hash);
             WriteSettings(w, settings);
             w.Write(len);
             for (int i = 0; i < len; i++) w.Write(log[i]);
@@ -236,6 +255,8 @@ settings keys: dayMinutes humanDensity beeAggression seasonDays reaction escalat
             if (r.ReadUInt32() != LOG_MAGIC) throw new InvalidDataException(file + " is not a STING input log");
             int v = r.ReadInt32();
             if (v != LOG_VERSION) throw new InvalidDataException($"input log version {v} is not {LOG_VERSION}");
+            string tune = r.ReadString();
+            if (tune != Tune.Hash) throw new InvalidDataException($"input log was recorded with tuning {tune}, this run has {Tune.Hash}");
             var s = ReadSettings(r);
             int len = r.ReadInt32();
             var log = new int[len];

@@ -5,8 +5,18 @@ import {
   Sim, Act, T, DT, ZONES, ZoneName, SwatKind, SwatKindName, StyleName, TopName, BottomName, Top, Bottom,
   toWorld, toLocal, chunkKey, chunkOf, hash, Domain, rangeInt, resolveSting, zoneCover, segClosest, classify, predictedKind,
   NEST, NEST_ENTRANCE, flyPos, beePos, fmtClock, minuteOfDay, isLowerZone, broodTotal, sugarCap, proteinCap, garmentGraph, dayWeather,
-  NetLab, LINKS, birdPos, dragonPos, shedSites, snapshot, restore, replayFrom, worldTag, rulesHash,
+  NetLab, LINKS, birdPos, dragonPos, shedSites, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE,
 } from './sim/index.js';
+
+// Tuning as data (GDD 13, T1-22): read tuning/sting.tune, served next to the page, before anything uses T. Without it
+// the game runs the built-in values, and the pause screen and rules hash say so.
+try {
+  const r = await fetch(new URL('tuning/sting.tune', import.meta.url));
+  if (r.ok) {
+    const { unknown, missing } = applyTuning(T, await r.text());
+    if (unknown.length || missing.length) console.warn(`tuning ${TUNE.hash}: ${unknown.length} unknown keys, ${missing.length} left built-in`, unknown, missing);
+  }
+} catch (e) { console.warn('tuning: running the built-in values', e.message); }
 
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
@@ -1238,7 +1248,7 @@ document.addEventListener('pointerlockchange', () => {
   if (!locked && pointerLockWorked && $('winterScreen').hidden && $('extinctScreen').hidden) setPaused(true);
   if (locked) { pointerLockWorked = true; setPaused(false); }
 });
-function setPaused(p) { paused = p; if (p && sim) $('pauseTag').textContent = `${tagText(sim.settings)} · rules ${rulesHash(sim.settings)}`; input.free.held = false; $('pauseScreen').hidden = !p; input.lmb = false; input.keys.clear(); if (p) { $('saveNote').textContent = ''; saveWorld(false); } }
+function setPaused(p) { paused = p; if (p && sim) $('pauseTag').textContent = `${tagText(sim.settings)} · rules ${rulesHash(sim.settings)} · tuning ${TUNE.hash}`; input.free.held = false; $('pauseScreen').hidden = !p; input.lmb = false; input.keys.clear(); if (p) { $('saveNote').textContent = ''; saveWorld(false); } }
 $('bResume').addEventListener('click', () => { setPaused(false); lock(); });
 function showOpts() {
   $('optVol').value = Math.round(opts.volume * 100); $('optVolOut').textContent = Math.round(opts.volume * 100) + '%';

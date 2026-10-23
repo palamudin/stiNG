@@ -5,7 +5,8 @@ The tier-0 slice of the GDD, built in the browser so it can move to Unity. Same 
 | Path | Role | Unity counterpart |
 |---|---|---|
 | `sim/rng.js` | Counter-based RNG, own sin/cos/atan2 and rounding, hashes | `core/Sting.Core/Rng.cs` (ported) |
-| `sim/tuning.js` | Every tuning number, with biology notes | `core/Sting.Core/Tuning.cs` (ported); data files later (GDD 13) |
+| `sim/tuning.js` | Every tuning number as built-in defaults, with biology notes | `core/Sting.Core/Tuning.cs` (ported) |
+| `sim/tunefile.js` | Reads `../tuning/sting.tune` into the tables, checks every key, hashes the file (GDD 13, 18.29) | `core/Sting.Core/Tune.cs` (ported) |
 | `sim/body.js` | Traits, clothing, body capsules, 17 zones, reach, `resolveSting`, garment graphs | `core/Sting.Core/Body.cs` (ported) |
 | `sim/world.js` | Chunk generation, clock, weather, schedules, pure motion of flies and bees | `core/Sting.Core/World.cs` (ported) |
 | `sim/colony.js` | Colony economy and the yearly cycle | `core/Sting.Core/Colony.cs` (ported) |
@@ -15,12 +16,11 @@ The tier-0 slice of the GDD, built in the browser so it can move to Unity. Same 
 | `sim/bots.js` | Scripted pilots that produce ordinary input commands | `core/Sting.Core/Bots.cs` (ported) |
 | `game.js` | three.js rendering, animation, camera, input, HUD, sound | Unity scene, Animator, UI |
 | `index.html` | Page shell, HUD markup and styles | UI Toolkit |
-| `test/sim.test.mjs` | 106 headless sim checks | `Sting.Core.Tests` |
-| `test/net.test.mjs` | 31 network checks | `Sting.Net.Tests` |
-
+| `test/sim.test.mjs` | 190 headless sim checks | `Sting.Core.Tests` |
+| `test/net.test.mjs` | 32 network checks | `Sting.Net.Tests` |
 | `test/parity.mjs` | Writes `core/fixtures/parity.txt`: 22 digests the C# core must reproduce bit for bit | `core/Sting.Core.Tests` |
 
-Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 18+, no packages). Play locally with `node serve.mjs`. Any change to `sim/` that changes behaviour must be made in `core/` too: rerun `node test/parity.mjs`, then `dotnet run -c Release` in `core/Sting.Core.Tests`.
+Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 18+, no packages). Play locally with `node serve.mjs`. Any change to `sim/` that changes behaviour must be made in `core/` too: rerun `node test/parity.mjs`, then `dotnet run -c Release` in `core/Sting.Core.Tests`. To retune, edit `../tuning/sting.tune`: the game, the tests, parity and the core all read it, and a different file gives a different tuning hash, so old saves and peers on the old file are refused.
 
 ## Feature list
 
@@ -105,6 +105,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 77 | Hollow cups: the walls keep you out from the side; in over the rim to reach the drink, which you must not touch. Someone who sees you go in covers the cup with a hand and you drown inside; lids at level 2 do the same. On a surface, the mouse turns you about it as on the ground | 7.2, 7.5 | 14 |
 | 78 | Seasonal ecology (T1-8): flowers bloom by kind through the season (bud, bloom, faded); nectar runs down as you and the bees drink and regrows over the day; caterpillars early, flies late; carrion turns up for a few days with loads of meat. The colony's off-screen foraging follows the same calendar | 9.4 | 14 |
 | 79 | Feral hives and robbing (T1-9): wild bee colonies in some hollow trees and shed walls; E at any hive entrance goes inside for honey and a larva (mash LMB to grab faster, Space to bail), with the bees inside able to kill you and the hive roused when you come out. Three loads a hive a day; AI foragers rob when the colony is short of sugar | 9.1, 9.2 | 14 |
+| 80 | Tuning as data (T1-22): every tuning value in one plain-text file, `tuning/sting.tune`, read at start by own parsers here and in the C# core. Edit and reload to retune; the file's hash goes into the rules hash and every save, so worlds and peers on different tuning are refused. Shown on the pause screen | 13 | 14 |
 
 ## Verified
 
@@ -127,8 +128,8 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 
 - The colony economy is tuned against one simulated season with an idle player; it needs real play data.
 - Shed roofs are drawn pitched but collide as a flat top.
-- Walking is on horizontal surfaces only; tree trunks and walls are obstacles, not surfaces.
-- Two players' colonies never fight each other yet. Q-07 is settled (rivals by default, co-op opt-in); guards that attack other players' wasps come with T1-13.
+- A wasp walking on a surface keeps its heading over edges, but the eye view while landed still turns with the world yaw.
+- Two players' colonies meet only through guards at the entrance (T1-13); colony-against-colony raids are not built.
 
 ## Controls
 

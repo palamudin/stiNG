@@ -814,6 +814,7 @@ On Main the entity count is dominated by AI wasps: one player's colony can hold 
 - Tables: `HumanTraitRanges`, `BodyZones`, `ResponseStyles`, `ClothingMaterials`, `WaspCasteStats`, `BroodTimings`, `ResourceRates`, `SeasonCurve`, `EscalationLadder`, `BeeDefense`, `ChunkGen`.
 - Tuning values are parsed into fixed-point at load. The parser MUST be deterministic (no culture-dependent number parsing).
 - The tuning hash goes into the world record (4.6).
+- As built (18.29): one file, `tuning/sting.tune`, holds every table; the PoC and both core builds read it at start and refuse saves, input logs and peers made with a different file.
 
 ---
 
@@ -1088,6 +1089,20 @@ Every can on a table is a hollow cup: a 3 mm wall, open at the top, holding a dr
 
 **Robbing.** E at any hive entrance, wild or managed, takes the wasp inside and rouses the whole hive. The grab fills over three seconds, a twentieth faster for each sting press; every second inside there is a 15% chance the bees inside kill it ("stung inside a hive"). Space or Shift bails out with nothing. Done, the wasp comes out with a full crop of honey (sugar for the colony on deposit) and a bee larva (2 protein), into a hive whose guards are already in the air, so the balling of 9.2 is the price of getting home. A hive gives three loads a day (shared between peers through the `caught` event). AI sugar foragers rob only when the colony is short of sugar; a wasp inside a hive cannot be balled until it comes out.
 
+### 18.29 Tuning as data as built (T1-22)
+
+**One file.** Every tuning value of the sim, about 450 of them from wasp radius to the escalation ladder, the allocation presets, the nest site types and the bloom windows, lives in `tuning/sting.tune` at the root of the repository. The format is the plainest that does the job: `# comments`, `[section.sub]` headers, and `key = value` lines where a value is a number, `true` or `false`, a `"string"` or a `[list]` (lists nest). A number in a path indexes a table of tables (`[alloc.0]`). Numbers are written the way JS prints doubles (shortest round trip), so JS and C# read back the same bits; C# parses with the invariant culture, and the fixed-point build converts the doubles to Q32.32 as it always did for its built-in values.
+
+**Own parsers.** `poc/sim/tunefile.js` and its port `core/Sting.Core/Tune.cs` read the file with no library. The code keeps its tables in the same shape as before (`T.wasp.radius` in both), so nothing else in the sim changed: the parser walks the path and sets the value. JS checks each value against the kind of the default it replaces; C# finds the field by reflection and converts to its type (`Num`, `int`, `long`, `bool`, `string`, arrays). Both report the keys the file has that the code does not and the keys the code has that the file does not set, and the tests insist on none of either; a malformed line or a value of the wrong kind is refused. The C# tables became plain statics (they were read-only) and a few were reshaped so the two sides have the same keys: bird and dragonfly hunters split into their own tables, winter site names joined the data.
+
+**Fixed by the world format.** The chunk size is baked into every world record and captured when the modules load, so the file may restate it but not change it.
+
+**The hash.** The tuning hash is FNV-1a over the file's UTF-8 bytes with carriage returns dropped (so a Windows checkout gives the same hash), the same function in both languages. It joins the rules hash peers compare, so two players with different files do not match rules (4.6); JS saves and the core's binary saves (format 12) record it and will not load under a different file; the headless runner's input logs (format 2) record it and a replay under a different file is refused. The pause screen shows it.
+
+**Who reads it.** The browser game fetches it from beside the page before anything uses the tables and falls back to the built-in values if it is missing; `serve.mjs` serves the repo's `tuning/` folder there. The JS tests, the parity writer, the C# test runner and `sting-headless` (which looks up from its working folder, or takes `--tune file`) all read the same file, so the 22 parity digests and the fixed-point lock are unchanged by the move.
+
+**Tuning in practice.** Change a value in the file and rerun: the PoC picks it up on reload, the tests and parity run against it, and the hash tells every save and peer that the rules changed. The built-in values stay in `tuning.js` and `Tuning.cs` as the reference the file was generated from; the file wins when present.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1096,7 +1111,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (79 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (80 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -1123,10 +1138,10 @@ Everything in `POC.md` (79 features) and its C# port (18.18), including the Tier
 | T1-19 | Chunk authority and contested pickups in the lab: rendezvous hashing picks one peer per chunk to settle two wasps grabbing the same caterpillar | 11.6 | M | |
 | T1-20 | Remaining plausibility checks: carry limits, positions inside solid geometry, chunk deltas consistent with their cause | 11.8 | S | T1-12 for deltas |
 | T1-21 | Relevance tiers in the lab: near, mid and far wasps at different rates, swarm packets; measure bandwidth with a 200-worker colony | 11.12 | M | |
-| T1-22 | Tuning as data: the tuning tables as versioned plain-text files read by own parsers in JS and C#, and the tuning hash in the world record | 13 | M | |
+| T1-22 | **Built (18.29).** Tuning as data: the tuning tables as versioned plain-text files read by own parsers in JS and C#, and the tuning hash in the world record | 13 | M | |
 | T1-23 | **Built (18.21).** Solo time: accelerate time in the colony view, and the Reflex slowdown as a solo option | 5.1, 7.8 | S | |
 
-Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, then the other S items: T1-14, T1-17, T1-18, T1-23, all done; T1-20 waits on regions), then the M items (T1-6 to T1-9, T1-13 and T1-15 done); each batch is built in the PoC and then ported to the core with parity.
+Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, then the other S items: T1-14, T1-17, T1-18, T1-23, all done; T1-20 waits on regions), then the M items (T1-6 to T1-9, T1-13, T1-15 and T1-22 done; then T1-16, T1-10, T1-19, T1-21); each batch is built in the PoC and then ported to the core with parity.
 
 ### 19.3 Tier 2: later
 
