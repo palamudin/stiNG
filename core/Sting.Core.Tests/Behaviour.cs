@@ -612,7 +612,16 @@ namespace Sting.Core.Tests
             RunS(s4, 30, (sim, i) => Idle(c => { c.yawQ = 0; c.mx = -100; }));
             Ok(w4.state == "landed" && w4.x > x0 + 0.02 && Abs(w4.y - (table.maxy + T.wasp.radius)) < 0.01, $"a landed wasp walks across the table ({D(w4.x - x0) * 100:0.0} cm)");
             ev = RunS(s4, 1500, (sim, i) => Idle(c => { c.yawQ = 0; c.mx = -100; }));
-            Ok(Count(ev, "walkOff") == 1 && w4.state == "fly" && w4.x >= table.maxx, $"walking off the edge drops it into flight ({w4.state})");
+            Ok(Count(ev, "takeoff") == 0 && w4.state == "landed" && w4.land.ny < 0.5 && w4.x >= table.maxx - 0.01, $"walking over the edge of the table it crawls round onto the side ({w4.state}, normal y {D(w4.land.ny):0.00})");
+            ev = RunS(s4, 30, (sim, i) => Idle(c => { c.my = -100; c.sting = i == 3 ? 1 : 0; }));
+            Ok(w4.state == "landed" && Count(ev, "takeoff") == 0, "holding down or stinging the air keeps it on the surface");
+            ev = RunS(s4, 2, (sim, i) => Idle(c => c.my = i == 0 ? 100 : 0));
+            Ok(Count(ev, "takeoff") == 1 && w4.state == "fly", "Space takes off");
+            Place(w4, P((table.minx + table.maxx) / 2, table.miny - T.wasp.radius - 0.005, (table.minz + table.maxz) / 2 + 0.1));
+            RunS(s4, 120);
+            Ok(w4.state == "landed" && Abs(w4.land.ny + 1) < 1e-6 && Abs(w4.y - (table.miny - T.wasp.radius)) < 1e-6, $"hovering under the table it lands upside down on the underside ({w4.state}, normal y {(w4.land == null ? 0 : D(w4.land.ny))})");
+            ev = RunS(s4, 2, (sim, i) => Idle(c => c.burst = i == 0 ? 1 : 0));
+            Ok(Count(ev, "takeoff") == 1 && w4.state == "fly" && w4.y < table.miny - T.wasp.radius, "Shift takes off, pushing away from the underside");
             {
                 var s5 = new Sim(new Settings { seed = 1234 }); var b5 = s5.records.Get("0,0").content.boxes[1]; var w5 = s5.wasp;
                 var sitter = s5.active.First(h => h.posture == "sit" && h.z > b5.minz - 0.2 && h.z < b5.maxz + 0.2 && h.x - 0.3 > b5.minx);
@@ -625,9 +634,42 @@ namespace Sting.Core.Tests
             var tree = s4.records.Get("0,0").content.trees[0];
             Place(w4, P(tree.x - tree.r - 0.05, T.wasp.radius + 0.001, tree.z));
             RunS(s4, 120);
-            Num gx = w4.x;
-            RunS(s4, 600, (sim, i) => Idle(c => { c.yawQ = 0; c.mx = -100; }));
-            Ok(w4.state == "landed" && w4.x > gx && w4.x < tree.x - tree.r, $"a tree trunk blocks a walking wasp (stopped {D(tree.x - tree.r - w4.x) * 1000:0.0} mm short)");
+            int east = (int)Math.Round(Math.PI / 2 * 1e4);
+            RunS(s4, 900, (sim, i) => Idle(c => { c.yawQ = east; c.mz = 100; }));
+            Ok(w4.state == "landed" && w4.land.kind == "bark" && w4.y > 0.1 && Math.Abs(Hypot(w4.x - tree.x, w4.z - tree.z) - D(tree.r + T.wasp.radius)) < 1e-6,
+                $"walking into a trunk climbs it ({w4.land?.kind}, {D(w4.y) * 100:0.0} cm up)");
+            RunS(s4, 2, (sim, i) => Idle(c => c.my = i == 0 ? 100 : 0));
+            Func<Sim, int, Cmd> Hold(V3 hp) => (sim, i) => { if (w4.state == "fly") Place(w4, hp); return Idle(); };
+            RunS(s4, 60, Hold(P(tree.x - tree.r - T.wasp.radius - 0.006, 1.2, tree.z)));
+            Ok(w4.state == "landed" && w4.land.kind == "bark" && Abs(w4.land.ny) < 1e-9, "hovering beside a trunk it lands on the bark");
+            var fl = s4.activeChunks.SelectMany(r => r.content.flowers).First(f => f.y > 0.35);
+            RunS(s4, 2, (sim, i) => Idle(c => c.my = i == 0 ? 100 : 0));
+            RunS(s4, 60, Hold(P(fl.x + T.land.stalkR + T.wasp.radius + 0.004, fl.y * 0.5, fl.z)));
+            Ok(w4.state == "landed" && w4.land.kind == "stalk", $"beside a flower stalk it grips the stalk ({w4.land?.kind})");
+            {
+                var s6 = new Sim(new Settings { seed = 1234 }); var b6 = s6.records.Get("0,0").content.boxes[1]; var w6 = s6.wasp;
+                V3? spot = null;
+                foreach (var hm in s6.active)
+                {
+                    if (hm.posture != "sit" || spot != null) continue;
+                    for (Num dx = -0.6; dx <= 0.6 && spot == null; dx += 0.004)
+                    {
+                        var p = P(hm.x + dx, b6.maxy + T.wasp.radius, (b6.minz + b6.maxz) / 2);
+                        if (p.x < b6.minx || p.x > b6.maxx) continue;
+                        Place(w6, p);
+                        s6.ContactQuery(w6); bool near = w6.contact != null;
+                        s6.ContactQuery(w6, T.land.stingReach); bool reach = w6.contact != null;
+                        w6.contact = null;
+                        if (!near && reach) spot = p;
+                    }
+                }
+                Ok(spot != null, "a spot on the bench a few centimetres from someone's leg");
+                Place(w6, spot.Value);
+                RunS(s6, 60);
+                string landed = w6.state;
+                var ev6 = RunS(s6, 3, (sim, i) => Idle(c => c.sting = i == 1 ? 1 : 0));
+                Ok(landed == "landed" && (w6.state == "attached" || Count(ev6, "blocked") == 1), $"landed on the bench, a sting reaches them ({landed} -> {w6.state})");
+            }
             RunS(s4, 2, (sim, i) => Idle(c => c.my = 100));
             Ok(w4.state == "fly", "climbing takes off again");
 

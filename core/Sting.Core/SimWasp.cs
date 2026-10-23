@@ -41,9 +41,19 @@ namespace Sting.Core
                     else if (armed && w.contact != null && w.contact.humanHex == w.ai.humanHex) BeginSting(w, w.contact, "jab");
                     break;
                 case "landed":
-                    // Walk on the surface with the move keys; climb, burst or sting to take off (GDD 7.2)
-                    if (!driven || cmd.my > 0 || cmd.burst != 0 || cmd.sting != 0) { Takeoff(w); break; }
+                    // Walk on the surface with the move keys, at any angle; only climb (Space) or burst (Shift) take off (GDD 7.2)
+                    if (!driven || cmd.my > 0 || cmd.burst != 0) { Takeoff(w); break; }
+                    if (armed)
+                    {
+                        // a sting reaches a person close by: a leg next to the bench, an arm on the table
+                        pressUsed = true;
+                        ContactQuery(w, T.land.stingReach);
+                        var sc = w.contact;
+                        w.contact = null;
+                        if (sc != null && BeginSting(w, sc, "jab")) { w.land = null; w.walking = false; break; }
+                    }
                     if ((edge & Act.Interact) != 0) { Interact(w); if (w.state != "landed") break; }
+                    NestTouch(w); // landed at the entrance: in with the load
                     w.walking = false;
                     if (cmd.mx != 0 || cmd.mz != 0) Walk(w, cmd);
                     if (w.state != "landed") break;
@@ -250,10 +260,11 @@ namespace Sting.Core
 
         // ---------------- contact (GDD 7.4)
 
-        void ContactQuery(Wasp w)
+        internal void ContactQuery(Wasp w) => ContactQuery(w, T.wasp.contactGap);
+        internal void ContactQuery(Wasp w, Num reach)
         {
             Num R = T.wasp.radius;
-            Num bestGap = T.wasp.contactGap;
+            Num bestGap = reach;
             Human bHm = null; Part bPart = null; V3 bN = default, bSurf = default, bLp = default; int bZone = 0;
             foreach (var hm in active)
             {

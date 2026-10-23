@@ -757,6 +757,19 @@ function poseHuman(view, t, dt) {
   group.rotation.y = view.ang + (hm.state === 'watch' ? Math.sin(t * 0.03 + hm.lines) * 0.9 : 0); // scanning for flight lines (T1-7)
 }
 
+// The world normal of the surface a wasp stands on: a landed wasp keeps its own; a perched one takes the skin's,
+// turned from the person's body frame into the world
+const _basis = new THREE.Matrix4();
+function surfaceNormal(w) {
+  if (w.state === 'landed' && w.land) return new THREE.Vector3(w.land.nx, w.land.ny, w.land.nz);
+  const on = w.state === 'perched' ? w.perch : w.state === 'attached' ? w.attach : null;
+  if (!on) return null;
+  const hm = sim.humanByHex(on.hex);
+  if (!hm) return null;
+  const n = on.n;
+  return new THREE.Vector3(hm.fz * n.x + hm.fx * n.z, n.y, -hm.fx * n.x + hm.fz * n.z).normalize();
+}
+
 // Lab: color every vertex by what the human does if stung there (GDD 8.3-8.5)
 let kindColors = null;
 const zoneMat = new THREE.MeshLambertMaterial({ vertexColors: true });
@@ -859,6 +872,14 @@ function renderWasps(alpha, t, dt) {
       g.rotation.y = g.userData.yaw; g.rotation.x = -Math.atan2(w.vy, Math.max(0.3, sp)) * 0.6;
     }
     g.rotation.z = w.state === 'stunned' ? t * 0.6 : w.state === 'fighting' ? Math.sin(t * 3 + w.id) * 1.4 : 0;
+    // on a surface the body lies along it: belly to the surface, head toward where the camera points (GDD 7.2)
+    const sn = surfaceNormal(w);
+    if (sn) {
+      const f = driven ? new THREE.Vector3(Math.sin(input.yaw) * Math.cos(input.pitch), Math.sin(input.pitch), Math.cos(input.yaw) * Math.cos(input.pitch)) : new THREE.Vector3(Math.sin(g.userData.yaw), 0, Math.cos(g.userData.yaw));
+      f.addScaledVector(sn, -f.dot(sn));
+      if (f.lengthSq() < 0.04) f.set(-Math.sin(input.yaw) * Math.sin(input.pitch), Math.cos(input.pitch), -Math.cos(input.yaw) * Math.sin(input.pitch)).projectOnPlane(sn); // looking straight at the surface: head up the screen
+      if (f.lengthSq() > 1e-8) { f.normalize(); g.quaternion.setFromRotationMatrix(_basis.makeBasis(new THREE.Vector3().crossVectors(sn, f), sn, f)); }
+    }
     const flap = w.state === 'attached' || w.state === 'balled' || w.state === 'trapped' || w.state === 'landed' || w.state === 'perched' ? 0.15 : w.state === 'webbed' ? Math.sin(t * 2.3) * 0.3 : w.state === 'fighting' ? Math.sin(t * 5 + w.id) * 1.2 : Math.sin(performance.now() * 0.9 + w.id) * 0.9;
     g.userData.wl.rotation.z = flap; g.userData.wr.rotation.z = -flap;
     // legs: planted and stepping on a surface, tucked back in flight
@@ -1394,7 +1415,7 @@ function updateHud() {
   else if (w.state === 'webbed') hint = `Mash ${kbd('Shift')} to tear free`;
   else if (w.state === 'drowning') hint = `Mash ${kbd('Shift')} to climb out`;
   else if (w.state === 'fighting') hint = `Mash ${kbd('LMB')} to sting it first`;
-  else if (w.state === 'landed') hint = w.walking ? 'Walking · off the edge and you drop into flight' : 'Resting costs no sugar in the warmth · WASD walk · Space, Shift or sting takes off';
+  else if (w.state === 'landed') hint = w.walking ? 'Walking · it follows the surface round edges, up trunks and under tables · look where you want to go' : `Resting costs no sugar in the warmth · ${kbd('W')}${kbd('A')}${kbd('S')}${kbd('D')} walk on any surface · ${kbd('LMB')} sting someone within reach · ${kbd('Space')} or ${kbd('Shift')} take off`;
   else if (w.state === 'perched') hint = `${kbd('W')}${kbd('A')}${kbd('S')}${kbd('D')} crawl (look up or down to climb) · ${kbd('LMB')} sting · ${kbd('Space')} take off · ${kbd('E')} crawl under at an opening`;
   else if (h.rival) hint = `${kbd('E')} steal a larva from the rival nest`;
   else if (h.hiber) hint = `${kbd('E')} scout this winter site for the young queens: ${T.hiber.name[h.hiber]}, shelter ${Math.round(T.hiber.q[h.hiber] * 100)}%`;
@@ -1765,14 +1786,11 @@ function updateCamera(p, dt) {
   const focus = dead && deathSpot ? deathSpot : p || (w ? V(w) : V(sim.nest.spawn)); // no wasp at all in winter (T1-15)
   let off = fwd.clone().multiplyScalar(-camDist).add(new THREE.Vector3(0, camDist * 0.28, 0));
   // on a body: look at the wasp from outside the skin, along the surface normal, blended with the view direction
-  const onBody = !dead && (w.state === 'perched' ? w.perch : w.state === 'attached' ? w.attach : null);
-  if (onBody) {
-    const hm = sim.humanByHex(onBody.hex);
-    if (hm) {
-      const n = onBody.n, nw = new THREE.Vector3(hm.fz * n.x + hm.fx * n.z, n.y, -hm.fx * n.x + hm.fz * n.z).normalize();
-      off = nw.multiplyScalar(0.75).addScaledVector(fwd, -0.45).normalize().multiplyScalar(camDist).add(new THREE.Vector3(0, camDist * 0.2, 0));
-    }
-  }
+  // on a body or any surface: look at the wasp from outside it, along the surface normal, blended with the view
+  // direction, so the camera never ends up inside a trunk or a table top
+  const nw = !dead && w ? surfaceNormal(w) : null;
+  const onBody = !!nw;
+  if (nw) off = nw.multiplyScalar(0.75).addScaledVector(fwd, -0.45).normalize().multiplyScalar(camDist).add(new THREE.Vector3(0, camDist * 0.2 * Math.max(0, nw.y), 0));
   camOff.lerp(off, 1 - Math.exp(-dt * (dead ? 2 : 14)));
   const chase = focus.clone().add(camOff);
   if (chase.y < 0.006) chase.y = 0.006;

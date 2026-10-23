@@ -405,7 +405,7 @@ Economy step in Appendix A.4.
 
 - A steered kinematic model in fixed-point: desired velocity from input, limited by max acceleration and turn rate, plus wind and gravity when not producing lift.
 - Collision is **swept** against world geometry every tick (at burst speed a wasp crosses a thin twig in one tick). Uses the deterministic collision developed in the Tarmac Lab pilot.
-- Landing and gripping on any surface is a state, not a physics outcome.
+- Landing and gripping on any surface, at any angle, is a state, not a physics outcome (as built: 18.25). Only climb or burst leave a surface; a sting from a surface reaches a person within a few centimetres.
 
 ### 7.3 Senses (AI wasps) **[T1]**
 
@@ -1062,6 +1062,12 @@ All five are in the C# core with parity: the 22 JS digests still match in the do
 
 **Waking.** When the season ends the colony sleeps: the wasps go, and the game shows one choice per site that woke a queen (how many, what kind of shelter, how far from the old nest, and whether it is the scouted one). The choice is sent as an ordinary recorded command, so replays and saves keep it; a world saved in winter restores asleep. Left alone (bots, the lab), the site with most survivors wakes after 30 s. The chosen queen wakes at her site, which is where the next season starts, with sugar reserves scaled by her site's shelter (×0.5 to ×1.35). The other survivors found sister nests as before. If no own queen survived but sister nests did, you wake in one of them. A queen who never founds a nest settles in the nearest tree to where she wintered.
 
+### 18.25 Landing on any surface as built
+
+A slow wasp with no input settles on the nearest static surface within 12 mm of its body, whatever its orientation: the ground, any face of a box (table tops and their undersides, bench sides, sheds, hive boxes), tree trunks (side and top), flower stalks and heads, and the colony's own hanging paper nest. The surface is found by a nearest-point query on the frozen chunk geometry, like perching on a person uses the body's capsules, so every peer agrees; branches will join as capsules when the world has them.
+
+On a surface the move keys walk camera-relative: the wish is projected onto the surface, and when the camera looks straight at it, forward means up the screen. After each step the wasp is put back on the nearest surface, so it follows round the edge of a table onto its side and underside, climbs a trunk it walks into, and never falls off. Only Space (climb) or Shift (burst) take off, pushing away along the surface normal, with half a second before it can settle again. A sting while landed reaches a person whose body is within 4 cm (a leg beside the bench, an arm on the table) and starts the sting there; with nobody in reach it does nothing. Landing at the nest entrance delivers the load as flying in does. The wasp's body and the chase camera follow the surface normal, on surfaces and on people alike.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1070,7 +1076,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (75 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (76 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 

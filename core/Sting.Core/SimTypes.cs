@@ -58,6 +58,8 @@ namespace Sting.Core
         public Carry carry; public int groundTicks, chew; public string role = "sugar", colony = "own";
         public WebHold web; public Drown drown; public Fight fight; public Ai ai = new Ai(); public Contact contact; public Perch perch;
         public bool walking; public Num fightReqUntil;
+        /// the surface a landed wasp holds on to, and a short window after takeoff before it can settle again
+        public Land land; public int noLandUntil;
         public Wasp Ghost() { var g = (Wasp)MemberwiseClone(); g.state = "dead"; return g; }
     }
 
@@ -68,6 +70,8 @@ namespace Sting.Core
     }
 
     public sealed class MemRec { public Num m, x, z; }
+    public sealed class Land { public Num nx, ny, nz; public string kind; }
+    public sealed class Surf { public Num x, y, z, nx, ny, nz, gap; public string kind; }
     public sealed class Home { public Num x, z, fx, fz, ax, az; public string posture; }
     public sealed class Human
     {

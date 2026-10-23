@@ -86,7 +86,7 @@ namespace Sting.Core
 
     public static class Persist
     {
-        public const int SAVE_VERSION = 7; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices
+        public const int SAVE_VERSION = 8; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface
         const uint MAGIC = 0x474E4953; // "SING"
 
         // ---------------------------------------------------------------- one Io per type
@@ -159,6 +159,8 @@ namespace Sting.Core
                 a.D(ref p.tickle); a.D(ref p.need); a.D(ref p.quietUntil);
             }
             a.B(ref w.walking); a.D(ref w.fightReqUntil);
+            if (a.Opt(ref w.land)) { a.D(ref w.land.nx); a.D(ref w.land.ny); a.D(ref w.land.nz); a.S(ref w.land.kind); }
+            a.I(ref w.noLandUntil);
             return w;
         }
 

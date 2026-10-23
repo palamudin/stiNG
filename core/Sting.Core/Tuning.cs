@@ -143,7 +143,8 @@ namespace Sting.Core
         public sealed class Hunter { public Num sight, minY, abortY, maxY, speed, accel, @catch; public int diveTicks, coolTicks; }
         public static readonly Hunter dragon = new Hunter { sight = 2.5, maxY = 2.5, speed = 7.5, accel = 14, @catch = 0.04, diveTicks = 90, coolTicks = 420 };
         public static readonly Hunter bird = new Hunter { sight = 7, minY = 1.5, abortY = 0.8, speed = 9, accel = 26, @catch = 0.06, diveTicks = 150, coolTicks = 600 };
-        public static class land { public static readonly Num maxSpeed = 0.25, gap = 0.004, walkSpeed = 0.05; }
+        /// any surface at any angle (GDD 7.2): settle within reach, walk round edges, only Space or Shift take off
+        public static class land { public static readonly Num maxSpeed = 0.25, walkSpeed = 0.05, reach = 0.012, stick = 0.03, stingReach = 0.04, stalkR = 0.0035, headR = 0.022; public const int afterTakeoff = 30; }
         public static class perch { public static readonly Num crawlSpeed = 0.06, tickleBase = 4, bareMul = 1, thinMul = 2, backMul = 1.5, faceMul = 0.4, movingMul = 2, panic = 0.05; public const int cooldown = 90; }
         /// People remember stings by recency and place (GDD 8.10, T1-18): wary for a couple of days, most where it happened
         public static class memory { public static readonly Num fasterPerSting = 0.08, minFactor = 0.6, panicPerSting = 0.15, forgetMinutes = 2880, nearDist = 4, farShare = 0.35; public const int maxStings = 4, keep = 8; }

@@ -384,7 +384,7 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   w4.energy = 0.5;
   ev = run(s4, 300, () => idle());
   ok(w4.state === 'landed' && Math.abs(w4.energy - 0.5) < 0.01, `a still wasp lands on the bench and rests (${w4.state}, crop ${w4.energy.toFixed(3)})`);
-  // walking: the move keys walk camera-relative on the surface; off the edge the wasp drops into flight.
+  // walking: the move keys walk camera-relative on the surface; over the edge it crawls round, never falls off.
   // The middle of the table top, walking along it, is clear of arms.
   const table = s4.records.get('0,0').content.boxes[0];
   place(w4, { x: (table.minx + table.maxx) / 2, y: table.maxy + 0.0071, z: (table.minz + table.maxz) / 2 });
@@ -393,7 +393,19 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   run(s4, 30, () => idle({ yawQ: 0, mx: -100 }));
   ok(w4.state === 'landed' && w4.x > x0 + 0.02 && Math.abs(w4.y - (table.maxy + T.wasp.radius)) < 0.01, `a landed wasp walks across the table (${((w4.x - x0) * 100).toFixed(1)} cm)`);
   ev = run(s4, 1500, () => idle({ yawQ: 0, mx: -100 }));
-  ok(count(ev, 'walkOff') === 1 && w4.state === 'fly' && w4.x >= table.maxx, `walking off the edge drops it into flight (${w4.state})`);
+  ok(count(ev, 'takeoff') === 0 && w4.state === 'landed' && w4.land.ny < 0.5 && w4.x >= table.maxx - 0.01,
+    `walking over the edge of the table it crawls round onto the side (${w4.state}, normal y ${w4.land.ny.toFixed(2)})`);
+  // only Space or Shift take off: down, sting with nobody near, and E do not
+  ev = run(s4, 30, (sim, i) => idle({ my: -100, sting: i === 3 ? 1 : 0 }));
+  ok(w4.state === 'landed' && count(ev, 'takeoff') === 0, 'holding down or stinging the air keeps it on the surface');
+  ev = run(s4, 2, (sim, i) => idle({ my: i === 0 ? 100 : 0 }));
+  ok(count(ev, 'takeoff') === 1 && w4.state === 'fly', 'Space takes off');
+  // upside down: hover still under the table top and it settles on the underside
+  place(w4, { x: (table.minx + table.maxx) / 2, y: table.miny - T.wasp.radius - 0.005, z: (table.minz + table.maxz) / 2 + 0.1 });
+  run(s4, 120, () => idle());
+  ok(w4.state === 'landed' && Math.abs(w4.land.ny + 1) < 1e-6 && Math.abs(w4.y - (table.miny - T.wasp.radius)) < 1e-6, `hovering under the table it lands upside down on the underside (${w4.state}, normal y ${w4.land && w4.land.ny})`);
+  ev = run(s4, 2, (sim, i) => idle({ burst: i === 0 ? 1 : 0 }));
+  ok(count(ev, 'takeoff') === 1 && w4.state === 'fly' && w4.y < table.miny - T.wasp.radius, 'Shift takes off, pushing away from the underside');
   // walking into a seated person climbs onto them
   // land on the bench 30 cm beside someone sitting on it (fresh world, so nobody has left yet), then walk toward them
   {
@@ -405,13 +417,47 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
     ev = run(s5, 600, () => idle({ yawQ: 0, mx: w5.state === 'landed' ? -100 : 0 }));
     ok(count(ev, 'perch') >= 1, `walking along the bench into them climbs onto them (${w5.state})`);
   }
-  // on the ground, a tree trunk stops it
+  // on the ground, walking into a tree trunk climbs it
   const tree = s4.records.get('0,0').content.trees[0];
   place(w4, { x: tree.x - tree.r - 0.05, y: T.wasp.radius + 0.001, z: tree.z });
   run(s4, 120, () => idle());
-  const gx = w4.x;
-  run(s4, 600, () => idle({ yawQ: 0, mx: -100 }));
-  ok(w4.state === 'landed' && w4.x > gx && w4.x < tree.x - tree.r, `a tree trunk blocks a walking wasp (stopped ${((tree.x - tree.r - w4.x) * 1000).toFixed(1)} mm short)`);
+  const east = Math.round(Math.PI / 2 * 1e4);
+  run(s4, 900, () => idle({ yawQ: east, mz: 100 }));
+  ok(w4.state === 'landed' && w4.land.kind === 'bark' && w4.y > 0.1 && Math.abs(Math.hypot(w4.x - tree.x, w4.z - tree.z) - tree.r - T.wasp.radius) < 1e-6,
+    `walking into a trunk climbs it (${w4.land && w4.land.kind}, ${(w4.y * 100).toFixed(1)} cm up)`);
+  // hovering beside a trunk lands on its side; a flower stalk too
+  place(w4, { x: tree.x - tree.r - T.wasp.radius - 0.006, y: 1.2, z: tree.z });
+  run(s4, 2, (sim, i) => idle({ my: i === 0 ? 100 : 0 }));
+  const hold = (p) => (sim) => { if (w4.state === 'fly') place(w4, p); return idle(); }; // the player holds still there (the wind pushes)
+  run(s4, 60, hold({ x: tree.x - tree.r - T.wasp.radius - 0.006, y: 1.2, z: tree.z }));
+  ok(w4.state === 'landed' && w4.land.kind === 'bark' && Math.abs(w4.land.ny) < 1e-9, `hovering beside a trunk it lands on the bark (${w4.state} ${w4.land && w4.land.kind} ${w4.land && w4.land.ny})`);
+  const fl = s4.activeChunks.flatMap((r) => r.content.flowers).find((f) => f.y > 0.35);
+  run(s4, 2, (sim, i) => idle({ my: i === 0 ? 100 : 0 }));
+  run(s4, 60, hold({ x: fl.x + T.land.stalkR + T.wasp.radius + 0.004, y: fl.y * 0.5, z: fl.z }));
+  ok(w4.state === 'landed' && w4.land.kind === 'stalk', `beside a flower stalk it grips the stalk (${w4.land && w4.land.kind})`);
+  // a sting from the bench reaches a leg close by
+  {
+    const s6 = new Sim({ seed: 1234 }), b6 = s6.records.get('0,0').content.boxes[1], w6 = s6.wasp;
+    let spot = null;
+    for (const hm of s6.active) {
+      if (hm.posture !== 'sit' || spot) continue;
+      for (let dx = -0.6; dx <= 0.6 && !spot; dx += 0.004) {
+        const p = { x: hm.x + dx, y: b6.maxy + T.wasp.radius, z: (b6.minz + b6.maxz) / 2 };
+        if (p.x < b6.minx || p.x > b6.maxx) continue;
+        place(w6, p);
+        s6._contactQuery(w6); const near = !!w6.contact;
+        s6._contactQuery(w6, T.land.stingReach); const reach = !!w6.contact;
+        w6.contact = null;
+        if (!near && reach) spot = p;
+      }
+    }
+    ok(!!spot, 'a spot on the bench a few centimetres from someone\'s leg');
+    place(w6, spot);
+    run(s6, 60, () => idle());
+    const landed = w6.state;
+    const ev6 = run(s6, 3, (sim, i) => idle({ sting: i === 1 ? 1 : 0 }));
+    ok(landed === 'landed' && (w6.state === 'attached' || count(ev6, 'blocked') === 1), `landed on the bench, a sting reaches them (${landed} -> ${w6.state})`);
+  }
   run(s4, 2, () => idle({ my: 100 }));
   ok(w4.state === 'fly', 'climbing takes off again');
 

@@ -157,7 +157,10 @@ export const T = {
   // Dragonflies hunt low over open ground (GDD 9.3): faster than a wasp's burst, worse at turning
   dragon: { sight: 2.5, maxY: 2.5, speed: 7.5, accel: 14, catch: 0.04, dartTicks: 90, coolTicks: 420 },
   bird: { sight: 7, minY: 1.5, abortY: 0.8, speed: 9, accel: 26, catch: 0.06, diveTicks: 150, coolTicks: 600 },
-  land: { maxSpeed: 0.25, gap: 0.004, walkSpeed: 0.05 }, // bio: Vespula walk a few cm/s
+  // bio: Vespula walk a few cm/s and hold on at any angle. A slow wasp with no input settles on the nearest surface
+  // within reach (any face, trunk, stalk, underside); walking follows the surface round edges; only Space or Shift
+  // take off. A sting lands on a person within stingReach.
+  land: { maxSpeed: 0.25, walkSpeed: 0.05, afterTakeoff: 30, reach: 0.012, stick: 0.03, stingReach: 0.04, stalkR: 0.0035, headR: 0.022 },
   // Perching and crawling on people (GDD 7.2, 8.3): how long until they feel you
   perch: { crawlSpeed: 0.06, tickleBase: 4, bareMul: 1, thinMul: 2, backMul: 1.5, faceMul: 0.4, movingMul: 2, cooldown: 90, panic: 0.05 },
   // People remember stings by recency and place (GDD 8.10, T1-18): wary for a couple of days, most where it happened

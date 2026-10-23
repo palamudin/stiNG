@@ -894,55 +894,118 @@ namespace Sting.Core
 
         // ---------------- landing (GDD 7.2)
 
-        string SurfaceBelow(Wasp w)
+        /// The nearest static surface to p (GDD 7.2): the ground, any face of a box (undersides too), tree trunks,
+        /// flower stalks and heads, and our hanging nest. The point, the outward normal, what it is, and the gap
+        /// between the wasp's body and it; null if nothing is within maxGap. Pure geometry on frozen chunk content.
+        internal Surf StaticSurface(V3 p, Num maxGap)
         {
-            Num R = T.wasp.radius, g = T.land.gap;
-            if (w.y <= R + g) return "ground";
-            foreach (var rec in activeChunks) if (Near(rec, w.x, w.z)) foreach (var b in rec.content.boxes)
+            Num R = T.wasp.radius, lim = maxGap + R;
+            Surf best = null; Num bd = lim;
+            void Take(Num qx, Num qy, Num qz, Num nx, Num ny, Num nz, Num d, string kind) { if (d < bd) { bd = d; best = new Surf { x = qx, y = qy, z = qz, nx = nx, ny = ny, nz = nz, kind = kind }; } }
+            void Capsule(Num ax, Num ay, Num az, Num bx, Num by, Num bz, Num r, string kind)
+            {
+                var q = Body.SegClosest(new V3(ax, ay, az), new V3(bx, by, bz), p);
+                Num ex = p.x - q.x, ey = p.y - q.y, ez = p.z - q.z, d = Sqrt(ex * ex + ey * ey + ez * ez);
+                if (d - r >= bd || d == 0) return;
+                Take(q.x + ex / d * r, q.y + ey / d * r, q.z + ez / d * r, ex / d, ey / d, ez / d, d - r, kind);
+            }
+            if (p.y < lim) Take(p.x, 0, p.z, 0, 1, 0, p.y, "ground");
+            foreach (var rec in activeChunks)
+            {
+                var c = rec.content;
+                foreach (var b in c.boxes)
                 {
-                    if (w.x < b.minx || w.x > b.maxx || w.z < b.minz || w.z > b.maxz) continue;
-                    if (Abs(w.y - (b.maxy + R)) <= g) return b.hive ? "hive" : "wood";
+                    if (p.x < b.minx - lim || p.x > b.maxx + lim || p.y < b.miny - lim || p.y > b.maxy + lim || p.z < b.minz - lim || p.z > b.maxz + lim) continue;
+                    Num qx = Clamp(p.x, b.minx, b.maxx), qy = Clamp(p.y, b.miny, b.maxy), qz = Clamp(p.z, b.minz, b.maxz);
+                    Num ex = p.x - qx, ey = p.y - qy, ez = p.z - qz, d = Sqrt(ex * ex + ey * ey + ez * ez);
+                    string kind = b.hive ? "hive" : b.shed ? "shed" : "wood";
+                    if (d > 0) { Take(qx, qy, qz, ex / d, ey / d, ez / d, d, kind); continue; }
+                    // inside: out through the nearest face
+                    var f = new Num[] { p.x - b.minx, b.maxx - p.x, p.y - b.miny, b.maxy - p.y, p.z - b.minz, b.maxz - p.z };
+                    int k = 0;
+                    for (int i = 1; i < 6; i++) if (f[i] < f[k]) k = i;
+                    Num nx = k == 0 ? -1 : k == 1 ? 1 : 0, ny = k == 2 ? -1 : k == 3 ? 1 : 0, nz = k == 4 ? -1 : k == 5 ? 1 : 0;
+                    Take(p.x + nx * f[k], p.y + ny * f[k], p.z + nz * f[k], nx, ny, nz, 0, kind);
                 }
-            return null;
+                foreach (var cy in c.cylinders)
+                {
+                    Num hx = p.x - cy.x, hz = p.z - cy.z, hd = Sqrt(hx * hx + hz * hz);
+                    if (hd - cy.r >= bd || p.y > cy.h + bd) continue;
+                    if (p.y > cy.h && hd <= cy.r) { Take(p.x, cy.h, p.z, 0, 1, 0, p.y - cy.h, "bark"); continue; } // the top
+                    if (hd == 0) continue;
+                    Num qx = cy.x + hx / hd * cy.r, qz = cy.z + hz / hd * cy.r;
+                    if (p.y > cy.h) { Num ey = p.y - cy.h, dr = hd - cy.r, d = Sqrt(dr * dr + ey * ey); Take(qx, cy.h, qz, (hx / hd) * dr / d, ey / d, (hz / hd) * dr / d, d, "bark"); }
+                    else Take(qx, p.y, qz, hx / hd, 0, hz / hd, Max(0, hd - cy.r), "bark");
+                }
+                foreach (var f in c.flowers)
+                {
+                    if (Abs(p.x - f.x) > lim + T.land.headR || Abs(p.z - f.z) > lim + T.land.headR || p.y > f.y + lim + T.land.headR) continue;
+                    Capsule(f.x, 0, f.z, f.x, f.y - T.land.headR, f.z, T.land.stalkR, "stalk");
+                    Capsule(f.x, f.y, f.z, f.x, f.y, f.z, T.land.headR, "flower");
+                }
+            }
+            // our own paper nest, where it hangs in the open
+            var n = nest;
+            if (colony.sited && colony.nestAlive && (n.site == "trunk" || n.site == "branch")) Capsule(n.x, n.y, n.z, n.x, n.y, n.z, n.r, "nest");
+            if (best == null) return null;
+            best.gap = bd;
+            return best;
+        }
+
+        void Settle(Wasp w, Surf s)
+        {
+            Num R = T.wasp.radius;
+            w.x = s.x + s.nx * R; w.y = s.y + s.ny * R; w.z = s.z + s.nz * R;
+            w.land = new Land { nx = s.nx, ny = s.ny, nz = s.nz, kind = s.kind };
         }
 
         void MaybeLand(Wasp w, Cmd cmd)
         {
-            if (cmd.mx != 0 || cmd.my != 0 || cmd.mz != 0 || cmd.burst != 0 || cmd.sting != 0) return;
+            if (cmd.mx != 0 || cmd.my != 0 || cmd.mz != 0 || cmd.burst != 0 || cmd.sting != 0 || tick < w.noLandUntil) return;
             if (w.vx * w.vx + w.vy * w.vy + w.vz * w.vz > T.land.maxSpeed * T.land.maxSpeed) return;
             if (w.contact != null) { var c = w.contact; PerchOn(w, c.humanHex, c.zone, c.surf, c.n, c.part); return; }
-            string surf = SurfaceBelow(w);
-            if (surf == null) return;
+            var s = StaticSurface(w.P, T.land.reach);
+            if (s == null) return;
             w.state = "landed"; w.vx = w.vy = w.vz = 0;
-            Emit("landed", ("id", w.id), ("surface", surf));
+            Settle(w, s);
+            Emit("landed", ("id", w.id), ("surface", s.kind));
         }
 
-        void Takeoff(Wasp w) { w.state = "fly"; w.vy = 0.5; w.walking = false; Emit("takeoff", ("id", w.id)); }
+        /// push off along the surface normal: up from the ground, sideways off a trunk, down from under a table
+        void Takeoff(Wasp w)
+        {
+            Num nx = w.land != null ? w.land.nx : 0, ny = w.land != null ? w.land.ny : 1, nz = w.land != null ? w.land.nz : 0;
+            w.state = "fly"; w.vx = nx * 0.5; w.vy = ny * 0.5 + 0.1; w.vz = nz * 0.5; w.walking = false; w.land = null;
+            w.noLandUntil = tick + T.land.afterTakeoff; // clear of the surface before it can settle again
+            Emit("takeoff", ("id", w.id));
+        }
 
-        /// Walk camera-relative across the surface the wasp stands on. Off the edge it drops into flight;
-        /// the sides of boxes and tree trunks stop it.
+        /// Walk camera-relative along whatever the wasp stands on, at any angle. The wish is projected onto the
+        /// surface; looking straight at the surface, forward means up the screen. After each step the wasp is put back
+        /// on the nearest surface, so it follows round edges, up trunks and under table tops, and never falls off.
         void Walk(Wasp w, Cmd cmd)
         {
-            Num yaw = cmd.yawQ * 1e-4, sy = DSin(yaw), cy = DCos(yaw);
-            Num mz = (Num)cmd.mz / 100, mx = (Num)cmd.mx / 100, sp = T.land.walkSpeed * T.DT;
-            Num nx = w.x + (sy * mz - cy * mx) * sp, nz = w.z + (cy * mz + sy * mx) * sp;
-            Num R = T.wasp.radius;
-            foreach (var rec in activeChunks)
+            Num nnx = w.land != null ? w.land.nx : 0, nny = w.land != null ? w.land.ny : 1, nnz = w.land != null ? w.land.nz : 0;
+            Num yaw = cmd.yawQ * 1e-4, pitch = cmd.pitchQ * 1e-4, sy = DSin(yaw), cy = DCos(yaw), sp = DSin(pitch), cp = DCos(pitch);
+            Num mz = (Num)cmd.mz / 100, mx = (Num)cmd.mx / 100;
+            (Num, Num, Num) OnPlane(Num x, Num y, Num z) { Num k = x * nnx + y * nny + z * nnz; return (x - k * nnx, y - k * nny, z - k * nnz); }
+            var (dx, dy, dz) = OnPlane(sy * cp * mz - cy * mx, sp * mz, cy * cp * mz + sy * mx);
+            Num len = Sqrt(dx * dx + dy * dy + dz * dz);
+            if (len < 0.25 * Sqrt(mz * mz + mx * mx))
             {
-                if (!Near(rec, w.x, w.z)) continue;
-                foreach (var b in rec.content.boxes)
-                {
-                    if (nx < b.minx - R || nx > b.maxx + R || nz < b.minz - R || nz > b.maxz + R) continue;
-                    if (w.y > b.miny && w.y < b.maxy) return; // blocked by the side
-                }
-                foreach (var t in rec.content.trees) { Num dx = nx - t.x, dz = nz - t.z; if (dx * dx + dz * dz < Sq(t.r + R)) return; }
+                (dx, dy, dz) = OnPlane(-sy * sp * mz - cy * mx, cp * mz, -cy * sp * mz + sy * mx); // camera up instead of forward
+                len = Sqrt(dx * dx + dy * dy + dz * dz);
             }
-            w.x = nx; w.z = nz; w.yaw = yaw; w.walking = true;
+            if (len < 1e-6) return;
+            Num step = T.land.walkSpeed * T.DT * Min(1, Sqrt(mz * mz + mx * mx)) / len;
+            var s = StaticSurface(new V3(w.x + dx * step, w.y + dy * step, w.z + dz * step), T.land.stick);
+            if (s == null) return; // nothing to hold on to that way
+            Settle(w, s);
+            w.yaw = yaw; w.walking = true;
             // walking into a person climbs onto them (an arm on the table, a leg on the grass)
             ContactQuery(w);
-            if (w.contact != null) { w.walking = false; var c = w.contact; PerchOn(w, c.humanHex, c.zone, c.surf, c.n, c.part); return; }
+            if (w.contact != null) { w.walking = false; w.land = null; var c = w.contact; PerchOn(w, c.humanHex, c.zone, c.surf, c.n, c.part); return; }
             w.contact = null;
-            if (SurfaceBelow(w) == null) { w.state = "fly"; w.walking = false; w.vy = 0; Emit("walkOff", ("id", w.id)); }
         }
 
         // ---------------- level 5: municipal pest control (GDD 8.10)

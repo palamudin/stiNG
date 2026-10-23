@@ -154,7 +154,7 @@ export class Sim {
     const w = {
       id, caste, x: this.nest.spawn.x, y: this.nest.spawn.y, z: this.nest.spawn.z, vx: 0, vy: 0, vz: 0, yaw: this.nest.spawn.yaw, pitch: 0,
       energy: 1, venom: 1, bodyT: T.cold.nestTemp, chill: 0, state: 'fly', stateTicks: 0, attach: null, under: null, ball: null, born: this.minute,
-      carry: null, groundTicks: 0, chew: 0, role: 'sugar', colony: 'own', web: null, fight: null,
+      carry: null, groundTicks: 0, chew: 0, role: 'sugar', colony: 'own', web: null, fight: null, land: null,
       ai: { mode: 'pick', target: null, timer: 0, humanHex: null, stings: 0, stingHold: 0 },
     };
     if (!driven) {
@@ -746,9 +746,18 @@ export class Sim {
         } else if (armed && w.contact && w.contact.humanHex === w.ai.humanHex) this._beginSting(w, w.contact, 'jab');
         break;
       case 'landed': {
-        // Walk on the surface with the move keys; climb, burst or sting to take off (GDD 7.2)
-        if (!driven || cmd.my > 0 || cmd.burst || cmd.sting) { this._takeoff(w); break; }
+        // Walk on the surface with the move keys, at any angle; only climb (Space) or burst (Shift) take off (GDD 7.2)
+        if (!driven || cmd.my > 0 || cmd.burst) { this._takeoff(w); break; }
+        if (armed) {
+          // a sting reaches a person close by: a leg next to the bench, an arm on the table
+          this.pressUsed = true;
+          this._contactQuery(w, T.land.stingReach);
+          const c = w.contact;
+          w.contact = null;
+          if (c && this._beginSting(w, c, 'jab')) { w.land = null; w.walking = false; break; }
+        }
         if (edge & Act.Interact) { this._interact(w); if (w.state !== 'landed') break; }
+        this._nestTouch(w); // landed at the entrance: in with the load
         w.walking = false;
         if (cmd.mx || cmd.mz) this._walk(w, cmd);
         if (w.state !== 'landed') break;
@@ -929,9 +938,9 @@ export class Sim {
 
   // ---------------- contact (GDD 7.4)
 
-  _contactQuery(w) {
+  _contactQuery(w, reach = T.wasp.contactGap) {
     const R = T.wasp.radius;
-    let best = null, bestGap = T.wasp.contactGap;
+    let best = null, bestGap = reach;
     for (const hm of this.active) {
       if (hm.state === 'away') continue;
       const dx = w.x - hm.x, dz = w.z - hm.z;
@@ -2303,48 +2312,111 @@ export class Sim {
 
   // ---------------- landing (GDD 7.2)
 
-  _surfaceBelow(w) {
-    const R = T.wasp.radius, g = T.land.gap;
-    if (w.y <= R + g) return 'ground';
-    for (const rec of this.activeChunks) for (const b of rec.content.boxes) {
-      if (w.x < b.minx || w.x > b.maxx || w.z < b.minz || w.z > b.maxz) continue;
-      if (Math.abs(w.y - (b.maxy + R)) <= g) return b.hive ? 'hive' : 'wood';
+  // The nearest static surface to p (GDD 7.2): the ground, any face of a box (undersides too), tree trunks, flower
+  // stalks and heads, and capsules (branches, when the world has them). Returns the point, the outward normal, what
+  // it is, and the gap between the wasp's body and it; null if nothing is within maxGap. Pure geometry on frozen
+  // chunk content, so every peer agrees.
+  _staticSurface(p, maxGap) {
+    const R = T.wasp.radius, L = T.land, lim = maxGap + R;
+    let best = null, bd = lim;
+    const take = (qx, qy, qz, nx, ny, nz, d, kind) => { if (d < bd) { bd = d; best = { x: qx, y: qy, z: qz, nx, ny, nz, kind }; } };
+    // a point against a solid capsule (segment a-b, radius r)
+    const capsule = (ax, ay, az, bx, by, bz, r, kind) => {
+      const q = segClosest({ x: ax, y: ay, z: az }, { x: bx, y: by, z: bz }, p);
+      const ex = p.x - q.x, ey = p.y - q.y, ez = p.z - q.z, d = Math.sqrt(ex * ex + ey * ey + ez * ez);
+      if (d - r >= bd || d === 0) return;
+      take(q.x + ex / d * r, q.y + ey / d * r, q.z + ez / d * r, ex / d, ey / d, ez / d, d - r, kind);
+    };
+    if (p.y < lim) take(p.x, 0, p.z, 0, 1, 0, p.y, 'ground');
+    for (const rec of this.activeChunks) {
+      const c = rec.content;
+      for (const b of c.boxes) {
+        if (p.x < b.minx - lim || p.x > b.maxx + lim || p.y < b.miny - lim || p.y > b.maxy + lim || p.z < b.minz - lim || p.z > b.maxz + lim) continue;
+        const qx = clamp(p.x, b.minx, b.maxx), qy = clamp(p.y, b.miny, b.maxy), qz = clamp(p.z, b.minz, b.maxz);
+        const ex = p.x - qx, ey = p.y - qy, ez = p.z - qz, d = Math.sqrt(ex * ex + ey * ey + ez * ez);
+        const kind = b.hive ? 'hive' : b.shed ? 'shed' : 'wood';
+        if (d > 0) { take(qx, qy, qz, ex / d, ey / d, ez / d, d, kind); continue; }
+        // inside: out through the nearest face
+        const f = [p.x - b.minx, b.maxx - p.x, p.y - b.miny, b.maxy - p.y, p.z - b.minz, b.maxz - p.z];
+        let k = 0;
+        for (let i = 1; i < 6; i++) if (f[i] < f[k]) k = i;
+        const nx = k === 0 ? -1 : k === 1 ? 1 : 0, ny = k === 2 ? -1 : k === 3 ? 1 : 0, nz = k === 4 ? -1 : k === 5 ? 1 : 0;
+        take(p.x + nx * f[k], p.y + ny * f[k], p.z + nz * f[k], nx, ny, nz, 0, kind);
+      }
+      for (const cy of c.cylinders) {
+        const hx = p.x - cy.x, hz = p.z - cy.z, hd = Math.sqrt(hx * hx + hz * hz);
+        if (hd - cy.r >= bd || p.y > cy.h + bd) continue;
+        if (p.y > cy.h && hd <= cy.r) { take(p.x, cy.h, p.z, 0, 1, 0, p.y - cy.h, 'bark'); continue; } // the top
+        if (hd === 0) continue;
+        const qx = cy.x + hx / hd * cy.r, qz = cy.z + hz / hd * cy.r;
+        if (p.y > cy.h) { const ey = p.y - cy.h, dr = hd - cy.r, d = Math.sqrt(dr * dr + ey * ey); take(qx, cy.h, qz, (hx / hd) * dr / d, ey / d, (hz / hd) * dr / d, d, 'bark'); }
+        else take(qx, p.y, qz, hx / hd, 0, hz / hd, Math.max(0, hd - cy.r), 'bark');
+      }
+      for (const f of c.flowers) {
+        if (Math.abs(p.x - f.x) > lim + L.headR || Math.abs(p.z - f.z) > lim + L.headR || p.y > f.y + lim + L.headR) continue;
+        capsule(f.x, 0, f.z, f.x, f.y - L.headR, f.z, L.stalkR, 'stalk');
+        capsule(f.x, f.y, f.z, f.x, f.y, f.z, L.headR, 'flower');
+      }
+      for (const k of c.capsules || []) capsule(k.ax, k.ay, k.az, k.bx, k.by, k.bz, k.r, k.kind || 'branch');
     }
-    return null;
+    // our own paper nest, where it hangs in the open
+    const n = this.nest;
+    if (this.colony.sited !== false && this.colony.nestAlive && (n.site === 'trunk' || n.site === 'branch')) capsule(n.x, n.y, n.z, n.x, n.y, n.z, n.r, 'nest');
+    if (!best) return null;
+    best.gap = bd;
+    return best;
+  }
+
+  _settle(w, s) {
+    const R = T.wasp.radius;
+    w.x = s.x + s.nx * R; w.y = s.y + s.ny * R; w.z = s.z + s.nz * R;
+    w.land = { nx: s.nx, ny: s.ny, nz: s.nz, kind: s.kind };
   }
 
   _maybeLand(w, cmd) {
-    if (cmd.mx || cmd.my || cmd.mz || cmd.burst || cmd.sting) return;
+    if (cmd.mx || cmd.my || cmd.mz || cmd.burst || cmd.sting || this.tick < (w.noLandUntil || 0)) return;
     if (w.vx * w.vx + w.vy * w.vy + w.vz * w.vz > T.land.maxSpeed * T.land.maxSpeed) return;
     if (w.contact && !w.contact.blockedPerch) { this._perch(w, w.contact); return; }
-    const surf = this._surfaceBelow(w);
-    if (!surf) return;
+    const s = this._staticSurface(w, T.land.reach);
+    if (!s) return;
     w.state = 'landed'; w.vx = w.vy = w.vz = 0;
-    this.emit('landed', { id: w.id, surface: surf });
+    this._settle(w, s);
+    this.emit('landed', { id: w.id, surface: s.kind });
   }
 
-  _takeoff(w) { w.state = 'fly'; w.vy = 0.5; w.walking = false; this.emit('takeoff', { id: w.id }); }
+  // push off along the surface normal: up from the ground, sideways off a trunk, down from under a table
+  _takeoff(w) {
+    const n = w.land || { nx: 0, ny: 1, nz: 0 };
+    w.state = 'fly'; w.vx = n.nx * 0.5; w.vy = n.ny * 0.5 + 0.1; w.vz = n.nz * 0.5; w.walking = false; w.land = null;
+    w.noLandUntil = this.tick + T.land.afterTakeoff; // clear of the surface before it can settle again
+    this.emit('takeoff', { id: w.id });
+  }
 
-  // Walk camera-relative across the surface the wasp stands on. Off the edge it drops into flight;
-  // the sides of boxes and tree trunks stop it.
+  // Walk camera-relative along whatever the wasp stands on, at any angle. The wish (forward and strafe from the
+  // camera) is projected onto the surface; looking straight at the surface, forward means up the screen. After each
+  // step the wasp is put back on the nearest surface, so it follows round edges, up trunks and under table tops,
+  // and never falls off: only Space or Shift take off.
   _walk(w, cmd) {
-    const yaw = cmd.yawQ * 1e-4, sy = dsin(yaw), cy = dcos(yaw);
-    const mz = cmd.mz / 100, mx = cmd.mx / 100, sp = T.land.walkSpeed * DT;
-    const nx = w.x + (sy * mz - cy * mx) * sp, nz = w.z + (cy * mz + sy * mx) * sp;
-    const R = T.wasp.radius;
-    for (const rec of this.activeChunks) {
-      for (const b of rec.content.boxes) {
-        if (nx < b.minx - R || nx > b.maxx + R || nz < b.minz - R || nz > b.maxz + R) continue;
-        if (w.y > b.miny && w.y < b.maxy) return; // blocked by the side
-      }
-      for (const t of rec.content.trees) { const dx = nx - t.x, dz = nz - t.z; if (dx * dx + dz * dz < sq(t.r + R)) return; }
+    const n = w.land || { nx: 0, ny: 1, nz: 0 };
+    const yaw = cmd.yawQ * 1e-4, pitch = cmd.pitchQ * 1e-4, sy = dsin(yaw), cy = dcos(yaw), sp = dsin(pitch), cp = dcos(pitch);
+    const mz = cmd.mz / 100, mx = cmd.mx / 100;
+    const onPlane = (x, y, z) => { const k = x * n.nx + y * n.ny + z * n.nz; return [x - k * n.nx, y - k * n.ny, z - k * n.nz]; };
+    let [dx, dy, dz] = onPlane(sy * cp * mz - cy * mx, sp * mz, cy * cp * mz + sy * mx);
+    let len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (len < 0.25 * Math.sqrt(mz * mz + mx * mx)) {
+      [dx, dy, dz] = onPlane(-sy * sp * mz - cy * mx, cp * mz, -cy * sp * mz + sy * mx); // camera up instead of forward
+      len = Math.sqrt(dx * dx + dy * dy + dz * dz);
     }
-    w.x = nx; w.z = nz; w.yaw = yaw; w.walking = true;
+    if (len < 1e-6) return;
+    const step = T.land.walkSpeed * DT * Math.min(1, Math.sqrt(mz * mz + mx * mx)) / len;
+    const s = this._staticSurface({ x: w.x + dx * step, y: w.y + dy * step, z: w.z + dz * step }, T.land.stick);
+    if (!s) return; // nothing to hold on to that way
+    this._settle(w, s);
+    w.yaw = yaw; w.walking = true;
     // walking into a person climbs onto them (an arm on the table, a leg on the grass)
     this._contactQuery(w);
-    if (w.contact && !w.contact.blockedPerch) { w.walking = false; this._perch(w, w.contact); return; }
+    if (w.contact && !w.contact.blockedPerch) { w.walking = false; w.land = null; this._perch(w, w.contact); return; }
     w.contact = null;
-    if (!this._surfaceBelow(w)) { w.state = 'fly'; w.walking = false; w.vy = 0; this.emit('walkOff', { id: w.id }); }
   }
 
   // ---------------- level 5: municipal pest control (GDD 8.10)
