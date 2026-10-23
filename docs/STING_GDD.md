@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | Working title | STING (from the "Sting 7 billion people" meme) |
-| Version | 0.3 — findings from the three.js proof of concept folded in (Section 18) |
-| Date | 2026-10-21 |
+| Version | 0.4 — feature tiers and stack compatibility (Section 19) |
+| Date | 2026-10-23 |
 | Engine | Unity (presentation), engine-agnostic C# core (simulation) |
 | Status | Draft for review. Decisions marked **[D]**, proposals marked **[P]**, open questions marked **[Q]** |
 
@@ -15,6 +15,7 @@
 - Numbers tagged *(tune)* are starting values for tuning, not commitments. Numbers tagged *(bio)* come from real biology and are the reference the tuning starts from.
 - Protocode is C# 9 targeting the .NET Standard 2.1 API surface (what Unity compiles). Appendix A is compile-checked; it is a specification, not the production code.
 - Time is in sim ticks. 1 tick = 1/60 s. "11 ticks" ≈ 183 ms.
+- **Feature tiers** (Section 19) are marked on headings: **[T0]** built in the PoC and the C# core, **[T1]** next, buildable on the current stack, **[T2]** later. **[Unity]** needs the engine, **[Infra]** needs servers or a real network. A heading with two marks is partly built.
 
 ---
 
@@ -38,6 +39,7 @@
 16. Decisions log
 17. Open questions
 18. Findings from the proof of concept
+19. Feature tiers and the current stack
 - Appendix A — Protocode
 - Appendix B — Glossary
 - Appendix C — Biology reference
@@ -122,7 +124,7 @@ Even a perfect season ends with the colony dying. "Survival" means passing the l
 - **R-08** If a subsystem is multithreaded, work MUST be partitioned deterministically and merged in fixed order.
 - **R-09** No third-party code in `Sting.Core`. Only the base class library.
 
-### 3.3 Tick
+### 3.3 Tick **[T0]**
 
 - Base tick: 60 Hz.
 - Subsystems run on divisors of the base tick:
@@ -139,7 +141,7 @@ Even a perfect season ends with the colony dying. "Survival" means passing the l
 
 - Subsystem order inside a tick is fixed and documented in code (Appendix A.3).
 
-### 3.4 Numbers
+### 3.4 Numbers **[T0]** (sine is a polynomial, not a table: 19.4)
 
 - `Fix64`: signed Q32.32 in a `long`. Range about ±2.1 × 10⁹, resolution about 2.3 × 10⁻¹⁰. One unit = 1 meter for distances.
 - A whole world fits with sub-micron precision, so there is no floating origin in the sim.
@@ -148,7 +150,7 @@ Even a perfect season ends with the colony dying. "Survival" means passing the l
 - `Vec3F`: three `Fix64`.
 - Overflow policy: debug builds assert, release builds saturate.
 
-### 3.5 Randomness
+### 3.5 Randomness **[T0]**
 
 Counter-based: every random value is a pure hash of its inputs, so any peer can compute "the random value for entity X at tick T" without having generated the values before it. This is what makes on-demand chunk generation and "same human, same traits everywhere" possible.
 
@@ -160,26 +162,26 @@ Domains: `WorldGen`, `HumanTraits`, `HumanSchedule`, `Clothing`, `Flight`, `Colo
 
 Mixer: the SplitMix64 finalizer applied to the inputs in sequence. Implementation in Appendix A.2.
 
-### 3.6 Entities
+### 3.6 Entities **[T0] [T2]** (type bits and struct-of-arrays storage not adopted: 19.4)
 
 - `EntityId` is a `ulong`. Top 8 bits: entity type. Remaining bits: a hash.
 - World-generated entities (humans, trees, hives, picnic tables): `id = Hash(worldSeed, WorldGen, chunkX, chunkZ, slot)`. Every peer derives the same ID without talking.
 - Runtime-born entities (brood, wasps): `id = Hash(colonyId, birthTick, sequence)`. Born only by the colony's owner peer, then announced.
 - Storage: struct-of-arrays per entity type, kept sorted by `EntityId` (R-06).
 
-### 3.7 Events
+### 3.7 Events **[T0]**
 
 - `SimEvent { Tick, Type, Source, Target, Payload }`.
 - Total order: (Tick, Type priority, Source, Sequence). Ties are impossible by construction.
 - Events are the unit of networking for anything that changes non-owned entities (Section 11).
 - Examples: `Sting`, `SwatAttempt`, `WaspKilled`, `ObjectKnockedOver`, `PickUp`, `NestFounded`, `NestDestroyed`, `ChunkDiscovered`.
 
-### 3.8 State hashing
+### 3.8 State hashing **[T0]**
 
 - Every subsystem can produce a 64-bit hash of its state.
 - The headless runner records hash streams. Peers exchange hashes of shared deterministic state (ambient humans, chunk deltas) every N seconds to detect desync.
 
-### 3.9 Serialization
+### 3.9 Serialization **[T0]**
 
 Own binary format, little-endian, explicit field order, version byte per record. No reflection-based serialization.
 
@@ -191,13 +193,13 @@ Own binary format, little-endian, explicit field order, version byte per record.
 
 Temperate world: suburbs with gardens, parks, picnic areas, beer gardens, farmland, forest edge, small town centers. Setting style is **[Q] Q-06**.
 
-### 4.2 Chunks
+### 4.2 Chunks **[T0] [T1]** (regions)
 
 - Chunk: 64 m × 64 m columns, keyed by integer (cx, cz).
 - Region: 8 × 8 chunks (512 m), used for large-scale layout (where the town is, where the farm is).
 - Wasp foraging range is on the order of hundreds of meters *(tune)*, so a colony's working area is roughly a region.
 
-### 4.3 Generation
+### 4.3 Generation **[T0] [T1]**
 
 - `Generate(worldSeed, genVersion, cx, cz) → ChunkBase` is a pure function (Appendix A.11).
 - Two passes: region layout (land use, roads, water) then chunk content.
@@ -209,14 +211,14 @@ Temperate world: suburbs with gardens, parks, picnic areas, beer gardens, farmla
   - hazards: spider web spots, bird perches
   - bee hives: managed boxes and feral hives
 
-### 4.4 Discovery and freeze **[D] D-02**
+### 4.4 Discovery and freeze **[D] D-02** **[T0]**
 
 - A chunk becomes **discovered** when any player-owned wasp comes within the discovery radius (2 chunks *(tune)*).
 - On discovery the chunk's base content is generated and **stored as a snapshot** with its generator version and content hash. **[P] D-10**
 - Rationale: generators will change through development. Storing only (seed, version) would force the game to carry every generator version forever. A snapshot lets old generators be deleted. Undiscovered chunks always use the current generator.
 - Simultaneous discovery by two peers is harmless: both generate from the same seed and the same `genVersion` (pinned in the world record), so the records are identical and writes are idempotent.
 
-### 4.5 Delta log
+### 4.5 Delta log **[T0] [T1]**
 
 Everything living things do to a discovered chunk is a delta on top of the frozen base:
 
@@ -230,7 +232,7 @@ Everything living things do to a discovered chunk is a delta on top of the froze
 
 Compaction: the persistence holder periodically folds old deltas into a new base revision of the chunk.
 
-### 4.6 Persistence
+### 4.6 Persistence **[T0] [Infra]** (local saves built; persistence node needs a server)
 
 - `IWorldStore` interface with two implementations:
   - `LocalWorldStore`: files on disk, for solo play and for a peer acting as world holder.
@@ -238,7 +240,7 @@ Compaction: the persistence holder periodically folds old deltas into a new base
 - World record: world seed, `genVersion`, tuning hash, epoch, population figure, list of discovered chunks.
 - All peers in a world MUST run the same build: same `genVersion` and same tuning hash. Connection is refused otherwise.
 
-### 4.7 World tiers **[D] D-13**
+### 4.7 World tiers **[D] D-13** **[Infra]** (Personal built)
 
 Worlds are separate, not one unified universe, in the way Valheim and Minecraft worlds are. There are three tiers:
 
@@ -254,7 +256,7 @@ Worlds are separate, not one unified universe, in the way Valheim and Minecraft 
 - An offshoot can be founded from a fresh seed, from Main's seed (same geography, undiscovered), or from a snapshot of an existing world (records and deltas copied) **[Q] Q-13**.
 - A colony line belongs to the world it was founded in **[Q] Q-14**.
 
-### 4.8 World modifiers **[P] D-14**
+### 4.8 World modifiers **[P] D-14** **[T0] [T1] [T2]**
 
 Every world carries a modifier set that makes it recognizably itself.
 
@@ -283,13 +285,13 @@ Rules:
 
 ## 5. Time, seasons, weather
 
-### 5.1 Clock
+### 5.1 Clock **[T0] [T1]** (time acceleration)
 
 - World time = ticks since the world epoch.
 - In-game day length: 12 real minutes *(tune)* **[Q] Q-02**. A season of about 200 active days is then about 40 real hours.
 - Solo play MAY accelerate time in colony view. A multiplayer world clock MUST NOT accelerate.
 
-### 5.2 Season phases *(tune, bio)*
+### 5.2 Season phases *(tune, bio)* **[T0]**
 
 | Phase | Northern-temperate calendar | Colony state |
 |---|---|---|
@@ -299,7 +301,7 @@ Rules:
 | Peak | Aug – Sep | Thousands of workers, queen cells, males, brood winding down |
 | Collapse | Sep – Oct | Reproductives leave, workers die |
 
-### 5.3 Temperature and weather
+### 5.3 Temperature and weather **[T0] [T1]** (wind, cloud)
 
 - Daily weather is a pure function: `Hash(worldSeed, Weather, dayIndex)` drives temperature offset, cloud, rain and wind.
 - Temperature affects: whether wasps can fly and forage, human outdoor density (picnics need warm dry days), resource availability and nest thermals.
@@ -310,7 +312,7 @@ Rules:
 
 ## 6. The colony
 
-### 6.1 Biology baseline *(bio)*
+### 6.1 Biology baseline *(bio)* **[T0]**
 
 Model species: *Vespula* (common wasp and German wasp, the yellowjackets in the meme). See Appendix C for sources and numbers.
 
@@ -323,7 +325,7 @@ Model species: *Vespula* (common wasp and German wasp, the yellowjackets in the 
 - Peak colonies run to thousands of workers.
 - Late in the season only queen cells are built; new queens and males emerge, mate, and the old colony collapses.
 
-### 6.2 Resources
+### 6.2 Resources **[T0] [T2]** (water)
 
 | Resource | Source | Spent on |
 |---|---|---|
@@ -332,7 +334,7 @@ Model species: *Vespula* (common wasp and German wasp, the yellowjackets in the 
 | Pulp (W) | Untreated wood: fences, sheds, dead branches | Nest cells and envelope |
 | Water (H₂O) *(tier 2)* | Puddles, birdbaths, drips | Nest cooling in heat |
 
-### 6.3 The sugar crisis
+### 6.3 The sugar crisis **[T0]**
 
 This is the central late-season mechanic, and it emerges from colony state rather than a script.
 
@@ -342,7 +344,7 @@ This is the central late-season mechanic, and it emerges from colony state rathe
 
 Economy step in Appendix A.4.
 
-### 6.4 Brood pipeline *(bio, tune)*
+### 6.4 Brood pipeline *(bio, tune)* **[T0]**
 
 | Stage | Duration |
 |---|---|
@@ -355,7 +357,7 @@ Economy step in Appendix A.4.
 - Larvae with insufficient protein develop more slowly; starved larvae die.
 - Cell type decides caste: worker cells all season, queen cells late season.
 
-### 6.5 Castes and roles
+### 6.5 Castes and roles **[T0] [T1]** (age roles, guards)
 
 | Caste | Notes |
 |---|---|
@@ -367,13 +369,13 @@ Economy step in Appendix A.4.
 - **Role allocation:** the player sets target ratios; the colony assigns idle workers to fill them.
 - **Default allocation by age:** young workers nurse and build inside; older workers forage; the oldest guard the entrance *(bio-inspired)*.
 
-### 6.6 Nest
+### 6.6 Nest **[T0] [T1]** (hollow tree, thermals)
 
 - Nest sites: underground cavity, wall cavity, attic, shed, hollow tree, open branch.
 - Each site type has: exposure to weather, thermal stability, human discovery chance, flood risk and maximum size.
 - Nest growth: builders turn pulp into cells and envelope layers. Size caps the colony.
 
-### 6.7 Succession and the line **[D] D-05**
+### 6.7 Succession and the line **[D] D-05** **[T0] [T1] [T2]**
 
 - Gynes leave in autumn, mate with males present in the mating area, then search for a hibernation site.
 - Winter mortality per hibernating queen depends on site quality *(tune)*.
@@ -384,7 +386,7 @@ Economy step in Appendix A.4.
 
 ## 7. The wasp
 
-### 7.1 Body *(bio, tune)*
+### 7.1 Body *(bio, tune)* **[T0]**
 
 | Parameter | Worker | Queen |
 |---|---|---|
@@ -399,19 +401,19 @@ Economy step in Appendix A.4.
 - Temperature: below the flight threshold the wasp cannot take off *(tune)*.
 - Health: a single solid hit (swat, crush) kills. Grazes stun.
 
-### 7.2 Flight
+### 7.2 Flight **[T0] [T1]** (wind)
 
 - A steered kinematic model in fixed-point: desired velocity from input, limited by max acceleration and turn rate, plus wind and gravity when not producing lift.
 - Collision is **swept** against world geometry every tick (at burst speed a wasp crosses a thin twig in one tick). Uses the deterministic collision developed in the Tarmac Lab pilot.
 - Landing and gripping on any surface is a state, not a physics outcome.
 
-### 7.3 Senses (AI wasps)
+### 7.3 Senses (AI wasps) **[T1]**
 
 - Scent fields: sugar, protein, alarm pheromone. Each is a decaying point source; strength at a point is a pure function of sources and time.
 - Vision cone for movement.
 - The driven wasp gets the same information as UI cues (Section 10).
 
-### 7.4 Stinging
+### 7.4 Stinging **[T0]**
 
 - A sting requires contact with an exposed or thinly covered zone of a target (Section 8.3).
 - **Pain onset is the contact tick.** The `Sting` event is emitted at that tick.
@@ -424,16 +426,16 @@ Economy step in Appendix A.4.
 
 - Both count toward the counter. Full stings are a risk/reward choice: the human's swat clock starts at contact, not at withdrawal.
 
-### 7.5 Death causes
+### 7.5 Death causes **[T0] [T1]** (cold, drowning in a drink)
 
 Swat, crush under clothing, insecticide spray, bee balling, bird, spider web, drowning in a drink or a trap, cold, starvation, old age, rival wasps.
 
-### 7.6 Alarm pheromone *(bio-inspired)*
+### 7.6 Alarm pheromone *(bio-inspired)* **[T0]**
 
 - A wasp crushed near its nest releases alarm pheromone. Nearby workers of that colony switch to attack for a duration *(tune)*.
 - Consequence chain: a human swats a wasp near the nest → many stings → that neighborhood escalates fast → exterminator. The colony defends itself into danger.
 
-### 7.7 Possession
+### 7.7 Possession **[T0]**
 
 - Any adult of the player's own colony can be driven.
 - When released, the wasp resumes its assigned role under AI.
@@ -441,7 +443,7 @@ Swat, crush under clothing, insecticide spray, bee balling, bird, spider web, dr
 
 ---
 
-### 7.8 Reflex (skill tree, later)
+### 7.8 Reflex (skill tree, later) **[T1] [T2]** (solo slowdown T1, skill tree T2)
 
 A slowdown on detection in the manner of Metal Gear Solid V's Reflex mode, unlocked through wasp progression. It triggers when a swat, spray or press is scheduled against your driven wasp (a `preSwat`, `notice`, `press` or own-sting swat), because that is the moment the sim already knows the hand is coming and exactly when it lands.
 
@@ -456,7 +458,7 @@ The determinism and netcode rules decide how it can work:
 
 Humans are the most important system in the game, and they are the most deterministic one.
 
-### 8.1 Identity and traits
+### 8.1 Identity and traits **[T0]**
 
 - `HumanId = Hash(worldSeed, WorldGen, homeChunkX, homeChunkZ, slot)`.
 - Every trait is derived from `Hash(worldSeed, HumanTraits, HumanId, traitIndex)`. Same human, same traits, on every machine, without syncing anything.
@@ -477,13 +479,13 @@ Humans are the most important system in the game, and they are the most determin
 
 Humans in the world are adults only.
 
-### 8.2 Schedules
+### 8.2 Schedules **[T0] [T1]**
 
 - Each human's day is a pure function of (traits, day index, weather): sleep, commute, work, errands, leisure (picnic, barbecue, beer garden, gardening).
 - Position at any tick is computed from the schedule, not simulated forward. A peer that loads a chunk at any time places every human correctly without asking anyone.
 - Deviations (fleeing, avoiding, fetching spray) come only from events, and events are synced (Section 11). So a human's full state is a function of (seed, time, event history).
 
-### 8.3 Body zones
+### 8.3 Body zones **[T0] [T1]** (walk and lie postures)
 
 The sim body is a set of zone capsules in a body frame, scaled by height and girth, in one of a few postures: stand, sit, walk, lie. The rendered skeleton is presentation; the zone capsules are the truth.
 
@@ -509,7 +511,7 @@ The sim body is a set of zone capsules in a body frame, scaled by height and gir
 
 All values *(tune)*. The acnestis is the real anatomical name for the patch of back you can't reach.
 
-### 8.4 Reach
+### 8.4 Reach **[T0]**
 
 Self-reach for a zone is a number from 0 to 1:
 
@@ -525,7 +527,7 @@ clamped to [0, 1]
 
 Below `minReachToSwat` *(tune 0.25)* the human cannot strike that zone and contorts instead. Appendix A.5.
 
-### 8.5 Response styles
+### 8.5 Response styles **[T0] [T1]** (shake, the runner's flail)
 
 | Style | Force | Volume radius | Window | Notes |
 |---|---|---|---|---|
@@ -537,7 +539,7 @@ Below `minReachToSwat` *(tune 0.25)* the human cannot strike that zone and conto
 | Freeze | none | — | — | The human goes rigid; panic builds |
 | Run | none | — | — | Flees, with a flailing swat on the way out |
 
-### 8.6 Sting resolution — the core function
+### 8.6 Sting resolution — the core function **[T0] [T1]** (fetch spray)
 
 `ResolveSting(StingEvent, HumanTraits, HumanContext) → ReactionPlan` is a pure function. Given the same inputs it MUST return the same plan on every machine. Appendix A.6.
 
@@ -555,11 +557,11 @@ Output: a fixed-size plan of scheduled sub-events:
 
 The skill the game teaches falls straight out of this: sting, and be gone before that person's swat lands. A slow older man gives you time to linger. A twitchy young adult gives you almost nothing. An isolated human cannot touch their own acnestis. A human with friends can.
 
-### 8.7 Swat check
+### 8.7 Swat check **[T0]**
 
 During each tick of a swat window, the volume is transformed from body frame to world frame and tested against the wasp's position (sphere vs sphere, swept over the tick). A hit kills (slap, cover) or stuns (brush, contort). Authority for this check is covered in Section 11.5. Appendix A.7.
 
-### 8.8 Clothing
+### 8.8 Clothing **[T0] [T1]** (by temperature)
 
 | Cover | Effect |
 |---|---|
@@ -571,7 +573,7 @@ During each tick of a swat window, the volume is transformed from body frame to 
 - A wasp under clothing is **trapped**: it can sting freely, but the human's response becomes compression (pressing the clothing against the body), with a much larger kill chance. High reward, high risk.
 - The day's clothing comes from `Hash(seed, Clothing, HumanId, day)` filtered by temperature.
 
-### 8.9 Panic
+### 8.9 Panic **[T0] [T1]** (line of sight)
 
 - Panic level 0–1 per human, updated at 20 Hz.
 - Gain from stings: zone sensitivity × sting mode pain × panic susceptibility.
@@ -579,7 +581,7 @@ During each tick of a swat window, the volume is transformed from body frame to 
 - Thresholds: flinch, then swat, then flee or scatter.
 - Panic can knock over tables and drinks. Those are sim events that write chunk deltas, and a spilled drink is a new sugar node. Panic feeds the wasps.
 
-### 8.10 Memory and escalation
+### 8.10 Memory and escalation **[T0] [T1]** (exterminator search)
 
 - Each human remembers stings: count, recency, place.
 - Each neighborhood has an **escalation level** from accumulated memory, decaying over time *(tune)*:
@@ -595,7 +597,7 @@ During each tick of a swat window, the volume is transformed from body frame to 
 
 - **Exterminator:** a special human who locates nests by observing wasp flight lines and destroys them by treating the entrance. The main external threat to the colony.
 
-### 8.11 The counter
+### 8.11 The counter **[T0] [Infra]** (canonical Main counter)
 
 - Counts **unique humans stung** in this world, by all players **[P] Q-09**. Only Main's counter is canonical; every other world's counter is shown with its modifier tag (4.8).
 - Display: `stung: N / <population figure>`. The figure is a world setting, default 8,200,000,000.
@@ -605,13 +607,13 @@ During each tick of a swat window, the volume is transformed from body frame to 
 
 ## 9. Bees and ecology
 
-### 9.1 Honeybee hives
+### 9.1 Honeybee hives **[T0] [T1]** (feral hives, robbing)
 
 - Managed hives (beekeepers' boxes in gardens) and feral hives (tree hollows, walls).
 - Bees forage flowers and compete with wasps for nectar.
 - Wasps can prey on bees and rob hives: a large protein and sugar reward at high risk.
 
-### 9.2 Hive defense
+### 9.2 Hive defense **[T0]**
 
 - Guards at the entrance detect intruders. Alarm recruits more bees.
 - **Balling:** when enough bees engage one intruder, they form a ball and heat it with their flight muscles.
@@ -621,11 +623,11 @@ During each tick of a swat window, the volume is transformed from body frame to 
   - Escape: each tick the wasp can break out with a chance based on its strength against ball size. A queen is stronger than a worker but caught queens usually die.
 - Design license: the research is on hornets and Asian honeybees. Applying balling to *Vespula* and to all bees in the game is a deliberate choice **[P]**, with balling strength as a per-hive parameter.
 
-### 9.3 Predators and hazards
+### 9.3 Predators and hazards **[T0]**
 
 Birds (perch and hunt flying insects), spiders (static webs), dragonflies, rival wasp colonies (AI and other players) fighting over food and nest sites.
 
-### 9.4 Prey and resources
+### 9.4 Prey and resources **[T0] [T1]** (seasons, regrowth, carrion)
 
 - Prey spawns by biome and season: caterpillars, flies, aphid-tending insects, carrion.
 - Flowers bloom in season. Fruit ripens and falls late summer.
@@ -635,19 +637,19 @@ Birds (perch and hunt flying insects), spiders (static webs), dragonflies, rival
 
 ## 10. Player control and UI
 
-### 10.1 Modes
+### 10.1 Modes **[T0]**
 
 - **Drive:** you are one wasp.
 - **Colony:** the nest cutaway and the map.
 
-### 10.2 Drive HUD
+### 10.2 Drive HUD **[T0] [T1]** (body temperature)
 
 - Crop sugar, venom, health, body temperature.
 - Scent cues: sugar, protein, alarm.
 - Threat cues come from the world, not numbers: the flinch, the hand coming up. Reaction delays are learned, not displayed. A hardcore option removes the HUD entirely.
 - Counter in the corner.
 
-### 10.3 Colony view
+### 10.3 Colony view **[T0]**
 
 - Resource stocks and flows, sugar deficit indicator.
 - Brood pipeline by stage and caste.
@@ -656,11 +658,11 @@ Birds (perch and hunt flying insects), spiders (static webs), dragonflies, rival
 - Map of discovered chunks, with resource nodes found and an escalation overlay per neighborhood.
 - List of adults with role and location, for picking a wasp to drive.
 
-### 10.4 Input (drive)
+### 10.4 Input (drive) **[T0]**
 
 Flight (pitch, yaw, climb, throttle), land and grip, sting (tap for jab, hold for full), pick up and carry, chew pulp, release control.
 
-### 10.5 Pause
+### 10.5 Pause **[T0]**
 
 Solo only. Multiplayer never pauses.
 
@@ -668,13 +670,13 @@ Solo only. Multiplayer never pauses.
 
 ## 11. Multiplayer
 
-### 11.1 Model **[D] D-01**
+### 11.1 Model **[D] D-01** **[T0]**
 
 - Peer-to-peer. Each peer is the authority over the entities it owns: its possessed wasp and its colony.
 - No rollback. Each player plays as-is on their own screen. Remote entities are extrapolated from their last known state.
 - No server simulates individual entities. Infrastructure depends on the world tier (11.11): rendezvous and relay (connections), persistence nodes (storage), and on Main, cell servers that route, audit and persist but do not simulate entities.
 
-### 11.2 What travels
+### 11.2 What travels **[T0]**
 
 | Data | Channel | Rate | Notes |
 |---|---|---|---|
@@ -683,19 +685,19 @@ Solo only. Multiplayer never pauses.
 | Chunk records and deltas | reliable | as they happen | Via the chunk authority or persistence node |
 | Ambient humans, fauna, weather, world generation | not sent | — | Computed locally from seed and time |
 
-### 11.3 The shared state table
+### 11.3 The shared state table **[T0]**
 
 - Key: `EntityId`. Row: entity state.
 - **Single writer per row:** only the owner writes it. Everyone else reads. Conflict-free by construction.
 - Rows replicate only to interested peers (Section 11.7).
 
-### 11.4 Remote entity display
+### 11.4 Remote entity display **[T0]**
 
 - On a state packet `(tick, position, velocity)`: predicted position = position + velocity × (now − tick).
 - Displayed position moves toward the prediction by a blend factor each frame; above a snap distance it jumps.
 - This is presentation code and MAY use floats. Appendix A.8.
 
-### 11.5 The consequence window
+### 11.5 The consequence window **[T0]**
 
 This is the property that makes rollback unnecessary for humans.
 
@@ -707,18 +709,18 @@ This is the property that makes rollback unnecessary for humans.
 
 **Swat hit authority [Q] Q-04.** Proposed: the wasp's owner evaluates whether its own wasp was inside the swat volume during the window, since it has the exact position and the volume is deterministic, and reports `WaspKilled` or nothing. Other peers audit with the states they received; a disagreement beyond tolerance is flagged as a plausibility violation (11.6).
 
-### 11.6 Contested objects and chunk authority
+### 11.6 Contested objects and chunk authority **[T1]**
 
 - Some things can't be resolved by events alone: two wasps grabbing the same caterpillar, the same soda can.
 - Each chunk has one **chunk authority** among the peers interested in it, chosen by rendezvous hashing: the peer with the smallest `Hash(chunkKey, peerId)` wins. Membership changes move as few chunks as possible. Appendix A.9.
 - The chunk authority resolves contested pickups, writes chunk deltas, and sends late-event corrections.
 
-### 11.7 Topology and interest
+### 11.7 Topology and interest **[T0] [Infra]** (rendezvous, hole punching, relay)
 
 - Peers connect only to peers whose entities are within the interest radius (3 chunks *(tune)*). The mesh is local and reshapes as players move. A full mesh across the world is never formed.
 - Rendezvous service: peer discovery and UDP hole punching. Relay fallback for peers whose NAT won't punch. Self-hostable.
 
-### 11.8 Plausibility checks
+### 11.8 Plausibility checks **[T0] [T1]**
 
 Owner authority means anyone can claim anything, so every peer checks what it receives:
 
@@ -731,12 +733,12 @@ Owner authority means anyone can claim anything, so every peer checks what it re
 
 Violations: drop the update, quarantine the peer, and report to the world holder, which can remove it. The persistence node applies the same checks to deltas before storing them.
 
-### 11.9 Clock sync
+### 11.9 Clock sync **[Infra]**
 
 - World tick = (synchronized time − epoch) / tick length.
 - Peers estimate clock offsets from ping exchanges. Peers MUST agree on the current tick within a few ticks; schedules and consequence windows depend on it.
 
-### 11.10 Joining a world in progress
+### 11.10 Joining a world in progress **[T0]**
 
 A joining peer receives:
 1. world record (seed, `genVersion`, tuning hash, epoch, population figure)
@@ -744,7 +746,7 @@ A joining peer receives:
 3. current rows of owned entities nearby
 4. the live rows of humans nearby, pending committed events and committed interest windows (revised by the PoC, 18.10: this replaces rebuilding panic from recent events)
 
-### 11.11 Network topology by world tier **[D] D-13, [P] D-15**
+### 11.11 Network topology by world tier **[D] D-13, [P] D-15** **[Infra]**
 
 Gameplay authority is the same in every tier: owners decide about what they own, and humans are resolved deterministically on every client. What changes is how data travels and who stores it.
 
@@ -765,7 +767,7 @@ Gameplay authority is the same in every tier: owners decide about what they own,
 
 There is precedent for this split. PlanetSide 2 is known for keeping hit detection on clients and spending server effort on routing relevant updates, and it set a Guinness record with 1,158 players in one battle in 2015 ([Guinness World Records](https://www.guinnessworldrecords.com/news/2015/01/planetside-2-gamers-aiming-for-fps-battle-world-record-this-weekend-370414)). STING's harder problem isn't players but wasps, which is what 11.12 handles.
 
-### 11.12 Relevance tiers (scale)
+### 11.12 Relevance tiers (scale) **[T0] [T1] [Infra]**
 
 On Main the entity count is dominated by AI wasps: one player's colony can hold thousands of workers. Nothing at that count can be replicated at full rate, so every wasp sits in a relevance tier, judged per receiving client:
 
@@ -784,7 +786,7 @@ On Main the entity count is dominated by AI wasps: one player's colony can hold 
 
 **Offline players on Main [Q] Q-15.** Seasons keep running on Main when a player logs off, but an offline player's colony has no owner to simulate it. Proposed: the cell server runs offline colonies at the abstract tier only (economy and statistical foraging risk, no individual wasps). This is a deliberate, narrow exception to "servers don't simulate."
 
-### 11.13 Transport **[Q] Q-05**
+### 11.13 Transport **[Q] Q-05** **[Infra]**
 
 - Own UDP protocol: header with protocol version, peer ID, sequence, ack and ack bitfield; an unreliable state channel and a reliable ordered event channel. Redundancy: each state packet MAY repeat the previous state for loss resilience.
 - **Cryptography is not hand-rolled.** Use the runtime's primitives or a platform transport.
@@ -793,7 +795,7 @@ On Main the entity count is dominated by AI wasps: one player's colony can hold 
 
 ---
 
-## 12. Presentation contract (Unity)
+## 12. Presentation contract (Unity) **[Unity]**
 
 - **Reads:** sim state each frame (interpolated between ticks for display) and sim events (to trigger animation and audio).
 - **Writes:** player input commands only.
@@ -806,7 +808,7 @@ On Main the entity count is dominated by AI wasps: one player's colony can hold 
 
 ---
 
-## 13. Data and tuning
+## 13. Data and tuning **[T1]**
 
 - All tuning lives in versioned plain-text data files read by own parser code. No JSON library.
 - Tables: `HumanTraitRanges`, `BodyZones`, `ResponseStyles`, `ClothingMaterials`, `WaspCasteStats`, `BroodTimings`, `ResourceRates`, `SeasonCurve`, `EscalationLadder`, `BeeDefense`, `ChunkGen`.
@@ -815,7 +817,7 @@ On Main the entity count is dominated by AI wasps: one player's colony can hold 
 
 ---
 
-## 14. Testing and verification
+## 14. Testing and verification **[T0]**
 
 - **Headless runner:** a console application that loads a world seed and a scripted event list, runs N ticks, and writes state hash streams. As built: `core/Sting.Headless` (`sting-headless run | replay | resume | compare`); an input log holds the settings and every tick's command and replays in either number build.
 - **Determinism:** same seed and script MUST give identical hash streams across runs, processes, and machines (Windows x64, Linux x64, ARM).
@@ -826,7 +828,7 @@ On Main the entity count is dominated by AI wasps: one player's colony can hold 
 
 ---
 
-## 15. Technical constraints
+## 15. Technical constraints **[T0] [Unity]**
 
 - Unity version to be fixed at project start. The core targets the C# 9 language level and the .NET Standard 2.1 API surface, so it compiles both in Unity and in the standalone .NET SDK.
 - `Sting.Core`: base class library only (R-09).
@@ -1007,6 +1009,64 @@ The C# save is binary and exact (each number as its 8 bytes, a double's or a fix
 The PoC's 105 headless sim checks are ported too (`Behaviour.cs`), and so are the network checks the lab digests do not already cover (`NetBehaviour.cs`: peers far apart, rival fights and a raid across peers, pest control across peers, the wire format). All 117 pass in both builds: under clothing, perching, bees, webs, birds and dragonflies, landing and walking, rivals and raids, the exterminator, pest control, spills, fruit, nest sites, seasons, switching, saves and world modifiers. In the fixed build they are the proof that every mechanic still works in Q32.32.
 
 Porting found three bugs, fixed in both: a line that went extinct kept ticking its colony and could come back the next autumn, alarm pheromone kept relaunching attacks on a human who had gone home; and the small per-decision hash reads four inputs, so calls that passed five or six (burrow positions, branch sites, fruit, bait stations) silently ignored the rest: both coordinates of a burrow came from the same number, every fruit of a tree fell on the same day, and only early in the windfall weeks. Such calls now chain two rounds of the hash.
+
+---
+
+## 19. Feature tiers and the current stack
+
+The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core/`), kept bit-identical by the parity harness. There is no Unity project yet and no server. The PoC is where features are built and played; each feature is then ported to the core and proven against the PoC's digests.
+
+### 19.1 Tier 0: built
+
+Everything in `POC.md` (62 features) and its C# port (18.18). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+
+### 19.2 Tier 1: next, on the current stack
+
+| # | Feature | GDD | Size | Depends on |
+|---|---|---|---|---|
+| T1-1 | Wind: a daily wind field from the weather hash, pushing wasps in flight and swaying trees; calm in the morning, stronger in the afternoon | 5.3, 7.2 | S | |
+| T1-2 | Cold: a wasp grounded below the flight temperature away from the nest chills and dies; body temperature on the HUD | 7.1, 7.5, 10.2 | S | |
+| T1-3 | Drowning in a drink: a wasp feeding at an open can may fall in and has a few seconds to climb out | 7.5 | S | |
+| T1-4 | Clothing by temperature: jackets and jeans on cool days, tank tops and shorts on hot ones | 8.8 | S | |
+| T1-5 | Shake and flail: a human stung on the head shakes it (dislodges, no kill); runners swat wildly on the way out | 8.5 | S | |
+| T1-6 | Fetching spray: at level 3 a stung human walks off and comes back armed, instead of having spray on hand | 8.6, 8.10 | M | |
+| T1-7 | The exterminator searches: at level 4 he walks the area watching wasp traffic and finds the nest from flight lines; a colony that keeps traffic low near people buys time | 8.10 | M | |
+| T1-8 | Seasonal ecology: flowers bloom and fade by season, nectar is drawn down by bees and wasps and regrows in an ecology tick (0.2 Hz); prey by season; carrion appears | 9.4, 3.3 | M | |
+| T1-9 | Feral hives and robbing: hives in hollow trees and walls; a wasp that gets inside takes honey (sugar) as well as brood | 9.1 | M | |
+| T1-10 | Barbecues: grills as human anchors with meat, a protein source at people's tables and a new kind of conflict | 4.3, 6.2 | M | T1-11 helps |
+| T1-11 | Human days: walk and lie postures, people strolling on paths, sunbathers lying on the grass, gardeners; the schedule picks the activity by weather and traits | 8.2, 8.3 | L | Q-06 for the paths |
+| T1-12 | Regions: an 8×8 chunk layout pass (park, gardens, houses with fences, farmland, forest edge) under the chunk pass, with pulp from fences that runs out (a chunk delta) | 4.2, 4.3, 4.5 | L | Q-06 |
+| T1-13 | Worker ages and guards: young workers stay in, older ones forage, the oldest guard the entrance and attack intruders (rivals, raiders, other players' wasps) | 6.5 | M | Q-07 for players |
+| T1-14 | Hollow-tree nest site and nest thermals: site insulation sets how cold snaps and heat slow the brood | 6.6 | S | |
+| T1-15 | Winter with choices: gynes pick hibernation sites whose quality sets winter survival; in spring the player chooses which surviving queen to continue | 6.7 | M | |
+| T1-16 | Senses for AI wasps: scent fields (sugar, protein, alarm) as decaying point sources and a vision cone, replacing the AI's perfect knowledge of every food source | 7.3 | M | |
+| T1-17 | Line of sight for panic: contagion only between humans who can see each other | 8.9 | S | |
+| T1-18 | Per-human memory: recency and place, so a person stung at this table is jumpy here and calmer elsewhere | 8.10 | S | |
+| T1-19 | Chunk authority and contested pickups in the lab: rendezvous hashing picks one peer per chunk to settle two wasps grabbing the same caterpillar | 11.6 | M | |
+| T1-20 | Remaining plausibility checks: carry limits, positions inside solid geometry, chunk deltas consistent with their cause | 11.8 | S | T1-12 for deltas |
+| T1-21 | Relevance tiers in the lab: near, mid and far wasps at different rates, swarm packets; measure bandwidth with a 200-worker colony | 11.12 | M | |
+| T1-22 | Tuning as data: the tuning tables as versioned plain-text files read by own parsers in JS and C#, and the tuning hash in the world record | 13 | M | |
+| T1-23 | Solo time: accelerate time in the colony view, and the Reflex slowdown as a solo option | 5.1, 7.8 | S | |
+
+Sizes: S a day or less, M a few days, L a week or more.
+
+### 19.3 Tier 2: later
+
+Water as a resource (6.2); extreme weather; town centers and beer gardens; lineage colonies played by AI as real colonies (6.7); males as wasps; the Reflex skill tree (7.8); feature modifiers that need the bigger generator (biome mix, town density, terrain); colonies of thousands of wasps out at once.
+
+### 19.4 Not on the current stack
+
+**Needs Unity [Unity].** The presentation contract (12): hands brought to the impact point by IK and time-warped clips, skeletons fitted to the zone capsules, the Unity physics rule, wing animation; the Unity version and packages (15); art scope for thousands of humans (Q-11). The PoC keeps its stand-ins: capsule humans with two-bone arm IK that reaches the impact point at the impact tick.
+
+**Needs servers or a real network [Infra].** The persistence node (4.6), Main and Offshoot hosting (4.7, 11.11), the canonical counter (8.11), rendezvous, hole punching and relay (11.7), clock sync between machines (11.9), the transport (11.13), offline colonies on Main (Q-15). Everything these carry is exercised in the network lab over simulated links. A browser-to-browser test over WebRTC on a LAN is possible without servers and could come before Unity if real latency data is wanted.
+
+**Built differently from the text.** Sine and cosine are a polynomial on exact operations, not a lookup table (3.4); entity IDs carry no type bits and storage is ordinary lists sorted by ID (3.6); collision is three substeps per tick rather than the swept Tarmac Lab collision (7.2); bees and hunters run at 60 Hz rather than 20 Hz (3.3); the test runner is a plain program rather than attribute-driven (14). None of these block anything; each can change when the Unity port needs it.
+
+### 19.5 Open questions that gate Tier 1
+
+- **Q-06 setting** gates T1-11 (paths) and T1-12 (regions): what the land between parks looks like.
+- **Q-07 players: co-op, rivals or both** gates the player side of T1-13 (whether guards attack other players' wasps) and any colony-against-colony play.
+- **Q-02 default day length** affects every timing that players feel; the PoC default is 2-minute days, the GDD says 12.
 
 ---
 
