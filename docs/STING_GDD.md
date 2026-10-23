@@ -1004,7 +1004,7 @@ The fixed build cannot match the JS bit for bit, so it is held to properties and
 
 The C# save is binary and exact (each number as its 8 bytes, a double's or a fixed point's); it is not interchangeable with the PoC's JSON saves, and does not need to be.
 
-The PoC's 105 headless checks are ported too (`Behaviour.cs`) and pass in both builds: under clothing, perching, bees, webs, birds and dragonflies, landing and walking, rivals and raids, the exterminator, pest control, spills, fruit, nest sites, seasons, switching, saves and world modifiers. In the fixed build they are the proof that every mechanic still works in Q32.32.
+The PoC's 105 headless sim checks are ported too (`Behaviour.cs`), and so are the network checks the lab digests do not already cover (`NetBehaviour.cs`: peers far apart, rival fights and a raid across peers, pest control across peers, the wire format). All 117 pass in both builds: under clothing, perching, bees, webs, birds and dragonflies, landing and walking, rivals and raids, the exterminator, pest control, spills, fruit, nest sites, seasons, switching, saves and world modifiers. In the fixed build they are the proof that every mechanic still works in Q32.32.
 
 Porting found two bugs, fixed in both: a line that went extinct kept ticking its colony and could come back the next autumn, and alarm pheromone kept relaunching attacks on a human who had gone home.
 

@@ -60,6 +60,7 @@ namespace Sting.Core.Tests
             SimParity();
             NetParity();
             Extra();
+            NetBehaviour();
             int fail = 0;
             foreach (var (name, ok, detail) in asserts) { Console.WriteLine($"{(ok ? "PASS" : "FAIL")} {name} {detail}"); if (!ok) fail++; }
 #if STING_FIXED
