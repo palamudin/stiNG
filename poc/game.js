@@ -698,22 +698,35 @@ function poseHuman(view, t, dt) {
   const P = {};
   for (const p of view.rest) P[p.name] = { a: V(p.a), b: V(p.b) };
   const X = new THREE.Vector3(1, 0, 0);
+  view.bob = 0;
   if (moving && hm.posture === 'stand') {
-    const amp = hm.state === 'flee' ? 0.7 : 0.4;
+    // A gait, in the body frame (+z forward; a positive turn about X swings a hanging bone backward).
+    // The hip swings the thigh forward and back; the knee only ever folds the shin backward: most in the swing,
+    // as the leg comes through, a little while the foot is planted. Arms swing against the legs, elbows bent.
+    const run = hm.state === 'flee';
+    const hipAmp = run ? 0.75 : 0.42, kneeAmp = run ? 1.5 : 0.8, kneeStance = run ? 0.25 : 0.08;
+    const armAmp = run ? 0.9 : 0.5, elbow = run ? 1.3 : 0.35;
+    const restFoot = Math.min(view.rest.find((q) => q.name === 'ShinL').b.y, view.rest.find((q) => q.name === 'ShinR').b.y);
+    let lowFoot = Infinity;
     for (const [side, ph] of [['L', 0], ['R', Math.PI]]) {
-      const s = Math.sin(view.walk + ph) * amp;
+      const phase = view.walk + ph;
+      const hip = Math.sin(phase) * hipAmp;                                    // + = thigh forward
+      const knee = kneeStance + kneeAmp * Math.pow(Math.max(0, Math.cos(phase)), 1.5); // swinging forward: fold
       // take each bone's vector before moving its end: copy() runs before the argument of add() is built
       const th = P['Thigh' + side], sh = P['Shin' + side];
-      const thv = th.b.clone().sub(th.a).applyAxisAngle(X, s);
-      const shv = sh.b.clone().sub(sh.a).applyAxisAngle(X, s - Math.max(0, -s) * 0.8);
+      const thv = th.b.clone().sub(th.a).applyAxisAngle(X, -hip);
+      const shv = sh.b.clone().sub(sh.a).applyAxisAngle(X, -hip + knee);
       th.b.copy(th.a).add(thv);
       sh.a.copy(th.b); sh.b.copy(th.b).add(shv);
+      lowFoot = Math.min(lowFoot, sh.b.y);
       const ua = P['UpperArm' + side], fa = P['Forearm' + side];
-      const uav = ua.b.clone().sub(ua.a).applyAxisAngle(X, -s * 0.8);
-      const fav = fa.b.clone().sub(fa.a).applyAxisAngle(X, -s * 0.8 - 0.5);
+      const arm = Math.sin(phase) * armAmp;                                    // against this side's leg
+      const uav = ua.b.clone().sub(ua.a).applyAxisAngle(X, arm);
+      const fav = fa.b.clone().sub(fa.a).applyAxisAngle(X, arm - elbow);
       ua.b.copy(ua.a).add(uav);
       fa.a.copy(ua.b); fa.b.copy(ua.b).add(fav);
     }
+    view.bob = restFoot - lowFoot; // bent legs are shorter: drop the body so the planted foot stays on the ground
   }
   if ((hm.tr.style === 3 && hm.panic > 0.15) || hm.state === 'treat') {
     for (const side of [-1, 1]) {
@@ -767,7 +780,7 @@ function poseHuman(view, t, dt) {
   if (hm.sprayCount > 0) view.meshes.Can.position.copy(P.ForearmR.b).add(new THREE.Vector3(0, 0.02, 0));
   if (view.meshes.Veil) { view.meshes.Veil.position.copy(head); view.meshes.Brim.position.copy(head).add(new THREE.Vector3(0, r * 0.75, 0)); }
   const jolt = view.flinch > 0 ? Math.sin(view.flinch * 40) * 0.015 * view.flinch : 0;
-  group.position.set(view.x + view.lean.x, jolt, view.z + view.lean.z);
+  group.position.set(view.x + view.lean.x, jolt + view.bob, view.z + view.lean.z);
   group.rotation.y = view.ang + (hm.state === 'watch' ? Math.sin(t * 0.03 + hm.lines) * 0.9 : 0); // scanning for flight lines (T1-7)
 }
 
