@@ -86,7 +86,7 @@ namespace Sting.Core
 
     public static class Persist
     {
-        public const int SAVE_VERSION = 3; // 2: records which number build wrote it; 3: body temperature and drowning
+        public const int SAVE_VERSION = 4; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings
         const uint MAGIC = 0x474E4953; // "SING"
 
         // ---------------------------------------------------------------- one Io per type
@@ -177,6 +177,7 @@ namespace Sting.Core
             a.L(ref h.winDay);
             if (a.Opt(ref h.win)) { a.D(ref h.win.arrive); a.D(ref h.win.leave); }
             a.I(ref h.annoyId); a.D(ref h.annoy); a.D(ref h.cooldown); a.D(ref h.sprayCount); a.D(ref h.treat); a.L(ref h.clothesDay); a.B(ref h.special);
+            a.List(ref h.mem, () => new MemRec(), e => { a.D(ref e.m); a.D(ref e.x); a.D(ref e.z); });
         }
 
         static void IoNest(Archive a, Nest n)

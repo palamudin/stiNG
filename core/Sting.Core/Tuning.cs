@@ -48,7 +48,8 @@ namespace Sting.Core
         {
             public static readonly Num decayPerStep = 0.993, contagionRadius = 5, contagionRate = 0.03, contagionMin = 0.3,
                 spillChance = 0.6, spillReach = 0.75, spillRate = 1.6, spillMinutes = 240,
-                calm = 0.2, fleeSpeed = 3.2, walkSpeed = 1.3, approachDist = 26;
+                calm = 0.2, fleeSpeed = 3.2, walkSpeed = 1.3, approachDist = 26,
+                sightHeight = 1.3; // panic spreads by sight (T1-17): sheds and anything taller, and tree trunks, block it
             public const int fleeStepsMin = 60, fleeStepsMax = 120;
         }
         public static class colony
@@ -119,7 +120,8 @@ namespace Sting.Core
         public static readonly Hunter bird = new Hunter { sight = 7, minY = 1.5, abortY = 0.8, speed = 9, accel = 26, @catch = 0.06, diveTicks = 150, coolTicks = 600 };
         public static class land { public static readonly Num maxSpeed = 0.25, gap = 0.004, walkSpeed = 0.05; }
         public static class perch { public static readonly Num crawlSpeed = 0.06, tickleBase = 4, bareMul = 1, thinMul = 2, backMul = 1.5, faceMul = 0.4, movingMul = 2, panic = 0.05; public const int cooldown = 90; }
-        public static class memory { public static readonly Num fasterPerSting = 0.08, minFactor = 0.6, panicPerSting = 0.15; public const int maxStings = 4; }
+        /// People remember stings by recency and place (GDD 8.10, T1-18): wary for a couple of days, most where it happened
+        public static class memory { public static readonly Num fasterPerSting = 0.08, minFactor = 0.6, panicPerSting = 0.15, forgetMinutes = 2880, nearDist = 4, farShare = 0.35; public const int maxStings = 4, keep = 8; }
         public static class rival
         {
             public const int maxPhysical = 3, remoteFightTimeout = 240, fightTicks = 40, huntTicks = 600;

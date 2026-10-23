@@ -106,7 +106,7 @@ namespace Sting.Core
                     Num oj = j < old.Length ? old[j] : Num.NaN;
                     if (i == j || oj < T.panic.contagionMin) continue;
                     var o = active[j]; Num dx = o.x - hm.x, dz = o.z - hm.z;
-                    if (dx * dx + dz * dz <= r2) gain += T.panic.contagionRate * oj * hm.tr.sociability * hm.tr.panicSusceptibility;
+                    if (dx * dx + dz * dz <= r2 && CanSee(hm.x, hm.z, o.x, o.z)) gain += T.panic.contagionRate * oj * hm.tr.sociability * hm.tr.panicSusceptibility;
                 }
                 hm.panic = Min(1, oldI * T.panic.decayPerStep + gain);
                 if (hm.state == "idle" && hm.panic >= T.resolve.fleePanic) StartFlee(hm, CS(hm.chunk).lastSting);
@@ -122,6 +122,65 @@ namespace Sting.Core
                 }
                 else if (hm.state == "idle") Annoyance(hm);
             }
+        }
+
+        /// How wary a person is from the stings they remember (GDD 8.10, T1-18): each one fades over a couple of days and
+        /// counts in full only near where it happened. The resolver reads this where it used to read the plain count.
+        public Num Wary(Human hm)
+        {
+            Num n = 0;
+            foreach (var e in hm.mem)
+            {
+                Num r = 1 - (minute - e.m) / T.memory.forgetMinutes;
+                if (r <= 0) continue;
+                n += r * (Sq(hm.x - e.x) + Sq(hm.z - e.z) <= T.memory.nearDist * T.memory.nearDist ? 1 : T.memory.farShare);
+            }
+            return n;
+        }
+
+        /// Can two people see each other (GDD 8.9, T1-17)? Sheds and anything above eye height block the line, and so do
+        /// tree trunks. Chunk content is a pure function of the seed, so peers agree whichever chunks each has discovered.
+        public bool CanSee(Num ax, Num az, Num bx, Num bz)
+        {
+            Num H = T.panic.sightHeight;
+            int cx = ChunkOf((ax + bx) / 2), cz = ChunkOf((az + bz) / 2);
+            for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++)
+                {
+                    var c = Content(cx + i, cz + j);
+                    foreach (var bo in c.boxes)
+                    {
+                        if (bo.maxy < H) continue;
+                        // segment against the box footprint (slab test)
+                        Num t0 = 0, t1 = 1; bool ok = true;
+                        for (int ax2 = 0; ax2 < 2 && ok; ax2++)
+                        {
+                            Num p = ax2 == 0 ? ax : az, d = ax2 == 0 ? bx - ax : bz - az, lo = ax2 == 0 ? bo.minx : bo.minz, hi = ax2 == 0 ? bo.maxx : bo.maxz;
+                            if (d == 0) { if (p < lo || p > hi) ok = false; continue; }
+                            Num u = (lo - p) / d, v = (hi - p) / d;
+                            if (u > v) { var s = u; u = v; v = s; }
+                            if (u > t0) t0 = u;
+                            if (v < t1) t1 = v;
+                            if (t0 > t1) ok = false;
+                        }
+                        if (ok) return false;
+                    }
+                    foreach (var cy in c.cylinders)
+                    {
+                        if (cy.h < H) continue;
+                        Num dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz;
+                        Num t = L2 > 0 ? Clamp(((cy.x - ax) * dx + (cy.z - az) * dz) / L2, 0, 1) : 0;
+                        if (Sq(ax + dx * t - cy.x) + Sq(az + dz * t - cy.z) < cy.r * cy.r) return false;
+                    }
+                }
+            return true;
+        }
+        readonly Dictionary<string, ChunkContent> genCache = new Dictionary<string, ChunkContent>();
+        ChunkContent Content(int cx, int cz)
+        {
+            string k = KeyOf(cx, cz);
+            if (records.TryGet(k, out var rec)) return rec.content;
+            if (!genCache.TryGetValue(k, out var c)) { if (genCache.Count > 32) genCache.Clear(); genCache[k] = c = GenerateChunk(seed, cx, cz); }
+            return c;
         }
 
         // Wasps hovering at a face or at food get swatted; level decides how hard (GDD 8.10)
@@ -493,7 +552,7 @@ namespace Sting.Core
                     p.tickle = 0; p.quietUntil = tick + T.perch.cooldown;
                     var comps = Companions(hm);
                     var plan = Body.ResolveSting(new StingIn { contactTick = tick, contactPointBody = p.surf, mode = "touch" }, hm.tr, Body.ZONES[p.zone],
-                        new StingCtx { clothingStiffness = hm.clothing.stiffness, panic = hm.panic, companions = comps, stung = hm.stungCount });
+                        new StingCtx { clothingStiffness = hm.clothing.stiffness, panic = hm.panic, companions = comps, stung = Wary(hm) });
                     Publish(new NetEv { type = "notice", humanHex = hm.hex, waspId = w.id, zone = p.zone, swats = SwatsOut(plan, hm, comps) });
                 }
             }

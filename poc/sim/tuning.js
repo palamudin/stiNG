@@ -47,7 +47,8 @@ export const T = {
   panic: {
     decayPerStep: 0.993, contagionRadius: 5, contagionRate: 0.03, contagionMin: 0.3,
     spillChance: 0.6, spillReach: 0.75, spillRate: 1.6, spillMinutes: 240, // GDD 8.9: a panicked sitter jolts the table and knocks a drink over
-    calm: 0.2, fleeSpeed: 3.2, walkSpeed: 1.3, fleeStepsMin: 60, fleeStepsMax: 120, approachDist: 26,
+    calm: 0.2, fleeSpeed: 3.2, walkSpeed: 1.3,
+    sightHeight: 1.3, fleeStepsMin: 60, fleeStepsMax: 120, approachDist: 26, // panic spreads by sight (T1-17): sheds and anything taller than this, and tree trunks, block it
   },
 
   // Colony economy (GDD 6). Rates are per in-game day.
@@ -132,7 +133,8 @@ export const T = {
   land: { maxSpeed: 0.25, gap: 0.004, walkSpeed: 0.05 }, // bio: Vespula walk a few cm/s
   // Perching and crawling on people (GDD 7.2, 8.3): how long until they feel you
   perch: { crawlSpeed: 0.06, tickleBase: 4, bareMul: 1, thinMul: 2, backMul: 1.5, faceMul: 0.4, movingMul: 2, cooldown: 90, panic: 0.05 },
-  memory: { fasterPerSting: 0.08, minFactor: 0.6, panicPerSting: 0.15, maxStings: 4 },
+  // People remember stings by recency and place (GDD 8.10, T1-18): wary for a couple of days, most where it happened
+  memory: { fasterPerSting: 0.08, minFactor: 0.6, panicPerSting: 0.15, maxStings: 4, keep: 8, forgetMinutes: 2880, nearDist: 4, farShare: 0.35 },
   rival: { maxPhysical: 3, fightRange: 0.025, remoteFightRange: 0.06, remoteFightTimeout: 240, fightTicks: 40, guardRadius: 1.5, raidProtein: 2, huntTicks: 600, mash: 0.15 },
 
   // Networking (GDD 11): human-side effects of events commit at the end of the consequence window

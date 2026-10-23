@@ -311,6 +311,7 @@ namespace Sting.Core.Tests
             People();
             SavesAndWorld();
             Batch1();
+            Batch2();
         }
 
         // 26. Tier 1, batch 1: wind, cold, drowning, clothes by the weather, shaking and flailing
@@ -393,6 +394,43 @@ namespace Sting.Core.Tests
         }
 
         // 14. predators, landing, walking, rivals
+        // T1-17 panic spreads by sight, T1-18 people remember stings by recency and place
+        static void Batch2()
+        {
+            Sim s = null; Shed sh = null;
+            for (ulong seed = 1; seed < 60 && sh == null; seed++) { var t = new Sim(new Settings { seed = seed }); var rec = t.activeChunks.FirstOrDefault(r => r.content.sheds.Count > 0); if (rec != null) { s = t; sh = rec.content.sheds[0]; } }
+            Num lx = sh.x - sh.hw - 1.2, lz = sh.z, rx = sh.x + sh.hw + 1.2, rz = sh.z, l2x = lx, l2z = sh.z + 2.5;
+            Ok(!s.CanSee(lx, lz, rx, rz) && s.CanSee(lx, lz, l2x, l2z), "a shed blocks the line of sight between two people; open ground does not");
+            var tree = s.activeChunks.SelectMany(r => r.content.trees).First();
+            Ok(!s.CanSee(tree.x - 1, tree.z, tree.x + 1, tree.z), "so does a tree trunk");
+            Num Spread(Num bx, Num bz)
+            {
+                var t = new Sim(new Settings { seed = s.seed });
+                var two = t.active.Where(h => !h.special && h.state == "idle").Take(2).ToList();
+                var A = two[0]; var B = two[1];
+                foreach (var h in t.active) if (h != A && h != B) { h.x += 500; h.z += 500; }
+                A.x = lx; A.z = lz; A.panic = 1; B.x = bx; B.z = bz; B.panic = 0;
+                for (int i = 0; i < 3; i++) t.Step(Idle());
+                return B.panic;
+            }
+            Num seen = Spread(l2x, l2z), hidden = Spread(rx, rz);
+            Ok(seen > 0.001 && hidden == 0, $"panic spreads to someone in sight ({D(seen):0.0000}) and not behind a shed ({D(hidden)})");
+
+            var s2 = new Sim(new Settings { seed = 1234 }); var bot = Bots.StingBot("jab");
+            var ev = new List<SimEvent>();
+            for (int i = 0; i < 6000 && !ev.Any(e => e.type == "sting"); i++) { s2.Step(bot(s2)); ev.AddRange(s2.DrainEvents()); }
+            var hm = s2.HumanByHex((string)Find(ev, "sting")["humanHex"]);
+            Num here = s2.Wary(hm);
+            Ok(hm.mem.Count == 1 && Abs(here - 1) < 0.01, $"a sting is remembered with its time and place (wary {D(here):0.00})");
+            Num x0 = hm.x; hm.x += 10; Num away = s2.Wary(hm); hm.x = x0;
+            hm.mem[0].m -= T.memory.forgetMinutes * 0.75; Num later = s2.Wary(hm);
+            Ok(away < here * 0.5 && later < here * 0.3, $"wary where it happened ({D(here):0.00}), calmer 10 m away ({D(away):0.00}) and after a day and a half ({D(later):0.00})");
+            Plan Pl(Num n) => Body.ResolveSting(new StingIn { contactTick = 0, contactPointBody = P(0, 1, 0), mode = "jab" }, hm.tr, Body.ZONES[Zone.Forearms], new StingCtx { clothingStiffness = 0, panic = 0, companions = new List<Companion>(), stung = n });
+            Ok(hm.tr.style == Style.Freezer || Pl(here).swats[0].start <= Pl(away).swats[0].start, "and the hand comes sooner where they were stung");
+            var r = Persist.Restore(Persist.Snapshot(s2));
+            Ok(r.HumanByHex(hm.hex).mem.Count == 1 && r.HumanHash() == s2.HumanHash(), "remembered stings survive save and restore");
+        }
+
         static void Predators()
         {
             Web FindWeb(Sim s) { foreach (var r in s.activeChunks) if (r.content.webs.Count > 0) return r.content.webs[0]; return null; }

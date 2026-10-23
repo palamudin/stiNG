@@ -726,5 +726,43 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   ok(run1.flee && flail && flail.kind === SwatKind.Brush && !flail.kills && flail.radius >= 0.2 && flail.start > run1.swats[0].start, 'a runner flails on the way out: a wide, late sweep that stuns');
 }
 
+// 27. Panic spreads by sight (GDD 8.9, T1-17)
+{
+  let s = null, sh = null;
+  for (let seed = 1; seed < 60 && !sh; seed++) { const t = new Sim({ seed }); const rec = t.activeChunks.find((r) => r.content.sheds.length); if (rec) { s = t; sh = rec.content.sheds[0]; } }
+  const P = (x, z) => ({ x, z });
+  const L = P(sh.x - sh.hw - 1.2, sh.z), Rr = P(sh.x + sh.hw + 1.2, sh.z), L2 = P(sh.x - sh.hw - 1.2, sh.z + 2.5);
+  ok(!s.canSee(L, Rr) && s.canSee(L, L2), 'a shed blocks the line of sight between two people; open ground does not');
+  const tree = s.activeChunks.flatMap((r) => r.content.trees)[0];
+  ok(!s.canSee(P(tree.x - 1, tree.z), P(tree.x + 1, tree.z)), 'so does a tree trunk');
+  // contagion: a panicking person spreads it to one who can see them, not to one behind the shed
+  const spread = (b) => {
+    const t = new Sim({ seed: s.seed });
+    const [A, B] = t.active.filter((h) => !h.special && h.state === 'idle').slice(0, 2);
+    for (const h of t.active) if (h !== A && h !== B) { h.x += 500; h.z += 500; } // everyone else out of the way
+    Object.assign(A, L, { panic: 1 }); Object.assign(B, b, { panic: 0 });
+    for (let i = 0; i < 3; i++) t.step(idle());
+    return B.panic;
+  };
+  const seen = spread(L2), hidden = spread(Rr);
+  ok(seen > 0.001 && hidden === 0, `panic spreads to someone in sight (${seen.toFixed(4)}) and not behind a shed (${hidden})`);
+}
+
+// 28. People remember stings by recency and place (GDD 8.10, T1-18)
+{
+  const s = new Sim({ seed: 1234 });
+  const bot = stingBot({ plan: 'jab' });
+  let ev = [];
+  for (let i = 0; i < 6000 && !ev.some((e) => e.type === 'sting'); i++) { s.step(bot(s)); ev.push(...s.drainEvents()); }
+  const st = ev.find((e) => e.type === 'sting'), hm = s.humanByHex(st.humanHex);
+  ok(hm.mem && hm.mem.length === 1 && Math.abs(s.wary(hm) - 1) < 0.01, `a sting is remembered with its time and place (wary ${s.wary(hm).toFixed(2)})`);
+  const plan = (n) => resolveSting({ contactTick: 0, zone: Zone.Forearms, contactPointBody: { x: 0, y: 1, z: 0 }, mode: 'jab' }, hm.tr, ZONES[Zone.Forearms], { clothingStiffness: 0, panic: 0, companions: [], stung: n });
+  const here = s.wary(hm);
+  const x0 = hm.x; hm.x += 10; const away = s.wary(hm); hm.x = x0;
+  hm.mem[0].m -= T.memory.forgetMinutes * 0.75; const later = s.wary(hm);
+  ok(away < here * 0.5 && later < here * 0.3, `wary where it happened (${here.toFixed(2)}), calmer 10 m away (${away.toFixed(2)}) and after a day and a half (${later.toFixed(2)})`);
+  ok(hm.tr.style === 3 || plan(here).swats[0].start <= plan(away).swats[0].start, 'and the hand comes sooner where they were stung');
+}
+
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');
 process.exit(failures ? 1 : 0);

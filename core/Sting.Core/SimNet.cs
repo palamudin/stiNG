@@ -299,6 +299,8 @@ namespace Sting.Core
                     if (hm == null) break;
                     hm.panic = Min(1, hm.panic + ev.panicGain);
                     hm.stungCount++;
+                    hm.mem.Add(new MemRec { m = minute, x = hm.x, z = hm.z });
+                    if (hm.mem.Count > T.memory.keep) hm.mem.RemoveAt(0);
                     bool first = !stung.Has(hm.hex);
                     stung.Set(hm.hex, true);
                     if (!mine) stats.remoteStings++; else if (ev.driven) stats.stings++; else stats.aiStings++;

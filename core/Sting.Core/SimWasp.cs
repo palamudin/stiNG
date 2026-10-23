@@ -350,7 +350,7 @@ namespace Sting.Core
             int lvl = EscAt(hm.x, hm.z);
             var plan = Body.ResolveSting(ev, hm.tr, Body.ZONES[zone], new StingCtx
             {
-                clothingStiffness = hm.clothing.stiffness, panic = hm.panic, companions = comps, panicMul = lvl >= 2 ? 1.3 : 1, stung = hm.stungCount,
+                clothingStiffness = hm.clothing.stiffness, panic = hm.panic, companions = comps, panicMul = lvl >= 2 ? 1.3 : 1, stung = Wary(hm),
             });
             var sw = SwatsOut(plan, hm, comps);
             Emit("stingContact", ("waspId", w.id), ("driven", driven), ("humanHex", hm.hex), ("zone", zone), ("first", !stung.Has(hm.hex)), ("under", under), ("swats", sw), ("contactTick", tick));
@@ -707,7 +707,7 @@ namespace Sting.Core
             {
                 var point = UnderPoint(u, nodes);
                 var plan = Body.ResolveSting(new StingIn { contactTick = tick, contactPointBody = point, mode = "jab", under = true }, hm.tr, Body.ZONES[here.zone],
-                    new StingCtx { clothingStiffness = 0, panic = hm.panic, companions = new List<Companion>(), stung = hm.stungCount });
+                    new StingCtx { clothingStiffness = 0, panic = hm.panic, companions = new List<Companion>(), stung = Wary(hm) });
                 var sw = new List<Swat>();
                 foreach (var s in plan.swats) sw.Add(new Swat { kind = s.kind, start = Max(s.start, tick + T.net.commitTicks), window = s.window, radius = s.radius, kills = s.kills, center = point });
                 Publish(new NetEv { type = "press", humanHex = hm.hex, waspId = w.id, swats = sw });

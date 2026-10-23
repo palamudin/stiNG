@@ -93,6 +93,8 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 65 | Drowning in a drink (T1-3): a wasp feeding at an open can may slip in (about 3% per second of feeding) and has 4 s to climb out by mashing burst; AI wasps sometimes make it. Lidded drinks at alert level 2 are safe and closed anyway | 7.5 | 14 |
 | 66 | Clothing by temperature (T1-4): the day's clothes follow the day's weather. Cool days put a third of people in jackets and most in jeans; hot days bring tank tops and shorts, and more bare skin to sting | 8.8 | 14 |
 | 67 | Shake and flail (T1-5): flailers and runners stung on the scalp or face shake their head, which dislodges and stuns but never kills; a runner who flees also flails on the way out, a wide late sweep that stuns | 8.5 | 14 |
+| 68 | Panic by line of sight (T1-17): contagion only between people who can see each other; sheds and tree trunks block it | 8.9 | 14 |
+| 69 | Memory by recency and place (T1-18): people remember their last stings with time and spot; they react faster and panic more where it happened, less elsewhere, and calm down over two days | 8.10 | 14 |
 
 ## Verified
 

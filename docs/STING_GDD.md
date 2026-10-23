@@ -573,7 +573,7 @@ During each tick of a swat window, the volume is transformed from body frame to 
 - A wasp under clothing is **trapped**: it can sting freely, but the human's response becomes compression (pressing the clothing against the body), with a much larger kill chance. High reward, high risk.
 - The day's clothing comes from `Hash(seed, Clothing, HumanId, day)` filtered by temperature.
 
-### 8.9 Panic **[T0] [T1]** (line of sight)
+### 8.9 Panic **[T0]**
 
 - Panic level 0–1 per human, updated at 20 Hz.
 - Gain from stings: zone sensitivity × sting mode pain × panic susceptibility.
@@ -581,7 +581,7 @@ During each tick of a swat window, the volume is transformed from body frame to 
 - Thresholds: flinch, then swat, then flee or scatter.
 - Panic can knock over tables and drinks. Those are sim events that write chunk deltas, and a spilled drink is a new sugar node. Panic feeds the wasps.
 
-### 8.10 Memory and escalation **[T0] [T1]** (exterminator search)
+### 8.10 Memory and escalation **[T0] [T1]** (exterminator search; memory by recency and place built)
 
 - Each human remembers stings: count, recency, place.
 - Each neighborhood has an **escalation level** from accumulated memory, decaying over time *(tune)*:
@@ -1024,6 +1024,12 @@ Porting found three bugs, fixed in both: a line that went extinct kept ticking i
 
 All five are in the C# core with parity: the 22 JS digests still match in the double build, the fixed-point build's lock is regenerated, and 130 properties hold in both (13 new).
 
+### 18.20 Sight and memory as built (T1-17, T1-18)
+
+**Panic by line of sight.** Contagion now passes only between people who can see each other: anything taller than 1.3 m (sheds) and tree trunks block the line between them. The check reads chunk content as a pure function of seed and coordinates, generating a chunk it has not discovered rather than skipping it, because peers discover different chunks and must still agree on every human.
+
+**Memory by recency and place.** Each person keeps their last eight stings with the minute and the spot. How wary they are is the sum over those stings of a weight that falls linearly to zero over two days, counted in full within 4 m of where it happened and at 35% elsewhere. The sting resolver reads that wariness where it used to read the plain sting count, so the hand comes faster and the panic higher at the table where they were stung, and less on the far side of the park or two days later. Remembered stings are shared human state: they are written at the sting's commit tick on every peer, and they travel in saves (save version 4).
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1032,7 +1038,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (67 features) and its C# port (18.18), including the first Tier 1 batch, now built (18.19): T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail. In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (69 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -1054,8 +1060,8 @@ Everything in `POC.md` (67 features) and its C# port (18.18), including the firs
 | T1-14 | Hollow-tree nest site and nest thermals: site insulation sets how cold snaps and heat slow the brood | 6.6 | S | |
 | T1-15 | Winter with choices: gynes pick hibernation sites whose quality sets winter survival; in spring the player chooses which surviving queen to continue | 6.7 | M | |
 | T1-16 | Senses for AI wasps: scent fields (sugar, protein, alarm) as decaying point sources and a vision cone, replacing the AI's perfect knowledge of every food source | 7.3 | M | |
-| T1-17 | Line of sight for panic: contagion only between humans who can see each other | 8.9 | S | |
-| T1-18 | Per-human memory: recency and place, so a person stung at this table is jumpy here and calmer elsewhere | 8.10 | S | |
+| T1-17 | **Built (18.20).** Line of sight for panic: contagion only between humans who can see each other | 8.9 | S | |
+| T1-18 | **Built (18.20).** Per-human memory: recency and place, so a person stung at this table is jumpy here and calmer elsewhere | 8.10 | S | |
 | T1-19 | Chunk authority and contested pickups in the lab: rendezvous hashing picks one peer per chunk to settle two wasps grabbing the same caterpillar | 11.6 | M | |
 | T1-20 | Remaining plausibility checks: carry limits, positions inside solid geometry, chunk deltas consistent with their cause | 11.8 | S | T1-12 for deltas |
 | T1-21 | Relevance tiers in the lab: near, mid and far wasps at different rates, swarm packets; measure bandwidth with a 200-worker colony | 11.12 | M | |

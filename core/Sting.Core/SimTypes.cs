@@ -67,6 +67,7 @@ namespace Sting.Core
         public int peer, stamp, seen, bad; public Num px, py, pz;
     }
 
+    public sealed class MemRec { public Num m, x, z; }
     public sealed class Home { public Num x, z, fx, fz, ax, az; public string posture; }
     public sealed class Human
     {
@@ -75,6 +76,8 @@ namespace Sting.Core
         public Num panic, fleeSteps, dirX, dirZ, stungCount; public long winDay = -1; public HumanWin win;
         public int annoyId; public Num annoy, cooldown, sprayCount, treat; public long clothesDay; public bool special;
         public List<Part> sit, stand;
+        /// The stings this person remembers: when and where (T1-18)
+        public List<MemRec> mem = new List<MemRec>();
         // the garment graph is a pure function of traits, clothing and posture; clothing is replaced, never edited
         internal List<GNode> gCache; internal Clothing gClothing; internal string gPosture;
         public List<Part> Parts(string posture) => posture == "sit" ? sit : stand;

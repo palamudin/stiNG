@@ -531,6 +531,8 @@ export class Sim {
         if (!hm) break;
         hm.panic = Math.min(1, hm.panic + ev.panicGain);
         hm.stungCount++;
+        (hm.mem || (hm.mem = [])).push({ m: this.minute, x: hm.x, z: hm.z });
+        if (hm.mem.length > T.memory.keep) hm.mem.shift();
         const first = !this.stung.has(hm.hex);
         this.stung.add(hm.hex);
         if (!mine) this.stats.remoteStings++; else if (ev.driven) this.stats.stings++; else this.stats.aiStings++;
@@ -979,7 +981,7 @@ export class Sim {
     const comps = under ? [] : this._companions(hm);
     const lvl = this.escAt(hm.x, hm.z);
     const plan = resolveSting(ev, hm.tr, ZONES[zone], {
-      clothingStiffness: hm.clothing.stiffness, panic: hm.panic, companions: comps, panicMul: lvl >= 2 ? 1.3 : 1, stung: hm.stungCount,
+      clothingStiffness: hm.clothing.stiffness, panic: hm.panic, companions: comps, panicMul: lvl >= 2 ? 1.3 : 1, stung: this.wary(hm),
     });
     const actorHex = (id) => (id === hm.id ? hm.hex : comps.find((x) => x.id === id).hex);
     const swats = plan.swats.map((s) => ({ actorHex: actorHex(s.actorId), kind: s.kind, start: s.start, window: s.window, radius: s.radius, kills: s.kills, center: { ...s.center } }));
@@ -1260,7 +1262,7 @@ export class Sim {
     // The human presses the cloth wherever they feel the wasp
     if (this.tick >= u.nextPress) {
       const point = this._underPoint(u, nodes);
-      const plan = resolveSting({ contactTick: this.tick, zone: here.zone, contactPointBody: point, mode: 'jab', under: true }, hm.tr, ZONES[here.zone], { clothingStiffness: 0, panic: hm.panic, companions: [], stung: hm.stungCount });
+      const plan = resolveSting({ contactTick: this.tick, zone: here.zone, contactPointBody: point, mode: 'jab', under: true }, hm.tr, ZONES[here.zone], { clothingStiffness: 0, panic: hm.panic, companions: [], stung: this.wary(hm) });
       const swats = plan.swats.map((s) => ({ kind: s.kind, start: Math.max(s.start, this.tick + T.net.commitTicks), window: s.window, radius: s.radius, kills: s.kills, center: { ...point } }));
       this._publish({ type: 'press', humanHex: hm.hex, waspId: w.id, swats });
       u.nextPress = this.tick + hm.tr.reactionTicks + T.under.compressEvery;
@@ -1522,7 +1524,7 @@ export class Sim {
       for (let j = 0; j < this.active.length; j++) {
         if (i === j || old[j] < P.contagionMin) continue;
         const o = this.active[j], dx = o.x - hm.x, dz = o.z - hm.z;
-        if (dx * dx + dz * dz <= r2) gain += P.contagionRate * old[j] * hm.tr.sociability * hm.tr.panicSusceptibility;
+        if (dx * dx + dz * dz <= r2 && this.canSee(hm, o)) gain += P.contagionRate * old[j] * hm.tr.sociability * hm.tr.panicSusceptibility;
       }
       hm.panic = Math.min(1, old[i] * P.decayPerStep + gain);
       if (hm.state === 'idle' && hm.panic >= T.resolve.fleePanic) this._startFlee(hm, this.cs(hm.chunk).lastSting || null);
@@ -1534,6 +1536,58 @@ export class Sim {
         if (this._walkTo(hm, hm.home.x, hm.home.z, P.walkSpeed)) { this._seat(hm); this.emit('settled', { humanHex: hm.hex }); }
       } else if (hm.state === 'idle') this._annoyance(hm);
     }
+  }
+
+  // How wary a person is from the stings they remember (GDD 8.10, T1-18): each one fades over a couple of days and
+  // counts in full only near where it happened. The resolver reads this where it used to read the plain count.
+  wary(hm) {
+    const M = T.memory;
+    let n = 0;
+    for (const e of hm.mem || []) {
+      const r = 1 - (this.minute - e.m) / M.forgetMinutes;
+      if (r <= 0) continue;
+      n += r * (sq(hm.x - e.x) + sq(hm.z - e.z) <= M.nearDist * M.nearDist ? 1 : M.farShare);
+    }
+    return n;
+  }
+
+  // Can two people see each other (GDD 8.9, T1-17)? Sheds and anything above eye height block the line, and so do tree
+  // trunks. Chunk content is a pure function of the seed, so peers agree whichever chunks each has discovered.
+  canSee(a, b) {
+    const H = T.panic.sightHeight, ax = a.x, az = a.z, bx = b.x, bz = b.z;
+    const cx = chunkOf((ax + bx) / 2), cz = chunkOf((az + bz) / 2);
+    for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {
+      const c = this._content(cx + i, cz + j);
+      for (const bo of c.boxes) {
+        if (bo.maxy < H) continue;
+        // segment against the box footprint (slab test)
+        let t0 = 0, t1 = 1, ok = true;
+        for (const [p, d, lo, hi] of [[ax, bx - ax, bo.minx, bo.maxx], [az, bz - az, bo.minz, bo.maxz]]) {
+          if (d === 0) { if (p < lo || p > hi) { ok = false; break; } continue; }
+          let u = (lo - p) / d, v = (hi - p) / d;
+          if (u > v) { const s = u; u = v; v = s; }
+          if (u > t0) t0 = u;
+          if (v < t1) t1 = v;
+          if (t0 > t1) { ok = false; break; }
+        }
+        if (ok) return false;
+      }
+      for (const cy of c.cylinders) {
+        if (cy.h < H) continue;
+        const dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz;
+        const t = L2 > 0 ? clamp(((cy.x - ax) * dx + (cy.z - az) * dz) / L2, 0, 1) : 0;
+        if (sq(ax + dx * t - cy.x) + sq(az + dz * t - cy.z) < cy.r * cy.r) return false;
+      }
+    }
+    return true;
+  }
+  _content(cx, cz) {
+    const rec = this.records.get(chunkKey(cx, cz));
+    if (rec) return rec.content;
+    const cache = this._genCache || (this._genCache = new Map()), k = chunkKey(cx, cz);
+    let c = cache.get(k);
+    if (!c) { if (cache.size > 32) cache.clear(); c = generateChunk(this.seed, cx, cz); cache.set(k, c); }
+    return c;
   }
 
   _nearestWasp(hm) {
@@ -1846,7 +1900,7 @@ export class Sim {
       if (p.tickle >= p.need) {
         p.tickle = 0; p.quietUntil = this.tick + T.perch.cooldown;
         const comps = this._companions(hm);
-        const plan = resolveSting({ contactTick: this.tick, zone: p.zone, contactPointBody: p.surf, mode: 'touch' }, hm.tr, ZONES[p.zone], { clothingStiffness: hm.clothing.stiffness, panic: hm.panic, companions: comps, stung: hm.stungCount });
+        const plan = resolveSting({ contactTick: this.tick, zone: p.zone, contactPointBody: p.surf, mode: 'touch' }, hm.tr, ZONES[p.zone], { clothingStiffness: hm.clothing.stiffness, panic: hm.panic, companions: comps, stung: this.wary(hm) });
         const actorHex = (id) => (id === hm.id ? hm.hex : comps.find((x) => x.id === id).hex);
         const swats = plan.swats.map((s) => ({ actorHex: actorHex(s.actorId), kind: s.kind, start: s.start, window: s.window, radius: s.radius, kills: s.kills, center: { ...s.center } }));
         this._publish({ type: 'notice', humanHex: hm.hex, waspId: w.id, zone: p.zone, swats });
