@@ -52,7 +52,7 @@ namespace Sting.Core
                 foreach (var a in alarms)
                 {
                     var k = HumanByHex(a.killerHex);
-                    if (D2(w, new V3(a.x, a.y, a.z)) < T.alarm.radius * T.alarm.radius && k != null && k.state != "away") { AiAttack(w, a.killerHex); break; }
+                    if (D2(w, new V3(a.x, a.y, a.z)) < Sq(AlarmReach(w, a)) && k != null && k.state != "away") { AiAttack(w, a.killerHex); break; }
                 }
             }
             bool daylight = IsDaylight(minute) && !Raining;
@@ -62,12 +62,13 @@ namespace Sting.Core
             switch (ai.mode)
             {
                 case "pick": AiPick(w); break;
+                case "search": Search(w, cmd, nest.entrance); break;
                 case "outbound":
                 {
                     var tp = AiTargetPos(w);
                     if (tp == null) { ai.mode = "pick"; break; }
                     Steer(w, tp.Value, cmd);
-                    if (D2(w, tp.Value) < T.ai.arrive * T.ai.arrive) { ai.mode = "collect"; ai.timer = tick + T.ai.collectTicks; }
+                    if (D2(w, tp.Value) < T.ai.arrive * T.ai.arrive) { ai.mode = "collect"; ai.timer = tick + T.ai.collectTicks; ai.from = ai.target; }
                     break;
                 }
                 case "collect":
@@ -126,54 +127,151 @@ namespace Sting.Core
             return cmd;
         }
 
-        internal void AiPick(Wasp w)
+        // ---------------- senses (GDD 7.3, T1-16)
+
+        /// How far a scent of the given strength from src reaches the wasp at p: further when p is downwind of it
+        internal Num ScentRange(Num px, Num pz, V3 src, Num strength)
         {
-            var ai = w.ai; var col = colony;
-            AiTarget best = null; Num bs = Num.MaxValue;
-            void Consider(AiTarget t, V3 pos)
+            var wd = Wind;
+            Num dx = px - src.x, dz = pz - src.z;
+            Num d = Sqrt(dx * dx + dz * dz);
+            Num mul = 1;
+            if (d > 1e-6) mul = 1 + T.sense.downwind * Clamp((dx * wd.x + dz * wd.z) / d / T.sense.windRef, -1, 1);
+            return T.sense.smell * strength * mul;
+        }
+
+        /// Every source of food in a chunk for a forager of this role, with its scent strength (0: moving prey, seen not
+        /// smelled). Lidded or knocked-over cans have nothing to smell, and traps are only out from level 3. With policy,
+        /// the AI's own choices apply (cans, traps and hives only when short of sugar); without, the list is what there
+        /// is to smell, which the player's nose reads.
+        internal void Sources(ChunkRec rec, int ri, string role, bool policy, System.Action<AiTarget, V3, Num> cb)
+        {
+            var c = rec.content; string key = rec.key; var st = CS(key); int lvl = EscLevel(key); var col = colony;
+            bool shortOf = col.deficit >= T.ai.canDeficit;
+            if (role == "sugar")
             {
-                Num s = Sqrt(D2(w, pos)) + H32(w.id, t.i, t.c, day) * 12;
-                if (s < bs) { bs = s; best = t; }
+                var fi = FlowerIdx(rec);
+                for (int i = 0; i < c.sugar.Count; i++)
+                {
+                    var s = c.sugar[i]; var sp = new V3(s.x, s.y, s.z);
+                    if (s.kind == "can") { if (lvl >= 2 || CanSpilled(key, i) || (policy && !shortOf)) continue; cb(new AiTarget { kind = "sugar", key = key, i = i, c = ri }, sp, T.sense.can); continue; }
+                    if (!InBloom(rec, fi[i])) continue;
+                    Num nv = NectarAt(rec, fi[i]);
+                    if (nv < 0.2) continue; // nothing there (T1-8)
+                    cb(new AiTarget { kind = "sugar", key = key, i = i, c = ri }, sp, T.sense.flower * nv);
+                }
+                if (lvl >= 3 && (!policy || shortOf)) for (int i = 0; i < c.traps.Count; i++) { var tr = c.traps[i]; cb(new AiTarget { kind = "trap", key = key, i = i, c = ri + 50 }, new V3(tr.x, tr.y, tr.z), T.sense.trap); }
+                // short of sugar, a forager will rob a hive (T1-9)
+                if (!policy || shortOf) { var hvs = HivesIn(rec); for (int h = 0; h < hvs.Count; h++) if (HiveLoadsLeft(key, h) > 0) cb(new AiTarget { kind = "hive", key = key, i = h, c = ri + 100 }, new V3(hvs[h].ex, hvs[h].ey, hvs[h].ez), T.sense.hive); }
+                // a spill dries: its scent fades with what is left of it
+                foreach (var sp in SpillsIn(key)) cb(new AiTarget { kind = "spill", key = key, i = sp.i, c = ri + 60 }, new V3(sp.x, sp.y, sp.z), T.sense.spill * Clamp01((st.spilled[sp.i] - minute) / T.panic.spillMinutes));
+                foreach (var f in FruitIn(rec)) cb(new AiTarget { kind = "fruit", key = key, i = f.i, c = ri + 80 }, new V3(f.x, f.y, f.z), T.sense.fruit);
             }
+            else if (role == "protein")
+            {
+                for (int i = 0; i < c.flies.Count; i++) if ((st.caughtFly.TryGetValue(i, out var cf) ? cf : 0) <= tick && FlyActive(rec, i)) cb(new AiTarget { kind = "prey", sub = "fly", key = key, i = i, c = ri }, FlyPos(c.flies[i], tick), 0);
+                for (int i = 0; i < c.caterpillars.Count; i++) if (!st.caughtCat.ContainsKey(i) && CatActive(rec, i)) { var f = c.caterpillars[i]; cb(new AiTarget { kind = "prey", sub = "cat", key = key, i = i, c = ri + 20 }, new V3(f.x, f.y, f.z), T.sense.cat); }
+                // carrion smells stronger by the day
+                foreach (var cr in CarrionIn(rec)) cb(new AiTarget { kind = "prey", sub = "carrion", key = key, i = (int)cr.d, c = ri + 90 }, new V3(cr.x, cr.y, cr.z), T.sense.carrion + T.sense.carrionPerDay * (Num)(day - cr.d));
+                var baits = BaitsIn(key);
+                for (int i = 0; i < baits.Count; i++) cb(new AiTarget { kind = "bait", key = key, i = i, c = ri + 70 }, new V3(baits[i].x, baits[i].y, baits[i].z), T.sense.bait);
+            }
+        }
+
+        /// What this wasp senses from where it is: the most attractive source it can smell or see, or null
+        internal AiTarget Sense(Wasp w)
+        {
+            Num spd = Sqrt(w.vx * w.vx + w.vy * w.vy + w.vz * w.vz);
+            AiTarget best = null; Num bs = Num.MaxValue;
             for (int ri = 0; ri < activeChunks.Count; ri++)
             {
-                var rec = activeChunks[ri]; var c = rec.content; string key = rec.key; var st = CS(key); int lvl = EscLevel(key);
-                if (w.role == "sugar")
+                Sources(activeChunks[ri], ri, w.role, true, (t, pos, strength) =>
                 {
-                    var fi = FlowerIdx(rec);
-                    for (int i = 0; i < c.sugar.Count; i++)
+                    Num dx = pos.x - w.x, dy = pos.y - w.y, dz = pos.z - w.z, d = Sqrt(dx * dx + dy * dy + dz * dz);
+                    Num reach;
+                    if (strength == 0)
                     {
-                        var s = c.sugar[i];
-                        if (s.kind == "can" && (lvl >= 2 || col.deficit < T.ai.canDeficit)) continue;
-                        if (s.kind == "flower" && (!InBloom(rec, fi[i]) || NectarAt(rec, fi[i]) < 0.2)) continue; // nothing there (T1-8)
-                        Consider(new AiTarget { kind = "sugar", key = key, i = i, c = ri }, new V3(s.x, s.y, s.z));
+                        // moving prey is seen: close by in any direction, or ahead in the cone
+                        bool ahead = spd > T.sense.minSpeed && d > 1e-6 && (dx * w.vx + dy * w.vy + dz * w.vz) / (d * spd) > T.sense.cone;
+                        reach = d < T.sense.near ? T.sense.near : ahead ? T.sense.sight : 0;
                     }
-                    if (lvl >= 3 && col.deficit >= T.ai.canDeficit) for (int i = 0; i < c.traps.Count; i++) { var tr = c.traps[i]; Consider(new AiTarget { kind = "trap", key = key, i = i, c = ri + 50 }, new V3(tr.x, tr.y, tr.z)); }
-                    // short of sugar, a forager will rob a hive (T1-9)
-                    if (col.deficit >= T.ai.canDeficit) { var hvs = HivesIn(rec); for (int h = 0; h < hvs.Count; h++) if (HiveLoadsLeft(key, h) > 0) Consider(new AiTarget { kind = "hive", key = key, i = h, c = ri + 100 }, new V3(hvs[h].ex, hvs[h].ey, hvs[h].ez)); }
-                    foreach (var sp in SpillsIn(key)) Consider(new AiTarget { kind = "spill", key = key, i = sp.i, c = ri + 60 }, new V3(sp.x, sp.y, sp.z));
-                    foreach (var f in FruitIn(rec)) Consider(new AiTarget { kind = "fruit", key = key, i = f.i, c = ri + 80 }, new V3(f.x, f.y, f.z));
-                }
-                else if (w.role == "protein")
-                {
-                    for (int i = 0; i < c.flies.Count; i++) if ((st.caughtFly.TryGetValue(i, out var cf) ? cf : 0) <= tick && FlyActive(rec, i)) Consider(new AiTarget { kind = "prey", sub = "fly", key = key, i = i, c = ri }, FlyPos(c.flies[i], tick));
-                    for (int i = 0; i < c.caterpillars.Count; i++) if (!st.caughtCat.ContainsKey(i) && CatActive(rec, i)) { var f = c.caterpillars[i]; Consider(new AiTarget { kind = "prey", sub = "cat", key = key, i = i, c = ri + 20 }, new V3(f.x, f.y, f.z)); }
-                    foreach (var cr in CarrionIn(rec)) Consider(new AiTarget { kind = "prey", sub = "carrion", key = key, i = (int)cr.d, c = ri + 90 }, new V3(cr.x, cr.y, cr.z));
-                    var baits = BaitsIn(key);
-                    for (int i = 0; i < baits.Count; i++)
-                    {
-                        // a bait station smells of meat from a long way off
-                        var b = baits[i];
-                        Num s = Sqrt(D2(w, new V3(b.x, b.y, b.z))) - T.muni.aiLure + H32(w.id, i, ri + 70, day) * 12;
-                        if (s < bs) { bs = s; best = new AiTarget { kind = "bait", key = key, i = i, c = ri + 70 }; }
-                    }
-                }
-                else
-                {
-                    for (int i = 0; i < c.boxes.Count; i++) { var b = c.boxes[i]; if (b.wood && !b.hive) Consider(new AiTarget { kind = "wood", key = key, i = i, c = ri + 40 }, new V3((b.minx + b.maxx) / 2, b.maxy, (b.minz + b.maxz) / 2)); }
-                }
+                    else reach = ScentRange(w.x, w.z, pos, strength);
+                    if (!(d < reach)) return;
+                    Num sc = d / reach + H32(w.id, t.i, t.c, day) * T.sense.jitter;
+                    if (sc < bs) { bs = sc; best = t; }
+                });
             }
-            if (best != null) { ai.target = best; ai.mode = "outbound"; } else ai.mode = "return";
+            return best;
+        }
+
+        /// Is a remembered source still there for a forager of this role (in the active world, still worth it)?
+        bool StillThere(string role, AiTarget t)
+        {
+            if (t == null) return false;
+            int ri = -1;
+            for (int i = 0; i < activeChunks.Count; i++) if (activeChunks[i].key == t.key) { ri = i; break; }
+            if (ri < 0) return false;
+            // a hunter remembers where the flies are (a table), not the one fly it took
+            if (t.sub == "fly") return role == "protein" && FlyActive(activeChunks[ri], t.i);
+            bool found = false;
+            Sources(activeChunks[ri], ri, role, true, (u, _, __) => { if (u.kind == t.kind && u.sub == t.sub && u.i == t.i) found = true; });
+            return found;
+        }
+
+        /// Alarm pheromone is a decaying scent too: strongest when fresh, carried downwind
+        internal Num AlarmReach(Wasp w, Alarm a) => T.alarm.radius * (0.5 + 0.5 * Clamp01((a.until - tick) / (Num)T.alarm.ticks)) * ScentRange(w.x, w.z, new V3(a.x, a.y, a.z), 1) / T.sense.smell;
+
+        internal void AiPick(Wasp w) => AiPick(w, nest.entrance);
+        internal void AiPick(Wasp w, V3 home)
+        {
+            var ai = w.ai;
+            if (w.role != "sugar" && w.role != "protein")
+            {
+                // wood is a landmark: a wasp knows the sheds and fences around its nest
+                AiTarget wb = null; Num ws = Num.MaxValue;
+                for (int ri = 0; ri < activeChunks.Count; ri++)
+                {
+                    var rec = activeChunks[ri]; var bx = rec.content.boxes;
+                    for (int i = 0; i < bx.Count; i++)
+                    {
+                        var b = bx[i]; if (!b.wood || b.hive) continue;
+                        Num s = Sqrt(D2(w, new V3((b.minx + b.maxx) / 2, b.maxy, (b.minz + b.maxz) / 2))) + H32(w.id, i, ri + 40, day) * 12;
+                        if (s < ws) { ws = s; wb = new AiTarget { kind = "wood", key = rec.key, i = i, c = ri + 40 }; }
+                    }
+                }
+                if (wb != null) { ai.target = wb; ai.mode = "outbound"; } else ai.mode = "return";
+                return;
+            }
+            // a forager goes back to a source that paid (site fidelity), then to the one whose scent a nestmate brought home
+            if (ai.known != null && ai.known.role == w.role && StillThere(w.role, ai.known.t)) { ai.target = ai.known.t.Copy(); ai.mode = "outbound"; return; }
+            ai.known = null;
+            var hs = homeScent;
+            if (w.colony == "own" && hs != null && hs.until > tick && hs.role == w.role && D2(w, nest.entrance) < 1 && StillThere(w.role, hs.t)) { ai.target = hs.t.Copy(); ai.mode = "outbound"; return; }
+            var t = Sense(w);
+            if (t != null) { ai.target = t; ai.mode = "outbound"; return; }
+            // nothing in reach: search in a widening spiral round home, sniffing as it goes
+            ai.mode = "search"; ai.target = null; ai.timer = tick + T.sense.searchTicks;
+            ai.head = DAtan2(w.z - home.z, w.x - home.x) + (H32(w.id, tick, 32) - 0.5);
+            ai.leg = Max(T.sense.searchR0, Sqrt(Sq(w.x - home.x) + Sq(w.z - home.z)));
+            ai.spin = H32(w.id, tick, 33) < 0.5 ? -1 : 1;
+        }
+
+        void Search(Wasp w, Cmd cmd, V3 home)
+        {
+            var ai = w.ai;
+            if (tick > ai.timer) { ai.mode = "return"; return; }
+            if ((tick + w.id) % T.sense.every == 0)
+            {
+                var t = Sense(w);
+                if (t != null) { ai.target = t; ai.mode = "outbound"; Emit("aiFound", ("id", w.id), ("kind", t.sub ?? t.kind)); return; }
+            }
+            // along the spiral at searchSpeed, the rings ringStep apart; out of range, give up
+            Num step = T.sense.searchSpeed * T.DT;
+            ai.head += ai.spin * step / ai.leg;
+            ai.leg += T.sense.ringStep * step / (TAU * ai.leg);
+            if (ai.leg > T.sense.searchRange) { ai.mode = "return"; return; }
+            Num a = ai.head + ai.spin * 1.5 / ai.leg;
+            Steer(w, new V3(home.x + ai.leg * DCos(a), T.sense.searchY, home.z + ai.leg * DSin(a)), cmd);
         }
 
         V3? AiTargetPos(Wasp w)
@@ -200,7 +298,8 @@ namespace Sting.Core
             if (t.kind == "spill") { foreach (var sp in SpillsIn(t.key)) if (sp.i == t.i) return new V3(sp.x, sp.y + 0.012, sp.z); return null; }
             if (t.kind == "bait") { var bs = BaitsIn(t.key); return t.i < bs.Count ? new V3(bs[t.i].x, bs[t.i].y, bs[t.i].z) : (V3?)null; }
             if (t.kind == "wood") { var b = c.boxes[t.i]; return new V3((b.minx + b.maxx) / 2 + 0.2 * (H32(w.id, t.i) - 0.5), b.maxy + T.wasp.radius + 0.008, (b.minz + b.maxz) / 2); }
-            if (t.sub == "fly") return (st.caughtFly.TryGetValue(t.i, out var cf) ? cf : 0) > tick || !FlyActive(rec, t.i) ? (V3?)null : FlyPos(c.flies[t.i], tick);
+            // a fly already taken: its table still draws flies, so go there and take whatever is about (T1-16)
+            if (t.sub == "fly") { if (!FlyActive(rec, t.i)) return null; var fl = c.flies[t.i]; return (st.caughtFly.TryGetValue(t.i, out var cf) ? cf : 0) > tick ? new V3(fl.x, fl.y, fl.z) : FlyPos(fl, tick); }
             if (t.sub == "cat") { if (st.caughtCat.ContainsKey(t.i) || !CatActive(rec, t.i)) return null; var cp = c.caterpillars[t.i]; return new V3(cp.x, cp.y, cp.z); }
             if (t.sub == "carrion") { foreach (var cr in CarrionIn(rec)) if (cr.d == t.i) return new V3(cr.x, cr.y, cr.z); return null; }
             return null;

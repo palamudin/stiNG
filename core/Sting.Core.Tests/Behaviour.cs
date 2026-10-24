@@ -523,6 +523,61 @@ namespace Sting.Core.Tests
                 string hex = xs.ext.hm?.hex ?? ev3.Where(q => q.type == "aiAttack").Select(q => (string)q["humanHex"]).FirstOrDefault();
                 Ok(ev3.Any(q => q.type == "aiAttack" && hex != null && (string)q["humanHex"] == hex) && Count(ev3, "extTreat") == 1, "guards go for the exterminator at the nest");
             }
+            // 37. senses for AI wasps (T1-16): food by scent, prey by sight, finds remembered and shared at the nest
+            {
+                var s = new Sim(new Settings { seed = 1234, birds = false });
+                RunS(s, 1);
+                s.windOverride = new V3(0, 0, 0);
+                Num jit = T.sense.jitter; T.sense.jitter = 0;
+                s.colony.deficit = 0;
+                var rec = s.activeChunks[4]; string key = rec.key; var fi = s.FlowerIdx(rec);
+                int fl = -1;
+                for (int i = 0; i < rec.content.sugar.Count && fl < 0; i++) if (rec.content.sugar[i].kind == "flower" && s.InBloom(rec, fi[i])) fl = i;
+                var fx = rec.content.sugar[fl];
+                s.nectarOverride = (r, j) => r == rec && j == fi[fl] ? 1 : 0; // this flower alone has nectar
+                var a = s.SpawnWasp(false); a.role = "sugar";
+                Num R = T.sense.smell * T.sense.flower;
+                Place(a, P(fx.x, fx.y + 0.9 * R, fx.z)); var t1 = s.Sense(a);
+                Place(a, P(fx.x, fx.y + 1.1 * R, fx.z)); var t2 = s.Sense(a);
+                Ok(t1 != null && t1.kind == "sugar" && t1.key == key && t1.i == fl && t2 == null, $"a flower is smelled within its reach ({D(R):0.0} m in still air) and not beyond");
+                s.windOverride = new V3(T.sense.windRef, 0, 0);
+                Num dn = s.ScentRange(fx.x + 5, fx.z, P(fx.x, fx.y, fx.z), 1), up = s.ScentRange(fx.x - 5, fx.z, P(fx.x, fx.y, fx.z), 1);
+                Ok(Abs(dn - T.sense.smell * (1 + T.sense.downwind)) < 1e-6 && Abs(up - T.sense.smell * (1 - T.sense.downwind)) < 1e-6, $"scent carries downwind ({D(dn):0.0} m) and hardly upwind ({D(up):0.0} m)");
+                s.windOverride = new V3(0, 0, 0);
+                var p = s.SpawnWasp(false); p.role = "protein";
+                int fly = 0; while (!s.FlyActive(rec, fly)) fly++;
+                var fp = World.FlyPos(rec.content.flies[fly], s.tick);
+                Place(p, P(fp.x + 3, fp.y, fp.z)); p.vx = -2; var seen = s.Sense(p);
+                p.vx = 2; var unseen = s.Sense(p);
+                Ok(seen != null && seen.sub == "fly" && !(unseen != null && unseen.sub == "fly"), "a fly 3 m ahead is seen; flying away, it is not");
+                var n = s.nest.entrance; var tgt = new AiTarget { kind = "sugar", key = key, i = fl, c = 4 };
+                Place(a, n); a.ai.from = tgt; a.ai.cargo = 0.9; a.energy = 1;
+                s.NestTouch(a);
+                Ok(a.ai.known != null && a.ai.known.t == tgt && s.homeScent != null && s.homeScent.t == tgt, "a forager home with food remembers its source, and the colony smells it on her");
+                var b = s.SpawnWasp(false); b.role = "sugar"; Place(b, n);
+                s.AiPick(b);
+                Ok(b.ai.mode == "outbound" && b.ai.target.i == fl && b.ai.target.key == key, "a nestmate leaving next goes for that source");
+                s.homeScent = null; s.nectarOverride = null;
+                Num smell = T.sense.smell; T.sense.smell = 0.01;
+                var c = s.SpawnWasp(false); c.role = "sugar"; Place(c, n); c.state = "fly";
+                s.AiPick(c);
+                bool searching = c.ai.mode == "search";
+                Num far = 0, inner = 1e9;
+                for (int i = 0; i < 900 && c.ai.mode == "search"; i++)
+                {
+                    RunS(s, 1);
+                    Num d = Sqrt(Sq(c.x - n.x) + Sq(c.z - n.z));
+                    far = Max(far, d); if (i > 300) inner = Min(inner, d);
+                }
+                Ok(searching && far > T.sense.searchR0 + 0.5 * T.sense.ringStep && far < T.sense.searchRange && inner > T.sense.searchR0, $"with nothing in reach a forager searches in a widening spiral round the nest (out to {D(far):0.0} m in 15 s)");
+                T.sense.smell = smell;
+                var ev = RunS(s, 900);
+                Ok(ev.Any(e => e.type == "aiFound" && (int)e["id"] == c.id) || c.ai.mode != "search", $"with its nose back it finds food on the way round ({c.ai.mode})");
+                var al = new Alarm { x = n.x, y = n.y, z = n.z, until = s.tick + T.alarm.ticks, killerHex = "" };
+                Num fresh = s.AlarmReach(a, al); al.until = s.tick + 1; Num old = s.AlarmReach(a, al);
+                Ok(Abs(fresh - T.alarm.radius) < 1e-6 && old < 0.51 * T.alarm.radius, $"alarm pheromone reaches {D(fresh)} m fresh and half that as it fades");
+                T.sense.jitter = jit; s.windOverride = null;
+            }
         }
 
         // 26. Tier 1, batch 1: wind, cold, drowning, clothes by the weather, shaking and flailing

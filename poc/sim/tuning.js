@@ -82,6 +82,18 @@ export const T = {
   guard: { minAdults: 25, count: 2, radius: 0.6, chase: 2.5, huntTicks: 300, ring: 0.09, humanRadius: 1.5 },
 
   ai: { maxPhysical: 12, launchEvery: 90, arrive: 0.05, collectTicks: 150, attackTicks: 600, evadeTicks: 50, canDeficit: 0.35 },
+  // Senses for AI wasps (GDD 7.3, T1-16). Food is found by scent, prey by sight, and good finds are remembered.
+  // A scent of strength 1 is caught this far in still air, further downwind and less far upwind; a moving thing is
+  // seen inside the forward cone, or anywhere close. A forager that senses nothing searches in a widening spiral
+  // round the nest (rings ringStep apart), sniffing as it goes, and goes home after searchTicks.
+  // bio: Vespula forage by odour and by sight of movement, return to profitable sites, and learn the odour of food
+  // that nestmates bring home (Jandt & Jeanne 2005).
+  sense: {
+    smell: 8, downwind: 0.6, windRef: 2, sight: 5, cone: 0.5, near: 0.5, minSpeed: 0.3, jitter: 0.5,
+    every: 15, searchTicks: 1800, searchR0: 3, ringStep: 5, searchSpeed: 2.2, searchRange: 45, searchY: 1.2, homeScentTicks: 3600,
+    // how strongly each kind of source smells
+    can: 1.6, flower: 1, spill: 2, fruit: 1.2, trap: 2, hive: 1.2, cat: 0.5, carrion: 1.5, carrionPerDay: 0.5, bait: 4,
+  },
 
   prey: {
     fliesPerTable: 3, flyOrbit: 0.32, catchDist: 0.03, flyRespawnTicks: 2400,
@@ -141,7 +153,7 @@ export const T = {
   // Level 5: municipal pest control (GDD 8.10). Poisoned protein bait stations across the area for a few days.
   // bio: real programs use protein baits laced with insecticide; foragers carry them home and poison the brood.
   muni: { level: 5, radius: 1, days: 3, cooldownDays: 4, aftermath: 0.5, baitsPerChunk: 3, baitHeight: 1.2, baitDist: 0.04, baitProtein: 2,
-    poisonAdults: 0.03, poisonLarvae: 0.08, abstractKillPerDay: 0.18, aiLure: 6 },
+    poisonAdults: 0.03, poisonLarvae: 0.08, abstractKillPerDay: 0.18 },
   ext: {
     speed: 1.1, treatTicks: 600, arriveMinute: 9 * 60, level: 4, minPanicAbort: 0.8,
     // the search (T1-7): he watches for flight lines and walks along each one he sees toward the nest

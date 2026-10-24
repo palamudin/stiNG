@@ -743,6 +743,7 @@ namespace Sting.Core
         }
         public Num NectarAt(ChunkRec rec, int i)
         {
+            if (nectarOverride != null) return nectarOverride(rec, i);
             if (!InBloom(rec, i)) return 0;
             Num net = (T.eco.regenPerDay - T.eco.beeDrawPerDay * BeeLoad(rec)[i]) / 1440;
             if (!chunkState.TryGet(rec.key, out var st) || st.nectar == null || !st.nectar.TryGetValue(i, out var n))
@@ -881,7 +882,7 @@ namespace Sting.Core
             if (kind == "sugar") s.depSugar += amt; else if (kind == "protein") s.depProtein += amt; else s.depPulp += amt;
         }
 
-        void NestTouch(Wasp w)
+        internal void NestTouch(Wasp w)
         {
             if (!colony.nestAlive || w.colony != "own") return;
             if (!colony.sited || D2(w, nest.entrance) > 0.07 * 0.07) return;
@@ -922,6 +923,15 @@ namespace Sting.Core
                 col.sugar -= take; w.energy += take / 0.6;
             }
             if (deposited) stats.deposits++;
+            // a forager home with food remembers where it was (site fidelity), and its load carries the scent of the
+            // source to nestmates leaving soon after (GDD 7.3, T1-16)
+            var from = w.ai.from;
+            if (deposited && from != null && w.role != null && from.kind != "wood" && from.kind != "bait")
+            {
+                w.ai.known = new Known { role = w.role, t = from };
+                homeScent = new Known { role = w.role, t = from, until = tick + T.sense.homeScentTicks };
+            }
+            w.ai.from = null;
         }
 
         // ---------------- under clothing (GDD 8.8)
@@ -1286,7 +1296,7 @@ namespace Sting.Core
             oldNests.Add(nest);
             foreach (var w in new List<Wasp>(wasps)) Despawn(w);
             foreach (var s in chunkState.Values) s.esc = 0;
-            swats = new List<Swat>(); sprays = new List<Spray>(); alarms = new List<Alarm>(); hiveAlarms.Clear();
+            swats = new List<Swat>(); sprays = new List<Spray>(); alarms = new List<Alarm>(); hiveAlarms.Clear(); homeScent = null;
             ext = new Ext();
             ghost = null;
             var q = SpawnWasp(true, "queen");

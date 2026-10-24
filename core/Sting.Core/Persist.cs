@@ -86,7 +86,7 @@ namespace Sting.Core
 
     public static class Persist
     {
-        public const int SAVE_VERSION = 12; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash
+        public const int SAVE_VERSION = 13; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home)
         const uint MAGIC = 0x474E4953; // "SING"
 
         // ---------------------------------------------------------------- one Io per type
@@ -118,11 +118,17 @@ namespace Sting.Core
             return e;
         }
 
+        static void IoTarget(Archive a, AiTarget t) { a.S(ref t.kind); a.S(ref t.key); a.S(ref t.sub); a.S(ref t.hex); a.I(ref t.i); a.I(ref t.c); a.V(ref t.p); }
+        static void IoKnown(Archive a, Known k) { a.S(ref k.role); a.I(ref k.until); k.t ??= new AiTarget(); IoTarget(a, k.t); }
+
         static void Io(Archive a, Ai ai)
         {
             a.S(ref ai.mode);
             if (a.Opt(ref ai.target)) { var t = ai.target; a.S(ref t.kind); a.S(ref t.key); a.S(ref t.sub); a.S(ref t.hex); a.I(ref t.i); a.I(ref t.c); a.V(ref t.p); }
             a.D(ref ai.timer); a.D(ref ai.until); a.S(ref ai.humanHex); a.I(ref ai.stings); a.I(ref ai.huntId); a.D(ref ai.stingHold); a.D(ref ai.cargo); a.S(ref ai.atFood);
+            if (a.Opt(ref ai.from)) IoTarget(a, ai.from);
+            if (a.Opt(ref ai.known)) IoKnown(a, ai.known);
+            a.D(ref ai.head); a.D(ref ai.leg); a.I(ref ai.spin);
         }
 
         static Wasp Io(Archive a, Wasp w)
@@ -289,6 +295,7 @@ namespace Sting.Core
             }
             if (a.Opt(ref s.hiberPick)) { a.I(ref s.hiberPick.season); a.D(ref s.hiberPick.x); a.D(ref s.hiberPick.z); a.S(ref s.hiberPick.kind); }
             if (a.Opt(ref s.springAt)) { a.D(ref s.springAt.x); a.D(ref s.springAt.z); }
+            if (a.Opt(ref s.homeScent)) IoKnown(a, s.homeScent);
             if (a.Opt(ref s.pendingSwitch)) { a.I(ref s.pendingSwitch.at); a.I(ref s.pendingSwitch.target); }
             if (a.Opt(ref s.muni))
             {
@@ -425,7 +432,7 @@ namespace Sting.Core
             sim.stats = new SimStats();
             sim.netStats = new NetStats();
             sim.ghost = null; sim.extinct = false; sim.lineage = 0; sim.evSeq = 0; sim.prevAct = 0; sim.pressUsed = false;
-            sim.alarms = new List<Alarm>(); sim.birdState = new OrderedMap<string, HunterState>(); sim.dragonState = new OrderedMap<string, HunterState>();
+            sim.alarms = new List<Alarm>(); sim.birdState = new OrderedMap<string, HunterState>(); sim.dragonState = new OrderedMap<string, HunterState>(); sim.homeScent = null;
             sim.JoinSpawn();
             return sim;
         }

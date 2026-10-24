@@ -233,6 +233,34 @@ attackTicks = 600
 evadeTicks = 50
 canDeficit = 0.35
 
+[sense]
+smell = 8
+downwind = 0.6
+windRef = 2
+sight = 5
+cone = 0.5
+near = 0.5
+minSpeed = 0.3
+jitter = 0.5
+every = 15
+searchTicks = 1800
+searchR0 = 3
+ringStep = 5
+searchSpeed = 2.2
+searchRange = 45
+searchY = 1.2
+homeScentTicks = 3600
+can = 1.6
+flower = 1
+spill = 2
+fruit = 1.2
+trap = 2
+hive = 1.2
+cat = 0.5
+carrion = 1.5
+carrionPerDay = 0.5
+bait = 4
+
 [prey]
 fliesPerTable = 3
 flyOrbit = 0.32
@@ -407,7 +435,6 @@ baitProtein = 2
 poisonAdults = 0.03
 poisonLarvae = 0.08
 abstractKillPerDay = 0.18
-aiLure = 6
 
 [ext]
 speed = 1.1

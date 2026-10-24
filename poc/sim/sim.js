@@ -54,6 +54,7 @@ export class Sim {
     this.swats = [];
     this.sprays = [];
     this.alarms = [];
+    this.homeScent = null; // the scent of the last food a forager brought home (T1-16)
     this.hiveAlarms = new Map();
     this.birdState = new Map();
     this.dragonState = new Map();
@@ -1358,6 +1359,14 @@ export class Sim {
       col.sugar -= take; w.energy += take / 0.6;
     }
     if (deposited) this.stats.deposits++;
+    // a forager home with food remembers where it was (site fidelity), and its load carries the scent of the source
+    // to nestmates leaving soon after (GDD 7.3, T1-16)
+    const from = w.ai && w.ai.from;
+    if (deposited && from && w.role && from.kind !== 'wood' && from.kind !== 'bait') {
+      w.ai.known = { role: w.role, t: from };
+      this.homeScent = { role: w.role, t: from, until: this.tick + T.sense.homeScentTicks };
+    }
+    if (w.ai) w.ai.from = null;
   }
 
   // ---------------- under clothing (GDD 8.8)
@@ -1656,7 +1665,7 @@ export class Sim {
     this.oldNests.push(this.nest);
     for (const w of this.wasps.slice()) this._despawn(w);
     for (const s of this.chunkState.values()) s.esc = 0;
-    this.swats = []; this.sprays = []; this.alarms = []; this.hiveAlarms.clear();
+    this.swats = []; this.sprays = []; this.alarms = []; this.hiveAlarms.clear(); this.homeScent = null;
     this.ext = { visit: 0, state: 'none', arriveMinute: 0, hm: null, lead: null };
     this.ghost = null;
     const q = this._spawnWasp(true, 'queen');
@@ -1989,6 +1998,7 @@ export class Sim {
     }
     for (const w of this.wasps) {
       if (w.colony !== 'own' || w.state !== 'fly' || sq(w.x - hm.x) + sq(w.z - hm.z) > X.sightR * X.sightR) continue;
+      if (w.id !== this.drivenId && w.ai.mode === 'search') continue; // a searching wasp zigzags: no line to follow (T1-16)
       if (this.canSee(hm, w)) rate += X.physPerSec;
     }
     return rate;
@@ -2899,7 +2909,8 @@ export class Sim {
       return cmd;
     }
     if (w.energy < 0.2) { ai.mode = 'return'; return cmd; }
-    if (ai.mode === 'pick') { this._aiPick(w); return cmd; }
+    if (ai.mode === 'pick') { this._aiPick(w, home); return cmd; }
+    if (ai.mode === 'search') { this._search(w, cmd, home); return cmd; }
     if (ai.mode === 'outbound' || ai.mode === 'collect') {
       const tp = this._aiTargetPos(w);
       if (!tp) { ai.mode = w.carry ? 'return' : 'pick'; return cmd; }
@@ -3075,7 +3086,7 @@ export class Sim {
     if (ai.mode !== 'attack' && ai.mode !== 'evade') {
       for (const a of this.alarms) {
         const k = this.humanByHex(a.killerHex);
-        if (dist2(w, a) < T.alarm.radius * T.alarm.radius && k && k.state !== 'away') { this._aiAttack(w, a.killerHex); break; }
+        if (dist2(w, a) < sq(this._alarmReach(w, a)) && k && k.state !== 'away') { this._aiAttack(w, a.killerHex); break; }
       }
     }
     const daylight = isDaylight(this.minute) && !this.raining;
@@ -3084,11 +3095,12 @@ export class Sim {
     if (w.role === 'guard' && (ai.mode === 'guard' || ai.mode === 'hunt' || ai.mode === 'pick')) return this._thinkGuard(w, cmd);
     switch (ai.mode) {
       case 'pick': this._aiPick(w); break;
+      case 'search': this._search(w, cmd, this.nest.entrance); break;
       case 'outbound': {
         const tp = this._aiTargetPos(w);
         if (!tp) { ai.mode = 'pick'; break; }
         this._steer(w, tp, cmd);
-        if (dist2(w, tp) < T.ai.arrive * T.ai.arrive) { ai.mode = 'collect'; ai.timer = this.tick + T.ai.collectTicks; }
+        if (dist2(w, tp) < T.ai.arrive * T.ai.arrive) { ai.mode = 'collect'; ai.timer = this.tick + T.ai.collectTicks; ai.from = ai.target; }
         break;
       }
       case 'collect': {
@@ -3160,41 +3172,155 @@ export class Sim {
     return cmd;
   }
 
-  _aiPick(w) {
-    const ai = w.ai, col = this.colony;
-    let best = null, bs = Infinity;
-    const consider = (t, pos) => {
-      const s = Math.sqrt(dist2(w, pos)) + h32(w.id, t.i | 0, t.c | 0, this.day) * 12;
-      if (s < bs) { bs = s; best = t; }
-    };
-    for (let ri = 0; ri < this.activeChunks.length; ri++) {
-      const rec = this.activeChunks[ri], c = rec.content, key = chunkKey(rec.cx, rec.cz), st = this.cs(key), lvl = this.escLevel(key);
-      if (w.role === 'sugar') {
-        const fi = this._flowerIdx(rec);
-        c.sugar.forEach((s, i) => {
-          if (s.kind === 'can' && (lvl >= 2 || col.deficit < T.ai.canDeficit)) return;
-          if (s.kind === 'flower' && (!this.inBloom(rec, fi[i]) || this.nectarAt(rec, fi[i]) < 0.2)) return; // nothing there (T1-8)
-          consider({ kind: 'sugar', key, i, c: ri }, s);
-        });
-        if (lvl >= 3 && col.deficit >= T.ai.canDeficit) c.traps.forEach((tr, i) => consider({ kind: 'trap', key, i, c: ri + 50 }, tr));
-        // short of sugar, a forager will rob a hive (T1-9)
-        if (col.deficit >= T.ai.canDeficit) this.hivesIn(rec).forEach((hv, h) => { if (this.hiveLoadsLeft(key, h) > 0) consider({ kind: 'hive', key, i: h, c: ri + 100 }, { x: hv.ex, y: hv.ey, z: hv.ez }); });
-        this.spillsIn(key).forEach((sp) => consider({ kind: 'spill', key, i: sp.i, c: ri + 60 }, sp));
-        this.fruitIn(rec).forEach((f) => consider({ kind: 'fruit', key, i: f.i, c: ri + 80 }, f));
-      } else if (w.role === 'protein') {
-        c.flies.forEach((f, i) => { if ((st.caughtFly[i] || 0) <= this.tick && this.flyActive(rec, i)) consider({ kind: 'prey', sub: 'fly', key, i, c: ri }, flyPos(f, this.tick)); });
-        c.caterpillars.forEach((f, i) => { if (!st.caughtCat[i] && this.catActive(rec, i)) consider({ kind: 'prey', sub: 'cat', key, i, c: ri + 20 }, f); });
-        for (const cr of this.carrionIn(rec)) consider({ kind: 'prey', sub: 'carrion', key, i: cr.d, c: ri + 90 }, cr);
-        this._baitsIn(key).forEach((b, i) => {
-          // a bait station smells of meat from a long way off
-          const s = Math.sqrt(dist2(w, b)) - T.muni.aiLure + h32(w.id, i, ri + 70, this.day) * 12;
-          if (s < bs) { bs = s; best = { kind: 'bait', key, i, c: ri + 70 }; }
-        });
-      } else {
-        c.boxes.forEach((b, i) => { if (b.wood && !b.hive) consider({ kind: 'wood', key, i, c: ri + 40 }, { x: (b.minx + b.maxx) / 2, y: b.maxy, z: (b.minz + b.maxz) / 2 }); });
-      }
+  // ---------------------------------------------------------------- senses (GDD 7.3, T1-16)
+
+  // How far a scent of the given strength from src reaches the wasp at p: further when p is downwind of it
+  _scentRange(p, src, strength) {
+    const S = T.sense, wd = this.wind;
+    let dx = p.x - src.x, dz = p.z - src.z;
+    const d = Math.sqrt(dx * dx + dz * dz);
+    let mul = 1;
+    if (d > 1e-6) mul = 1 + S.downwind * clamp((dx * wd.x + dz * wd.z) / d / S.windRef, -1, 1);
+    return S.smell * strength * mul;
+  }
+
+  // Every source of food in a chunk for a forager of this role, with how it is sensed: scent strength, or sight
+  // (moving prey). Lidded or knocked-over cans have nothing to smell, and traps are only out from level 3. `policy`
+  // adds the AI's own choices (cans, traps and hives only when short of sugar); without it the list is what is there
+  // to smell, which the player's nose reads.
+  _sources(rec, ri, role, policy, cb) {
+    const S = T.sense, c = rec.content, key = chunkKey(rec.cx, rec.cz), st = this.cs(key), lvl = this.escLevel(key), col = this.colony;
+    const short = col.deficit >= T.ai.canDeficit;
+    if (role === 'sugar') {
+      const fi = this._flowerIdx(rec);
+      c.sugar.forEach((s, i) => {
+        if (s.kind === 'can') { if (lvl >= 2 || this.canSpilled(key, i) || (policy && !short)) return; cb({ kind: 'sugar', key, i, c: ri }, s, S.can); return; }
+        if (!this.inBloom(rec, fi[i])) return;
+        const nv = this.nectarAt(rec, fi[i]);
+        if (nv < 0.2) return; // nothing there (T1-8)
+        cb({ kind: 'sugar', key, i, c: ri }, s, S.flower * nv);
+      });
+      if (lvl >= 3 && (!policy || short)) c.traps.forEach((tr, i) => cb({ kind: 'trap', key, i, c: ri + 50 }, tr, S.trap));
+      // short of sugar, a forager will rob a hive (T1-9)
+      if (!policy || short) this.hivesIn(rec).forEach((hv, h) => { if (this.hiveLoadsLeft(key, h) > 0) cb({ kind: 'hive', key, i: h, c: ri + 100 }, { x: hv.ex, y: hv.ey, z: hv.ez }, S.hive); });
+      // a spill dries: its scent fades with what is left of it
+      this.spillsIn(key).forEach((sp) => cb({ kind: 'spill', key, i: sp.i, c: ri + 60 }, sp, S.spill * clamp01((st.spilled[sp.i] - this.minute) / T.panic.spillMinutes)));
+      this.fruitIn(rec).forEach((f) => cb({ kind: 'fruit', key, i: f.i, c: ri + 80 }, f, S.fruit));
+    } else if (role === 'protein') {
+      c.flies.forEach((f, i) => { if ((st.caughtFly[i] || 0) <= this.tick && this.flyActive(rec, i)) cb({ kind: 'prey', sub: 'fly', key, i, c: ri }, flyPos(f, this.tick), 0); });
+      c.caterpillars.forEach((f, i) => { if (!st.caughtCat[i] && this.catActive(rec, i)) cb({ kind: 'prey', sub: 'cat', key, i, c: ri + 20 }, f, S.cat); });
+      // carrion smells stronger by the day
+      for (const cr of this.carrionIn(rec)) cb({ kind: 'prey', sub: 'carrion', key, i: cr.d, c: ri + 90 }, cr, S.carrion + S.carrionPerDay * (this.day - cr.d));
+      this._baitsIn(key).forEach((b, i) => cb({ kind: 'bait', key, i, c: ri + 70 }, b, S.bait));
     }
-    if (best) { ai.target = best; ai.mode = 'outbound'; } else ai.mode = 'return';
+  }
+
+  // What this wasp senses from where it is: the most attractive source it can smell or see, or null
+  _sense(w) {
+    const S = T.sense, spd = Math.sqrt(w.vx * w.vx + w.vy * w.vy + w.vz * w.vz);
+    let best = null, bs = Infinity;
+    for (let ri = 0; ri < this.activeChunks.length; ri++) {
+      this._sources(this.activeChunks[ri], ri, w.role, true, (t, pos, strength) => {
+        const dx = pos.x - w.x, dy = pos.y - w.y, dz = pos.z - w.z, d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        let reach;
+        if (strength === 0) {
+          // moving prey is seen: close by in any direction, or ahead in the cone
+          const ahead = spd > S.minSpeed && d > 1e-6 && (dx * w.vx + dy * w.vy + dz * w.vz) / (d * spd) > S.cone;
+          reach = d < S.near ? S.near : ahead ? S.sight : 0;
+        } else reach = this._scentRange(w, pos, strength);
+        if (!(d < reach)) return;
+        const sc = d / reach + h32(w.id, t.i | 0, t.c | 0, this.day) * S.jitter;
+        if (sc < bs) { bs = sc; best = t; }
+      });
+    }
+    return best;
+  }
+
+  // Is a remembered source still there for a forager of this role (in the active world, still worth it)?
+  _stillThere(role, t) {
+    if (!t) return false;
+    const ri = this.activeChunks.findIndex((r) => chunkKey(r.cx, r.cz) === t.key);
+    if (ri < 0) return false;
+    // a hunter remembers where the flies are (a table), not the one fly it took
+    if (t.sub === 'fly') return role === 'protein' && this.flyActive(this.activeChunks[ri], t.i);
+    let found = false;
+    this._sources(this.activeChunks[ri], ri, role, true, (u) => { if (u.kind === t.kind && u.sub === t.sub && u.i === t.i) found = true; });
+    return found;
+  }
+
+  // The player's nose (GDD 7.3: the driven wasp gets the same information as cues): the strongest scent of each kind
+  // in reach, as a direction and a strength from 0 (at the edge of the scent) to 1 (on it)
+  smellAt(w) {
+    const out = {};
+    for (const role of ['sugar', 'protein']) {
+      let best = null;
+      for (let ri = 0; ri < this.activeChunks.length; ri++) this._sources(this.activeChunks[ri], ri, role, false, (t, pos, strength) => {
+        if (strength === 0) return;
+        const d = Math.sqrt(dist2(w, pos)), reach = this._scentRange(w, pos, strength);
+        if (d >= reach) return;
+        const s = 1 - d / reach;
+        if (!best || s > best.s) best = { s, x: pos.x - w.x, z: pos.z - w.z, kind: t.kind === 'bait' ? 'bait' : t.sub || t.kind };
+      });
+      if (best) out[role] = best;
+    }
+    const a = this._alarmNear(w);
+    if (a) out.alarm = { s: a.s, x: a.a.x - w.x, z: a.a.z - w.z };
+    return out;
+  }
+
+  // Alarm pheromone is a decaying scent too: strongest when fresh, carried downwind
+  _alarmReach(w, a) { return T.alarm.radius * (0.5 + 0.5 * clamp01((a.until - this.tick) / T.alarm.ticks)) * this._scentRange(w, a, 1) / T.sense.smell; }
+  _alarmNear(w) {
+    let best = null;
+    for (const a of this.alarms) {
+      const reach = this._alarmReach(w, a), d = Math.sqrt(dist2(w, a));
+      if (d < reach && (!best || 1 - d / reach > best.s)) best = { a, s: 1 - d / reach };
+    }
+    return best;
+  }
+
+  _aiPick(w, home = this.nest.entrance) {
+    const ai = w.ai, S = T.sense;
+    if (w.role !== 'sugar' && w.role !== 'protein') {
+      // wood is a landmark: a wasp knows the sheds and fences around its nest
+      let best = null, bs = Infinity;
+      this.activeChunks.forEach((rec, ri) => rec.content.boxes.forEach((b, i) => {
+        if (!b.wood || b.hive) return;
+        const s = Math.sqrt(dist2(w, { x: (b.minx + b.maxx) / 2, y: b.maxy, z: (b.minz + b.maxz) / 2 })) + h32(w.id, i, ri + 40, this.day) * 12;
+        if (s < bs) { bs = s; best = { kind: 'wood', key: chunkKey(rec.cx, rec.cz), i, c: ri + 40 }; }
+      }));
+      if (best) { ai.target = best; ai.mode = 'outbound'; } else ai.mode = 'return';
+      return;
+    }
+    // a forager goes back to a source that paid (site fidelity), then to the one whose scent a nestmate brought home
+    if (ai.known && ai.known.role === w.role && this._stillThere(w.role, ai.known.t)) { ai.target = { ...ai.known.t }; ai.mode = 'outbound'; return; }
+    ai.known = null;
+    const hs = this.homeScent;
+    if (w.colony === 'own' && hs && hs.until > this.tick && hs.role === w.role && dist2(w, this.nest.entrance) < 1 && this._stillThere(w.role, hs.t)) { ai.target = { ...hs.t }; ai.mode = 'outbound'; return; }
+    const t = this._sense(w);
+    if (t) { ai.target = t; ai.mode = 'outbound'; return; }
+    // nothing in reach: search in a widening spiral round home, sniffing as it goes; ai.head is the angle on the
+    // spiral, ai.leg its radius, ai.spin which way round
+    ai.mode = 'search'; ai.target = null; ai.timer = this.tick + S.searchTicks;
+    ai.head = datan2(w.z - home.z, w.x - home.x) + (h32(w.id, this.tick, 32) - 0.5);
+    ai.leg = Math.max(S.searchR0, Math.sqrt(sq(w.x - home.x) + sq(w.z - home.z)));
+    ai.spin = h32(w.id, this.tick, 33) < 0.5 ? -1 : 1;
+  }
+
+  _search(w, cmd, home) {
+    const ai = w.ai, S = T.sense;
+    if (this.tick > ai.timer) { ai.mode = 'return'; return; }
+    if ((this.tick + w.id) % S.every === 0) {
+      const t = this._sense(w);
+      if (t) { ai.target = t; ai.mode = 'outbound'; this.emit('aiFound', { id: w.id, kind: t.sub || t.kind }); return; }
+    }
+    // along the spiral at searchSpeed, the rings ringStep apart; out of range, give up
+    const step = S.searchSpeed * DT;
+    ai.head += ai.spin * step / ai.leg;
+    ai.leg += S.ringStep * step / (TAU * ai.leg);
+    if (ai.leg > S.searchRange) { ai.mode = 'return'; return; }
+    const a = ai.head + ai.spin * 1.5 / ai.leg;
+    this._steer(w, { x: home.x + ai.leg * dcos(a), y: S.searchY, z: home.z + ai.leg * dsin(a) }, cmd);
   }
 
   _aiTargetPos(w) {
@@ -3218,7 +3344,8 @@ export class Sim {
     if (t.kind === 'spill') { const sp = this.spillsIn(t.key).find((x) => x.i === t.i); return sp ? { x: sp.x, y: sp.y + 0.012, z: sp.z } : null; }
     if (t.kind === 'bait') return this._baitsIn(t.key)[t.i] || null;
     if (t.kind === 'wood') { const b = c.boxes[t.i]; return { x: (b.minx + b.maxx) / 2 + 0.2 * (h32(w.id, t.i) - 0.5), y: b.maxy + T.wasp.radius + 0.008, z: (b.minz + b.maxz) / 2 }; }
-    if (t.sub === 'fly') return (st.caughtFly[t.i] || 0) > this.tick || !this.flyActive(rec, t.i) ? null : flyPos(c.flies[t.i], this.tick);
+    // a fly already taken: its table still draws flies, so go there and take whatever is about (T1-16)
+    if (t.sub === 'fly') return !this.flyActive(rec, t.i) ? null : (st.caughtFly[t.i] || 0) > this.tick ? c.flies[t.i] : flyPos(c.flies[t.i], this.tick);
     if (t.sub === 'cat') return st.caughtCat[t.i] || !this.catActive(rec, t.i) ? null : c.caterpillars[t.i];
     if (t.sub === 'carrion') return this.carrionIn(rec).find((x) => x.d === t.i) || null;
     return null;

@@ -1098,6 +1098,70 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   ok(picks > 0, `short of sugar, AI foragers go for hives (${picks} of 40 near one)`);
 }
 
+// Senses for AI wasps (GDD 7.3, T1-16): food by scent, prey by sight, finds remembered and shared at the nest
+{
+  const s = new Sim({ seed: 1234, birds: false });
+  run(s, 1, () => idle());
+  const still = { x: 0, z: 0 };
+  Object.defineProperty(s, 'wind', { value: still, writable: true, configurable: true });
+  const S = T.sense, jit = S.jitter;
+  S.jitter = 0;
+  s.colony.deficit = 0; // no cans, traps or hives: sugar is flowers only, early in the season no fruit
+  const rec = s.activeChunks[4], key = chunkKey(rec.cx, rec.cz), fi = s._flowerIdx(rec);
+  const fl = rec.content.sugar.map((x, i) => ({ x, i })).filter(({ x, i }) => x.kind === 'flower' && s.inBloom(rec, fi[i]))[0];
+  s.nectarAt = (r, j) => (r === rec && j === fi[fl.i] ? 1 : 0); // this flower alone has nectar
+  const a = s._spawnWasp(false); a.role = 'sugar';
+  const R = S.smell * S.flower;
+  place(a, { x: fl.x.x, y: fl.x.y + 0.9 * R, z: fl.x.z });
+  const t1 = s._sense(a);
+  place(a, { x: fl.x.x, y: fl.x.y + 1.1 * R, z: fl.x.z });
+  const t2 = s._sense(a);
+  ok(t1 && t1.kind === 'sugar' && t1.key === key && t1.i === fl.i && !t2, `a flower is smelled within its reach (${R.toFixed(1)} m in still air) and not beyond`);
+  s.wind = { x: S.windRef, z: 0 };
+  const dn = s._scentRange({ x: fl.x.x + 5, z: fl.x.z }, fl.x, 1), up = s._scentRange({ x: fl.x.x - 5, z: fl.x.z }, fl.x, 1);
+  ok(Math.abs(dn - S.smell * (1 + S.downwind)) < 1e-9 && Math.abs(up - S.smell * (1 - S.downwind)) < 1e-9, `scent carries downwind (${dn.toFixed(1)} m) and hardly upwind (${up.toFixed(1)} m)`);
+  s.wind = still;
+  // sight: a fly ahead is seen, one behind is not
+  const p = s._spawnWasp(false); p.role = 'protein';
+  const fly = rec.content.flies.map((f, i) => ({ f, i })).find(({ i }) => s.flyActive(rec, i));
+  const fp = flyPos(fly.f, s.tick);
+  place(p, { x: fp.x + 3, y: fp.y, z: fp.z }); p.vx = -2;
+  const seen = s._sense(p);
+  p.vx = 2;
+  const unseen = s._sense(p);
+  ok(seen && seen.sub === 'fly' && !(unseen && unseen.sub === 'fly'), `a fly 3 m ahead is seen; flying away, it is not (${unseen ? unseen.sub || unseen.kind : 'nothing'} instead)`);
+  // site fidelity and the scent of food brought home
+  const n = s.nest.entrance, tgt = { kind: 'sugar', key, i: fl.i, c: 4 };
+  place(a, n); a.ai.from = tgt; a.ai.cargo = 0.9; a.energy = 1;
+  s._nestTouch(a);
+  ok(a.ai.known && a.ai.known.t === tgt && s.homeScent && s.homeScent.t === tgt, 'a forager home with food remembers its source, and the colony smells it on her');
+  const b = s._spawnWasp(false); b.role = 'sugar'; place(b, n);
+  s._aiPick(b);
+  ok(b.ai.mode === 'outbound' && b.ai.target.i === fl.i && b.ai.target.key === key, 'a nestmate leaving next goes for that source');
+  s.homeScent = null;
+  delete s.nectarAt;
+  // nothing in reach: a spiral search round the nest that ends at home
+  const smell = S.smell; S.smell = 0.01;
+  const c = s._spawnWasp(false); c.role = 'sugar'; place(c, n); c.state = 'fly';
+  s._aiPick(c);
+  const searching = c.ai.mode === 'search';
+  let far = 0, inner = Infinity;
+  for (let i = 0; i < 900 && c.ai.mode === 'search'; i++) {
+    run(s, 1, () => idle());
+    const d = Math.hypot(c.x - n.x, c.z - n.z);
+    far = Math.max(far, d); if (i > 300) inner = Math.min(inner, d);
+  }
+  ok(searching && far > S.searchR0 + 0.5 * S.ringStep && far < S.searchRange && inner > S.searchR0, `with nothing in reach a forager searches in a widening spiral round the nest (out to ${far.toFixed(1)} m in 15 s)`);
+  S.smell = smell;
+  const ev = run(s, 900, () => idle());
+  ok(ev.some((e) => e.type === 'aiFound' && e.id === c.id) || c.ai.mode !== 'search', `with its nose back it finds food on the way round (${c.ai.mode})`);
+  // alarm pheromone fades
+  const al = { x: n.x, y: n.y, z: n.z, until: s.tick + T.alarm.ticks, killerHex: '' };
+  const fresh = s._alarmReach(a, al); al.until = s.tick + 1; const old = s._alarmReach(a, al);
+  ok(Math.abs(fresh - T.alarm.radius) < 1e-9 && old < 0.51 * T.alarm.radius, `alarm pheromone reaches ${fresh} m fresh and half that as it fades`);
+  S.jitter = jit;
+}
+
 // Tuning as data (GDD 13, T1-22): one plain-text file feeds both sims
 {
   const { unknown, missing } = TUNE_RESULT;

@@ -381,6 +381,7 @@ namespace Sting.Core
             foreach (var w in wasps)
             {
                 if (w.colony != "own" || w.state != "fly" || Sq(w.x - hx) + Sq(w.z - hz) > T.ext.sightR * T.ext.sightR) continue;
+                if (w.id != drivenId && w.ai.mode == "search") continue; // a searching wasp zigzags: no line to follow (T1-16)
                 if (CanSee(hx, hz, w.x, w.z)) rate += T.ext.physPerSec;
             }
             return rate;
@@ -1277,7 +1278,8 @@ namespace Sting.Core
                 return cmd;
             }
             if (w.energy < 0.2) { ai.mode = "return"; return cmd; }
-            if (ai.mode == "pick") { AiPick(w); return cmd; }
+            if (ai.mode == "pick") { AiPick(w, home); return cmd; }
+            if (ai.mode == "search") { Search(w, cmd, home); return cmd; }
             if (ai.mode == "outbound" || ai.mode == "collect")
             {
                 var tp = AiTargetPos(w);

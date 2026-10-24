@@ -39,6 +39,7 @@ namespace Sting.Core
         public List<Swat> swats = new List<Swat>();
         public List<Spray> sprays = new List<Spray>();
         public List<Alarm> alarms = new List<Alarm>();
+        public Known homeScent; // the scent of the last food a forager brought home (T1-16)
         public OrderedMap<string, HiveAlarm> hiveAlarms = new OrderedMap<string, HiveAlarm>();
         public OrderedMap<string, HunterState> birdState = new OrderedMap<string, HunterState>();
         public OrderedMap<string, HunterState> dragonState = new OrderedMap<string, HunterState>();
@@ -191,7 +192,8 @@ namespace Sting.Core
         }
         public Num BroodSpeed() => BroodSpeed(minute);
         long wcMinute = long.MinValue; V3 wcVal;
-        public V3 Wind { get { if (wcMinute != minute) { wcVal = WindAt(seed, minute); wcMinute = minute; } return wcVal; } }
+        public V3 Wind { get { if (windOverride.HasValue) return windOverride.Value; if (wcMinute != minute) { wcVal = WindAt(seed, minute); wcMinute = minute; } return wcVal; } }
+        internal V3? windOverride; internal System.Func<ChunkRec, int, Num> nectarOverride; // test hooks
         /// Debug and test hook: force rain on (true) or off (false); null follows the weather
         public bool? rainOverride;
         public bool Raining => rainOverride ?? IsRaining(seed, minute);

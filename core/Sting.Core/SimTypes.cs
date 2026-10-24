@@ -14,11 +14,15 @@ namespace Sting.Core
     }
 
     public sealed class Carry { public string kind, what; public Num amount; public bool poison; }
-    public sealed class AiTarget { public string kind, key, sub, hex; public int i, c; public V3 p; }
+    public sealed class AiTarget { public string kind, key, sub, hex; public int i, c; public V3 p; public AiTarget Copy() => (AiTarget)MemberwiseClone(); }
+    /// a source a forager remembers, or whose scent a forager brought home (T1-16)
+    public sealed class Known { public string role; public AiTarget t; public int until; }
     public sealed class Ai
     {
         public string mode = "pick"; public AiTarget target; public Num timer, until; public string humanHex; public int stings, huntId;
         public Num stingHold, cargo; public string atFood;
+        // senses (T1-16): the source being worked, the one remembered, and the spiral search (angle, radius, which way)
+        public AiTarget from; public Known known; public Num head, leg; public int spin;
         public Ai Clone() => (Ai)MemberwiseClone();
     }
     public sealed class Attach { public string hex, posture; public V3 local, n; public int start; public bool deepened; public int zone; }

@@ -412,6 +412,7 @@ Economy step in Appendix A.4.
 - Scent fields: sugar, protein, alarm pheromone. Each is a decaying point source; strength at a point is a pure function of sources and time.
 - Vision cone for movement.
 - The driven wasp gets the same information as UI cues (Section 10).
+- As built (18.30): scent reach by source and wind, sight for flies, a spiral search when nothing is in reach, site fidelity, and the scent of food brought home.
 
 ### 7.4 Stinging **[T0]**
 
@@ -1103,6 +1104,24 @@ Every can on a table is a hollow cup: a 3 mm wall, open at the top, holding a dr
 
 **Tuning in practice.** Change a value in the file and rerun: the PoC picks it up on reload, the tests and parity run against it, and the hash tells every save and peer that the rules changed. The built-in values stay in `tuning.js` and `Tuning.cs` as the reference the file was generated from; the file wins when present.
 
+### 18.30 Senses for AI wasps as built (T1-16)
+
+**No more perfect knowledge.** Before, an AI forager picked the nearest food anywhere in the nine active chunks. Now it knows only what it can sense from where it is, what it remembers, and what nestmates bring home. Pulp foragers still know the wooden boxes round the nest (landmarks, not food).
+
+**Scent.** Every food source has a scent strength, and a scent of strength 1 reaches 8 m in still air. Wind stretches it: a wasp straight downwind smells it up to 60% further, one upwind 60% less (at 2 m/s, scaled by the day's wind). Strengths: an open drink 1.6, a flower 1 times its nectar (so drained and faded flowers do not call), a spill 2 fading as it dries, fallen fruit 1.2, a trap 2, a hive's honey 1.2, a caterpillar 0.5, carrion 1.5 plus 0.5 a day as it ripens, a bait station 4. A covered or knocked-over can and traps that are not out (below level 3) have no scent. Each is a point source whose strength is a pure function of the source and the clock (3.3), so every peer computes the same field. Alarm pheromone is a scent too: it reaches the full 6 m when fresh, half that as it fades, further downwind.
+
+**Sight.** Flies move, so they are seen, not smelled: within 5 m inside the forward cone (about 60° either side of the direction of flight) or within 0.5 m in any direction. A hovering wasp sees only what is close.
+
+**Choosing.** Of what it senses, a forager takes the source with the lowest distance over reach, plus a per-wasp, per-day jitter so foragers spread out. The AI's choices stay as before: drinks, traps and hives only when the colony is short of sugar, no drinks once people put lids on (level 2).
+
+**Searching.** A forager that senses nothing searches: it flies a widening spiral round its nest at 2.2 m/s and 1.2 m up, the rings 5 m apart, sniffing every quarter second, and goes home after 30 s or 45 m out. A searching wasp zigzags, so the exterminator gets no flight line from it (8.10, T1-7). Rival workers search round their own nest the same way.
+
+**Memory and the scent brought home.** A forager that gets food home remembers the source and goes back to it while it still pays (site fidelity); a hunter remembers the table where flies gather, not the fly. Its load also carries the scent to the nest: for the next minute of play (half a game day at the default two-minute day), a forager of the same kind leaving the nest heads for that source. *(bio: Vespula return to profitable sites and learn the odour of food that nestmates bring home; Jandt & Jeanne 2005.)*
+
+**The player's nose.** The scent markers round the crosshair (10.2) now come from the same function: the strongest sugar and meat scent in reach and which way it lies, carried by the wind, plus alarm pheromone and roused hives. Flies are not on it; you see them.
+
+**Effect.** With an idle player over ten minutes of play, foragers bring home about the same sugar (seed 1234: 29 against 32) and about half the protein (57 against 110, which was well above what the brood needs), and they stay within about 15 m of the nest instead of crossing the map; a fifth to a third of forager time is spent searching. All of it is tuning in `tuning/sting.tune` (`[sense]`).
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1111,7 +1130,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (80 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (81 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -1132,7 +1151,7 @@ Everything in `POC.md` (80 features) and its C# port (18.18), including the Tier
 | T1-13 | **Built (18.23).** Worker ages and guards: young workers stay in, older ones forage, the oldest guard the entrance and attack intruders (rivals, raiders, other players' wasps) | 6.5 | M | Q-07 for players |
 | T1-14 | **Built (18.21).** Hollow-tree nest site and nest thermals: site insulation sets how cold snaps and heat slow the brood | 6.6 | S | |
 | T1-15 | **Built (18.24).** Winter with choices: gynes pick hibernation sites whose quality sets winter survival; in spring the player chooses which surviving queen to continue | 6.7 | M | |
-| T1-16 | Senses for AI wasps: scent fields (sugar, protein, alarm) as decaying point sources and a vision cone, replacing the AI's perfect knowledge of every food source | 7.3 | M | |
+| T1-16 | **Built (18.30).** Senses for AI wasps: scent fields (sugar, protein, alarm) as decaying point sources and a vision cone, replacing the AI's perfect knowledge of every food source | 7.3 | M | |
 | T1-17 | **Built (18.20).** Line of sight for panic: contagion only between humans who can see each other | 8.9 | S | |
 | T1-18 | **Built (18.20).** Per-human memory: recency and place, so a person stung at this table is jumpy here and calmer elsewhere | 8.10 | S | |
 | T1-19 | Chunk authority and contested pickups in the lab: rendezvous hashing picks one peer per chunk to settle two wasps grabbing the same caterpillar | 11.6 | M | |
@@ -1141,7 +1160,7 @@ Everything in `POC.md` (80 features) and its C# port (18.18), including the Tier
 | T1-22 | **Built (18.29).** Tuning as data: the tuning tables as versioned plain-text files read by own parsers in JS and C#, and the tuning hash in the world record | 13 | M | |
 | T1-23 | **Built (18.21).** Solo time: accelerate time in the colony view, and the Reflex slowdown as a solo option | 5.1, 7.8 | S | |
 
-Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, then the other S items: T1-14, T1-17, T1-18, T1-23, all done; T1-20 waits on regions), then the M items (T1-6 to T1-9, T1-13, T1-15 and T1-22 done; then T1-16, T1-10, T1-19, T1-21); each batch is built in the PoC and then ported to the core with parity.
+Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, then the other S items: T1-14, T1-17, T1-18, T1-23, all done; T1-20 waits on regions), then the M items (T1-6 to T1-9, T1-13, T1-15, T1-16 and T1-22 done; then T1-10, T1-19, T1-21); each batch is built in the PoC and then ported to the core with parity.
 
 ### 19.3 Tier 2: later
 

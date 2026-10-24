@@ -83,6 +83,15 @@ namespace Sting.Core
         /// the oldest workers guard the entrance against other colonies' wasps and the exterminator (T1-13)
         public static class guard { public static int count = 2, huntTicks = 300; public static Num minAdults = 25, radius = 0.6, chase = 2.5, ring = 0.09, humanRadius = 1.5; }
         public static class ai { public static int maxPhysical = 12, launchEvery = 90, collectTicks = 150, attackTicks = 600, evadeTicks = 50; public static Num arrive = 0.05, canDeficit = 0.35; }
+        /// Senses for AI wasps (GDD 7.3, T1-16): food by scent (further downwind), moving prey by sight, a widening spiral
+        /// search round the nest when nothing is in reach, and finds remembered and smelled on returning foragers
+        public static class sense
+        {
+            public static Num smell = 8, downwind = 0.6, windRef = 2, sight = 5, cone = 0.5, near = 0.5, minSpeed = 0.3, jitter = 0.5;
+            public static int every = 15, searchTicks = 1800, homeScentTicks = 3600;
+            public static Num searchR0 = 3, ringStep = 5, searchSpeed = 2.2, searchRange = 45, searchY = 1.2;
+            public static Num can = 1.6, flower = 1, spill = 2, fruit = 1.2, trap = 2, hive = 1.2, cat = 0.5, carrion = 1.5, carrionPerDay = 0.5, bait = 4;
+        }
         public static class prey
         {
             public static int fliesPerTable = 3, flyRespawnTicks = 2400;
@@ -134,7 +143,7 @@ namespace Sting.Core
         {
             public static int level = 5, radius = 1, baitsPerChunk = 3;
             public static Num days = 3, cooldownDays = 4, aftermath = 0.5, baitHeight = 1.2, baitDist = 0.04, baitProtein = 2,
-                poisonAdults = 0.03, poisonLarvae = 0.08, abstractKillPerDay = 0.18, aiLure = 6;
+                poisonAdults = 0.03, poisonLarvae = 0.08, abstractKillPerDay = 0.18;
         }
         public static class ext
         {
