@@ -92,7 +92,7 @@ export const T = {
     smell: 8, downwind: 0.6, windRef: 2, sight: 5, cone: 0.5, near: 0.5, minSpeed: 0.3, jitter: 0.5,
     every: 15, searchTicks: 1800, searchR0: 3, ringStep: 5, searchSpeed: 2.2, searchRange: 45, searchY: 1.2, homeScentTicks: 3600,
     // how strongly each kind of source smells
-    can: 1.6, flower: 1, spill: 2, fruit: 1.2, trap: 2, hive: 1.2, cat: 0.5, carrion: 1.5, carrionPerDay: 0.5, bait: 4,
+    can: 1.6, flower: 1, spill: 2, fruit: 1.2, trap: 2, hive: 1.2, cat: 0.5, carrion: 1.5, carrionPerDay: 0.5, bait: 4, meat: 3,
   },
 
   prey: {
@@ -148,6 +148,16 @@ export const T = {
     catFrom: 0.15, catTo: 0.7, catJitter: 0.08, flyBase: 0.35, flySlope: 0.65,
     carrionChance: 0.2, carrionDays: 3, carrionLoads: 4, carrionProtein: 1.5, carrionReach: 0.05,
     sugarBase: 0.5, sugarBloom: 0.9, sugarFruit: 0.35, protBase: 0.5, protCat: 0.35, protFly: 0.4,
+  },
+  // Barbecues (GDD 4.3, 6.2, T1-10). Some picnic tables have a kettle grill at one end. On a warm dry day the first
+  // person at the table may cook a lunchtime barbecue: they stand at the grill while it is lit, meat sits on the grate
+  // and later on a plate on the table. Meat is protein; people guard it and slap at wasps near it from the start; the
+  // grate burns and the air above it cooks a wasp that hangs about.
+  bbq: {
+    share: 0.35, gap: 1.1, station: 0.55, r: 0.27, grateY: 0.82, along: -0.5,
+    dayChance: 0.5, minTemp: 19, from: 750, to: 930, jitter: 40, serve: 40, plateEnd: 60, settle: 20, minLength: 60,
+    grillLoads: 4, plateLoads: 6, meatProtein: 1.5, reach: 0.04,
+    burnH: 0.012, plumeR: 0.35, plumeH: 0.6, plumeTemp: 70, heatRate: 1 / 150, lethal: 46, guardR: 0.3, noticeMul: 0.8,
   },
   fruit: { treeShare: 0.3, startFrac: 0.55, perTree: 6, rate: 0.8, spread: 1.6, rotDays: 6 },
   // Level 5: municipal pest control (GDD 8.10). Poisoned protein bait stations across the area for a few days.

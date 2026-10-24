@@ -90,7 +90,7 @@ namespace Sting.Core
             public static Num smell = 8, downwind = 0.6, windRef = 2, sight = 5, cone = 0.5, near = 0.5, minSpeed = 0.3, jitter = 0.5;
             public static int every = 15, searchTicks = 1800, homeScentTicks = 3600;
             public static Num searchR0 = 3, ringStep = 5, searchSpeed = 2.2, searchRange = 45, searchY = 1.2;
-            public static Num can = 1.6, flower = 1, spill = 2, fruit = 1.2, trap = 2, hive = 1.2, cat = 0.5, carrion = 1.5, carrionPerDay = 0.5, bait = 4;
+            public static Num can = 1.6, flower = 1, spill = 2, fruit = 1.2, trap = 2, hive = 1.2, cat = 0.5, carrion = 1.5, carrionPerDay = 0.5, bait = 4, meat = 3;
         }
         public static class prey
         {
@@ -137,6 +137,15 @@ namespace Sting.Core
                 carrionChance = 0.2, carrionProtein = 1.5, carrionReach = 0.05,
                 sugarBase = 0.5, sugarBloom = 0.9, sugarFruit = 0.35, protBase = 0.5, protCat = 0.35, protFly = 0.4;
             public static int carrionDays = 3, carrionLoads = 4;
+        }
+        /// Barbecues (GDD 4.3, 6.2, T1-10): grills at some tables, a cook, meat on the grate and the plate, a hot grate
+        public static class bbq
+        {
+            public static Num share = 0.35, gap = 1.1, station = 0.55, r = 0.27, grateY = 0.82, along = -0.5;
+            public static Num dayChance = 0.5, minTemp = 19, from = 750, to = 930, jitter = 40, serve = 40, plateEnd = 60, settle = 20, minLength = 60;
+            public static int grillLoads = 4, plateLoads = 6;
+            public static Num meatProtein = 1.5, reach = 0.04;
+            public static Num burnH = 0.012, plumeR = 0.35, plumeH = 0.6, plumeTemp = 70, heatRate = 1.0 / 150, lethal = 46, guardR = 0.3, noticeMul = 0.8;
         }
         public static class fruit { public static Num treeShare = 0.3, startFrac = 0.55, rate = 0.8, spread = 1.6; public static int perTree = 6, rotDays = 6; }
         public static class muni

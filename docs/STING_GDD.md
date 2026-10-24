@@ -1122,6 +1122,22 @@ Every can on a table is a hollow cup: a 3 mm wall, open at the top, holding a dr
 
 **Effect.** With an idle player over ten minutes of play, foragers bring home about the same sugar (seed 1234: 29 against 32) and about half the protein (57 against 110, which was well above what the brood needs), and they stay within about 15 m of the nest instead of crossing the map; a fifth to a third of forager time is spent searching. All of it is tuning in `tuning/sting.tune` (`[sense]`).
 
+### 18.31 Barbecues as built (T1-10)
+
+**Grills.** About a third of picnic tables have a kettle grill 1.1 m past one end (the end away from the sugar trap), unless a tree or a box is in the way. Like the nest sites and feral hives, grills are derived from the seed at the sim level, so the chunk generator, its version and old worlds are unchanged. A grill is a solid drum to the grate (0.82 m), so wasps bump into it and can land on it.
+
+**The day.** On a warm (19 °C at 1 pm), dry day, half the grills have a barbecue, cooked by the first person seated at that table, if they are in the park that day. It is lit at lunchtime, or once the cook has had time to walk in and sit down if that is later, for up to three hours, and goes out 20 minutes before the cook leaves; a day that leaves less than an hour has none. People walk in real time while the clock runs fast (at the default two-minute day the walk in from the path takes four game hours), so the timing follows the cook's own day. Rain puts it out while it falls.
+
+**The cook.** While it is lit the cook leaves the seat, walks to a spot behind the grill and stands facing it, and goes back to the seat when it goes out. Panic sends the cook running like anyone else; calm again, they sit down and then go back to the grill. Every peer computes the same from the clock, so no events are needed.
+
+**Meat.** While it is lit there are four loads of meat on the grate; 40 minutes after it is lit a plate with six loads goes on the table, and stays until an hour after the grill goes out, or until people put things away at level 2. E within 4 cm takes a load (1.5 protein), shared between peers through the `caught` event like carrion; loads reset each day. AI hunters smell it from far off (scent 3, 18.30) and go for it like any prey.
+
+**The conflict.** People guard the meat from the first visit: a wasp within 30 cm of the grate or the plate gets slapped at a little sooner than over a drink (reaction ×0.8), and it is a slap that kills, even at alert level 0, where elsewhere people only brush. The grate burns on contact ("burned on a grill"). The air over a lit grill is hot (70 °C at the grate, cooling to the air temperature 60 cm up, within 35 cm of its centre): body temperature climbs within a second or two, and at 46 °C the wasp is "cooked over a grill". Taking from the grate means diving in, grabbing, and getting out. The HUD shows the body temperature in red and "Over the grill" while it is hot.
+
+**In the PoC.** A black bowl on three legs with a wire grate; glowing coals and smoke that drifts with the wind while lit; sausages on the grate and on a white plate, one for each load left.
+
+**Effect.** Over three days with an idle player, seed 7 (two grills) had three barbecues, ten loads of meat taken, six slaps at wasps by the meat and a wasp or two lost to the grill; seed 1234 (one grill) had two. All of it is tuning in `[bbq]`.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1130,7 +1146,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (81 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (82 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -1145,7 +1161,7 @@ Everything in `POC.md` (81 features) and its C# port (18.18), including the Tier
 | T1-7 | **Built (18.22).** The exterminator searches: at level 4 he walks the area watching wasp traffic and finds the nest from flight lines; a colony that keeps traffic low near people buys time | 8.10 | M | |
 | T1-8 | **Built (18.27).** Seasonal ecology: flowers bloom and fade by season, nectar is drawn down by bees and wasps and regrows in an ecology tick (0.2 Hz); prey by season; carrion appears | 9.4, 3.3 | M | |
 | T1-9 | **Built (18.28).** Feral hives and robbing: hives in hollow trees and walls; a wasp that gets inside takes honey (sugar) as well as brood | 9.1 | M | |
-| T1-10 | Barbecues: grills as human anchors with meat, a protein source at people's tables and a new kind of conflict | 4.3, 6.2 | M | T1-11 helps |
+| T1-10 | **Built (18.31).** Barbecues: grills as human anchors with meat, a protein source at people's tables and a new kind of conflict | 4.3, 6.2 | M | T1-11 helps |
 | T1-11 | Human days: walk and lie postures, people strolling on paths, sunbathers lying on the grass, gardeners; the schedule picks the activity by weather and traits | 8.2, 8.3 | L | Q-06 for the paths |
 | T1-12 | Regions: an 8×8 chunk layout pass (park, gardens, houses with fences, farmland, forest edge) under the chunk pass, with pulp from fences that runs out (a chunk delta) | 4.2, 4.3, 4.5 | L | Q-06 |
 | T1-13 | **Built (18.23).** Worker ages and guards: young workers stay in, older ones forage, the oldest guard the entrance and attack intruders (rivals, raiders, other players' wasps) | 6.5 | M | Q-07 for players |
@@ -1160,7 +1176,7 @@ Everything in `POC.md` (81 features) and its C# port (18.18), including the Tier
 | T1-22 | **Built (18.29).** Tuning as data: the tuning tables as versioned plain-text files read by own parsers in JS and C#, and the tuning hash in the world record | 13 | M | |
 | T1-23 | **Built (18.21).** Solo time: accelerate time in the colony view, and the Reflex slowdown as a solo option | 5.1, 7.8 | S | |
 
-Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, then the other S items: T1-14, T1-17, T1-18, T1-23, all done; T1-20 waits on regions), then the M items (T1-6 to T1-9, T1-13, T1-15, T1-16 and T1-22 done; then T1-10, T1-19, T1-21); each batch is built in the PoC and then ported to the core with parity.
+Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, then the other S items: T1-14, T1-17, T1-18, T1-23, all done; T1-20 waits on regions), then the M items (T1-6 to T1-10, T1-13, T1-15, T1-16 and T1-22 done; then T1-19, T1-21); each batch is built in the PoC and then ported to the core with parity.
 
 ### 19.3 Tier 2: later
 

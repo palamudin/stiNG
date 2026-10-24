@@ -11,9 +11,9 @@ bodies.16045690984503098046 ce376aab
 colony c78b1d1e
 sim.jab e94f1f8c
 sim.full 7b27ce56
-sim.idle7 b3fb4a26
+sim.idle7 d864800a
 sim.season ab0565d0
-sim.hot c9b0c291
+sim.hot 37716397
 sim.restored caecc5b1
 net.good 032e1dbe
 net.awful 4bb5ddbe

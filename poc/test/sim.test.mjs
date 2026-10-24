@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, CMD_FIELDS,
+  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, CMD_FIELDS,
 } from '../sim/index.js';
 import { applyTuning, parseTuning, tuningHash, tuningLeaves, TUNE } from '../sim/tunefile.js';
 
@@ -1160,6 +1160,77 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   const fresh = s._alarmReach(a, al); al.until = s.tick + 1; const old = s._alarmReach(a, al);
   ok(Math.abs(fresh - T.alarm.radius) < 1e-9 && old < 0.51 * T.alarm.radius, `alarm pheromone reaches ${fresh} m fresh and half that as it fades`);
   S.jitter = jit;
+}
+
+// Barbecues (GDD 4.3, 6.2, T1-10): grills at some tables, a cook, meat on the grate and the plate, heat, guarding
+{
+  const s = new Sim({ seed: 7, birds: false });
+  run(s, 1, () => idle());
+  const jump = (m) => { s.clockOffset += (m - s.minute) * s.tpm; s._minute(clockMinutes(s.tick + s.clockOffset, s.settings)); };
+  let rec = null, g = null;
+  for (const r of s.activeChunks) if (!g && s.grillsIn(r).length) { rec = r; g = s.grillsIn(r)[0]; }
+  const tb = rec && rec.content.tables[g.ti];
+  ok(g && Math.hypot(g.x - tb.x, g.z - tb.z) > 1.5 && Math.hypot(g.x - tb.x, g.z - tb.z) < 2.5 && rec.content.humans.some((h) => h.posture === 'sit' && Math.hypot(h.x - tb.x, h.z - tb.z) < 1.3),
+    `some picnic tables have a grill at one end (${s.activeChunks.reduce((n, r) => n + s.grillsIn(r).length, 0)} of ${s.activeChunks.reduce((n, r) => n + r.content.tables.length, 0)} tables)`);
+  // the next barbecue day
+  let day = -1;
+  const d0 = s.day;
+  for (let d = d0 + 1; d < d0 + 40 && day < 0; d++) { s.day = d; g._d = null; if (s._bbqDay(rec, g)) day = d; }
+  s.day = d0; g._d = null;
+  ok(day > 0, `a warm dry day with the cook about brings a barbecue (day ${day})`);
+  jump(day * 1440 + g._from - 240);
+  const cook = s.humanByHex(g.cook);
+  let atGrill = false, grillMeat = false, plate = false, lit = false;
+  const ev = [];
+  for (let i = 0; i < 4000 && !(plate && atGrill); i++) {
+    ev.push(...run(s, 1, () => idle()));
+    lit = lit || s.bbqLit(rec, g);
+    if (cook.state === 'cook' && Math.hypot(cook.x - g.sx, cook.z - g.sz) < 0.01) atGrill = true;
+    const m = s.meatIn(rec);
+    if (m.some((x) => x.hot)) grillMeat = true;
+    if (m.some((x) => !x.hot)) plate = true;
+  }
+  ok(lit && atGrill && cook.posture === 'stand' && count(ev, 'cookStart') >= 1, 'the cook leaves the table and stands at the lit grill');
+  ok(grillMeat && plate, 'meat sits on the grate, and later on a plate on the table');
+  // E at the plate takes a load of meat
+  const w = s.wasp, pm = s.meatIn(rec).find((x) => !x.hot);
+  place(w, { x: pm.x, y: pm.y + 0.01, z: pm.z }); w.state = 'fly'; w.carry = null;
+  run(s, 2, (sim, i) => idle({ act: i === 1 ? Act.Interact : 0 }));
+  ok(w.carry && w.carry.what === 'meat' && w.carry.kind === 'protein' && s.meatIn(rec).find((x) => x.i === pm.i).left === pm.left - 1, `E at the plate takes meat (${w.carry && w.carry.what}, ${pm.left - 1} left)`);
+  // people at the table slap at a wasp by the meat, at any alert level
+  const pm2 = s.meatIn(rec).find((x) => !x.hot);
+  let guard = [];
+  for (let i = 0; i < 600 && pm2 && !guard.some((e) => e.type === 'preSwat' && e.why === 'meat'); i++) {
+    const wd = s._driven(); if (!wd) break;
+    place(wd, { x: pm2.x + 0.1, y: pm2.y + 0.05, z: pm2.z }); wd.state = 'fly';
+    guard.push(...run(s, 1, () => idle()));
+  }
+  ok(guard.some((e) => e.type === 'preSwat' && e.why === 'meat'), `a wasp hanging over the plate gets slapped at (level ${s.escLevel(chunkKey(rec.cx, rec.cz))})`);
+  // the grate burns, the air over it cooks
+  const s2 = new Sim({ seed: 7, birds: false }); run(s2, 1, () => idle());
+  const r2 = s2.records.get(chunkKey(rec.cx, rec.cz)), g2 = s2.grillsIn(r2)[0];
+  const jump2 = (m) => { s2.clockOffset += (m - s2.minute) * s2.tpm; s2._minute(clockMinutes(s2.tick + s2.clockOffset, s2.settings)); };
+  jump2(day * 1440 + 600); s2._bbqDay(r2, g2);
+  jump2(day * 1440 + g2._from + 10);
+  const w2 = s2.wasp;
+  place(w2, { x: g2.x, y: T.bbq.grateY + T.wasp.radius + 0.004, z: g2.z }); w2.state = 'fly';
+  let e2 = run(s2, 3, () => idle());
+  const burned = e2.find((e) => e.type === 'waspDied');
+  ok(s2.bbqLit(r2, g2) && burned && burned.cause === 'burned on a grill', `touching a lit grate burns (${burned && burned.cause})`);
+  run(s2, 200, () => idle());
+  const w3 = s2._driven() || s2.wasp;
+  place(w3, { x: g2.x + 0.05, y: T.bbq.grateY + 0.12, z: g2.z }); w3.state = 'fly'; w3.bodyT = 30;
+  for (const hm of s2.active) hm.cooldown = Infinity; // nobody swats: the heat alone
+  e2 = [];
+  for (let i = 0; i < 600 && !e2.some((e) => e.type === 'waspDied'); i++) { w3.x = g2.x + 0.05; w3.y = T.bbq.grateY + 0.12; w3.z = g2.z; w3.vx = w3.vy = w3.vz = 0; e2.push(...run(s2, 1, () => idle())); }
+  const cooked = e2.find((e) => e.type === 'waspDied');
+  ok(cooked && cooked.cause === 'cooked over a grill', `hanging in the hot air over it cooks a wasp (${cooked && cooked.cause} in ${(e2.length && cooked ? (cooked.t - e2[0].t) / 60 : 0).toFixed(1)} s)`);
+  // AI hunters smell the meat from far off
+  const a = s._spawnWasp(false); a.role = 'protein';
+  place(a, { x: g.x + 12, y: 1.5, z: g.z });
+  const T0 = T.sense.jitter; T.sense.jitter = 0;
+  const t = s._sense(a); T.sense.jitter = T0;
+  ok(t && t.sub === 'meat', `barbecue meat draws a hunter from 12 m (${t ? t.sub || t.kind : 'nothing'})`);
 }
 
 // Tuning as data (GDD 13, T1-22): one plain-text file feeds both sims

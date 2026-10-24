@@ -59,6 +59,7 @@ namespace Sting.Core
                     if (cmd.mx != 0 || cmd.mz != 0) Walk(w, cmd);
                     if (w.state != "landed") break;
                     if (CupCheck(w)) break;
+                    if (OnHotGrate(w)) { Die(w, "burned on a grill", null); break; } // T1-10
                     Feed(w, driven);
                     if (w.state != "landed") break;
                     Hints(w);
@@ -106,7 +107,14 @@ namespace Sting.Core
                     break;
                 }
             }
-            w.bodyT += (target - w.bodyT) * T.cold.rate;
+            // the air over a lit grill (T1-10) heats a wasp fast, and past the lethal temperature it is cooked
+            Num? hot = w.state == "fly" || w.state == "landed" ? GrillAir(w) : null;
+            if (hot.HasValue && hot.Value > target)
+            {
+                w.bodyT += (hot.Value - w.bodyT) * T.bbq.heatRate;
+                if (w.bodyT >= T.bbq.lethal) { Die(w, "cooked over a grill", null); return; }
+            }
+            else w.bodyT += (target - w.bodyT) * T.cold.rate;
             if (w.bodyT < T.cold.torpor)
             {
                 if (++w.chill > T.cold.lethalTicks) Die(w, "cold", null);
@@ -172,6 +180,7 @@ namespace Sting.Core
             }
             WebCheck(w, p0);
             CupCheck(w);
+            if (OnHotGrate(w)) { Die(w, "burned on a grill", null); return; } // T1-10
 
             // grounded without fuel: starvation clock
             if (w.energy <= 0 && w.y <= T.wasp.radius + 1e-6)
@@ -246,7 +255,7 @@ namespace Sting.Core
                         }
                     }
                 }
-                foreach (var cy in c.cylinders)
+                foreach (var cy in CylsOf(rec))
                 {
                     if (w.y > cy.h) continue;
                     Num dx = w.x - cy.x, dz = w.z - cy.z, rr = cy.r + R, d2 = dx * dx + dz * dz;
@@ -488,6 +497,7 @@ namespace Sting.Core
                     if (D2(w, new V3(cp.x, cp.y, cp.z)) <= r2 * 2) return new PreyHit { kind = "caterpillar", key = key, i = i, protein = T.prey.caterpillarProtein };
                 }
                 foreach (var cr in CarrionIn(rec)) if (D2(w, new V3(cr.x, cr.y, cr.z)) <= T.eco.carrionReach * T.eco.carrionReach) return new PreyHit { kind = "carrion", key = key, i = (int)cr.d, protein = T.eco.carrionProtein };
+                foreach (var mt in MeatIn(rec)) if (D2(w, new V3(mt.x, mt.y, mt.z)) <= T.bbq.reach * T.bbq.reach) return new PreyHit { kind = "meat", key = key, i = mt.i, protein = T.bbq.meatProtein };
                 var hives = HivesIn(rec);
                 for (int h = 0; h < hives.Count; h++)
                 {
@@ -508,6 +518,7 @@ namespace Sting.Core
             if (p.kind == "fly") st.caughtFly[p.i] = tick + T.prey.flyRespawnTicks;
             else if (p.kind == "caterpillar") st.caughtCat[p.i] = 1;
             else if (p.kind == "carrion") { st.carrion ??= new Dictionary<int, int>(); st.carrion[p.i] = (st.carrion.TryGetValue(p.i, out var cn) ? cn : 0) + 1; }
+            else if (p.kind == "meat") { st.meat ??= new Dictionary<int, int>(); st.meat[p.i] = (st.meat.TryGetValue(p.i, out var mn) ? mn : 0) + 1; }
             else
             {
                 if (!st.beeLost.TryGetValue(p.hive, out var l)) st.beeLost[p.hive] = l = new Dictionary<int, int>();

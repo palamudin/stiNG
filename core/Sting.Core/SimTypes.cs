@@ -158,6 +158,7 @@ namespace Sting.Core
         internal object sites; internal List<Food> fruit; internal long fruitDay = long.MinValue; internal int fruitSeason;
         internal List<Bait> baits; internal int baitsCampaign = -1;
         internal List<Cup> cups; internal int[] beeLoad, flowerIdx; internal List<Hive> hives;
+        internal List<Grill> grills; internal List<Cyl> cyls;
         string[] _sub = new string[0];
         /// "cx,cz#i": the key of the i-th hive or hunter in this chunk
         public string Sub(int i)
@@ -180,8 +181,8 @@ namespace Sting.Core
         public Dictionary<int, int> cover;
         /// nectar at the last sip and when (T1-8); carrion loads taken, by the day it appeared
         public Dictionary<int, Nectar> nectar; public Dictionary<int, int> carrion;
-        /// loads robbed from each hive today (T1-9)
-        public Dictionary<int, int> robbed;
+        /// loads robbed from each hive today (T1-9); barbecue meat taken today, by grill (2 ti) and plate (2 ti + 1) (T1-10)
+        public Dictionary<int, int> robbed, meat;
     }
 
     public sealed class BeePhys { public Num x, y, z, vx, vy, vz, stun; public string mode; }

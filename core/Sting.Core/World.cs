@@ -15,7 +15,7 @@ namespace Sting.Core
     public sealed class Fly { public Num x, y, z, r, w1, w2, w3, p1, p2, p3; }
     public sealed class HumanSlot { public int slot; public Num x, z, fx, fz, exit; public string posture; }
     public sealed class Box { public Num minx, maxx, miny, maxy, minz, maxz; public bool wood, hive, shed; }
-    public sealed class Cyl { public Num x, z, r, h; public bool wood; }
+    public sealed class Cyl { public Num x, z, r, h; public bool wood, grill; }
     /// A sugar source: a can, a flower, a puddle ('spill') or fallen 'fruit'. i identifies spills and fruit.
     public sealed class SugarNode { public Num x, y, z, rate; public string kind; public int table = -1, i; }
     public sealed class Bee { public bool guard; public Num p, w, tx, ty, tz; public int period, phase; }

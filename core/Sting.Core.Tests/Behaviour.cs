@@ -578,6 +578,69 @@ namespace Sting.Core.Tests
                 Ok(Abs(fresh - T.alarm.radius) < 1e-6 && old < 0.51 * T.alarm.radius, $"alarm pheromone reaches {D(fresh)} m fresh and half that as it fades");
                 T.sense.jitter = jit; s.windOverride = null;
             }
+            // 38. barbecues (T1-10): grills, a cook, meat on the grate and the plate, the hot grate and the air over it
+            {
+                var s = new Sim(new Settings { seed = 7, birds = false });
+                RunS(s, 1);
+                void Jump(Sim x, long m) { x.clockOffset += (m - x.minute) * x.tpm; x.Minute(World.ClockMinutes(x.tick + x.clockOffset, x.settings)); }
+                ChunkRec rec = null; Grill g = null;
+                foreach (var r in s.activeChunks) if (g == null && s.GrillsIn(r).Count > 0) { rec = r; g = s.GrillsIn(r)[0]; }
+                var tb = rec.content.tables[g.ti];
+                Num gd = Sqrt(Sq(g.x - tb.x) + Sq(g.z - tb.z));
+                Ok(gd > 1.5 && gd < 2.5, $"some picnic tables have a grill at one end ({s.activeChunks.Sum(r => s.GrillsIn(r).Count)} of {s.activeChunks.Sum(r => r.content.tables.Count)} tables)");
+                long d0 = s.day, day = -1;
+                for (long d = d0 + 1; d < d0 + 40 && day < 0; d++) { s.day = d; g.d = long.MinValue; if (s.BbqDay(rec, g)) day = d; }
+                s.day = d0; g.d = long.MinValue;
+                Ok(day > 0, $"a warm dry day with the cook about brings a barbecue (day {day})");
+                Jump(s, day * 1440 + (long)g.from - 240);
+                var cook = s.HumanByHex(g.cook);
+                bool atGrill = false, grillMeat = false, plate = false, lit = false;
+                var ev = new List<SimEvent>();
+                for (int i = 0; i < 4000 && !(plate && atGrill); i++)
+                {
+                    ev.AddRange(RunS(s, 1));
+                    lit |= s.BbqLit(rec, g);
+                    if (cook.state == "cook" && Sqrt(Sq(cook.x - g.sx) + Sq(cook.z - g.sz)) < 0.01) atGrill = true;
+                    var m = s.MeatIn(rec);
+                    if (m.Any(x => x.hot)) grillMeat = true;
+                    if (m.Any(x => !x.hot)) plate = true;
+                }
+                Ok(lit && atGrill && cook.posture == "stand" && Count(ev, "cookStart") >= 1, "the cook leaves the table and stands at the lit grill");
+                Ok(grillMeat && plate, "meat sits on the grate, and later on a plate on the table");
+                var w = s.wasp; var pm = s.MeatIn(rec).First(x => !x.hot);
+                Place(w, P(pm.x, pm.y + 0.01, pm.z)); w.state = "fly"; w.carry = null;
+                RunS(s, 2, (sim, i) => Idle(c => c.act = i == 1 ? Act.Interact : 0));
+                Ok(w.carry != null && w.carry.what == "meat" && s.MeatIn(rec).First(x => x.i == pm.i).left == pm.left - 1, $"E at the plate takes meat ({w.carry?.what}, {pm.left - 1} left)");
+                var pm2 = s.MeatIn(rec).FirstOrDefault(x => !x.hot);
+                var guard = new List<SimEvent>();
+                for (int i = 0; i < 600 && pm2 != null && !guard.Any(e => e.type == "preSwat" && (string)e["why"] == "meat"); i++)
+                {
+                    var wd = s.Driven(); if (wd == null) break;
+                    Place(wd, P(pm2.x + 0.1, pm2.y + 0.05, pm2.z)); wd.state = "fly";
+                    guard.AddRange(RunS(s, 1));
+                }
+                Ok(guard.Any(e => e.type == "preSwat" && (string)e["why"] == "meat"), "a wasp hanging over the plate gets slapped at");
+                var s2 = new Sim(new Settings { seed = 7, birds = false }); RunS(s2, 1);
+                var r2 = s2.records.Get(rec.key); var g2 = s2.GrillsIn(r2)[0];
+                Jump(s2, day * 1440 + 600); s2.BbqDay(r2, g2);
+                Jump(s2, day * 1440 + (long)g2.from + 10);
+                var w2 = s2.wasp;
+                Place(w2, P(g2.x, T.bbq.grateY + T.wasp.radius + 0.004, g2.z)); w2.state = "fly";
+                var e2 = RunS(s2, 3);
+                Ok(s2.BbqLit(r2, g2) && Cause(e2.FirstOrDefault(e => e.type == "waspDied")) == "burned on a grill", $"touching a lit grate burns ({Cause(e2.FirstOrDefault(e => e.type == "waspDied"))})");
+                RunS(s2, 200);
+                var w3 = s2.Driven() ?? s2.wasp;
+                foreach (var hm in s2.active) hm.cooldown = int.MaxValue; // nobody swats: the heat alone
+                w3.state = "fly"; w3.bodyT = 30;
+                var e3 = new List<SimEvent>();
+                for (int i = 0; i < 600 && !e3.Any(e => e.type == "waspDied"); i++) { Place(w3, P(g2.x + 0.05, T.bbq.grateY + 0.12, g2.z)); e3.AddRange(RunS(s2, 1)); }
+                Ok(Cause(e3.FirstOrDefault(e => e.type == "waspDied")) == "cooked over a grill", $"hanging in the hot air over it cooks a wasp ({Cause(e3.FirstOrDefault(e => e.type == "waspDied"))})");
+                var a = s.SpawnWasp(false); a.role = "protein";
+                Place(a, P(g.x + 12, 1.5, g.z));
+                Num jit = T.sense.jitter; T.sense.jitter = 0;
+                var t = s.Sense(a); T.sense.jitter = jit;
+                Ok(t != null && t.sub == "meat", $"barbecue meat draws a hunter from 12 m ({t?.sub ?? t?.kind ?? "nothing"})");
+            }
         }
 
         // 26. Tier 1, batch 1: wind, cold, drowning, clothes by the weather, shaking and flailing

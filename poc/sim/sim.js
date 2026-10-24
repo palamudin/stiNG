@@ -8,7 +8,7 @@ import {
 } from './body.js';
 import {
   chunkOf, chunkKey, NEST, NEST_ENTRANCE, SPAWN, generateChunk, ticksPerMinute, clockMinutes, dayOf, minuteOfDay,
-  isRaining, tempAt, windAt, isDaylight, humanWindow, flyPos, beePos, birdPos, dragonPos, shedSites, makeNest,
+  isRaining, dayWeather, tempAt, windAt, isDaylight, humanWindow, flyPos, beePos, birdPos, dragonPos, shedSites, makeNest,
 } from './world.js';
 import { newColony, colonyStep, destroyNest, colonyFinished, seasonPhase } from './colony.js';
 
@@ -521,6 +521,7 @@ export class Sim {
         if (ev.what === 'fly') st.caughtFly[ev.i] = ev.tick + T.prey.flyRespawnTicks;
         else if (ev.what === 'caterpillar') st.caughtCat[ev.i] = 1;
         else if (ev.what === 'carrion') { const cr = st.carrion || (st.carrion = {}); cr[ev.i] = (cr[ev.i] || 0) + 1; }
+        else if (ev.what === 'meat') { const mt = st.meat || (st.meat = {}); mt[ev.i] = (mt[ev.i] || 0) + 1; }
         else if (ev.what === 'honey') { const rb = st.robbed || (st.robbed = {}); rb[ev.i] = (rb[ev.i] || 0) + 1; }
         else (st.beeLost[ev.hive] || (st.beeLost[ev.hive] = {}))[ev.i] = 1;
         break;
@@ -656,7 +657,7 @@ export class Sim {
       this.day = newDay;
       let k = 1;
       for (let i = 0; i < days; i++) k *= 1 - T.esc.decayPerDay;
-      for (const s of this.chunkState.values()) { s.esc *= k; s.beeLost = {}; s.caughtCat = {}; s.robbed = {}; }
+      for (const s of this.chunkState.values()) { s.esc *= k; s.beeLost = {}; s.caughtCat = {}; s.robbed = {}; s.meat = {}; }
       this.emit('newDay', { day: newDay });
     }
   }
@@ -777,6 +778,7 @@ export class Sim {
         if (cmd.mx || cmd.mz) this._walk(w, cmd);
         if (w.state !== 'landed') break;
         if (this._cupCheck(w)) break;
+        if (this._onHotGrate(w)) { this._die(w, 'burned on a grill', null); break; } // T1-10
         this._feed(w, driven);
         if (w.state !== 'landed') break;
         this._hints(w);
@@ -821,7 +823,12 @@ export class Sim {
         target = air + (shiver ? C.shiverHeat : 0);
       }
     }
-    w.bodyT += (target - w.bodyT) * C.rate;
+    // the air over a lit grill (T1-10) heats a wasp fast, and past the lethal temperature it is cooked
+    const hot = w.state === 'fly' || w.state === 'landed' ? this._grillAir(w) : null;
+    if (hot !== null && hot > target) {
+      w.bodyT += (hot - w.bodyT) * T.bbq.heatRate;
+      if (w.bodyT >= T.bbq.lethal) { this._die(w, 'cooked over a grill', null); return; }
+    } else w.bodyT += (target - w.bodyT) * C.rate;
     if (w.bodyT < C.torpor) {
       if (++w.chill > C.lethalTicks) this._die(w, 'cold', null);
     } else if (w.chill > 0) w.chill--;
@@ -879,6 +886,7 @@ export class Sim {
     }
     this._webCheck(w, p0);
     this._cupCheck(w);
+    if (this._onHotGrate(w)) { this._die(w, 'burned on a grill', null); return; } // T1-10
     // grounded without fuel: starvation clock
     if (w.energy <= 0 && w.y <= W.radius + 1e-6) {
       if (++w.groundTicks > W.starveTicks) this._die(w, 'starved', null);
@@ -939,7 +947,7 @@ export class Sim {
           if (cov && w.y > C.rim - R) { w.y = C.rim - R; if (w.vy > 0) w.vy = 0; }
         }
       }
-      for (const cy of c.cylinders) {
+      for (const cy of this._cylsOf(rec)) {
         if (w.y > cy.h) continue;
         const dx = w.x - cy.x, dz = w.z - cy.z, rr = cy.r + R, d2 = dx * dx + dz * dz;
         if (d2 >= rr * rr || d2 === 0) continue;
@@ -1138,6 +1146,7 @@ export class Sim {
         if (dist2(w, c.caterpillars[i]) <= r2 * 2) return { kind: 'caterpillar', key, i, protein: T.prey.caterpillarProtein };
       }
       for (const cr of this.carrionIn(rec)) if (dist2(w, cr) <= T.eco.carrionReach * T.eco.carrionReach) return { kind: 'carrion', key, i: cr.d, protein: T.eco.carrionProtein };
+      for (const mt of this.meatIn(rec)) if (dist2(w, mt) <= T.bbq.reach * T.bbq.reach) return { kind: 'meat', key, i: mt.i, protein: T.bbq.meatProtein };
       const hives = this.hivesIn(rec);
       for (let h = 0; h < hives.length; h++) {
         const hv = hives[h], lost = st.beeLost[h] || {}, al = this.hiveAlarms.get(key + '#' + h);
@@ -1155,6 +1164,7 @@ export class Sim {
     if (p.kind === 'fly') st.caughtFly[p.i] = this.tick + T.prey.flyRespawnTicks;
     else if (p.kind === 'caterpillar') st.caughtCat[p.i] = 1;
     else if (p.kind === 'carrion') { const cr = st.carrion || (st.carrion = {}); cr[p.i] = (cr[p.i] || 0) + 1; }
+    else if (p.kind === 'meat') { const mt = st.meat || (st.meat = {}); mt[p.i] = (mt[p.i] || 0) + 1; }
     else {
       (st.beeLost[p.hive] || (st.beeLost[p.hive] = {}))[p.i] = 1;
       this._alarmHive(p.key, p.hive, w, T.bees.catchAlarmRadius * 3);
@@ -1766,7 +1776,7 @@ export class Sim {
         if (dx * dx + dz * dz <= r2 && this.canSee(hm, o)) gain += P.contagionRate * old[j] * hm.tr.sociability * hm.tr.panicSusceptibility;
       }
       hm.panic = Math.min(1, old[i] * P.decayPerStep + gain);
-      if (hm.state === 'idle' && hm.panic >= T.resolve.fleePanic) this._startFlee(hm, this.cs(hm.chunk).lastSting || null);
+      if ((hm.state === 'idle' || hm.state === 'cook' || hm.state === 'toGrill') && hm.panic >= T.resolve.fleePanic) this._startFlee(hm, this.cs(hm.chunk).lastSting || null);
       if (hm.state === 'flee') {
         hm.x += hm.dirX * P.fleeSpeed * 3 * DT; hm.z += hm.dirZ * P.fleeSpeed * 3 * DT;
         if (--hm.fleeSteps <= 0) hm.state = 'return';
@@ -1774,11 +1784,28 @@ export class Sim {
         if (hm.panic >= T.resolve.fleePanic) { this._startFlee(hm, this.cs(hm.chunk).lastSting || null); continue; }
         if (this._walkTo(hm, hm.home.x, hm.home.z, P.walkSpeed)) { this._seat(hm); this.emit('settled', { humanHex: hm.hex }); }
       } else if (hm.state === 'fetch') this._fetchStep(hm);
+      else if (hm.state === 'toGrill' || hm.state === 'cook') this._cookStep(hm);
       else if (hm.state === 'idle') {
         if (hm.wantSpray) { hm.wantSpray = false; hm.state = 'fetch'; hm.posture = 'stand'; hm.fetchT = 0; this.emit('fetchSpray', { humanHex: hm.hex }); }
+        else if (this._cookNow(hm)) { hm.state = 'toGrill'; hm.posture = 'stand'; this.emit('cookStart', { humanHex: hm.hex }); }
         else this._annoyance(hm);
       }
     }
+  }
+
+  // The cook (T1-10): to the grill while it is lit, standing at it facing the grate, back to the seat when it goes out
+  _cookNow(hm) {
+    const g = this._grillOf(hm);
+    return !!g && this.bbqLit(this.records.get(hm.chunk), g);
+  }
+  _cookStep(hm) {
+    const g = this._grillOf(hm);
+    if (!g || !this.bbqLit(this.records.get(hm.chunk), g)) { hm.state = 'return'; this.emit('cookEnd', { humanHex: hm.hex }); return; }
+    if (hm.state === 'toGrill') {
+      if (this._walkTo(hm, g.sx, g.sz, T.panic.walkSpeed)) { hm.state = 'cook'; hm.fx = g.fx; hm.fz = g.fz; }
+      return;
+    }
+    this._annoyance(hm);
   }
 
   // Off to the house for a can and back (T1-6): out of sight at the exit, then back to the seat armed
@@ -1855,6 +1882,7 @@ export class Sim {
     const lvl = this.escAt(hm.x, hm.z), E = T.esc;
     const head = hm.parts[hm.posture][0];
     let target = null, why = null, cupHit = null;
+    const hrec = this.records.get(hm.chunk), meat = hrec && this.grillsIn(hrec).length ? this.meatIn(hrec) : null;
     for (const w of this.wasps) {
       if (!(w.state === 'fly' || w.state === 'chewing' || w.state === 'landed')) continue;
       const dx = w.x - hm.x, dz = w.z - hm.z;
@@ -1867,12 +1895,14 @@ export class Sim {
       if (hd2 < E.faceRadius * E.faceRadius) { target = w; why = 'face'; break; }
       if (lvl >= 1 && hd2 < E.headRadius * E.headRadius) { target = w; why = 'head'; break; }
       if (lvl >= 1 && (w.ai.atFood === 'can' || (w.state === 'landed' && this._nearCan(w))) && dx * dx + dz * dz < 1.5) { target = w; why = 'food'; break; }
+      // people guard the barbecue meat from the start (T1-10)
+      if (meat && meat.some((m) => dist2(w, m) < T.bbq.guardR * T.bbq.guardR)) { target = w; why = 'meat'; break; }
       if (lvl >= 3 && hm.sprayCount > 0 && lp.z > 0.1 && lp.z < E.sprayRange && Math.abs(lp.x) < lp.z) { target = w; why = 'spray'; break; }
     }
     if (!target) { hm.annoy = 0; hm.annoyId = 0; return; }
     if (hm.annoyId !== target.id) { hm.annoyId = target.id; hm.annoy = 0; }
     hm.annoy += 3;
-    const need = hm.tr.reactionTicks * (why === 'face' ? 3 : why === 'cup' ? T.cup.noticeMul : E.noticeMul) + (why === 'spray' ? 20 : 0);
+    const need = hm.tr.reactionTicks * (why === 'face' ? 3 : why === 'cup' ? T.cup.noticeMul : why === 'meat' ? T.bbq.noticeMul : E.noticeMul) + (why === 'spray' ? 20 : 0);
     if (hm.annoy < need) return;
     hm.annoy = 0;
     hm.cooldown = this.tick + E.cooldownTicks;
@@ -1886,7 +1916,7 @@ export class Sim {
       return;
     }
     const lp = toLocal(hm, target);
-    const slap = lvl >= 1;
+    const slap = lvl >= 1 || why === 'meat';
     const kind = slap ? SwatKind.Slap : SwatKind.Brush;
     this._publish({
       type: 'preSwat', humanHex: hm.hex, waspId: target.id, kind, start, window: windowFor(kind), why,
@@ -2397,6 +2427,94 @@ export class Sim {
     }
     return out;
   }
+  // ---------------- barbecues (GDD 4.3, 6.2, T1-10)
+
+  // The grills of a chunk: one at the end of some picnic tables (away from the trap end), with the spot the cook stands
+  // and the person who cooks (the first seated at that table). Derived from the seed at the sim level like the nest
+  // sites, so the chunk generator and old worlds are unchanged. Grills that would stand in a tree or a box are left out.
+  grillsIn(rec) {
+    if (rec._grills) return rec._grills;
+    const B = T.bbq, c = rec.content, sd = Number(this.seed & 0xffffffffn), out = [];
+    c.tables.forEach((tb, ti) => {
+      if (hseq(sd, rec.cx, rec.cz, ti, 941) >= B.share) return;
+      const ux = tb.axisX ? -1 : 0, uz = tb.axisX ? 0 : -1, hw = 0.95;
+      const gx = tb.x + ux * (hw + B.gap), gz = tb.z + uz * (hw + B.gap), sx = gx + ux * B.station, sz = gz + uz * B.station;
+      const clear = (x, z, r) => c.cylinders.every((cy) => sq(cy.x - x) + sq(cy.z - z) > sq(cy.r + r)) &&
+        c.boxes.every((b) => x < b.minx - r || x > b.maxx + r || z < b.minz - r || z > b.maxz + r);
+      if (!clear(gx, gz, B.r + 0.1) || !clear(sx, sz, 0.3)) return;
+      let cook = null, cs = Infinity;
+      for (const hs of c.humans) if (hs.posture === 'sit' && sq(hs.x - tb.x) + sq(hs.z - tb.z) < 1.5 && hs.slot < cs) { cs = hs.slot; cook = hs; }
+      if (!cook) return;
+      const id = hash(this.seed, Domain.WorldGen, u64(rec.cx), u64(rec.cz), BigInt(cook.slot));
+      out.push({ ti, x: gx, z: gz, sx, sz, fx: -ux, fz: -uz, cookId: id, cook: id.toString(16).padStart(16, '0'),
+        px: tb.x + (tb.axisX ? B.along : 0), pz: tb.z + (tb.axisX ? 0 : B.along) });
+    });
+    rec._grills = out;
+    return out;
+  }
+  // Is there a barbecue at this grill today: the dice, a warm dry day, and the cook in the park. It is lit at lunchtime
+  // or once the cook has had time to walk in and sit down, whichever is later, for up to three hours, and goes out
+  // before the cook leaves; a day too short for an hour of it has none.
+  _bbqDay(rec, g) {
+    const B = T.bbq, sd = Number(this.seed & 0xffffffffn), d = this.day;
+    if (g._d === d && g._s === this.season.n) return g._on;
+    g._d = d; g._s = this.season.n;
+    const win = humanWindow(this.seed, g.cookId, d, this.settings.humanDensity);
+    g._on = false;
+    if (!win || hseq(sd, rec.cx, rec.cz, g.ti, d, 943) >= B.dayChance || dayWeather(this.seed, d).rain || this.airAt(d * 1440 + 13 * 60) < B.minTemp) return false;
+    // people walk in real time while the clock runs on: the walk from the path to the seat in game minutes
+    const walk = Math.ceil(T.panic.approachDist / T.panic.walkSpeed * 1440 / (this.settings.dayMinutes * 60));
+    g._from = Math.max(B.from + Math.round((hseq(sd, rec.cx, rec.cz, g.ti, d, 944) * 2 - 1) * B.jitter), win.arrive + walk + B.settle);
+    g._end = Math.min(g._from + B.to - B.from, win.leave - B.settle);
+    g._on = g._end - g._from >= B.minLength;
+    return g._on;
+  }
+  // Lit while it is not raining
+  bbqLit(rec, g) {
+    if (!this._bbqDay(rec, g) || this.raining) return false;
+    const md = minuteOfDay(this.minute);
+    return md >= g._from && md < g._end;
+  }
+  // The meat about a chunk: on the grate while it is lit, then on a plate on the table (covered once people are cross)
+  meatIn(rec) {
+    const B = T.bbq, key = chunkKey(rec.cx, rec.cz), st = this.chunkState.get(key), taken = (st && st.meat) || {}, out = [];
+    const md = minuteOfDay(this.minute), lvl = this.escLevel(key);
+    for (const g of this.grillsIn(rec)) {
+      if (!this._bbqDay(rec, g)) continue;
+      const left0 = B.grillLoads - (taken[g.ti * 2] || 0), left1 = B.plateLoads - (taken[g.ti * 2 + 1] || 0);
+      if (this.bbqLit(rec, g) && left0 > 0) out.push({ x: g.x, y: B.grateY + 0.025, z: g.z, i: g.ti * 2, left: left0, hot: true });
+      const end = g._end + B.plateEnd;
+      if (md >= g._from + B.serve && md < end && lvl < 2 && left1 > 0) out.push({ x: g.px, y: 0.77, z: g.pz, i: g.ti * 2 + 1, left: left1, hot: false });
+    }
+    return out;
+  }
+  // grills as solid drums from the ground to the grate, for collision and for landing (the top is the grate)
+  _cylsOf(rec) {
+    return rec._cyls || (rec._cyls = rec.content.cylinders.concat(this.grillsIn(rec).map((g) => ({ x: g.x, z: g.z, r: T.bbq.r, h: T.bbq.grateY, grill: true }))));
+  }
+  _grillOf(hm) {
+    const rec = this.records.get(hm.chunk);
+    return rec ? this.grillsIn(rec).find((g) => g.cook === hm.hex) || null : null;
+  }
+  // A lit grill's air: hot right over the grate, cooling with height. Returns the air temperature there, or null.
+  _grillAir(w) {
+    const B = T.bbq;
+    if (w.y < B.grateY || w.y > B.grateY + B.plumeH) return null;
+    for (const rec of this.activeChunks) for (const g of this.grillsIn(rec)) {
+      if (sq(w.x - g.x) + sq(w.z - g.z) > B.plumeR * B.plumeR || !this.bbqLit(rec, g)) continue;
+      const air = this.temperature;
+      return air + (B.plumeTemp - air) * (1 - (w.y - B.grateY) / B.plumeH);
+    }
+    return null;
+  }
+  // Touching the grate of a lit grill
+  _onHotGrate(w) {
+    const B = T.bbq;
+    if (w.y > B.grateY + T.wasp.radius + B.burnH || w.y < B.grateY - 0.05) return false;
+    for (const rec of this.activeChunks) for (const g of this.grillsIn(rec)) if (sq(w.x - g.x) + sq(w.z - g.z) < B.r * B.r && this.bbqLit(rec, g)) return true;
+    return false;
+  }
+
   // what the season offers the abstract foragers: multipliers on sugar and protein income
   ecoAvail() {
     const E = T.eco, f = clamp(this.seasonFrac, 0, 1);
@@ -2616,14 +2734,14 @@ export class Sim {
         const nx = k === 0 ? -1 : k === 1 ? 1 : 0, ny = k === 2 ? -1 : k === 3 ? 1 : 0, nz = k === 4 ? -1 : k === 5 ? 1 : 0;
         take(p.x + nx * f[k], p.y + ny * f[k], p.z + nz * f[k], nx, ny, nz, 0, kind);
       }
-      for (const cy of c.cylinders) {
-        const hx = p.x - cy.x, hz = p.z - cy.z, hd = Math.sqrt(hx * hx + hz * hz);
+      for (const cy of this._cylsOf(rec)) {
+        const hx = p.x - cy.x, hz = p.z - cy.z, hd = Math.sqrt(hx * hx + hz * hz), sk = cy.grill ? 'grill' : 'bark';
         if (hd - cy.r >= bd || p.y > cy.h + bd) continue;
-        if (p.y > cy.h && hd <= cy.r) { take(p.x, cy.h, p.z, 0, 1, 0, p.y - cy.h, 'bark'); continue; } // the top
+        if (p.y > cy.h && hd <= cy.r) { take(p.x, cy.h, p.z, 0, 1, 0, p.y - cy.h, sk); continue; } // the top
         if (hd === 0) continue;
         const qx = cy.x + hx / hd * cy.r, qz = cy.z + hz / hd * cy.r;
-        if (p.y > cy.h) { const ey = p.y - cy.h, dr = hd - cy.r, d = Math.sqrt(dr * dr + ey * ey); take(qx, cy.h, qz, (hx / hd) * dr / d, ey / d, (hz / hd) * dr / d, d, 'bark'); }
-        else take(qx, p.y, qz, hx / hd, 0, hz / hd, Math.max(0, hd - cy.r), 'bark');
+        if (p.y > cy.h) { const ey = p.y - cy.h, dr = hd - cy.r, d = Math.sqrt(dr * dr + ey * ey); take(qx, cy.h, qz, (hx / hd) * dr / d, ey / d, (hz / hd) * dr / d, d, sk); }
+        else take(qx, p.y, qz, hx / hd, 0, hz / hd, Math.max(0, hd - cy.r), sk);
       }
       for (const f of c.flowers) {
         if (Math.abs(p.x - f.x) > lim + L.headR || Math.abs(p.z - f.z) > lim + L.headR || p.y > f.y + lim + L.headR) continue;
@@ -3212,6 +3330,8 @@ export class Sim {
       // carrion smells stronger by the day
       for (const cr of this.carrionIn(rec)) cb({ kind: 'prey', sub: 'carrion', key, i: cr.d, c: ri + 90 }, cr, S.carrion + S.carrionPerDay * (this.day - cr.d));
       this._baitsIn(key).forEach((b, i) => cb({ kind: 'bait', key, i, c: ri + 70 }, b, S.bait));
+      // barbecue meat smells a long way (T1-10)
+      for (const mt of this.meatIn(rec)) cb({ kind: 'prey', sub: 'meat', key, i: mt.i, c: ri + 110 }, mt, S.meat);
     }
   }
 
@@ -3348,6 +3468,7 @@ export class Sim {
     if (t.sub === 'fly') return !this.flyActive(rec, t.i) ? null : (st.caughtFly[t.i] || 0) > this.tick ? c.flies[t.i] : flyPos(c.flies[t.i], this.tick);
     if (t.sub === 'cat') return st.caughtCat[t.i] || !this.catActive(rec, t.i) ? null : c.caterpillars[t.i];
     if (t.sub === 'carrion') return this.carrionIn(rec).find((x) => x.d === t.i) || null;
+    if (t.sub === 'meat') { const mt = this.meatIn(rec).find((x) => x.i === t.i); return mt ? { x: mt.x, y: mt.y + 0.012, z: mt.z } : null; }
     return null;
   }
 

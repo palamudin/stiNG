@@ -270,6 +270,7 @@ namespace Sting.Core
                     if (ev.what == "fly") st.caughtFly[ev.i] = ev.tick + T.prey.flyRespawnTicks;
                     else if (ev.what == "caterpillar") st.caughtCat[ev.i] = 1;
                     else if (ev.what == "carrion") { st.carrion ??= new Dictionary<int, int>(); st.carrion[ev.i] = (st.carrion.TryGetValue(ev.i, out var cn) ? cn : 0) + 1; }
+                    else if (ev.what == "meat") { st.meat ??= new Dictionary<int, int>(); st.meat[ev.i] = (st.meat.TryGetValue(ev.i, out var mn) ? mn : 0) + 1; }
                     else if (ev.what == "honey") { st.robbed ??= new Dictionary<int, int>(); st.robbed[ev.i] = (st.robbed.TryGetValue(ev.i, out var rn) ? rn : 0) + 1; }
                     else { if (!st.beeLost.TryGetValue(ev.hive, out var l)) st.beeLost[ev.hive] = l = new Dictionary<int, int>(); l[ev.i] = 1; }
                     break;

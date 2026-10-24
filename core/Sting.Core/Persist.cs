@@ -86,7 +86,7 @@ namespace Sting.Core
 
     public static class Persist
     {
-        public const int SAVE_VERSION = 13; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home)
+        public const int SAVE_VERSION = 14; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home); 14: barbecue meat taken
         const uint MAGIC = 0x474E4953; // "SING"
 
         // ---------------------------------------------------------------- one Io per type
@@ -221,6 +221,7 @@ namespace Sting.Core
             a.Dict(ref s.nectar, () => null, v => { v ??= new Nectar(); a.D(ref v.lv); a.L(ref v.m); return v; });
             a.Dict(ref s.carrion, () => 0, v => { a.I(ref v); return v; });
             a.Dict(ref s.robbed, () => 0, v => { a.I(ref v); return v; });
+            a.Dict(ref s.meat, () => 0, v => { a.I(ref v); return v; });
             return s;
         }
 

@@ -260,6 +260,7 @@ cat = 0.5
 carrion = 1.5
 carrionPerDay = 0.5
 bait = 4
+meat = 3
 
 [prey]
 fliesPerTable = 3
@@ -413,6 +414,35 @@ sugarFruit = 0.35
 protBase = 0.5
 protCat = 0.35
 protFly = 0.4
+
+[bbq]
+share = 0.35
+gap = 1.1
+station = 0.55
+r = 0.27
+grateY = 0.82
+along = -0.5
+dayChance = 0.5
+minTemp = 19
+from = 750
+to = 930
+jitter = 40
+serve = 40
+plateEnd = 60
+settle = 20
+minLength = 60
+grillLoads = 4
+plateLoads = 6
+meatProtein = 1.5
+reach = 0.04
+burnH = 0.012
+plumeR = 0.35
+plumeH = 0.6
+plumeTemp = 70
+heatRate = 0.006666666666666667
+lethal = 46
+guardR = 0.3
+noticeMul = 0.8
 
 [fruit]
 treeShare = 0.3

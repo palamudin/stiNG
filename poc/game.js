@@ -148,13 +148,17 @@ const geoStem = new THREE.CylinderGeometry(0.0035, 0.0035, 1, 4);
 const geoHead = new THREE.IcosahedronGeometry(0.022, 1);
 const geoBottle = new THREE.CylinderGeometry(0.035, 0.04, 0.2, 12);
 const geoCandle = new THREE.CylinderGeometry(0.04, 0.04, 0.07, 14);
+const geoBowl = new THREE.SphereGeometry(0.27, 20, 10, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2); // the lower half: a kettle open at the top
+const geoGrillLeg = new THREE.CylinderGeometry(0.012, 0.012, 0.72, 6);
+const geoGrate = new THREE.CircleGeometry(0.26, 16, 0, Math.PI * 2);
+const geoPuff = new THREE.SphereGeometry(0.06, 8, 6);
 const geoFlame = new THREE.ConeGeometry(0.008, 0.025, 6);
 const webMat = new THREE.LineBasicMaterial({ color: '#f4f4f4', transparent: true, opacity: 0.32 });
 
 function buildChunk(rec) {
   const g = new THREE.Group();
   const c = rec.content;
-  const dyn = { lids: [], traps: [], candles: [], cans: [], puddles: [], crowns: [] };
+  const dyn = { lids: [], traps: [], candles: [], cans: [], puddles: [], crowns: [], grills: [] };
   // garden sheds: plank walls, a pitched roof, a crack in one wall and a gap under one eave (nest sites)
   for (const sh of c.sheds || []) {
     const walls = new THREE.Mesh(new THREE.BoxGeometry(sh.hw * 2, sh.h, sh.hd * 2), mat('#7a5a3c'));
@@ -210,6 +214,22 @@ function buildChunk(rec) {
     candle.add(cup, flame); candle.position.set(t.x, 0.75, t.z); candle.visible = false;
     g.add(candle); dyn.candles.push(candle);
   });
+  // kettle grills at some tables (T1-10): a black bowl on three legs, a grate, coals and smoke when lit, a plate
+  for (const gr of sim.grillsIn(rec)) {
+    const B = T.bbq, grp = new THREE.Group(); grp.position.set(gr.x, 0, gr.z);
+    const bowl = new THREE.Mesh(geoBowl, mat('#1c1c1e', { side: THREE.DoubleSide })); bowl.position.y = B.grateY; bowl.castShadow = true;
+    for (let k = 0; k < 3; k++) {
+      const a = k * 2.094, leg = new THREE.Mesh(geoGrillLeg, mat('#2a2a2c'));
+      leg.position.set(Math.cos(a) * B.r * 0.7, (B.grateY - 0.12) / 2, Math.sin(a) * B.r * 0.7); leg.rotation.set(Math.sin(a) * 0.12, 0, -Math.cos(a) * 0.12); grp.add(leg);
+    }
+    const grate = new THREE.Mesh(geoGrate, new THREE.MeshLambertMaterial({ color: '#555', wireframe: true })); grate.rotation.x = -Math.PI / 2; grate.position.y = B.grateY;
+    const coals = new THREE.Mesh(new THREE.CircleGeometry(B.r * 0.8, 20), new THREE.MeshBasicMaterial({ color: '#ff6a1a' })); coals.rotation.x = -Math.PI / 2; coals.position.y = B.grateY - 0.06; coals.visible = false;
+    const smoke = [];
+    for (let k = 0; k < 6; k++) { const p = new THREE.Mesh(geoPuff, new THREE.MeshBasicMaterial({ color: '#c8c8c8', transparent: true, opacity: 0, depthWrite: false })); p.visible = false; grp.add(p); smoke.push(p); }
+    grp.add(bowl, grate, coals); g.add(grp);
+    const plate = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.09, 0.012, 20), mat('#f2efe8')); plate.position.set(gr.px, 0.757, gr.pz); plate.visible = false; g.add(plate);
+    dyn.grills.push({ gr, coals, smoke, plate });
+  }
   const cups = sim.cupsIn(rec);
   c.cans.forEach((can, ci) => {
     // a hollow cup: painted outside, plain inside, the drink at its level
@@ -327,6 +347,23 @@ function updateChunkDynamics() {
       d.heads.instanceMatrix.needsUpdate = true; if (d.heads.instanceColor) d.heads.instanceColor.needsUpdate = true;
     }
     for (const t of d.traps) t.visible = lv >= 3;
+    // barbecues (T1-10): coals and smoke while lit, the plate while meat is served
+    if (d.grills.length) {
+      const rec2 = sim.records.get(k), meat = rec2 ? sim.meatIn(rec2) : [], now = performance.now() / 1000;
+      for (const gv of d.grills) {
+        const lit = rec2 && sim.bbqLit(rec2, gv.gr);
+        gv.coals.visible = lit;
+        if (lit) gv.coals.material.color.setHSL(0.05, 1, 0.5 + 0.08 * Math.sin(now * 7 + gv.gr.ti));
+        gv.smoke.forEach((p, i) => {
+          p.visible = lit;
+          if (!lit) return;
+          const f = (now * 0.35 + i / gv.smoke.length) % 1, w = sim.wind;
+          p.position.set(w.x * f * 0.6 + 0.05 * Math.sin(now + i), T.bbq.grateY + 0.05 + f * 1.4, w.z * f * 0.6 + 0.05 * Math.cos(now * 1.3 + i));
+          p.scale.setScalar(0.6 + f * 2.2); p.material.opacity = 0.35 * (1 - f);
+        });
+        gv.plate.visible = meat.some((m) => m.i === gv.gr.ti * 2 + 1);
+      }
+    }
 
   }
 }
@@ -409,6 +446,8 @@ const baitBoxGeo = new THREE.BoxGeometry(0.07, 0.1, 0.05), baitMeatGeo = new THR
 // Windfall fruit in the grass late in the season (apples and plums)
 const carrionMesh = new THREE.InstancedMesh(new THREE.CapsuleGeometry(0.022, 0.06, 4, 8).rotateZ(Math.PI / 2), mat('#4a3a30'), 64);
 carrionMesh.count = 0; carrionMesh.frustumCulled = false; scene.add(carrionMesh);
+const meatMesh = new THREE.InstancedMesh(new THREE.CapsuleGeometry(0.011, 0.07, 4, 8).rotateZ(Math.PI / 2), mat('#7a3018'), 64);
+meatMesh.count = 0; meatMesh.frustumCulled = false; scene.add(meatMesh);
 const honeyMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.03, 8, 6).scale(1, 1.3, 0.5), mat('#c98a1b'), 64);
 honeyMesh.count = 0; honeyMesh.frustumCulled = false; scene.add(honeyMesh);
 const fruitMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.032, 10, 8), new THREE.MeshLambertMaterial({ color: '#ffffff' }), 400);
@@ -511,6 +550,15 @@ function renderCritters(t) {
     carrionMesh.setMatrixAt(nk++, _m4.compose(_p.set(cr.x, 0.02, cr.z), _q, _s));
   }
   carrionMesh.count = nk; carrionMesh.instanceMatrix.needsUpdate = true;
+  // barbecue meat (T1-10): sausages on the grate and on the plate, one for each load left (up to four)
+  let nm = 0;
+  for (const rec of sim.activeChunks) for (const mt of sim.meatIn(rec)) {
+    for (let k = 0; k < Math.min(4, mt.left) && nm < 64; k++) {
+      _q.setFromAxisAngle(UP, mt.hot ? 0.3 : 1.2);
+      meatMesh.setMatrixAt(nm++, _m4.compose(_p.set(mt.x + (k - 1.5) * 0.045, mt.y - 0.012, mt.z + (k % 2) * 0.02), _q, _s));
+    }
+  }
+  meatMesh.count = nm; meatMesh.instanceMatrix.needsUpdate = true;
   honeyMesh.count = nh; honeyMesh.instanceMatrix.needsUpdate = true;
   flyMesh.count = nf; catMesh.count = nc; beeMesh.count = nb;
   flyMesh.instanceMatrix.needsUpdate = catMesh.instanceMatrix.needsUpdate = beeMesh.instanceMatrix.needsUpdate = true;
@@ -1452,8 +1500,8 @@ function updateHud() {
   $('venomBar').style.width = (w.venom * 100).toFixed(1) + '%';
   { const life = w.caste === 'queen' ? 0 : Math.min(1, (sim.minute - (w.born ?? sim.minute)) / sim.lifespanMinutes(w)); $('ageRow').hidden = $('ageWrap').hidden = w.caste === 'queen'; $('ageBar').style.width = (life * 100).toFixed(1) + '%'; }
   $('cropBar').style.width = (w.energy * 100).toFixed(1) + '%';
-  { const bt = w.bodyT ?? 30, cold = bt < T.cold.flyBody; // body temperature (GDD 10.2): 0-40 °C
-    $('bodyBar').style.width = Math.max(0, Math.min(100, bt / 40 * 100)).toFixed(1) + '%'; $('bodyWrap').classList.toggle('cold', cold); $('bodyL').textContent = `Body ${Math.round(bt)} °C`; }
+  { const bt = w.bodyT ?? 30, cold = bt < T.cold.flyBody; // body temperature (GDD 10.2): 0 °C to the lethal heat of a grill
+    $('bodyBar').style.width = Math.max(0, Math.min(100, bt / T.bbq.lethal * 100)).toFixed(1) + '%'; $('bodyWrap').classList.toggle('cold', cold); $('bodyWrap').classList.toggle('hot', bt > 36); $('bodyL').textContent = `Body ${Math.round(bt)} °C`; }
   $('cropBar').style.background = w.energy < 0.2 ? 'var(--red)' : '';
   $('ball').hidden = w.state !== 'balled';
   $('tickle').hidden = w.state !== 'perched';
@@ -1478,6 +1526,7 @@ function updateHud() {
   else if (w.energy <= 0) status = 'Crop empty · falling';
   else if (w.carry) status = `Carrying ${w.carry.what}`;
   else if (Math.hypot(w.vx, w.vy, w.vz) < 0.05) status = 'Hovering';
+  if ((w.state === 'fly' || w.state === 'landed') && sim._grillAir(w) !== null) status = `Over the grill · ${Math.round(w.bodyT)} °C, cooked at ${T.bbq.lethal}`; // T1-10
   $('status').textContent = status;
 
   let hint = '';
@@ -1501,7 +1550,7 @@ function updateHud() {
     }
   } else if (w.state === 'chewing') hint = `Keep holding ${kbd('E')}`;
   else if (h.opening) hint = `${kbd('E')} crawl in at the ${h.opening}`;
-  else if (h.prey) hint = h.prey === 'carrion' ? `${kbd('E')} take a load of meat from the carcass` : `${kbd('E')} catch the ${h.prey}`;
+  else if (h.prey) hint = h.prey === 'carrion' ? `${kbd('E')} take a load of meat from the carcass` : h.prey === 'meat' ? `${kbd('E')} grab a piece of barbecue meat` : `${kbd('E')} catch the ${h.prey}`;
   else if (h.bait) hint = `${kbd('E')} take the meat from the station`;
   else if (h.wood) hint = `Hold ${kbd('E')} to chew pulp`;
   else if (h.nest && (md < T.time.dawn || md >= T.time.dusk)) hint = `${kbd('R')} rest until morning`;
@@ -1586,6 +1635,8 @@ function deathWhy(e) {
   if (e.cause === 'drowned in a trap') return 'Sweet-smelling bottles at alert level 3 are traps.';
   if (e.cause === 'drowned in a drink') return 'Cups are deep. Feed just above the drink without touching it, and mash Shift the moment you slip in.';
   if (e.cause === 'stung inside a hive') return 'Every second inside a hive is a chance for the bees to get you. Mash to grab fast, or bail out with Space.';
+  if (e.cause === 'burned on a grill') return 'A lit grate burns on contact. Grab the meat from just above it, never land on it.';
+  if (e.cause === 'cooked over a grill') return 'The air over a lit grill heats you in a second or two. Dive in, grab, and get out; watch your body temperature.';
   if (e.cause === 'drowned under a lid') return 'Someone saw you go into their drink and covered it. Don\'t linger inside a cup in front of people.';
   if (e.cause === 'cold') return 'Below about 8 °C a wasp goes torpid and dies. Get home before cold nights, or warm up on a person.';
   if (e.cause === 'insecticide') return 'Some people carry spray once the area is alert. Stay out of the cone in front of them.';
@@ -1604,7 +1655,7 @@ function deathWhy(e) {
     default: return '';
   }
 }
-const DEATH_TITLE = { 'eaten by a spider': 'EATEN', 'taken by a bird': 'TAKEN', 'killed by a rival wasp': 'KILLED', slap: 'SWATTED', cover: 'SMOTHERED', 'crushed under clothing': 'CRUSHED', insecticide: 'SPRAYED', 'drowned in a trap': 'DROWNED', 'cooked by bees': 'COOKED', starved: 'STARVED', 'old age': 'SPENT', 'taken by a dragonfly': 'TAKEN', cold: 'CHILLED', 'drowned in a drink': 'DROWNED', 'drowned under a lid': 'SHUT IN', 'stung inside a hive': 'STUNG' };
+const DEATH_TITLE = { 'eaten by a spider': 'EATEN', 'taken by a bird': 'TAKEN', 'killed by a rival wasp': 'KILLED', slap: 'SWATTED', cover: 'SMOTHERED', 'crushed under clothing': 'CRUSHED', insecticide: 'SPRAYED', 'drowned in a trap': 'DROWNED', 'cooked by bees': 'COOKED', starved: 'STARVED', 'old age': 'SPENT', 'taken by a dragonfly': 'TAKEN', cold: 'CHILLED', 'drowned in a drink': 'DROWNED', 'drowned under a lid': 'SHUT IN', 'stung inside a hive': 'STUNG', 'burned on a grill': 'BURNED', 'cooked over a grill': 'GRILLED' };
 
 function pushSwatAnims(list, frameHex, contactTick) {
   const frame = sim.humanByHex(frameHex);
@@ -1693,6 +1744,8 @@ function handleEvents(events) {
       case 'guardHunt': logEvent(`a guard chases off ${e.player ? "another player's wasp" : 'a rival wasp'}`); break;
       case 'guardOut': logEvent('a guard takes up post at the entrance'); break;
       case 'fetchSpray': logEvent(`#${e.humanHex.slice(0, 4)} goes for a can of spray`); break;
+      case 'cookStart': logEvent(`#${e.humanHex.slice(0, 4)} lights the barbecue`); break;
+      case 'cookEnd': logEvent(`#${e.humanHex.slice(0, 4)} is done at the grill`); break;
       case 'armed': logEvent(`#${e.humanHex.slice(0, 4)} is back with spray`); break;
       case 'extAbort': toast('The exterminator gives up for today', 'var(--yellow)', 3); break;
       case 'extCancelled': toast('Exterminator cancelled', 'var(--yellow)', 2.4); break;

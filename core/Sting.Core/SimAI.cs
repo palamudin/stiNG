@@ -175,6 +175,8 @@ namespace Sting.Core
                 foreach (var cr in CarrionIn(rec)) cb(new AiTarget { kind = "prey", sub = "carrion", key = key, i = (int)cr.d, c = ri + 90 }, new V3(cr.x, cr.y, cr.z), T.sense.carrion + T.sense.carrionPerDay * (Num)(day - cr.d));
                 var baits = BaitsIn(key);
                 for (int i = 0; i < baits.Count; i++) cb(new AiTarget { kind = "bait", key = key, i = i, c = ri + 70 }, new V3(baits[i].x, baits[i].y, baits[i].z), T.sense.bait);
+                // barbecue meat smells a long way (T1-10)
+                foreach (var mt in MeatIn(rec)) cb(new AiTarget { kind = "prey", sub = "meat", key = key, i = mt.i, c = ri + 110 }, new V3(mt.x, mt.y, mt.z), T.sense.meat);
             }
         }
 
@@ -302,6 +304,7 @@ namespace Sting.Core
             if (t.sub == "fly") { if (!FlyActive(rec, t.i)) return null; var fl = c.flies[t.i]; return (st.caughtFly.TryGetValue(t.i, out var cf) ? cf : 0) > tick ? new V3(fl.x, fl.y, fl.z) : FlyPos(fl, tick); }
             if (t.sub == "cat") { if (st.caughtCat.ContainsKey(t.i) || !CatActive(rec, t.i)) return null; var cp = c.caterpillars[t.i]; return new V3(cp.x, cp.y, cp.z); }
             if (t.sub == "carrion") { foreach (var cr in CarrionIn(rec)) if (cr.d == t.i) return new V3(cr.x, cr.y, cr.z); return null; }
+            if (t.sub == "meat") { foreach (var mt in MeatIn(rec)) if (mt.i == t.i) return new V3(mt.x, mt.y + 0.012, mt.z); return null; }
             return null;
         }
 

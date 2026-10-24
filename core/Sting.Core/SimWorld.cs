@@ -112,7 +112,7 @@ namespace Sting.Core
                     if (dx * dx + dz * dz <= r2 && CanSee(hm.x, hm.z, o.x, o.z)) gain += T.panic.contagionRate * oj * hm.tr.sociability * hm.tr.panicSusceptibility;
                 }
                 hm.panic = Min(1, oldI * T.panic.decayPerStep + gain);
-                if (hm.state == "idle" && hm.panic >= T.resolve.fleePanic) StartFlee(hm, CS(hm.chunk).lastSting);
+                if ((hm.state == "idle" || hm.state == "cook" || hm.state == "toGrill") && hm.panic >= T.resolve.fleePanic) StartFlee(hm, CS(hm.chunk).lastSting);
                 if (hm.state == "flee")
                 {
                     hm.x += hm.dirX * T.panic.fleeSpeed * 3 * T.DT; hm.z += hm.dirZ * T.panic.fleeSpeed * 3 * T.DT;
@@ -124,9 +124,11 @@ namespace Sting.Core
                     if (WalkTo(hm, hm.home.x, hm.home.z, T.panic.walkSpeed)) { Seat(hm); Emit("settled", ("humanHex", hm.hex)); }
                 }
                 else if (hm.state == "fetch") FetchStep(hm);
+                else if (hm.state == "toGrill" || hm.state == "cook") CookStep(hm);
                 else if (hm.state == "idle")
                 {
                     if (hm.wantSpray) { hm.wantSpray = false; hm.state = "fetch"; hm.posture = "stand"; hm.fetchT = 0; Emit("fetchSpray", ("humanHex", hm.hex)); }
+                    else if (CookNow(hm)) { hm.state = "toGrill"; hm.posture = "stand"; Emit("cookStart", ("humanHex", hm.hex)); }
                     else Annoyance(hm);
                 }
             }
@@ -209,6 +211,7 @@ namespace Sting.Core
             int lvl = EscAt(hm.x, hm.z);
             var head = hm.PartsNow[0];
             Wasp target = null; string why = null; (string key, Cup cup)? cupHit = null;
+            List<Meat> meat = records.TryGet(hm.chunk, out var hrec) && GrillsIn(hrec).Count > 0 ? MeatIn(hrec) : null;
             foreach (var w in wasps)
             {
                 if (!(w.state == "fly" || w.state == "chewing" || w.state == "landed")) continue;
@@ -222,12 +225,14 @@ namespace Sting.Core
                 if (hd2 < T.esc.faceRadius * T.esc.faceRadius) { target = w; why = "face"; break; }
                 if (lvl >= 1 && hd2 < T.esc.headRadius * T.esc.headRadius) { target = w; why = "head"; break; }
                 if (lvl >= 1 && (w.ai.atFood == "can" || (w.state == "landed" && NearCan(w))) && dx * dx + dz * dz < 1.5) { target = w; why = "food"; break; }
+                // people guard the barbecue meat from the start (T1-10)
+                if (meat != null && meat.Exists(m => D2(w, new V3(m.x, m.y, m.z)) < T.bbq.guardR * T.bbq.guardR)) { target = w; why = "meat"; break; }
                 if (lvl >= 3 && hm.sprayCount > 0 && lp.z > 0.1 && lp.z < T.esc.sprayRange && Abs(lp.x) < lp.z) { target = w; why = "spray"; break; }
             }
             if (target == null) { hm.annoy = 0; hm.annoyId = 0; return; }
             if (hm.annoyId != target.id) { hm.annoyId = target.id; hm.annoy = 0; }
             hm.annoy += 3;
-            Num need = hm.tr.reactionTicks * (why == "face" ? 3 : why == "cup" ? T.cup.noticeMul : T.esc.noticeMul) + (why == "spray" ? 20 : 0);
+            Num need = hm.tr.reactionTicks * (why == "face" ? 3 : why == "cup" ? T.cup.noticeMul : why == "meat" ? T.bbq.noticeMul : T.esc.noticeMul) + (why == "spray" ? 20 : 0);
             if (hm.annoy < need) return;
             hm.annoy = 0;
             hm.cooldown = tick + T.esc.cooldownTicks;
@@ -243,7 +248,7 @@ namespace Sting.Core
                 return;
             }
             var tl = Body.ToLocal(hm.F, target.P);
-            bool slap = lvl >= 1;
+            bool slap = lvl >= 1 || why == "meat";
             int kind = slap ? SwatKind.Slap : SwatKind.Brush;
             Publish(new NetEv
             {
@@ -936,15 +941,15 @@ namespace Sting.Core
                     Num nx = k == 0 ? -1 : k == 1 ? 1 : 0, ny = k == 2 ? -1 : k == 3 ? 1 : 0, nz = k == 4 ? -1 : k == 5 ? 1 : 0;
                     Take(p.x + nx * f[k], p.y + ny * f[k], p.z + nz * f[k], nx, ny, nz, 0, kind);
                 }
-                foreach (var cy in c.cylinders)
+                foreach (var cy in CylsOf(rec))
                 {
-                    Num hx = p.x - cy.x, hz = p.z - cy.z, hd = Sqrt(hx * hx + hz * hz);
+                    Num hx = p.x - cy.x, hz = p.z - cy.z, hd = Sqrt(hx * hx + hz * hz); string sk = cy.grill ? "grill" : "bark";
                     if (hd - cy.r >= bd || p.y > cy.h + bd) continue;
-                    if (p.y > cy.h && hd <= cy.r) { Take(p.x, cy.h, p.z, 0, 1, 0, p.y - cy.h, "bark"); continue; } // the top
+                    if (p.y > cy.h && hd <= cy.r) { Take(p.x, cy.h, p.z, 0, 1, 0, p.y - cy.h, sk); continue; } // the top
                     if (hd == 0) continue;
                     Num qx = cy.x + hx / hd * cy.r, qz = cy.z + hz / hd * cy.r;
-                    if (p.y > cy.h) { Num ey = p.y - cy.h, dr = hd - cy.r, d = Sqrt(dr * dr + ey * ey); Take(qx, cy.h, qz, (hx / hd) * dr / d, ey / d, (hz / hd) * dr / d, d, "bark"); }
-                    else Take(qx, p.y, qz, hx / hd, 0, hz / hd, Max(0, hd - cy.r), "bark");
+                    if (p.y > cy.h) { Num ey = p.y - cy.h, dr = hd - cy.r, d = Sqrt(dr * dr + ey * ey); Take(qx, cy.h, qz, (hx / hd) * dr / d, ey / d, (hz / hd) * dr / d, d, sk); }
+                    else Take(qx, p.y, qz, hx / hd, 0, hz / hd, Max(0, hd - cy.r), sk);
                 }
                 foreach (var f in c.flowers)
                 {

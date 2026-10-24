@@ -389,7 +389,7 @@ namespace Sting.Core
             return new Cmd { mx = log[i], my = log[i + 1], mz = log[i + 2], burst = log[i + 3], sting = log[i + 4], yawQ = log[i + 5], pitchQ = log[i + 6], act = log[i + 7], alloc = log[i + 8], pick = log[i + 9] };
         }
 
-        void Minute(long m)
+        internal void Minute(long m)
         {
             long newDay = DayOf(m);
             minute = m;
@@ -399,7 +399,7 @@ namespace Sting.Core
                 day = newDay;
                 Num k = 1;
                 for (long i = 0; i < days; i++) k *= 1 - T.esc.decayPerDay;
-                foreach (var s in chunkState.Values) { s.esc *= k; s.beeLost = new Dictionary<int, Dictionary<int, int>>(); s.caughtCat = new Dictionary<int, int>(); s.robbed = new Dictionary<int, int>(); }
+                foreach (var s in chunkState.Values) { s.esc *= k; s.beeLost = new Dictionary<int, Dictionary<int, int>>(); s.caughtCat = new Dictionary<int, int>(); s.robbed = new Dictionary<int, int>(); s.meat = new Dictionary<int, int>(); }
                 Emit("newDay", ("day", newDay));
             }
         }
