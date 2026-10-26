@@ -152,21 +152,63 @@ const geoBowl = new THREE.SphereGeometry(0.27, 20, 10, 0, Math.PI * 2, Math.PI /
 const geoGrillLeg = new THREE.CylinderGeometry(0.012, 0.012, 0.72, 6);
 const geoGrate = new THREE.CircleGeometry(0.26, 16, 0, Math.PI * 2);
 const geoPuff = new THREE.SphereGeometry(0.06, 8, 6);
+const STRIPPED = new THREE.Color('#c9c5bb');
 const geoFlame = new THREE.ConeGeometry(0.008, 0.025, 6);
 const webMat = new THREE.LineBasicMaterial({ color: '#f4f4f4', transparent: true, opacity: 0.32 });
 
 function buildChunk(rec) {
   const g = new THREE.Group();
   const c = rec.content;
-  const dyn = { lids: [], traps: [], candles: [], cans: [], puddles: [], crowns: [], grills: [] };
+  const dyn = { lids: [], traps: [], candles: [], cans: [], puddles: [], crowns: [], grills: [], wood: [] };
   // garden sheds: plank walls, a pitched roof, a crack in one wall and a gap under one eave (nest sites)
+  // land use (T1-12): the ground of a yard is a mown lawn, a forest floor is dark; streets, cul-de-sacs, parking lots
+  if (c.use === 'yards' || c.use === 'forest' || c.use === 'mall') {
+    const tint = new THREE.Mesh(new THREE.PlaneGeometry(64, 64), new THREE.MeshLambertMaterial({ color: c.use === 'yards' ? '#7fbf4a' : c.use === 'forest' ? '#3d4a22' : '#8f9a6a', transparent: true, opacity: c.use === 'yards' ? 0.28 : 0.45, depthWrite: false }));
+    tint.rotation.x = -Math.PI / 2; tint.position.set(rec.cx * 64, 0.002, rec.cz * 64); tint.receiveShadow = true; g.add(tint);
+  }
+  const flat = (minx, maxx, minz, maxz, color, y) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(maxx - minx, maxz - minz), mat(color)); m.rotation.x = -Math.PI / 2; m.position.set((minx + maxx) / 2, y, (minz + maxz) / 2); m.receiveShadow = true; g.add(m); };
+  for (const r of c.roads || []) {
+    flat(r.minx, r.maxx, r.minz - 1.6, r.minz, '#b9b4a8', 0.004); flat(r.minx, r.maxx, r.maxz, r.maxz + 1.6, '#b9b4a8', 0.004); // sidewalks
+    flat(r.minx, r.maxx, r.minz, r.maxz, '#45464a', 0.005);
+  }
+  for (const l of c.loops || []) { const m = new THREE.Mesh(new THREE.CircleGeometry(l.r, 40), mat('#45464a')); m.rotation.x = -Math.PI / 2; m.position.set(l.x, 0.006, l.z); m.receiveShadow = true; g.add(m); }
+  for (const l of c.lots || []) {
+    flat(l.minx, l.maxx, l.minz, l.maxz, '#4b4c50', 0.005);
+    const along = l.maxx - l.minx > l.maxz - l.minz;
+    for (let k = -12; k <= 12; k++) { const x = (l.minx + l.maxx) / 2 + (along ? k * 2.5 : 0), z = (l.minz + l.maxz) / 2 + (along ? 0 : k * 2.5); flat(x - (along ? 0.06 : 2.4), x + (along ? 0.06 : 2.4), z - (along ? 2.4 : 0.06), z + (along ? 2.4 : 0.06), '#d8d6cf', 0.006); }
+  }
+  for (const m of c.malls || []) {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(m.hw * 2, m.h, m.hd * 2), mat('#cdbfa6')); b.position.set(m.x, m.h / 2, m.z); b.castShadow = b.receiveShadow = true;
+    const band = new THREE.Mesh(new THREE.BoxGeometry(m.hw * 2 + 0.1, 1.2, m.hd * 2 + 0.1), mat('#7a2f24')); band.position.set(m.x, m.h - 0.6, m.z);
+    const glass = new THREE.Mesh(new THREE.BoxGeometry(m.hw * 2 - 1, 2.4, m.hd * 2 + 0.06), mat('#2c3a44')); glass.position.set(m.x, 1.5, m.z);
+    if (m.hd > m.hw) glass.scale.set((m.hw * 2 + 0.06) / (m.hw * 2 - 1), 1, (m.hd * 2 - 1) / (m.hd * 2 + 0.06));
+    g.add(b, band, glass);
+  }
   for (const sh of c.sheds || []) {
-    const walls = new THREE.Mesh(new THREE.BoxGeometry(sh.hw * 2, sh.h, sh.hd * 2), mat('#7a5a3c'));
+    const siding = sh.house ? ['#e3dccb', '#c9d3d6', '#dcc9a8', '#c7cdb6', '#efe9dd'][Math.abs(Math.round(sh.x * 7 + sh.z * 3)) % 5] : '#7a5a3c';
+    const walls = new THREE.Mesh(new THREE.BoxGeometry(sh.hw * 2, sh.h, sh.hd * 2), mat(siding));
     walls.position.set(sh.x, sh.h / 2, sh.z); walls.castShadow = walls.receiveShadow = true;
-    const long = sh.hw >= sh.hd, span = long ? sh.hd : sh.hw, len = (long ? sh.hw : sh.hd) * 2 + 0.2, rise = 0.55;
+    const long = sh.hw >= sh.hd, span = long ? sh.hd : sh.hw, len = (long ? sh.hw : sh.hd) * 2 + 0.2, rise = sh.house ? 1.9 : 0.55;
+    if (sh.house) {
+      // windows on the long sides, a door on one, and the gable ends closed with a wedge
+      const win = mat('#33404a'), along = long ? [1, 0] : [0, 1], across = long ? [0, 1] : [1, 0], half = long ? sh.hw : sh.hd, depth = long ? sh.hd : sh.hw;
+      for (const s of [-1, 1]) for (let k = -1; k <= 1; k++) for (const y of [1.5, sh.h - 1.4]) {
+        if (s === (long ? Math.sign(rec.cz * 64 - sh.z) || 1 : Math.sign(rec.cx * 64 - sh.x) || 1) && k === 0 && y < 2) continue; // the door goes there
+        const wv = new THREE.Mesh(new THREE.BoxGeometry(along[0] ? 1.1 : 0.06, 1.0, along[1] ? 1.1 : 0.06), win);
+        wv.position.set(sh.x + along[0] * k * half * 0.6 + across[0] * s * (depth + 0.02), y, sh.z + along[1] * k * half * 0.6 + across[1] * s * (depth + 0.02)); g.add(wv);
+      }
+      const door = new THREE.Mesh(new THREE.BoxGeometry(along[0] ? 1.0 : 0.06, 2.1, along[1] ? 1.0 : 0.06), mat('#6b3b2a'));
+      const ds = long ? Math.sign(rec.cz * 64 - sh.z) || 1 : Math.sign(rec.cx * 64 - sh.x) || 1; // the door faces the street
+      door.position.set(sh.x + across[0] * ds * (depth + 0.02), 1.05, sh.z + across[1] * ds * (depth + 0.02)); g.add(door);
+      const gable = new THREE.Shape([new THREE.Vector2(-depth, 0), new THREE.Vector2(depth, 0), new THREE.Vector2(0, rise)]);
+      for (const s of [-1, 1]) {
+        const gm = new THREE.Mesh(new THREE.ShapeGeometry(gable), mat(siding, { side: THREE.DoubleSide }));
+        gm.position.set(sh.x + along[0] * s * half, sh.h, sh.z + along[1] * s * half); gm.rotation.y = long ? Math.PI / 2 : 0; g.add(gm);
+      }
+    }
     const slope = Math.hypot(span + 0.12, rise), ang = Math.atan2(rise, span + 0.12);
     for (const side of [-1, 1]) {
-      const roof = new THREE.Mesh(new THREE.BoxGeometry(long ? len : slope, 0.05, long ? slope : len), mat('#3d3a36'));
+      const roof = new THREE.Mesh(new THREE.BoxGeometry(long ? len : slope, sh.house ? 0.12 : 0.05, long ? slope : len), mat(sh.house ? '#4e4b52' : '#3d3a36'));
       if (long) { roof.position.set(sh.x, sh.h + rise / 2, sh.z + side * (span + 0.12) / 2); roof.rotation.x = side * ang; }
       else { roof.position.set(sh.x + side * (span + 0.12) / 2, sh.h + rise / 2, sh.z); roof.rotation.z = -side * ang; }
       roof.castShadow = true; g.add(roof);
@@ -190,14 +232,16 @@ function buildChunk(rec) {
     g.add(trunk, a, b);
   }
   const wood = mat('#8a6440');
-  for (const b of c.boxes) {
-    if (b.hive) continue;
-    const m = new THREE.Mesh(geoBox, wood);
+  c.boxes.forEach((b, bi) => {
+    if (b.hive || b.shed || b.mall) return; // drawn with their own shapes
+    // fences in cedar; each wooden box keeps its own material so it can pale as wasps strip its pulp (T1-12)
+    const m = new THREE.Mesh(geoBox, b.wood ? mat(b.fence ? '#b98a55' : '#8a6440') : wood);
     m.scale.set(b.maxx - b.minx, b.maxy - b.miny, b.maxz - b.minz);
     m.position.set((b.minx + b.maxx) / 2, (b.miny + b.maxy) / 2, (b.minz + b.maxz) / 2);
     m.castShadow = m.receiveShadow = true;
     g.add(m);
-  }
+    if (b.wood) dyn.wood.push({ m, i: bi, base: new THREE.Color(b.fence ? '#b98a55' : '#8a6440'), shown: -1 });
+  });
   c.tables.forEach((t, ti) => {
     const along = t.axisX ? [1, 0] : [0, 1], across = t.axisX ? [0, 1] : [1, 0];
     for (const s of [-0.8, 0.8]) for (const q of [-0.3, 0.3]) {
@@ -347,6 +391,18 @@ function updateChunkDynamics() {
       d.heads.instanceMatrix.needsUpdate = true; if (d.heads.instanceColor) d.heads.instanceColor.needsUpdate = true;
     }
     for (const t of d.traps) t.visible = lv >= 3;
+    // wood stripped of pulp goes grey (T1-12)
+    if (d.wood.length) {
+      const taken = (sim.chunkState.get(k) || {}).pulp || {}, rec3 = sim.records.get(k);
+      for (const wv of d.wood) {
+        const n = taken[wv.i] || 0;
+        if (n === wv.shown || !rec3) continue;
+        wv.shown = n;
+        const f = Math.min(1, n / sim.pulpLoads(rec3.content.boxes[wv.i]));
+        if (!wv.own) { wv.m.material = wv.m.material.clone(); wv.own = true; } // materials are shared until one is stripped
+        wv.m.material.color.copy(wv.base).lerp(STRIPPED, f * 0.85);
+      }
+    }
     // barbecues (T1-10): coals and smoke while lit, the plate while meat is served
     if (d.grills.length) {
       const rec2 = sim.records.get(k), meat = rec2 ? sim.meatIn(rec2) : [], now = performance.now() / 1000;
@@ -1598,8 +1654,16 @@ function drawMap() {
     const [sx, sy] = toS((cx + 0.5) * CSZ, (cz + 0.5) * CSZ);
     const rec = sim.records.get(key);
     if (rec) {
-      ctx.fillStyle = `hsla(${88 + rec.content.tint * 20}, 30%, ${21 + rec.content.tint * 8}%, 0.92)`;
+      const use = rec.content.use || 'park';
+      ctx.fillStyle = use === 'yards' ? 'hsla(95, 22%, 31%, 0.92)' : use === 'forest' ? 'hsla(100, 35%, 14%, 0.95)' : use === 'mall' ? 'hsla(40, 6%, 30%, 0.92)' : `hsla(${88 + rec.content.tint * 20}, 30%, ${21 + rec.content.tint * 8}%, 0.92)`;
       ctx.fillRect(sx + 1, sy + 1, cell - 2, cell - 2);
+      // streets and buildings (T1-12)
+      ctx.fillStyle = 'rgba(30,30,32,.75)';
+      for (const r of rec.content.roads || []) { const [x0, y0] = toS(r.maxx, r.maxz), [x1, y1] = toS(r.minx, r.minz); ctx.fillRect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.max(2, Math.abs(y1 - y0))); }
+      for (const l of rec.content.loops || []) { const [x, y] = toS(l.x, l.z); ctx.beginPath(); ctx.arc(x, y, l.r / CSZ * cell, 0, Math.PI * 2); ctx.fill(); }
+      ctx.fillStyle = 'rgba(214,206,190,.55)';
+      for (const sh of rec.content.sheds || []) if (sh.house) { const [x, y] = toS(sh.x, sh.z); ctx.fillRect(x - sh.hw / CSZ * cell, y - sh.hd / CSZ * cell, sh.hw * 2 / CSZ * cell, sh.hd * 2 / CSZ * cell); }
+      for (const m of rec.content.malls || []) { const [x, y] = toS(m.x, m.z); ctx.fillRect(x - m.hw / CSZ * cell, y - m.hd / CSZ * cell, m.hw * 2 / CSZ * cell, m.hd * 2 / CSZ * cell); }
       const lv = sim.escLevel(key);
       if (lv) { ctx.fillStyle = `rgba(229,65,45,${0.1 + lv * 0.1})`; ctx.fillRect(sx + 1, sy + 1, cell - 2, cell - 2); }
       ctx.fillStyle = 'rgba(243,238,226,.4)';
@@ -1710,7 +1774,7 @@ function handleEvents(events) {
         if (!e.remote) logEvent(`${e.driven ? 'you stung' : 'a worker stung'} #${e.humanHex.slice(0, 4)} · ${zoneLabel(e.zone)}${e.under ? ' (under clothes)' : ''}`);
         break;
       case 'remoteDied': logEvent(`player 2's wasp died · ${e.cause}`); break;
-      case 'lateEvent': logEvent(`late ${e.type} event (${e.by} ticks)`); break;
+      case 'lateEvent': logEvent(`late ${e.evType} event (${e.by} ticks)`); break;
       case 'preSwat':
         pushSwatAnims([{ actorHex: e.humanHex, kind: e.kind, start: e.start, window: e.window, center: e.center }], e.humanHex, e.contactTick ?? e.t);
         if (e.waspId === sim.drivenId) logEvent(`#${e.humanHex.slice(0, 4)} swats at you (${e.why})`);

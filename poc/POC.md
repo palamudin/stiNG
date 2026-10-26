@@ -16,8 +16,8 @@ The tier-0 slice of the GDD, built in the browser so it can move to Unity. Same 
 | `sim/bots.js` | Scripted pilots that produce ordinary input commands | `core/Sting.Core/Bots.cs` (ported) |
 | `game.js` | three.js rendering, animation, camera, input, HUD, sound | Unity scene, Animator, UI |
 | `index.html` | Page shell, HUD markup and styles | UI Toolkit |
-| `test/sim.test.mjs` | 207 headless sim checks | `Sting.Core.Tests` |
-| `test/net.test.mjs` | 44 network checks | `Sting.Net.Tests` |
+| `test/sim.test.mjs` | 214 headless sim checks | `Sting.Core.Tests` |
+| `test/net.test.mjs` | 43 network checks | `Sting.Net.Tests` |
 | `test/parity.mjs` | Writes `core/fixtures/parity.txt`: 22 digests the C# core must reproduce bit for bit | `core/Sting.Core.Tests` |
 
 Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 18+, no packages). Play locally with `node serve.mjs`. Any change to `sim/` that changes behaviour must be made in `core/` too: rerun `node test/parity.mjs`, then `dotnet run -c Release` in `core/Sting.Core.Tests`. To retune, edit `../tuning/sting.tune`: the game, the tests, parity and the core all read it, and a different file gives a different tuning hash, so old saves and peers on the old file are refused.
@@ -110,11 +110,12 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 82 | Barbecues (T1-10): kettle grills at some picnic tables. On warm dry days the first person at the table cooks: they stand at the lit grill, meat sits on the grate and later on a plate. E takes meat (protein). People slap at a wasp by the meat from the start; the grate burns and the hot air over it cooks you (watch the body temperature) | 4.3, 6.2 | 14 |
 | 83 | Chunk authority and contested pickups (T1-19): one peer per chunk, elected by rendezvous hashing, rules when two players' wasps take the same caterpillar, fly, bee or load of carrion, meat or honey. You take it at once; if the other got to the authority first, your wasp lets go. The lab panel shows who rules your chunk | 11.6 | 14 |
 | 84 | Relevance tiers (T1-21): each peer hears about your wasps by how far they are from its own wasp: your wasp at 20 Hz, AI wasps within 50 m at 10 Hz, within 3 chunks at 3 Hz in compact swarm packets, the rest as counts per chunk. With 143 foragers out, 25 KB/s to a player among them, 5 KB/s to one 150 m away, 1.4 KB/s far off, against 51 KB/s at full rate. The lab panel shows the split | 11.12 | 14 |
+| 85 | Regions (T1-12): the world is laid out 8×8 chunks at a time as American suburbia: a park strip through home, suburban yards with streets, cul-de-sacs, houses and fenced backyards (patio tables, flower beds, sheds, bee boxes), a strip mall with its parking lot and outdoor seating, and a forest edge. Houses and fences block sight; houses have wall and eave nest sites. Wooden fences, tables and sheds hold a limited amount of pulp and go grey as they are stripped (a chunk delta) | 4.2, 4.3, 4.5 | 14 |
 
 ## Verified
 
 - **Sim:** traits and hash match the compiled C# protocode; trig error 6.6e-10; no swat or press lands inside the consequence window; fed colonies grow and starved larvae die; the yearly cycle raises and mates young queens and collapses in autumn; winter and spring hand the line to a founding queen; two runs and a replay give the same hash; lingering kills, jab-and-run survives; AI workers launch and deposit; covered food, traps, preemptive slaps, compression under a shirt, crawling to the acnestis, bee balls and escape, the exterminator destroying an unguarded nest and aborting when stung under his collar, the day cycle, possession, frozen chunks, and a restored snapshot that stays bit-identical to the original for 6000 more ticks and replays the input recorded after it.
-- **Network:** two peers sting the same humans over four links, from LAN up to 16±6 ticks one-way with 10% loss. Human state is identical on both peers at every check (300/300 per link) and no event arrives after its commit tick. With the peers two chunks apart, all 63 shared humans still agree at every check. A peer that joins 50 s in from a snapshot agrees on every check after joining (200/200). A remote player's wasp fought A's rivals 62 times over good and bad links, and both peers agreed on every winner. State packets round-trip within 0.4 mm and swarm packets within 0.5 mm; a colony with 23 wasps out sends about 2.8 KB/s upstream, and one with 143 out 25 KB/s to a player among them, 5 KB/s to one 150 m off.
+- **Network:** two peers sting the same humans over four links, from LAN up to 16±6 ticks one-way with 10% loss. Human state is identical on both peers at every check (300/300) on the LAN, good and bad links with no late events; on the awful link one event in the run arrives a tick after its commit and the peers agree until then. With the peers two chunks apart, all 89 shared humans still agree at every check. A peer that joins 50 s in from a snapshot agrees on every check after joining (200/200). A remote player's wasp fought A's rivals 62 times over good and bad links, and both peers agreed on every winner. State packets round-trip within 0.4 mm and swarm packets within 0.5 mm; a colony with 17 wasps out sends about 2.4 KB/s upstream, and one with 141 out 25 KB/s to a player among them, 5 KB/s to one 150 m off.
 - **Rendering:** headless Chromium screenshots of every system. The software renderer runs at under 1 fps, so frame rate on real GPUs is not measured.
 
 ## Design changes found by building (fold into the GDD)
@@ -131,7 +132,9 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 ## Known limits
 
 - The colony economy is tuned against one simulated season with an idle player; it needs real play data.
-- Shed roofs are drawn pitched but collide as a flat top.
+- Shed and house roofs are drawn pitched but collide as a flat top.
+- An event that arrives after its commit tick (only past the commit window, the awful link) is counted but not corrected, so the peers' humans can diverge from then on; late-event corrections by the chunk authority are not built.
+- Far-tier traffic counts are received but not drawn.
 - A wasp walking on a surface keeps its heading over edges, but the eye view while landed still turns with the world yaw.
 - Two players' colonies meet only through guards at the entrance (T1-13); colony-against-colony raids are not built.
 

@@ -131,6 +131,39 @@ export function beePos(hive, k, tick) {
 
 // ---------------------------------------------------------------- chunk generation (GDD 4.3)
 
+// ---------------------------------------------------------------- regions (GDD 4.2, 4.3, T1-12)
+// A region is 8x8 chunks, laid out before any chunk in it: a park strip along one row (through the home chunk in the
+// home region), a strip mall three chunks long on one edge, a 2x2 corner of forest edge, and suburban yards everywhere
+// else (Q-06: American suburbia). A pure function of the seed, so every chunk knows its land use and its neighbours'.
+export const REGION = 8;
+const regionCache = new Map();
+export function regionLayout(seed, rx, rz) {
+  const key = seed + ':' + rx + ',' + rz;
+  let L = regionCache.get(key);
+  if (L) return L;
+  const H = (slot) => hash(seed, Domain.WorldGen, u64(rx), u64(rz), BigInt(90000 + slot));
+  L = { strip: rx === 0 && rz === 0 ? REGION / 2 : 2 + rangeInt(H(1), 0, 4), mallSide: rangeInt(H(2), 0, 4), mallFrom: rangeInt(H(3), 0, REGION - 2), forest: rangeInt(H(4), 0, 4) };
+  if (regionCache.size > 256) regionCache.clear();
+  regionCache.set(key, L);
+  return L;
+}
+export function landUse(seed, cx, cz) {
+  if (cx === 0 && cz === 0) return 'park';
+  const h = REGION / 2, rx = Math.floor((cx + h) / REGION), rz = Math.floor((cz + h) / REGION), lx = cx + h - rx * REGION, lz = cz + h - rz * REGION;
+  const L = regionLayout(seed, rx, rz);
+  if (lz === L.strip) return 'park';
+  const edge = [lz === 0, lx === REGION - 1, lz === REGION - 1, lx === 0][L.mallSide], along = L.mallSide % 2 ? lz : lx;
+  if (edge && along >= L.mallFrom && along < L.mallFrom + 3) return 'mall';
+  const fx = L.forest & 1 ? REGION - 2 : 0, fz = L.forest & 2 ? REGION - 2 : 0;
+  if (lx >= fx && lx < fx + 2 && lz >= fz && lz < fz + 2) return 'forest';
+  return 'yards';
+}
+// which way a strip mall faces out of its region: 0 -z, 1 +x, 2 +z, 3 -x
+export function mallSide(seed, cx, cz) {
+  const h = REGION / 2;
+  return regionLayout(seed, Math.floor((cx + h) / REGION), Math.floor((cz + h) / REGION)).mallSide;
+}
+
 export function generateChunk(seed, cx, cz) {
   const H = (slot) => hash(seed, Domain.WorldGen, u64(cx), u64(cz), BigInt(slot));
   const ox = cx * CS, oz = cz * CS;
@@ -138,6 +171,7 @@ export function generateChunk(seed, cx, cz) {
     cx, cz, tint: unit(H(0)), trees: [], tables: [], benches: [], cans: [], flowers: [], caterpillars: [], flies: [],
     humans: [], boxes: [], cylinders: [], sugar: [], hives: [], traps: [], nest: null,
     webs: [], birds: [], rival: null, sheds: [], dragonflies: [],
+    use: 'park', roads: [], loops: [], lots: [], malls: [], // T1-12: land use, streets, cul-de-sacs, parking lots, mall buildings
   };
   const occupied = [];
   const isOrigin = cx === 0 && cz === 0;
@@ -223,6 +257,61 @@ export function generateChunk(seed, cx, cz) {
     c.boxes.push({ minx: x - 0.225, maxx: x + 0.225, miny: 0, maxy: 0.98, minz: z - 0.225, maxz: z + 0.225, wood: true, hive: true });
     c.hives.push(hive);
   };
+  // A garden shed (GDD 6.6: wall and attic nest sites); a house is a big one that is not wood
+  const addShed = (sx, sz, axisX, slot, house) => {
+    const hw = house ? range(H(slot), 5, 6.5) : axisX ? 1.2 : 0.9, hd = house ? range(H(slot + 1), 4, 5) : axisX ? 0.9 : 1.2, h = house ? range(H(slot + 2), 5, 6.5) : 2.1;
+    occupied.push({ x: sx, z: sz, r: house ? 8 : 4 });
+    c.sheds.push({ x: sx, z: sz, hw, hd, h, crack: rangeInt(H(slot + 3), 0, 4), eave: rangeInt(H(slot + 4), 0, 4), house: !!house });
+    c.boxes.push({ minx: sx - hw, maxx: sx + hw, miny: 0, maxy: h, minz: sz - hd, maxz: sz + hd, wood: !house, shed: true });
+  };
+  // A wooden fence from a to b (along x or z), in sections of up to 4 m: each section is its own store of pulp (T1-12)
+  const addFence = (ax, az, bx, bz) => {
+    const L = Math.abs(bx - ax) + Math.abs(bz - az), n = Math.max(1, Math.ceil(L / 4)), t = 0.03, h = 1.5;
+    for (let k = 0; k < n; k++) {
+      const x0 = ax + (bx - ax) * k / n, z0 = az + (bz - az) * k / n, x1 = ax + (bx - ax) * (k + 1) / n, z1 = az + (bz - az) * (k + 1) / n;
+      c.boxes.push({ minx: Math.min(x0, x1) - t, maxx: Math.max(x0, x1) + t, miny: 0, maxy: h, minz: Math.min(z0, z1) - t, maxz: Math.max(z0, z1) + t, wood: true, fence: true });
+    }
+  };
+  // Suburban yards (Q-06): a street along the chunk, ending in a cul-de-sac where the next chunk is not yards; two
+  // lots each side, a house set back from the sidewalk, a fenced backyard with maybe a patio table, a flower bed, a
+  // shed, a tree, a bee box
+  const addYards = () => {
+    const endW = landUse(seed, cx - 1, cz) !== 'yards', endE = landUse(seed, cx + 1, cz) !== 'yards';
+    c.roads.push({ minx: ox + (endW ? -22 : -32), maxx: ox + (endE ? 22 : 32), minz: oz - 4, maxz: oz + 4 });
+    if (endW) c.loops.push({ x: ox - 22, z: oz, r: 11 });
+    if (endE) c.loops.push({ x: ox + 22, z: oz, r: 11 });
+    occupied.push({ x: ox, z: oz, r: 4 });
+    for (let li = 0; li < 4; li++) {
+      // each lot draws from its own run of hash slots: house 0-6, patio 10-246, flowers 300-400, shed 500-506,
+      // bee box 510-740, people on the front lawn 800-1300
+      const s = li < 2 ? -1 : 1, lx = ox + (li % 2 ? 16 : -16), base = 3000 + li * 2000;
+      if (unit(H(base)) < 0.9) addShed(lx + range(H(base + 1), -3, 3), oz + s * 15.5, true, base + 2, true);
+      // the backyard fence: across the back, and the sides between lots and at the chunk edge
+      addFence(lx - 15.6, oz + s * 20.5, lx - 15.6, oz + s * 31.6);
+      addFence(lx - 15.6, oz + s * 31.6, lx + 15.6, oz + s * 31.6);
+      if (li % 2) addFence(lx + 15.6, oz + s * 20.5, lx + 15.6, oz + s * 31.6);
+      if (unit(H(base + 10)) < 0.55) addPicnic(lx + range(H(base + 11), -6, 6), oz + s * 24.5, true, rangeInt(H(base + 12), 1, 64) | 1, base + 20);
+      if (unit(H(base + 300)) < 0.75) addFlowers(lx + range(H(base + 301), -11, 11), oz + s * 29.5, base + 310);
+      if (unit(H(base + 500)) < 0.3) { const sx = lx + (unit(H(base + 501)) < 0.5 ? -12.5 : 12.5), sz = oz + s * 28.7; if (free(sx, sz, 2)) addShed(sx, sz, true, base + 502, false); }
+      if (unit(H(base + 510)) < 0.08) { const hx = lx + range(H(base + 511), -10, 10), hz = oz + s * 22; if (free(hx, hz, 2)) addHive(hx, hz, base + 600); }
+      if (unit(H(base + 800)) < 0.2) { const gx = lx + range(H(base + 801), -8, 8), gz = oz + s * 7; if (free(gx, gz, 2)) addGroup(gx, gz, rangeInt(H(base + 802), 2, 4), base + 1000); }
+    }
+  };
+  // A strip mall on the region's edge: a long low building facing in, its parking lot, outdoor seating by the doors
+  const addMall = () => {
+    const side = mallSide(seed, cx, cz), out = [[0, -1], [1, 0], [0, 1], [-1, 0]][side], along = out[0] ? [0, 1] : [1, 0];
+    const at = (u, v) => ({ x: ox + along[0] * u + out[0] * v, z: oz + along[1] * u + out[1] * v });
+    const b = at(0, 21), hu = 27, hv = 8, hx = out[0] ? hv : hu, hz = out[0] ? hu : hv;
+    c.malls.push({ x: b.x, z: b.z, hw: hx, hd: hz, h: 6 });
+    c.boxes.push({ minx: b.x - hx, maxx: b.x + hx, miny: 0, maxy: 6, minz: b.z - hz, maxz: b.z + hz, wood: false, mall: true });
+    occupied.push({ x: b.x, z: b.z, r: 28 });
+    const l0 = at(-28, 11), l1 = at(28, -20);
+    c.lots.push({ minx: Math.min(l0.x, l1.x), maxx: Math.max(l0.x, l1.x), minz: Math.min(l0.z, l1.z), maxz: Math.max(l0.z, l1.z) });
+    for (let k = 0; k < 2; k++) { const p = at(k ? 9 : -9, 9.5); addPicnic(p.x, p.z, !out[0], rangeInt(H(4000 + k * 400), 7, 64) | 1, 4010 + k * 400); }
+    if (unit(H(4900)) < 0.5) { const p = at(range(H(4901), -20, 20), 6); if (free(p.x, p.z, 2)) addGroup(p.x, p.z, rangeInt(H(4902), 2, 5), 4910); }
+    const nf = rangeInt(H(4950), 0, 3);
+    for (let i = 0; i < nf; i++) { const p = at(range(H(4951 + i), -24, 24), 13); addFlowers(p.x, p.z, 4960 + i * 80); }
+  };
 
   if (isOrigin) {
     addTree(NEST.treeX, NEST.treeZ, 100);
@@ -232,6 +321,11 @@ export function generateChunk(seed, cx, cz) {
     addGroup(1, 10, 3, 1100);
     addFlowers(-6, 2, 400);
     addFlowers(3, -5, 480);
+  } else if ((c.use = landUse(seed, cx, cz)) === 'yards') addYards();
+  else if (c.use === 'mall') addMall();
+  else if (c.use === 'forest') {
+    const np = rangeInt(H(2010), 1, 3);
+    for (let i = 0; i < np; i++) addFlowers(ox + range(H(2020 + i), -26, 26), oz + range(H(2030 + i), -26, 26), 2100 + i * 80);
   } else {
     if (unit(H(1)) < 0.6) {
       const px = ox + range(H(2), -20, 20), pz = oz + range(H(3), -20, 20);
@@ -252,17 +346,18 @@ export function generateChunk(seed, cx, cz) {
       if (free(sx, sz, 3)) {
         occupied.push({ x: sx, z: sz, r: 4 });
         const axisX = unit(H(18)) < 0.5, hw = axisX ? 1.2 : 0.9, hd = axisX ? 0.9 : 1.2, h = 2.1;
-        c.sheds.push({ x: sx, z: sz, hw, hd, h, crack: rangeInt(H(19), 0, 4), eave: rangeInt(H(21), 0, 4) });
+        c.sheds.push({ x: sx, z: sz, hw, hd, h, crack: rangeInt(H(19), 0, 4), eave: rangeInt(H(21), 0, 4), house: false });
         c.boxes.push({ minx: sx - hw, maxx: sx + hw, miny: 0, maxy: h, minz: sz - hd, maxz: sz + hd, wood: true, shed: true });
       }
     }
     const np = rangeInt(H(10), 3, 9);
     for (let i = 0; i < np; i++) addFlowers(ox + range(H(20 + i), -28, 28), oz + range(H(40 + i), -28, 28), 400 + i * 80);
   }
-  const nt = rangeInt(H(11), isOrigin ? 3 : 2, isOrigin ? 6 : 8);
+  // trees: a few in a park, yard trees, dense at the forest edge, hardly any by a mall
+  const nt = c.use === 'forest' ? rangeInt(H(2000), 16, 26) : c.use === 'yards' ? rangeInt(H(2001), 1, 4) : c.use === 'mall' ? rangeInt(H(2002), 0, 3) : rangeInt(H(11), isOrigin ? 3 : 2, isOrigin ? 6 : 8);
   for (let i = 0; i < nt; i++) {
     const x = ox + range(H(150 + i * 4), -30, 30), z = oz + range(H(151 + i * 4), -30, 30);
-    if (free(x, z, 3)) { addTree(x, z, 200 + i * 4); occupied.push({ x, z, r: 2 }); }
+    if (free(x, z, c.use === 'forest' ? 1.5 : 3)) { addTree(x, z, 200 + i * 4); occupied.push({ x, z, r: c.use === 'forest' ? 1 : 2 }); }
   }
   // Spider webs: vertical discs beside tree trunks (GDD 9.3)
   c.trees.forEach((t, i) => {

@@ -21,7 +21,12 @@ namespace Sting.Core.Tests
         static SimEvent Find(List<SimEvent> ev, string type) => ev.FirstOrDefault(e => e.type == type);
         static void Place(WaspBase w, V3 p) { w.x = p.x; w.y = p.y; w.z = p.z; w.vx = w.vy = w.vz = 0; }
         static V3 P(Num x, Num y, Num z) => new V3(x, y, z);
-        static Human Seated(Sim sim, Func<Human, bool> pred) => sim.active.FirstOrDefault(h => !h.special && h.posture == "sit" && h.state == "idle" && pred(h));
+        /// someone sitting at a table, in the home park if there is one (the chunks around it are yards since T1-12)
+        static Human Seated(Sim sim, Func<Human, bool> pred)
+        {
+            bool ok(Human h) => !h.special && h.posture == "sit" && h.state == "idle" && pred(h);
+            return sim.active.FirstOrDefault(h => h.chunk == "0,0" && ok(h)) ?? sim.active.FirstOrDefault(ok);
+        }
         static double D(Num n) => (double)n;
         static string Cause(SimEvent e) => e == null ? "none" : (string)e["cause"];
         static void Ok(bool cond, string msg) => Assert("sim: " + msg, cond);
@@ -111,7 +116,7 @@ namespace Sting.Core.Tests
             {
                 (Sim s, List<SimEvent> ev, string hash) Go(string plan, ulong seed = 1234)
                 {
-                    var s = new Sim(new Settings { seed = seed }); var bot = Bots.StingBot(plan, h => true);
+                    var s = new Sim(new Settings { seed = seed }); var bot = Bots.StingBot(plan, h => h.chunk == "0,0"); // the home park (the yards around it are fenced since T1-12)
                     var ev = RunS(s, 15000, (sim, i) => bot(sim));
                     return (s, ev, s.StateHash());
                 }
@@ -641,6 +646,32 @@ namespace Sting.Core.Tests
                 var t = s.Sense(a); T.sense.jitter = jit;
                 Ok(t != null && t.sub == "meat", $"barbecue meat draws a hunter from 12 m ({t?.sub ?? t?.kind ?? "nothing"})");
             }
+            // 39. regions (T1-12): the layout, a yards chunk, houses that block the view, pulp that runs out
+            {
+                var uses = new Dictionary<string, int>();
+                for (int z = -4; z < 4; z++) for (int x = -4; x < 4; x++) { var u = World.LandUse(1234, x, z); uses[u] = (uses.TryGetValue(u, out var n0) ? n0 : 0) + 1; }
+                Ok(World.LandUse(1234, 0, 0) == "park" && new[] { -4, -1, 1, 3 }.All(x => World.LandUse(1234, x, 0) == "park") && uses["yards"] >= 40 && uses["mall"] == 3 && uses["forest"] >= 3,
+                    $"the home region: a park strip through home, a strip mall, a forest corner, yards everywhere else ({string.Join(", ", uses.Select(kv => kv.Key + " " + kv.Value))})");
+                var c = World.GenerateChunk(1234, 0, 1);
+                var houses = c.sheds.Where(q => q.house).ToList(); int fences = c.boxes.Count(q => q.fence);
+                Ok(c.use == "yards" && houses.Count >= 2 && fences >= 30 && c.roads.Count == 1, $"a yards chunk: a street, {houses.Count} houses, backyard fences in {fences} sections");
+                var s = new Sim(new Settings { seed = 1234, birds = false });
+                RunS(s, 1);
+                var rec = s.records.Get("0,1"); var h = rec.content.sheds.First(q => q.house);
+                Ok(!s.CanSee(h.x, h.z - h.hd - 2, h.x, h.z + h.hd + 2) && s.CanSee(h.x + h.hw + 3, h.z - h.hd - 2, h.x + h.hw + 3, h.z + h.hd + 2), "a house blocks the view across it; the gap beside it does not");
+                int fi = rec.content.boxes.FindIndex(q => q.fence); var fb = rec.content.boxes[fi]; int loads = s.PulpLoads(fb);
+                var w = s.wasp; int got = 0;
+                for (int k = 0; k < loads + 2; k++)
+                {
+                    Place(w, P(fb.maxx + T.wasp.radius + 0.005, 0.8, (fb.minz + fb.maxz) / 2)); w.state = "fly"; w.carry = null; w.energy = 1;
+                    var ev = RunS(s, T.pulp.chewTicks + 4, (sim, i) => Idle(cm => cm.act = Act.Interact));
+                    if (ev.Any(e => e.type == "chewed" && (int)e["id"] == w.id)) got++;
+                    RunS(s, 2);
+                }
+                Ok(got == loads && s.PulpLeft("0,1", fi) == 0, $"a fence section gives {got} loads of pulp, then it is stripped bare");
+                var r2 = Persist.Restore(Persist.Snapshot(s));
+                Ok(r2.PulpLeft("0,1", fi) == 0, "a stripped fence stays stripped after save and restore (a chunk delta)");
+            }
         }
 
         // 26. Tier 1, batch 1: wind, cold, drowning, clothes by the weather, shaking and flailing
@@ -802,8 +833,10 @@ namespace Sting.Core.Tests
         static void Batch3()
         {
             var t = Spring();
-            var hol = t.activeChunks.SelectMany(r => t.SitesIn(r).hollows).ToList();
-            Ok(hol.Count > 3 && hol.All(x => x.t.r >= T.sites.hollowMinR && x.p.y > 0.6 && x.p.y < x.t.h), $"some thick trees have a hollow in the trunk ({hol.Count} near home)");
+            // hollows the bees hold are not nest sites (T1-9); the test takes a free one
+            bool BeesIn(V3 p) => t.activeChunks.Any(r => t.HivesIn(r).Any(hv => hv.feral && Hypot(hv.ex - p.x, hv.ez - p.z) < 0.1));
+            var hol = t.activeChunks.SelectMany(r => t.SitesIn(r).hollows).Where(x => !BeesIn(x.p)).ToList();
+            Ok(hol.Count >= 2 && hol.All(x => x.t.r >= T.sites.hollowMinR && x.p.y > 0.6 && x.p.y < x.t.h), $"some thick trees have a hollow in the trunk ({hol.Count} near home)");
             var (h, tr) = hol[0];
             Num o = Sqrt(Sq(h.x - tr.x) + Sq(h.z - tr.z));
             Place(t.wasp, P(h.x + (h.x - tr.x) / o * 0.05, h.y, h.z + (h.z - tr.z) / o * 0.05));

@@ -33,7 +33,7 @@ export function digestChunk(c, d) {
   f(c.caterpillars.length); for (const t of c.caterpillars) { f(t.x); f(t.y); f(t.z); }
   f(c.flies.length); for (const t of c.flies) { for (const k of ['x', 'y', 'z', 'r', 'w1', 'w2', 'w3', 'p1', 'p2', 'p3']) f(t[k]); }
   f(c.humans.length); for (const t of c.humans) { f(t.slot); f(t.x); f(t.z); f(t.fx); f(t.fz); f(t.posture === 'sit'); f(t.exit); }
-  f(c.boxes.length); for (const t of c.boxes) { for (const k of ['minx', 'maxx', 'miny', 'maxy', 'minz', 'maxz']) f(t[k]); f(!!t.wood); f(!!t.hive); f(!!t.shed); }
+  f(c.boxes.length); for (const t of c.boxes) { for (const k of ['minx', 'maxx', 'miny', 'maxy', 'minz', 'maxz']) f(t[k]); f(!!t.wood); f(!!t.hive); f(!!t.shed); f(!!t.fence); f(!!t.mall); }
   f(c.cylinders.length); for (const t of c.cylinders) { f(t.x); f(t.z); f(t.r); f(t.h); }
   f(c.sugar.length); for (const t of c.sugar) { f(t.x); f(t.y); f(t.z); f(t.rate); f(KIND[t.kind]); f(t.table ?? -1); }
   f(c.hives.length); for (const t of c.hives) {
@@ -44,8 +44,13 @@ export function digestChunk(c, d) {
   f(c.webs.length); for (const t of c.webs) { for (const k of ['x', 'y', 'z', 'nx', 'nz', 'r', 'tree']) f(t[k]); }
   for (const list of [c.birds, c.dragonflies]) { f(list.length); for (const t of list) for (const k of ['x', 'y', 'z', 'r', 'period', 'phase', 'dir']) f(t[k]); }
   f(c.rival ? 1 : 0); if (c.rival) for (const k of ['x', 'y', 'z', 'r', 'ex', 'ey', 'ez', 'workers']) f(c.rival[k]);
-  f(c.sheds.length); for (const t of c.sheds) { for (const k of ['x', 'z', 'hw', 'hd', 'h', 'crack', 'eave']) f(t[k]); }
+  f(c.sheds.length); for (const t of c.sheds) { for (const k of ['x', 'z', 'hw', 'hd', 'h', 'crack', 'eave']) f(t[k]); f(!!t.house); }
   f(!!c.nest);
+  // regions (T1-12)
+  f(['park', 'yards', 'mall', 'forest'].indexOf(c.use));
+  for (const list of [c.roads, c.lots]) { f(list.length); for (const t of list) for (const k of ['minx', 'maxx', 'minz', 'maxz']) f(t[k]); }
+  f(c.loops.length); for (const t of c.loops) { f(t.x); f(t.z); f(t.r); }
+  f(c.malls.length); for (const t of c.malls) for (const k of ['x', 'z', 'hw', 'hd', 'h']) f(t[k]);
 }
 
 const lines = [];

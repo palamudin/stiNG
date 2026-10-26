@@ -40,7 +40,14 @@ namespace Sting.Core
                 if (why != null) { Strike(ev.peer, ev.type, why); continue; }
                 ApplyImmediate(ev);
                 if (IMMEDIATE.Contains(ev.type)) continue;
-                if (ev.commit < tick) { netStats.late++; netStats.lateMax = Max(netStats.lateMax, tick - ev.commit); Emit("lateEvent", ("type", ev.type), ("by", tick - ev.commit)); }
+                // this tick's commits are already applied, so an event committing on it now is late too (applied next tick)
+                if (ev.commit <= tick)
+                {
+                    int by = tick + 1 - ev.commit;
+                    netStats.late++; netStats.lateMax = Max(netStats.lateMax, by);
+                    if (netStats.firstLate == 0) netStats.firstLate = tick;
+                    Emit("lateEvent", ("evType", ev.type), ("by", by));
+                }
                 Schedule(ev);
             }
         }
@@ -340,6 +347,7 @@ namespace Sting.Core
                     else if (ev.what == "caterpillar") st.caughtCat[ev.i] = 1;
                     else if (ev.what == "carrion") { st.carrion ??= new Dictionary<int, int>(); st.carrion[ev.i] = (st.carrion.TryGetValue(ev.i, out var cn) ? cn : 0) + 1; }
                     else if (ev.what == "meat") { st.meat ??= new Dictionary<int, int>(); st.meat[ev.i] = (st.meat.TryGetValue(ev.i, out var mn) ? mn : 0) + 1; }
+                    else if (ev.what == "pulp") { st.pulp ??= new Dictionary<int, int>(); st.pulp[ev.i] = (st.pulp.TryGetValue(ev.i, out var pn) ? pn : 0) + 1; }
                     else if (ev.what == "honey") { st.robbed ??= new Dictionary<int, int>(); st.robbed[ev.i] = (st.robbed.TryGetValue(ev.i, out var rn) ? rn : 0) + 1; }
                     else { if (!st.beeLost.TryGetValue(ev.hive, out var l)) st.beeLost[ev.hive] = l = new Dictionary<int, int>(); l[ev.i] = 1; }
                     break;

@@ -86,7 +86,7 @@ namespace Sting.Core
 
     public static class Persist
     {
-        public const int SAVE_VERSION = 14; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home); 14: barbecue meat taken
+        public const int SAVE_VERSION = 15; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home); 14: barbecue meat taken; 15: regions, pulp taken from wood
         const uint MAGIC = 0x474E4953; // "SING"
 
         // ---------------------------------------------------------------- one Io per type
@@ -146,6 +146,7 @@ namespace Sting.Core
             a.D(ref w.born);
             if (a.Opt(ref w.carry)) { var c = w.carry; a.S(ref c.kind); a.S(ref c.what); a.D(ref c.amount); a.B(ref c.poison); }
             a.I(ref w.groundTicks); a.I(ref w.chew); a.S(ref w.role); a.S(ref w.colony);
+            if (a.Opt(ref w.chewAt)) { a.S(ref w.chewAt.key); a.I(ref w.chewAt.i); }
             if (a.Opt(ref w.web)) { var b = w.web; a.S(ref b.key); a.I(ref b.i); a.D(ref b.progress); a.D(ref b.prevBurst); a.I(ref b.start); a.D(ref b.spiderAt); }
             if (a.Opt(ref w.drown)) { var d = w.drown; a.S(ref d.key); a.I(ref d.until); a.I(ref d.i); a.D(ref d.progress); a.D(ref d.prevBurst); }
             if (a.Opt(ref w.fight))
@@ -222,6 +223,7 @@ namespace Sting.Core
             a.Dict(ref s.carrion, () => 0, v => { a.I(ref v); return v; });
             a.Dict(ref s.robbed, () => 0, v => { a.I(ref v); return v; });
             a.Dict(ref s.meat, () => 0, v => { a.I(ref v); return v; });
+            a.Dict(ref s.pulp, () => 0, v => { a.I(ref v); return v; });
             return s;
         }
 

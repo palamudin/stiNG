@@ -340,7 +340,13 @@ export class Sim {
       if (why) { this._strike(m.peer, m.type, why); continue; }
       this._applyImmediate(m);
       if (IMMEDIATE.has(m.type)) continue;
-      if (m.commit < this.tick) { this.netStats.late++; this.netStats.lateMax = Math.max(this.netStats.lateMax, this.tick - m.commit); this.emit('lateEvent', { type: m.type, by: this.tick - m.commit }); }
+      // this tick's commits are already applied, so an event committing on it now is late too (applied next tick)
+      if (m.commit <= this.tick) {
+        const by = this.tick + 1 - m.commit;
+        this.netStats.late++; this.netStats.lateMax = Math.max(this.netStats.lateMax, by);
+        if (!this.netStats.firstLate) this.netStats.firstLate = this.tick;
+        this.emit('lateEvent', { evType: m.type, by });
+      }
       this._schedule(m);
     }
   }
@@ -588,6 +594,7 @@ export class Sim {
         else if (ev.what === 'caterpillar') st.caughtCat[ev.i] = 1;
         else if (ev.what === 'carrion') { const cr = st.carrion || (st.carrion = {}); cr[ev.i] = (cr[ev.i] || 0) + 1; }
         else if (ev.what === 'meat') { const mt = st.meat || (st.meat = {}); mt[ev.i] = (mt[ev.i] || 0) + 1; }
+        else if (ev.what === 'pulp') { const pu = st.pulp || (st.pulp = {}); pu[ev.i] = (pu[ev.i] || 0) + 1; }
         else if (ev.what === 'honey') { const rb = st.robbed || (st.robbed = {}); rb[ev.i] = (rb[ev.i] || 0) + 1; }
         else (st.beeLost[ev.hive] || (st.beeLost[ev.hive] = {}))[ev.i] = 1;
         break;
@@ -1185,7 +1192,8 @@ export class Sim {
     const prey = this._preyNear(w);
     if (prey) { this._catch(w, prey); return; }
     if (!w.carry && this._baitNear(w)) { this._takeBait(w); return; }
-    if (!w.carry && this._woodNear(w)) { w.state = 'chewing'; w.chew = 0; w.vx = w.vy = w.vz = 0; this.emit('chewStart', { id: w.id }); return; }
+    const wood = !w.carry && this._woodNear(w);
+    if (wood) { w.state = 'chewing'; w.chew = 0; w.chewAt = wood; w.vx = w.vy = w.vz = 0; this.emit('chewStart', { id: w.id }); return; }
     if (w.carry) this.emit('carrying', { kind: w.carry.kind });
   }
 
@@ -1195,7 +1203,7 @@ export class Sim {
       opening: c && c.opening >= 0 ? c.openingKey : null,
       prey: !w.carry && this._preyNear(w) ? this._preyNear(w).kind : null,
       bait: !w.carry && !!this._baitNear(w),
-      wood: !w.carry && !c && this._woodNear(w),
+      wood: !w.carry && !c && !!this._woodNear(w),
       nest: dist2(w, this.nest.entrance) < 0.4 * 0.4,
       site: w.caste === 'queen' && !this.colony.sited ? (this._siteNear(w) || {}).type || null : null,
       rival: !w.carry && !!this._rivalNestNear(w),
@@ -1242,6 +1250,7 @@ export class Sim {
       case 'meat': return (ev.i % 2 ? T.bbq.plateLoads : T.bbq.grillLoads) - ((st.meat && st.meat[ev.i]) || 0) > 0;
       case 'honey': return this.hiveLoadsLeft(ev.key, ev.i) > 0;
       case 'bee': return !(st.beeLost[ev.hive] && st.beeLost[ev.hive][ev.i]);
+      case 'pulp': return this.pulpLeft(ev.key, ev.i) > 0;
     }
     return !!rec;
   }
@@ -1254,6 +1263,7 @@ export class Sim {
       case 'meat': inc(st.meat || (st.meat = {}), ev.i); break;
       case 'honey': inc(st.robbed || (st.robbed = {}), ev.i); break;
       case 'bee': if (sign > 0) (st.beeLost[ev.hive] || (st.beeLost[ev.hive] = {}))[ev.i] = 1; break;
+      case 'pulp': inc(st.pulp || (st.pulp = {}), ev.i); break;
     }
   }
   // The authority's ruling on another peer's claim: first to reach it wins
@@ -1268,10 +1278,10 @@ export class Sim {
     const c = this.claims.get(ev.claimWasp);
     if (!c || c.auth !== ev.peer || c.key !== ev.key || c.what !== ev.what || c.i !== ev.i) return;
     this.claims.delete(ev.claimWasp);
-    if (ev.what === 'carrion' || ev.what === 'meat' || ev.what === 'honey') this._taken(ev, -1, 0);
+    if (ev.what === 'carrion' || ev.what === 'meat' || ev.what === 'honey' || ev.what === 'pulp') this._taken(ev, -1, 0);
     const w = this.waspById(ev.claimWasp), had = !!(w && w.carry && w.carry.what === c.carry);
     if (had) { w.carry = null; if (w.id !== this.drivenId) { w.ai.mode = 'pick'; w.ai.target = null; } }
-    this.stats.caught--;
+    if (ev.what !== 'pulp') this.stats.caught--;
     this.emit('claimLost', { id: ev.claimWasp, what: ev.what, driven: ev.claimWasp === this.drivenId, had });
   }
   // a claim nobody answered (the authority left) stands
@@ -1321,22 +1331,46 @@ export class Sim {
     this.emit('caught', { id: w.id, kind: p.kind });
   }
 
+  // Wood within reach: a box with pulp left in it ({ key, i }), or a tree (i = -1), or null
   _woodNear(w) {
     const reach = T.pulp.reach + T.wasp.radius;
     for (const rec of this.activeChunks) {
-      for (const b of rec.content.boxes) {
+      const key = chunkKey(rec.cx, rec.cz), boxes = rec.content.boxes;
+      for (let i = 0; i < boxes.length; i++) {
+        const b = boxes[i];
         if (!b.wood || b.hive) continue;
         const qx = clamp(w.x, b.minx, b.maxx), qy = clamp(w.y, b.miny, b.maxy), qz = clamp(w.z, b.minz, b.maxz);
         const dx = w.x - qx, dy = w.y - qy, dz = w.z - qz;
-        if (dx * dx + dy * dy + dz * dz <= reach * reach) return true;
+        if (dx * dx + dy * dy + dz * dz <= reach * reach && this.pulpLeft(key, i) > 0) return { key, i };
       }
       for (const cy of rec.content.cylinders) {
         if (w.y > cy.h) continue;
         const dx = w.x - cy.x, dz = w.z - cy.z, d = Math.sqrt(dx * dx + dz * dz) - cy.r;
-        if (d <= reach) return true;
+        if (d <= reach) return { key, i: -1 };
       }
     }
-    return false;
+    return null;
+  }
+  // Pulp in a wooden box (T1-12): by its longest side, less what wasps have taken (a chunk delta); trees never run out
+  pulpLoads(b) { return Math.max(T.pulp.minLoads, Math.round(Math.max(b.maxx - b.minx, b.maxz - b.minz) * T.pulp.perMeter)); }
+  pulpLeft(key, i) {
+    const rec = this.records.get(key), b = rec && rec.content.boxes[i];
+    if (!b) return 0;
+    const st = this.chunkState.get(key);
+    return this.pulpLoads(b) - ((st && st.pulp && st.pulp[i]) || 0);
+  }
+  // a load of pulp chewed off: from a box it is taken through the chunk authority like any pickup (T1-19)
+  _takePulp(w, at) {
+    if (at && at.i >= 0) {
+      if (this.pulpLeft(at.key, at.i) <= 0) { this.emit('pulpGone', { id: w.id }); return false; }
+      w.carry = { kind: 'pulp', amount: T.pulp.amount, what: 'pulp' };
+      const st = this.cs(at.key), pu = st.pulp || (st.pulp = {});
+      pu[at.i] = (pu[at.i] || 0) + 1;
+      this._pickup(w, { type: 'caught', key: at.key, what: 'pulp', i: at.i });
+    } else w.carry = { kind: 'pulp', amount: T.pulp.amount, what: 'pulp' };
+    this.cs(at ? at.key : chunkKey(chunkOf(w.x), chunkOf(w.z))).chewed++;
+    this.emit('chewed', { id: w.id });
+    return true;
   }
 
   _chewStep(w, cmd, driven) {
@@ -1346,9 +1380,8 @@ export class Sim {
     w.energy -= T.energy.cruisePerSec * DT * T.energy.hoverShare;
     if (w.chew >= T.pulp.chewTicks) {
       w.state = 'fly';
-      w.carry = { kind: 'pulp', amount: T.pulp.amount, what: 'pulp' };
-      this.cs(chunkKey(chunkOf(w.x), chunkOf(w.z))).chewed++;
-      this.emit('chewed', { id: w.id });
+      this._takePulp(w, w.chewAt || null);
+      w.chewAt = null;
     }
   }
 
@@ -3380,7 +3413,7 @@ export class Sim {
           if (!w.carry && this.hiveLoadsLeft(t.key, t.i) > 0) { this._startRob(w, t.key, t.i); return cmd; }
           ai.mode = 'return'; ai.target = null;
         } else if (t.kind === 'wood') {
-          if (this.tick > ai.timer) { w.carry = { kind: 'pulp', amount: T.pulp.amount, what: 'pulp' }; ai.mode = 'return'; ai.target = null; this.emit('chewed', { id: w.id }); }
+          if (this.tick > ai.timer) { const got = this._takePulp(w, { key: t.key, i: t.i }); ai.mode = got ? 'return' : 'pick'; ai.target = null; }
         } else if ((ai.cargo || 0) >= 0.95 || this.tick > ai.timer + 300) { ai.mode = 'return'; ai.target = null; }
         break;
       }
@@ -3551,7 +3584,7 @@ export class Sim {
       // wood is a landmark: a wasp knows the sheds and fences around its nest
       let best = null, bs = Infinity;
       this.activeChunks.forEach((rec, ri) => rec.content.boxes.forEach((b, i) => {
-        if (!b.wood || b.hive) return;
+        if (!b.wood || b.hive || this.pulpLeft(chunkKey(rec.cx, rec.cz), i) <= 0) return;
         const s = Math.sqrt(dist2(w, { x: (b.minx + b.maxx) / 2, y: b.maxy, z: (b.minz + b.maxz) / 2 })) + h32(w.id, i, ri + 40, this.day) * 12;
         if (s < bs) { bs = s; best = { kind: 'wood', key: chunkKey(rec.cx, rec.cz), i, c: ri + 40 }; }
       }));

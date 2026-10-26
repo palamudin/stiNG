@@ -459,7 +459,8 @@ namespace Sting.Core
             var prey = PreyNear(w);
             if (prey != null) { Catch(w, prey); return; }
             if (w.carry == null && BaitNear(w) != null) { TakeBait(w); return; }
-            if (w.carry == null && WoodNear(w)) { w.state = "chewing"; w.chew = 0; w.vx = w.vy = w.vz = 0; Emit("chewStart", ("id", w.id)); return; }
+            var wood = w.carry == null ? WoodNear(w) : null;
+            if (wood != null) { w.state = "chewing"; w.chew = 0; w.chewAt = wood; w.vx = w.vy = w.vz = 0; Emit("chewStart", ("id", w.id)); return; }
             if (w.carry != null) Emit("carrying", ("kind", w.carry.kind));
         }
 
@@ -472,7 +473,7 @@ namespace Sting.Core
                 opening = c != null && c.opening >= 0 ? c.openingKey : null,
                 prey = pn?.kind,
                 bait = w.carry == null && BaitNear(w) != null,
-                wood = w.carry == null && c == null && WoodNear(w),
+                wood = w.carry == null && c == null && WoodNear(w) != null,
                 nest = D2(w, nest.entrance) < 0.4 * 0.4,
                 site = w.caste == "queen" && !colony.sited ? SiteNear(w)?.type : null,
                 rival = w.carry == null && RivalNestNear(w) != null,
@@ -534,27 +535,54 @@ namespace Sting.Core
             Emit("caught", ("id", w.id), ("kind", p.kind));
         }
 
-        bool WoodNear(Wasp w)
+        /// wood within reach: a box with pulp left ({ key, i }), or a tree (i = -1), or null
+        WoodSpot WoodNear(Wasp w)
         {
             Num reach = T.pulp.reach + T.wasp.radius;
             foreach (var rec in activeChunks)
             {
                 if (!Near(rec, w.x, w.z)) continue;
-                foreach (var b in rec.content.boxes)
+                var boxes = rec.content.boxes;
+                for (int i = 0; i < boxes.Count; i++)
                 {
+                    var b = boxes[i];
                     if (!b.wood || b.hive) continue;
                     Num qx = Clamp(w.x, b.minx, b.maxx), qy = Clamp(w.y, b.miny, b.maxy), qz = Clamp(w.z, b.minz, b.maxz);
                     Num dx = w.x - qx, dy = w.y - qy, dz = w.z - qz;
-                    if (dx * dx + dy * dy + dz * dz <= reach * reach) return true;
+                    if (dx * dx + dy * dy + dz * dz <= reach * reach && PulpLeft(rec.key, i) > 0) return new WoodSpot { key = rec.key, i = i };
                 }
                 foreach (var cy in rec.content.cylinders)
                 {
                     if (w.y > cy.h) continue;
                     Num dx = w.x - cy.x, dz = w.z - cy.z, d = Sqrt(dx * dx + dz * dz) - cy.r;
-                    if (d <= reach) return true;
+                    if (d <= reach) return new WoodSpot { key = rec.key, i = -1 };
                 }
             }
-            return false;
+            return null;
+        }
+        /// pulp in a wooden box (T1-12): by its longest side, less what wasps have taken
+        public int PulpLoads(Box b) => System.Math.Max(T.pulp.minLoads, (int)Rnd(Max(b.maxx - b.minx, b.maxz - b.minz) * T.pulp.perMeter));
+        public int PulpLeft(string key, int i)
+        {
+            if (!records.TryGet(key, out var rec) || i < 0 || i >= rec.content.boxes.Count) return 0;
+            chunkState.TryGet(key, out var st);
+            return PulpLoads(rec.content.boxes[i]) - (st?.pulp != null && st.pulp.TryGetValue(i, out var n) ? n : 0);
+        }
+        /// a load of pulp chewed off: from a box it is taken through the chunk authority like any pickup (T1-19)
+        internal bool TakePulp(Wasp w, WoodSpot at)
+        {
+            if (at != null && at.i >= 0)
+            {
+                if (PulpLeft(at.key, at.i) <= 0) { Emit("pulpGone", ("id", w.id)); return false; }
+                w.carry = new Carry { kind = "pulp", amount = T.pulp.amount, what = "pulp" };
+                var st = CS(at.key); st.pulp ??= new Dictionary<int, int>();
+                st.pulp[at.i] = (st.pulp.TryGetValue(at.i, out var n) ? n : 0) + 1;
+                Pickup(w, new NetEv { type = "caught", key = at.key, what = "pulp", i = at.i });
+            }
+            else w.carry = new Carry { kind = "pulp", amount = T.pulp.amount, what = "pulp" };
+            CS(at != null ? at.key : ChunkKey(ChunkOf(w.x), ChunkOf(w.z))).chewed++;
+            Emit("chewed", ("id", w.id));
+            return true;
         }
 
         void ChewStep(Wasp w, Cmd cmd, bool driven)
@@ -566,9 +594,8 @@ namespace Sting.Core
             if (w.chew >= T.pulp.chewTicks)
             {
                 w.state = "fly";
-                w.carry = new Carry { kind = "pulp", amount = T.pulp.amount, what = "pulp" };
-                CS(ChunkKey(ChunkOf(w.x), ChunkOf(w.z))).chewed++;
-                Emit("chewed", ("id", w.id));
+                TakePulp(w, w.chewAt);
+                w.chewAt = null;
             }
         }
 

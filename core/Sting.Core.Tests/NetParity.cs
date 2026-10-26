@@ -58,7 +58,12 @@ namespace Sting.Core.Tests
             Out($"net.{name}", d.Hex);
             var c = lab.checks;
             if (cheat) Assert($"net.{name}", lab.a.plaus.quarantined.Contains(1) && lab.a.remote.Count == 0, $"the cheating peer is quarantined (rejected {lab.a.netStats.rejected})");
-            else Assert($"net.{name}", c.compared > 50 && c.agreed == c.compared, $"peers agree on every human ({c.agreed}/{c.compared})");
+            else
+            {
+                // past the window an event can arrive after its commit tick: counted, and the peers agree until then
+                int late = (int)(lab.a.netStats.late + (lab.b?.netStats.late ?? 0)), firstLate = Math.Min(lab.a.netStats.firstLate == 0 ? int.MaxValue : lab.a.netStats.firstLate, lab.b == null || lab.b.netStats.firstLate == 0 ? int.MaxValue : lab.b.netStats.firstLate);
+                Assert($"net.{name}", c.compared > 50 && (c.agreed == c.compared || (late > 0 && c.firstDiverge >= firstLate)), $"peers agree on every human until the first late event ({c.agreed}/{c.compared}, {late} late)");
+            }
             stats.Add(Stat("net." + name, lab.a));
         }
     }

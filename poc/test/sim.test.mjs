@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, CMD_FIELDS,
+  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, CMD_FIELDS,
 } from '../sim/index.js';
 import { applyTuning, parseTuning, tuningHash, tuningLeaves, TUNE } from '../sim/tunefile.js';
 
@@ -110,7 +110,11 @@ function bot(plan) {
 }
 
 // helper: a seated human in the origin chunk wearing a given top
-function seated(sim, pred) { return sim.active.find((h) => !h.special && h.posture === 'sit' && h.state === 'idle' && pred(h)); }
+// someone sitting at a table, in the home park if there is one (the chunks around it are yards since T1-12)
+function seated(sim, pred) {
+  const ok = (h) => !h.special && h.posture === 'sit' && h.state === 'idle' && pred(h);
+  return sim.active.find((h) => h.chunk === '0,0' && ok(h)) || sim.active.find(ok);
+}
 
 // 5. Escalation ladder: covered food, traps (GDD 8.10)
 {
@@ -920,8 +924,10 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
 {
   const spring = () => { const t = new Sim({ seed: 1234 }); t.colony.mated = 200; t.season.startMinute -= 0.71 * t.settings.seasonDays * 1440; run(t, 120); run(t, 1, () => idle({ pick: 1 })); return t; };
   const t = spring();
-  const hol = t.activeChunks.flatMap((r) => t.sitesIn(r).hollows);
-  ok(hol.length > 3 && hol.every((h) => h.t.r >= T.sites.hollowMinR && h.y > 0.6 && h.y < h.t.h), `some thick trees have a hollow in the trunk (${hol.length} near home)`);
+  // hollows the bees hold are not nest sites (T1-9); the test takes a free one
+  const beesIn = (h) => t.activeChunks.some((r) => t.hivesIn(r).some((hv) => hv.feral && Math.hypot(hv.ex - h.x, hv.ez - h.z) < 0.1));
+  const hol = t.activeChunks.flatMap((r) => t.sitesIn(r).hollows).filter((h) => !beesIn(h));
+  ok(hol.length >= 2 && hol.every((h) => h.t.r >= T.sites.hollowMinR && h.y > 0.6 && h.y < h.t.h), `some thick trees have a hollow in the trunk (${hol.length} near home)`);
   const h = hol[0];
   const out = Math.hypot(h.x - h.t.x, h.z - h.t.z);
   place(t.wasp, { x: h.x + (h.x - h.t.x) / out * 0.05, y: h.y, z: h.z + (h.z - h.t.z) / out * 0.05 });
@@ -1238,6 +1244,49 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
   const T0 = T.sense.jitter; T.sense.jitter = 0;
   const t = s._sense(a); T.sense.jitter = T0;
   ok(t && t.sub === 'meat', `barbecue meat draws a hunter from 12 m (${t ? t.sub || t.kind : 'nothing'})`);
+}
+
+// Regions (GDD 4.2, 4.3, T1-12): an 8x8 chunk layout under the chunk pass; suburban yards; pulp that runs out
+{
+  const uses = {};
+  for (let z = -4; z < 4; z++) for (let x = -4; x < 4; x++) { const u = landUse(1234n, x, z); uses[u] = (uses[u] || 0) + 1; }
+  ok(landUse(1234n, 0, 0) === 'park' && [-4, -1, 1, 3].every((x) => landUse(1234n, x, 0) === 'park') && uses.yards >= 40 && uses.mall === 3 && uses.forest >= 3,
+    `the home region: a park strip through home, a strip mall, a forest corner, yards everywhere else (${Object.entries(uses).map(([k, n]) => k + ' ' + n).join(', ')})`);
+  let yx = 0, yz = 1;
+  const c = generateChunk(1234n, yx, yz);
+  const houses = c.sheds.filter((h) => h.house), fences = c.boxes.filter((b) => b.fence);
+  ok(c.use === 'yards' && houses.length >= 2 && fences.length >= 30 && c.roads.length === 1 && houses.every((h) => c.boxes.some((b) => b.shed && !b.wood && b.minx === h.x - h.hw)),
+    `a yards chunk: a street, ${houses.length} houses, backyard fences in ${fences.length} sections, ${c.tables.length} patio tables`);
+  // a street ends in a cul-de-sac where the next chunk is not yards
+  let loop = null;
+  for (let x = -4; x < 4 && !loop; x++) for (let z = -4; z < 4 && !loop; z++) {
+    if (landUse(1234n, x, z) !== 'yards') continue;
+    const k = generateChunk(1234n, x, z);
+    if (landUse(1234n, x + 1, z) !== 'yards') loop = { k, x, z };
+  }
+  ok(loop && loop.k.loops.length >= 1 && loop.k.roads[0].maxx < loop.x * 64 + 32, 'a street that meets a park, a mall or the woods ends in a cul-de-sac');
+  // houses block the view between people on either side (GDD 8.9)
+  const s = new Sim({ seed: 1234, birds: false });
+  run(s, 1, () => idle());
+  const rec = s.records.get(chunkKey(yx, yz)), h = rec.content.sheds.find((q) => q.house);
+  ok(!s.canSee({ x: h.x, z: h.z - h.hd - 2 }, { x: h.x, z: h.z + h.hd + 2 }) && s.canSee({ x: h.x + h.hw + 3, z: h.z - h.hd - 2 }, { x: h.x + h.hw + 3, z: h.z + h.hd + 2 }), 'a house blocks the view across it; the gap beside it does not');
+  // a fence section holds so much pulp, then it is stripped
+  const key = chunkKey(yx, yz), fi = rec.content.boxes.findIndex((b) => b.fence), fb = rec.content.boxes[fi], loads = s.pulpLoads(fb);
+  const w = s.wasp;
+  let got = 0;
+  for (let k = 0; k < loads + 2; k++) {
+    place(w, { x: fb.maxx + T.wasp.radius + 0.005, y: 0.8, z: (fb.minz + fb.maxz) / 2 }); w.state = 'fly'; w.carry = null; w.energy = 1;
+    const ev = run(s, T.pulp.chewTicks + 4, (sim, i) => idle({ act: Act.Interact }));
+    if (ev.some((e) => e.type === 'chewed' && e.id === w.id)) got++;
+    run(s, 2, () => idle());
+  }
+  ok(got === loads && s.pulpLeft(key, fi) === 0 && !s._woodNear({ x: fb.maxx + T.wasp.radius + 0.005, y: 0.8, z: (fb.minz + fb.maxz) / 2 }), `a ${(Math.max(fb.maxx - fb.minx, fb.maxz - fb.minz)).toFixed(1)} m fence section gives ${got} loads of pulp, then it is stripped bare`);
+  const r2 = restore(snapshot(s));
+  ok(r2.pulpLeft(key, fi) === 0, 'a stripped fence stays stripped after save and restore (a chunk delta)');
+  const a = s._spawnWasp(false); a.role = 'pulp';
+  place(a, { x: fb.maxx + 0.3, y: 1, z: (fb.minz + fb.maxz) / 2 });
+  s._aiPick(a);
+  ok(a.ai.target && a.ai.target.kind === 'wood' && !(a.ai.target.key === key && a.ai.target.i === fi), 'pulp foragers go past a stripped section to wood that has some left');
 }
 
 // Tuning as data (GDD 13, T1-22): one plain-text file feeds both sims

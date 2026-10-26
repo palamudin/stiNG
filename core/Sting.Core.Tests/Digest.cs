@@ -28,7 +28,7 @@ namespace Sting.Core.Tests
             F(c.caterpillars.Count); foreach (var t in c.caterpillars) { F(t.x); F(t.y); F(t.z); }
             F(c.flies.Count); foreach (var t in c.flies) { F(t.x); F(t.y); F(t.z); F(t.r); F(t.w1); F(t.w2); F(t.w3); F(t.p1); F(t.p2); F(t.p3); }
             F(c.humans.Count); foreach (var t in c.humans) { F(t.slot); F(t.x); F(t.z); F(t.fx); F(t.fz); F(t.posture == "sit"); F(t.exit); }
-            F(c.boxes.Count); foreach (var t in c.boxes) { F(t.minx); F(t.maxx); F(t.miny); F(t.maxy); F(t.minz); F(t.maxz); F(t.wood); F(t.hive); F(t.shed); }
+            F(c.boxes.Count); foreach (var t in c.boxes) { F(t.minx); F(t.maxx); F(t.miny); F(t.maxy); F(t.minz); F(t.maxz); F(t.wood); F(t.hive); F(t.shed); F(t.fence); F(t.mall); }
             F(c.cylinders.Count); foreach (var t in c.cylinders) { F(t.x); F(t.z); F(t.r); F(t.h); }
             F(c.sugar.Count); foreach (var t in c.sugar) { F(t.x); F(t.y); F(t.z); F(t.rate); F(t.kind == "can" ? 1 : t.kind == "flower" ? 2 : t.kind == "spill" ? 3 : 4); F(t.table); }
             F(c.hives.Count);
@@ -42,8 +42,13 @@ namespace Sting.Core.Tests
             foreach (var list in new[] { c.birds, c.dragonflies }) { F(list.Count); foreach (var t in list) { F(t.x); F(t.y); F(t.z); F(t.r); F(t.period); F(t.phase); F(t.dir); } }
             F(c.rival != null ? 1 : 0);
             if (c.rival != null) { var r = c.rival; F(r.x); F(r.y); F(r.z); F(r.r); F(r.ex); F(r.ey); F(r.ez); F(r.workers); }
-            F(c.sheds.Count); foreach (var t in c.sheds) { F(t.x); F(t.z); F(t.hw); F(t.hd); F(t.h); F(t.crack); F(t.eave); }
+            F(c.sheds.Count); foreach (var t in c.sheds) { F(t.x); F(t.z); F(t.hw); F(t.hd); F(t.h); F(t.crack); F(t.eave); F(t.house); }
             F(c.hasNest);
+            // regions (T1-12)
+            F(c.use == "park" ? 0 : c.use == "yards" ? 1 : c.use == "mall" ? 2 : 3);
+            foreach (var list in new[] { c.roads, c.lots }) { F(list.Count); foreach (var t in list) { F(t.minx); F(t.maxx); F(t.minz); F(t.maxz); } }
+            F(c.loops.Count); foreach (var t in c.loops) { F(t.x); F(t.z); F(t.r); }
+            F(c.malls.Count); foreach (var t in c.malls) { F(t.x); F(t.z); F(t.hw); F(t.hd); F(t.h); }
         }
     }
 }

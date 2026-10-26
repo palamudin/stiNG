@@ -45,6 +45,7 @@ namespace Sting.Core
                 case "meat": return (ev.i % 2 != 0 ? T.bbq.plateLoads : T.bbq.grillLoads) - (st.meat != null && st.meat.TryGetValue(ev.i, out var mn) ? mn : 0) > 0;
                 case "honey": return HiveLoadsLeft(ev.key, ev.i) > 0;
                 case "bee": return !(st.beeLost.TryGetValue(ev.hive, out var l) && l.ContainsKey(ev.i));
+                case "pulp": return PulpLeft(ev.key, ev.i) > 0;
             }
             return records.TryGet(ev.key, out _);
         }
@@ -60,6 +61,7 @@ namespace Sting.Core
                 case "meat": Inc(st.meat ??= new Dictionary<int, int>(), ev.i); break;
                 case "honey": Inc(st.robbed ??= new Dictionary<int, int>(), ev.i); break;
                 case "bee": if (sign > 0) { if (!st.beeLost.TryGetValue(ev.hive, out var l)) st.beeLost[ev.hive] = l = new Dictionary<int, int>(); l[ev.i] = 1; } break;
+                case "pulp": Inc(st.pulp ??= new Dictionary<int, int>(), ev.i); break;
             }
         }
         /// The authority's ruling on another peer's claim: first to reach it wins
@@ -76,10 +78,10 @@ namespace Sting.Core
         {
             if (!claims.TryGet(ev.claimWasp, out var c) || c.auth != ev.peer || c.key != ev.key || c.what != ev.what || c.i != ev.i) return;
             claims.Delete(ev.claimWasp);
-            if (ev.what == "carrion" || ev.what == "meat" || ev.what == "honey") Taken(ev, -1, 0);
+            if (ev.what == "carrion" || ev.what == "meat" || ev.what == "honey" || ev.what == "pulp") Taken(ev, -1, 0);
             var w = WaspById(ev.claimWasp); bool had = w != null && w.carry != null && w.carry.what == c.carry;
             if (had) { w.carry = null; if (w.id != drivenId) { w.ai.mode = "pick"; w.ai.target = null; } }
-            stats.caught--;
+            if (ev.what != "pulp") stats.caught--;
             Emit("claimLost", ("id", ev.claimWasp), ("what", ev.what), ("driven", ev.claimWasp == drivenId), ("had", had));
         }
         /// a claim nobody answered (the authority left) stands

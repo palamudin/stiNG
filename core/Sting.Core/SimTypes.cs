@@ -65,6 +65,8 @@ namespace Sting.Core
         public int stateTicks;
         public Attach attach; public Under under; public Ball ball; public Num born;
         public Carry carry; public int groundTicks, chew; public string role = "sugar", colony = "own";
+        /// the wood being chewed (T1-12): a box in a chunk, or a tree (i = -1)
+        public WoodSpot chewAt;
         public WebHold web; public Drown drown; public Fight fight; public Ai ai = new Ai(); public Contact contact; public Perch perch;
         public bool walking; public Num fightReqUntil;
         /// the surface a landed wasp holds on to, and a short window after takeoff before it can settle again
@@ -108,6 +110,7 @@ namespace Sting.Core
     public abstract class Msg { public string mk; public int peer, tick; public int to = -1; }
 
     /// A network event: one class holds every field any event type uses (sim.js publishes plain objects)
+    public sealed class WoodSpot { public string key; public int i; }
     public sealed class Claim { public int auth, i, hive, tick; public string key, what, carry; }
     public sealed class NetEv : Msg
     {
@@ -190,6 +193,8 @@ namespace Sting.Core
         public Dictionary<int, Nectar> nectar; public Dictionary<int, int> carrion;
         /// loads robbed from each hive today (T1-9); barbecue meat taken today, by grill (2 ti) and plate (2 ti + 1) (T1-10)
         public Dictionary<int, int> robbed, meat;
+        /// pulp chewed off each wooden box (T1-12)
+        public Dictionary<int, int> pulp;
     }
 
     public sealed class BeePhys { public Num x, y, z, vx, vy, vz, stun; public string mode; }
@@ -206,7 +211,7 @@ namespace Sting.Core
     public sealed class Muni { public int n; public MuniCampaign active; public Num cooldownUntil; }
     public sealed class PendingSwitch { public int at, target; }
     public sealed class SimStats { public Num stings, aiStings, remoteStings, full, deaths, caught, deposits; public Dictionary<string, Num> causes = new Dictionary<string, Num>(); }
-    public sealed class NetStats { public Num sent, recv, late, lateMax, rejected, dropped; }
+    public sealed class NetStats { public Num sent, recv, late, lateMax, rejected, dropped; public int firstLate; }
     public sealed class Plaus
     {
         public Dictionary<int, int> strikes = new Dictionary<int, int>(); public List<int> quarantined = new List<int>();

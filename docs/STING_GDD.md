@@ -198,6 +198,7 @@ Temperate world: suburbs with gardens, parks, picnic areas, beer gardens, farmla
 - Chunk: 64 m × 64 m columns, keyed by integer (cx, cz).
 - Region: 8 × 8 chunks (512 m), used for large-scale layout (where the town is, where the farm is).
 - Wasp foraging range is on the order of hundreds of meters *(tune)*, so a colony's working area is roughly a region.
+- As built (18.34): each region lays out a park strip, a strip-mall edge, a forest corner and suburban yards; chunks read their land use from it.
 
 ### 4.3 Generation **[T0] [T1]**
 
@@ -1177,6 +1178,20 @@ The driven wasp stays at the rate the lab tuned the remote view against (20 Hz r
 
 The ordinary lab colony (23 wasps) now sends 2.8 KB/s instead of 4.8. Two players among each other's foragers is the expensive case; there the near rate is the lever (5 Hz would halve it again).
 
+### 18.34 Regions as built (T1-12)
+
+**The layout pass.** A region is 8×8 chunks, laid out from the seed before any chunk in it (Q-06: American suburbia). One row of chunks is a park strip; in the home region it is the row through the home chunk, so the home park and the parks east and west of it play as before. Three chunks along one edge are a strip mall. A 2×2 corner is forest edge. Everything else is suburban yards. In the home region that is 49 yards, 8 park, 3 mall and 4 forest chunks. `landUse(seed, cx, cz)` is a pure function, so a chunk can ask about its neighbours (a street ends in a cul-de-sac where the next chunk is not yards). The generator version is now 4, so worlds saved before this do not load.
+
+**Yards.** A street (with sidewalks) runs east–west through the chunk. Two lots on each side, each with a house set back from the sidewalk (5–6.5 m tall, its door to the street), and a fenced backyard: cedar fences 1.5 m high along the back and the sides, in sections of up to 4 m. A backyard may hold a patio table with people at it (and so drinks, a trap at level 3, and a grill on a barbecue day, 18.31), a flower bed along the back fence, a garden shed in a corner, a yard tree, a bee box, and people chatting on the front lawn. On average a yards chunk has 3.6 houses, 2.3 patio tables, 9 people, 21 flowers and a tree.
+
+**Houses** are sheds at a larger size and not wood: their walls and eaves are nest sites (wall and attic), wild bees can take a wall, and young queens can winter in them, exactly as with garden sheds. They block sight (8.9), and so do the 1.5 m fences, so people in one backyard do not see a wasp in the next.
+
+**Strip malls** are a long low building on the region's edge facing in (storefront glass, a red fascia), a lined parking lot in front, and two picnic tables of outdoor seating by the doors with drinks and people. **Forest edge** is 16–26 trees, a few flower patches and no people: good for caterpillars, hollows and webs.
+
+**Pulp runs out.** Every wooden box (fence section, table, bench, garden shed) holds 1.5 loads of pulp per metre of its longest side, at least two; a 4 m fence section holds six. Each load taken is a chunk delta (`pulp` in the chunk state), saved with the world and claimed through the chunk authority like any pickup (18.32), so two players cannot strip the same board twice. A stripped section is not offered for chewing and pulp foragers go past it to wood that has some left; the PoC draws it greyer as it is stripped. Trees never run out.
+
+**Found on the way.** An event that reached a peer on its commit tick, after that tick's commits were applied, was applied one tick late without being counted as late; it is now counted (and the late-event log no longer overwrote its own type). Past the commit window (the awful link) such an event can still make the peers' humans diverge from that tick on; correcting it is the chunk authority's job (11.6) and not built. The test bot that stings anyone seated now has to get past houses and fences, so the behaviour checks aim it at the home park.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1185,7 +1200,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (84 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (85 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -1202,7 +1217,7 @@ Everything in `POC.md` (84 features) and its C# port (18.18), including the Tier
 | T1-9 | **Built (18.28).** Feral hives and robbing: hives in hollow trees and walls; a wasp that gets inside takes honey (sugar) as well as brood | 9.1 | M | |
 | T1-10 | **Built (18.31).** Barbecues: grills as human anchors with meat, a protein source at people's tables and a new kind of conflict | 4.3, 6.2 | M | T1-11 helps |
 | T1-11 | Human days: walk and lie postures, people strolling on paths, sunbathers lying on the grass, gardeners; the schedule picks the activity by weather and traits | 8.2, 8.3 | L | Q-06 for the paths |
-| T1-12 | Regions: an 8×8 chunk layout pass (park, gardens, houses with fences, farmland, forest edge) under the chunk pass, with pulp from fences that runs out (a chunk delta) | 4.2, 4.3, 4.5 | L | Q-06 |
+| T1-12 | **Built (18.34).** Regions: an 8×8 chunk layout pass (park, gardens, houses with fences, farmland, forest edge) under the chunk pass, with pulp from fences that runs out (a chunk delta) | 4.2, 4.3, 4.5 | L | Q-06 |
 | T1-13 | **Built (18.23).** Worker ages and guards: young workers stay in, older ones forage, the oldest guard the entrance and attack intruders (rivals, raiders, other players' wasps) | 6.5 | M | Q-07 for players |
 | T1-14 | **Built (18.21).** Hollow-tree nest site and nest thermals: site insulation sets how cold snaps and heat slow the brood | 6.6 | S | |
 | T1-15 | **Built (18.24).** Winter with choices: gynes pick hibernation sites whose quality sets winter survival; in spring the player chooses which surviving queen to continue | 6.7 | M | |
@@ -1215,7 +1230,7 @@ Everything in `POC.md` (84 features) and its C# port (18.18), including the Tier
 | T1-22 | **Built (18.29).** Tuning as data: the tuning tables as versioned plain-text files read by own parsers in JS and C#, and the tuning hash in the world record | 13 | M | |
 | T1-23 | **Built (18.21).** Solo time: accelerate time in the colony view, and the Reflex slowdown as a solo option | 5.1, 7.8 | S | |
 
-Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, then the other S items: T1-14, T1-17, T1-18, T1-23, all done; T1-20 waits on regions), then the M items (T1-6 to T1-10, T1-13, T1-15, T1-16, T1-19, T1-21 and T1-22 done; the L items T1-11 and T1-12 and then T1-20 remain); each batch is built in the PoC and then ported to the core with parity.
+Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, then the other S items: T1-14, T1-17, T1-18, T1-23, all done; T1-20 waits on regions), then the M items (T1-6 to T1-10, T1-12, T1-13, T1-15, T1-16, T1-19, T1-21 and T1-22 done; T1-11 human days and T1-20 remain); each batch is built in the PoC and then ported to the core with parity.
 
 ### 19.3 Tier 2: later
 

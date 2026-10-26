@@ -276,6 +276,8 @@ beeProtein = 1.5
 chewTicks = 120
 amount = 1
 reach = 0.018
+perMeter = 1.5
+minLoads = 2
 
 [esc]
 levels = [0, 3, 8, 15, 25, 40]

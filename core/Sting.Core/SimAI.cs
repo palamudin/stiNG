@@ -90,7 +90,7 @@ namespace Sting.Core
                     }
                     else if (t.kind == "wood")
                     {
-                        if (tick > ai.timer) { w.carry = new Carry { kind = "pulp", amount = T.pulp.amount, what = "pulp" }; ai.mode = "return"; ai.target = null; Emit("chewed", ("id", w.id)); }
+                        if (tick > ai.timer) { bool got = TakePulp(w, new WoodSpot { key = t.key, i = t.i }); ai.mode = got ? "return" : "pick"; ai.target = null; }
                     }
                     else if (ai.cargo >= 0.95 || tick > ai.timer + 300) { ai.mode = "return"; ai.target = null; }
                     break;
@@ -236,7 +236,7 @@ namespace Sting.Core
                     var rec = activeChunks[ri]; var bx = rec.content.boxes;
                     for (int i = 0; i < bx.Count; i++)
                     {
-                        var b = bx[i]; if (!b.wood || b.hive) continue;
+                        var b = bx[i]; if (!b.wood || b.hive || PulpLeft(rec.key, i) <= 0) continue;
                         Num s = Sqrt(D2(w, new V3((b.minx + b.maxx) / 2, b.maxy, (b.minz + b.maxz) / 2))) + H32(w.id, i, ri + 40, day) * 12;
                         if (s < ws) { ws = s; wb = new AiTarget { kind = "wood", key = rec.key, i = i, c = ri + 40 }; }
                     }

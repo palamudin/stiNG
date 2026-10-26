@@ -5,7 +5,7 @@ import { TUNE } from './tunefile.js';
 
 export const TICK_RATE = 60;
 export const DT = 1 / TICK_RATE;
-export const GEN_VERSION = 3; // 3: sheds and dragonflies
+export const GEN_VERSION = 4; // 3: sheds and dragonflies; 4: regions (T1-12)
 
 export const T = {
   population: 8200000000,
@@ -100,7 +100,9 @@ export const T = {
     fliesPerTable: 3, flyOrbit: 0.32, catchDist: 0.03, flyRespawnTicks: 2400,
     caterpillarChance: 0.25, flyProtein: 1, caterpillarProtein: 2, beeProtein: 1.5,
   },
-  pulp: { chewTicks: 120, amount: 1, reach: 0.018 },
+  // perMeter, minLoads (T1-12): a wooden fence section, table, bench or shed holds this much pulp; then it is stripped
+  // (a chunk delta). Trees are not used up.
+  pulp: { chewTicks: 120, amount: 1, reach: 0.018, perMeter: 1.5, minLoads: 2 },
 
   // Escalation ladder (GDD 8.10)
   esc: {

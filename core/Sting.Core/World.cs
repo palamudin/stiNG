@@ -14,7 +14,7 @@ namespace Sting.Core
     public sealed class Caterpillar { public Num x, y, z; }
     public sealed class Fly { public Num x, y, z, r, w1, w2, w3, p1, p2, p3; }
     public sealed class HumanSlot { public int slot; public Num x, z, fx, fz, exit; public string posture; }
-    public sealed class Box { public Num minx, maxx, miny, maxy, minz, maxz; public bool wood, hive, shed; }
+    public sealed class Box { public Num minx, maxx, miny, maxy, minz, maxz; public bool wood, hive, shed, fence, mall; }
     public sealed class Cyl { public Num x, z, r, h; public bool wood, grill; }
     /// A sugar source: a can, a flower, a puddle ('spill') or fallen 'fruit'. i identifies spills and fruit.
     public sealed class SugarNode { public Num x, y, z, rate; public string kind; public int table = -1, i; }
@@ -25,7 +25,12 @@ namespace Sting.Core
     /// Birds and dragonflies: a patrol loop
     public sealed class Patrol { public Num x, y, z, r, dir; public int period, phase; }
     public sealed class Rival { public Num x, y, z, r, ex, ey, ez; public int workers; }
-    public sealed class Shed { public Num x, z, hw, hd, h; public int crack, eave; }
+    public sealed class Shed { public Num x, z, hw, hd, h; public int crack, eave; public bool house; }
+    /// streets and parking lots (T1-12): flat rectangles; cul-de-sacs; strip-mall buildings
+    public sealed class Rect { public Num minx, maxx, minz, maxz; }
+    public sealed class Loop { public Num x, z, r; }
+    public sealed class Mall { public Num x, z, hw, hd, h; }
+    public sealed class RegionLayout { public int strip, mallSide, mallFrom, forest; }
     public sealed class Spawn { public Num x, y, z, yaw; }
     public sealed class Nest
     {
@@ -42,6 +47,8 @@ namespace Sting.Core
         public List<Cyl> cylinders = new List<Cyl>(); public List<SugarNode> sugar = new List<SugarNode>(); public List<Hive> hives = new List<Hive>();
         public List<Trap> traps = new List<Trap>(); public bool hasNest; public List<Web> webs = new List<Web>(); public List<Patrol> birds = new List<Patrol>();
         public Rival rival; public List<Shed> sheds = new List<Shed>(); public List<Patrol> dragonflies = new List<Patrol>();
+        /// land use and the suburban layout (T1-12)
+        public string use = "park"; public List<Rect> roads = new List<Rect>(), lots = new List<Rect>(); public List<Loop> loops = new List<Loop>(); public List<Mall> malls = new List<Mall>();
     }
 
     public sealed class ShedSite { public Num x, y, z, ix, iz, nx, nz; }
@@ -172,6 +179,38 @@ namespace Sting.Core
             return new V3(fx + 0.05 * DCos(a), fy + 0.02 * DSin(a * 1.3), fz + 0.05 * DSin(a));
         }
 
+        // ---------------------------------------------------------------- regions (GDD 4.2, 4.3, T1-12)
+        public const int REGION = 8;
+        static readonly Dictionary<string, RegionLayout> regionCache = new Dictionary<string, RegionLayout>();
+        static int FloorDiv(int a, int b) => a >= 0 ? a / b : -((-a + b - 1) / b);
+        public static RegionLayout Region(ulong seed, int rx, int rz)
+        {
+            string key = seed + ":" + rx + "," + rz;
+            lock (regionCache)
+            {
+                if (regionCache.TryGetValue(key, out var L)) return L;
+                ulong H(long slot) => Hash(seed, Domain.WorldGen, U64(rx), U64(rz), U64(90000 + slot));
+                L = new RegionLayout { strip = rx == 0 && rz == 0 ? REGION / 2 : 2 + RangeInt(H(1), 0, 4), mallSide = RangeInt(H(2), 0, 4), mallFrom = RangeInt(H(3), 0, REGION - 2), forest = RangeInt(H(4), 0, 4) };
+                if (regionCache.Count > 256) regionCache.Clear();
+                regionCache[key] = L;
+                return L;
+            }
+        }
+        public static string LandUse(ulong seed, int cx, int cz)
+        {
+            if (cx == 0 && cz == 0) return "park";
+            int h = REGION / 2, rx = FloorDiv(cx + h, REGION), rz = FloorDiv(cz + h, REGION), lx = cx + h - rx * REGION, lz = cz + h - rz * REGION;
+            var L = Region(seed, rx, rz);
+            if (lz == L.strip) return "park";
+            bool edge = L.mallSide == 0 ? lz == 0 : L.mallSide == 1 ? lx == REGION - 1 : L.mallSide == 2 ? lz == REGION - 1 : lx == 0;
+            int along = L.mallSide % 2 != 0 ? lz : lx;
+            if (edge && along >= L.mallFrom && along < L.mallFrom + 3) return "mall";
+            int fx = (L.forest & 1) != 0 ? REGION - 2 : 0, fz = (L.forest & 2) != 0 ? REGION - 2 : 0;
+            if (lx >= fx && lx < fx + 2 && lz >= fz && lz < fz + 2) return "forest";
+            return "yards";
+        }
+        public static int MallSide(ulong seed, int cx, int cz) { int h = REGION / 2; return Region(seed, FloorDiv(cx + h, REGION), FloorDiv(cz + h, REGION)).mallSide; }
+
         // ---------------------------------------------------------------- chunk generation (GDD 4.3)
         struct Occ { public Num x, z, r; }
 
@@ -282,6 +321,64 @@ namespace Sting.Core
                 c.hives.Add(hive);
             }
 
+            // a garden shed (GDD 6.6), or a house: a big one that is not wood
+            void AddShed(Num sx, Num sz, bool axisX, long slot, bool house)
+            {
+                Num hw = house ? Range(H(slot), 5, 6.5) : axisX ? 1.2 : 0.9, hd = house ? Range(H(slot + 1), 4, 5) : axisX ? 0.9 : 1.2, h = house ? Range(H(slot + 2), 5, 6.5) : 2.1;
+                occupied.Add(new Occ { x = sx, z = sz, r = house ? 8 : 4 });
+                c.sheds.Add(new Shed { x = sx, z = sz, hw = hw, hd = hd, h = h, crack = RangeInt(H(slot + 3), 0, 4), eave = RangeInt(H(slot + 4), 0, 4), house = house });
+                c.boxes.Add(new Box { minx = sx - hw, maxx = sx + hw, miny = 0, maxy = h, minz = sz - hd, maxz = sz + hd, wood = !house, shed = true });
+            }
+            // a wooden fence along x or z, in sections of up to 4 m (each its own store of pulp)
+            void AddFence(Num ax, Num az, Num bx, Num bz)
+            {
+                Num L = Abs(bx - ax) + Abs(bz - az), t = 0.03, fh = 1.5; int n = System.Math.Max(1, (int)Ceil(L / 4));
+                for (int k = 0; k < n; k++)
+                {
+                    Num x0 = ax + (bx - ax) * k / n, z0 = az + (bz - az) * k / n, x1 = ax + (bx - ax) * (k + 1) / n, z1 = az + (bz - az) * (k + 1) / n;
+                    c.boxes.Add(new Box { minx = Min(x0, x1) - t, maxx = Max(x0, x1) + t, miny = 0, maxy = fh, minz = Min(z0, z1) - t, maxz = Max(z0, z1) + t, wood = true, fence = true });
+                }
+            }
+            // suburban yards (see world.js addYards)
+            void AddYards()
+            {
+                bool endW = LandUse(seed, cx - 1, cz) != "yards", endE = LandUse(seed, cx + 1, cz) != "yards";
+                c.roads.Add(new Rect { minx = ox + (endW ? -22 : -32), maxx = ox + (endE ? 22 : 32), minz = oz - 4, maxz = oz + 4 });
+                if (endW) c.loops.Add(new Loop { x = ox - 22, z = oz, r = 11 });
+                if (endE) c.loops.Add(new Loop { x = ox + 22, z = oz, r = 11 });
+                occupied.Add(new Occ { x = ox, z = oz, r = 4 });
+                for (int li = 0; li < 4; li++)
+                {
+                    int s = li < 2 ? -1 : 1; Num lx = ox + (li % 2 != 0 ? 16 : -16); long b = 3000 + li * 2000;
+                    if (Unit(H(b)) < 0.9) AddShed(lx + Range(H(b + 1), -3, 3), oz + s * 15.5, true, b + 2, true);
+                    AddFence(lx - 15.6, oz + s * 20.5, lx - 15.6, oz + s * 31.6);
+                    AddFence(lx - 15.6, oz + s * 31.6, lx + 15.6, oz + s * 31.6);
+                    if (li % 2 != 0) AddFence(lx + 15.6, oz + s * 20.5, lx + 15.6, oz + s * 31.6);
+                    if (Unit(H(b + 10)) < 0.55) AddPicnic(lx + Range(H(b + 11), -6, 6), oz + s * 24.5, true, RangeInt(H(b + 12), 1, 64) | 1, b + 20);
+                    if (Unit(H(b + 300)) < 0.75) AddFlowers(lx + Range(H(b + 301), -11, 11), oz + s * 29.5, b + 310);
+                    if (Unit(H(b + 500)) < 0.3) { Num sx = lx + (Unit(H(b + 501)) < 0.5 ? -12.5 : 12.5), sz = oz + s * 28.7; if (Free(sx, sz, 2)) AddShed(sx, sz, true, b + 502, false); }
+                    if (Unit(H(b + 510)) < 0.08) { Num hx = lx + Range(H(b + 511), -10, 10), hz = oz + s * 22; if (Free(hx, hz, 2)) AddHive(hx, hz, b + 600); }
+                    if (Unit(H(b + 800)) < 0.2) { Num gx = lx + Range(H(b + 801), -8, 8), gz = oz + s * 7; if (Free(gx, gz, 2)) AddGroup(gx, gz, RangeInt(H(b + 802), 2, 4), b + 1000); }
+                }
+            }
+            // a strip mall on the region's edge (see world.js addMall)
+            void AddMall()
+            {
+                int side = MallSide(seed, cx, cz);
+                int o0 = side == 1 ? 1 : side == 3 ? -1 : 0, o1 = side == 0 ? -1 : side == 2 ? 1 : 0, a0 = o0 != 0 ? 0 : 1, a1 = o0 != 0 ? 1 : 0;
+                (Num x, Num z) At(Num u, Num v) => (ox + a0 * u + o0 * v, oz + a1 * u + o1 * v);
+                var bp = At(0, 21); Num hu = 27, hv = 8, hx = o0 != 0 ? hv : hu, hz = o0 != 0 ? hu : hv;
+                c.malls.Add(new Mall { x = bp.x, z = bp.z, hw = hx, hd = hz, h = 6 });
+                c.boxes.Add(new Box { minx = bp.x - hx, maxx = bp.x + hx, miny = 0, maxy = 6, minz = bp.z - hz, maxz = bp.z + hz, wood = false, mall = true });
+                occupied.Add(new Occ { x = bp.x, z = bp.z, r = 28 });
+                var l0 = At(-28, 11); var l1 = At(28, -20);
+                c.lots.Add(new Rect { minx = Min(l0.x, l1.x), maxx = Max(l0.x, l1.x), minz = Min(l0.z, l1.z), maxz = Max(l0.z, l1.z) });
+                for (int k = 0; k < 2; k++) { var p = At(k != 0 ? 9 : -9, 9.5); AddPicnic(p.x, p.z, o0 == 0, RangeInt(H(4000 + k * 400), 7, 64) | 1, 4010 + k * 400); }
+                if (Unit(H(4900)) < 0.5) { var p = At(Range(H(4901), -20, 20), 6); if (Free(p.x, p.z, 2)) AddGroup(p.x, p.z, RangeInt(H(4902), 2, 5), 4910); }
+                int nf = RangeInt(H(4950), 0, 3);
+                for (int i = 0; i < nf; i++) { var p = At(Range(H(4951 + i), -24, 24), 13); AddFlowers(p.x, p.z, 4960 + i * 80); }
+            }
+
             if (isOrigin)
             {
                 AddTree(NEST.treeX, NEST.treeZ, 100);
@@ -291,6 +388,13 @@ namespace Sting.Core
                 AddGroup(1, 10, 3, 1100);
                 AddFlowers(-6, 2, 400);
                 AddFlowers(3, -5, 480);
+            }
+            else if ((c.use = LandUse(seed, cx, cz)) == "yards") AddYards();
+            else if (c.use == "mall") AddMall();
+            else if (c.use == "forest")
+            {
+                int npf = RangeInt(H(2010), 1, 3);
+                for (int i = 0; i < npf; i++) AddFlowers(ox + Range(H(2020 + i), -26, 26), oz + Range(H(2030 + i), -26, 26), 2100 + i * 80);
             }
             else
             {
@@ -317,18 +421,20 @@ namespace Sting.Core
                     {
                         occupied.Add(new Occ { x = sx, z = sz, r = 4 });
                         bool axisX = Unit(H(18)) < 0.5; Num hw = axisX ? 1.2 : 0.9, hd = axisX ? 0.9 : 1.2, h = 2.1;
-                        c.sheds.Add(new Shed { x = sx, z = sz, hw = hw, hd = hd, h = h, crack = RangeInt(H(19), 0, 4), eave = RangeInt(H(21), 0, 4) });
+                        c.sheds.Add(new Shed { x = sx, z = sz, hw = hw, hd = hd, h = h, crack = RangeInt(H(19), 0, 4), eave = RangeInt(H(21), 0, 4), house = false });
                         c.boxes.Add(new Box { minx = sx - hw, maxx = sx + hw, miny = 0, maxy = h, minz = sz - hd, maxz = sz + hd, wood = true, shed = true });
                     }
                 }
                 int np = RangeInt(H(10), 3, 9);
                 for (int i = 0; i < np; i++) AddFlowers(ox + Range(H(20 + i), -28, 28), oz + Range(H(40 + i), -28, 28), 400 + i * 80);
             }
-            int nt = RangeInt(H(11), isOrigin ? 3 : 2, isOrigin ? 6 : 8);
+            // trees: a few in a park, yard trees, dense at the forest edge, hardly any by a mall
+            bool forest = c.use == "forest";
+            int nt = forest ? RangeInt(H(2000), 16, 26) : c.use == "yards" ? RangeInt(H(2001), 1, 4) : c.use == "mall" ? RangeInt(H(2002), 0, 3) : RangeInt(H(11), isOrigin ? 3 : 2, isOrigin ? 6 : 8);
             for (int i = 0; i < nt; i++)
             {
                 Num x = ox + Range(H(150 + i * 4), -30, 30), z = oz + Range(H(151 + i * 4), -30, 30);
-                if (Free(x, z, 3)) { AddTree(x, z, 200 + i * 4); occupied.Add(new Occ { x = x, z = z, r = 2 }); }
+                if (Free(x, z, forest ? 1.5 : 3)) { AddTree(x, z, 200 + i * 4); occupied.Add(new Occ { x = x, z = z, r = forest ? 1 : 2 }); }
             }
             for (int i = 0; i < c.trees.Count; i++)
             {

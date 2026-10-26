@@ -10,7 +10,7 @@ namespace Sting.Core
     {
         public const int TICK_RATE = 60;
         public static readonly Num DT = 1.0 / TICK_RATE;
-        public const int GEN_VERSION = 3;
+        public const int GEN_VERSION = 4; // 3: sheds and dragonflies; 4: regions (T1-12)
 
         public static Num population = 8200000000;
         public static class chunk { public static Num size = 64; public static int activeRadius = 1, discoverRadius = 2; }
@@ -97,7 +97,8 @@ namespace Sting.Core
             public static int fliesPerTable = 3, flyRespawnTicks = 2400;
             public static Num flyOrbit = 0.32, catchDist = 0.03, caterpillarChance = 0.25, flyProtein = 1, caterpillarProtein = 2, beeProtein = 1.5;
         }
-        public static class pulp { public static int chewTicks = 120; public static Num amount = 1, reach = 0.018; }
+        /// perMeter, minLoads (T1-12): a wooden box holds this much pulp, then it is stripped (a chunk delta); trees never run out
+        public static class pulp { public static int chewTicks = 120, minLoads = 2; public static Num amount = 1, reach = 0.018, perMeter = 1.5; }
         public static class esc
         {
             public static Num[] levels = { 0, 3, 8, 15, 25, 40 };
