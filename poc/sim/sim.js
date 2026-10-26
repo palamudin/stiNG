@@ -21,7 +21,7 @@ const byHumanId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 // Events that change shared world state. Most commit at the end of the consequence window so every
 // peer applies them on the same tick (GDD 11.5); a few cosmetic or owner-decided ones apply on receipt.
-const IMMEDIATE = new Set(['caught', 'sip', 'beeAlarm', 'died', 'fight', 'fightReq', 'fightJoin', 'fightRefuse', 'fightEnd', 'raid']); // wasp-level: never touch humans
+const IMMEDIATE = new Set(['caught', 'claim', 'denied', 'sip', 'beeAlarm', 'died', 'fight', 'fightReq', 'fightJoin', 'fightRefuse', 'fightEnd', 'raid']); // wasp-level: never touch humans
 
 export class Sim {
   constructor(settings = {}, opts = {}) {
@@ -35,6 +35,7 @@ export class Sim {
     this.remote = new Map();
     this.netStats = { sent: 0, recv: 0, late: 0, lateMax: 0, rejected: 0, dropped: 0 };
     this.plaus = { strikes: {}, quarantined: [], lastSeq: {}, stingTicks: {} };
+    this.claims = new Map(); // pickups waiting for the chunk authority (T1-19), by wasp id
     // Which chunks each peer is near. Humans are simulated over the union, changes commit like any event (Q-16)
     this.interest = new Map();
     for (const p of opts.peers || [this.peer]) this.interest.set(p, chunkKey(chunkOf(SPAWN.x), chunkOf(SPAWN.z)));
@@ -303,6 +304,7 @@ export class Sim {
     if (!this._driven() && !this.extinct && !this.winter && this.tick >= this.respawnAt) this._respawn();
     this._updateChunks();
     if (this.net && this.tick % T.net.stateEvery === 0) this._sendState();
+    if (this.claims.size && this.tick % 60 === 0) this._expireClaims();
   }
 
   // ---------------------------------------------------------------- networking (GDD 11)
@@ -515,10 +517,17 @@ export class Sim {
         this._fightResolve(w, aWins, ev.b);
         break;
       }
+      case 'claim': // a pickup in a chunk this peer rules on (T1-19)
+        if (!mine && ev.auth === this.peer) this._rule(ev);
+        break;
+      case 'denied':
+        if (!mine && ev.claimPeer === this.peer) this._denied(ev);
+        break;
       case 'caught': {
         if (mine) break;
+        if (ev.claimPeer === this.peer) { this.claims.delete(ev.claimWasp); break; } // our own claim, granted: applied already
         const st = this.cs(ev.key);
-        if (ev.what === 'fly') st.caughtFly[ev.i] = ev.tick + T.prey.flyRespawnTicks;
+        if (ev.what === 'fly') st.caughtFly[ev.i] = (ev.ctick ?? ev.tick) + T.prey.flyRespawnTicks;
         else if (ev.what === 'caterpillar') st.caughtCat[ev.i] = 1;
         else if (ev.what === 'carrion') { const cr = st.carrion || (st.carrion = {}); cr[ev.i] = (cr[ev.i] || 0) + 1; }
         else if (ev.what === 'meat') { const mt = st.meat || (st.meat = {}); mt[ev.i] = (mt[ev.i] || 0) + 1; }
@@ -1133,6 +1142,81 @@ export class Sim {
     };
   }
 
+  // ---------------- chunk authority and contested pickups (GDD 11.6, T1-19)
+
+  // The peer that rules on a chunk: of the peers whose interest is within the active window of it, the one with the
+  // smallest Hash(seed, chunk, peer) (rendezvous hashing, A.9). Interest is committed state, so every peer elects the
+  // same one, and a peer coming or going moves only the chunks it wins or loses.
+  chunkAuthority(key) {
+    const [cx, cz] = key.split(',').map(Number), A = T.chunk.activeRadius;
+    const k64 = (BigInt.asUintN(32, BigInt(cx)) << 32n) | BigInt.asUintN(32, BigInt(cz));
+    let best = -1, bs = 0n;
+    for (const [p, ik] of this.interest) {
+      if (this.plaus.quarantined.includes(p)) continue;
+      const [ix, iz] = ik.split(',').map(Number);
+      if (Math.max(Math.abs(ix - cx), Math.abs(iz - cz)) > A) continue;
+      const s = hash(this.seed, Domain.WorldGen, k64, BigInt(p), 0xA11CEn);
+      if (best < 0 || s < bs || (s === bs && p < best)) { bs = s; best = p; }
+    }
+    return best < 0 ? this.peer : best;
+  }
+
+  // A wasp takes something only one can have (a caterpillar, a fly, a load of carrion, meat or honey, a bee). It is
+  // taken at once; off the chunk authority's peer it is also a claim, and the authority grants it (publishing the
+  // pickup for everyone) or denies it (the item goes back to whoever got there first).
+  _pickup(w, ev) {
+    const auth = this.net ? this.chunkAuthority(ev.key) : this.peer;
+    if (auth === this.peer) { this._publish(ev); return; }
+    this.claims.set(w.id, { auth, key: ev.key, what: ev.what, i: ev.i, hive: ev.hive, carry: w.carry && w.carry.what, tick: this.tick });
+    this._publish({ ...ev, type: 'claim', waspId: w.id, auth });
+  }
+  // Is it still there, by this peer's state?
+  _available(ev) {
+    const st = this.cs(ev.key), rec = this.records.get(ev.key);
+    switch (ev.what) {
+      case 'fly': return !((st.caughtFly[ev.i] || 0) > this.tick);
+      case 'caterpillar': return !st.caughtCat[ev.i];
+      case 'carrion': return T.eco.carrionLoads - ((st.carrion && st.carrion[ev.i]) || 0) > 0;
+      case 'meat': return (ev.i % 2 ? T.bbq.plateLoads : T.bbq.grillLoads) - ((st.meat && st.meat[ev.i]) || 0) > 0;
+      case 'honey': return this.hiveLoadsLeft(ev.key, ev.i) > 0;
+      case 'bee': return !(st.beeLost[ev.hive] && st.beeLost[ev.hive][ev.i]);
+    }
+    return !!rec;
+  }
+  _taken(ev, sign, tick) {
+    const st = this.cs(ev.key), inc = (o, k) => { o[k] = Math.max(0, (o[k] || 0) + sign); };
+    switch (ev.what) {
+      case 'fly': if (sign > 0) st.caughtFly[ev.i] = tick + T.prey.flyRespawnTicks; break;
+      case 'caterpillar': if (sign > 0) st.caughtCat[ev.i] = 1; break;
+      case 'carrion': inc(st.carrion || (st.carrion = {}), ev.i); break;
+      case 'meat': inc(st.meat || (st.meat = {}), ev.i); break;
+      case 'honey': inc(st.robbed || (st.robbed = {}), ev.i); break;
+      case 'bee': if (sign > 0) (st.beeLost[ev.hive] || (st.beeLost[ev.hive] = {}))[ev.i] = 1; break;
+    }
+  }
+  // The authority's ruling on another peer's claim: first to reach it wins
+  _rule(ev) {
+    const out = { key: ev.key, what: ev.what, i: ev.i, hive: ev.hive, claimPeer: ev.peer, claimWasp: ev.waspId };
+    if (!this._available(ev)) { this._publish({ type: 'denied', ...out }); this.emit('claimDenied', { peer: ev.peer, what: ev.what }); return; }
+    this._taken(ev, 1, ev.tick);
+    this._publish({ type: 'caught', ...out, ctick: ev.tick });
+  }
+  // Our claim lost: someone got there first. Undo our share of a load count, and the wasp lets go if it still holds it.
+  _denied(ev) {
+    const c = this.claims.get(ev.claimWasp);
+    if (!c || c.auth !== ev.peer || c.key !== ev.key || c.what !== ev.what || c.i !== ev.i) return;
+    this.claims.delete(ev.claimWasp);
+    if (ev.what === 'carrion' || ev.what === 'meat' || ev.what === 'honey') this._taken(ev, -1, 0);
+    const w = this.waspById(ev.claimWasp), had = !!(w && w.carry && w.carry.what === c.carry);
+    if (had) { w.carry = null; if (w.id !== this.drivenId) { w.ai.mode = 'pick'; w.ai.target = null; } }
+    this.stats.caught--;
+    this.emit('claimLost', { id: ev.claimWasp, what: ev.what, driven: ev.claimWasp === this.drivenId, had });
+  }
+  // a claim nobody answered (the authority left) stands
+  _expireClaims() {
+    for (const [id, c] of this.claims) if (this.tick - c.tick > T.net.claimTicks) this.claims.delete(id);
+  }
+
   _preyNear(w) {
     const r2 = T.prey.catchDist * T.prey.catchDist;
     for (const rec of this.activeChunks) {
@@ -1170,7 +1254,7 @@ export class Sim {
       this._alarmHive(p.key, p.hive, w, T.bees.catchAlarmRadius * 3);
     }
     w.carry = { kind: 'protein', amount: p.protein, what: p.kind };
-    this._publish({ type: 'caught', key: p.key, what: p.kind, i: p.i, hive: p.hive });
+    this._pickup(w, { type: 'caught', key: p.key, what: p.kind, i: p.i, hive: p.hive });
     this.stats.caught++;
     this.emit('caught', { id: w.id, kind: p.kind });
   }
@@ -2366,7 +2450,7 @@ export class Sim {
     rb[r.h] = (rb[r.h] || 0) + 1;
     w.energy = 1; w.ai.cargo = Math.max(w.ai.cargo || 0, F.honeyCargo);
     w.carry = { kind: 'protein', amount: F.broodProtein, what: 'bee brood' };
-    this._publish({ type: 'caught', key: r.key, what: 'honey', i: r.h });
+    this._pickup(w, { type: 'caught', key: r.key, what: 'honey', i: r.h });
     this.stats.caught++;
     this.emit('robbed', { id: w.id, driven, key: r.key, h: r.h });
     if (!driven) { w.ai.mode = 'return'; w.ai.target = null; }

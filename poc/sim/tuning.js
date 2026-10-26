@@ -210,7 +210,8 @@ export const T = {
   rival: { maxPhysical: 3, fightRange: 0.025, remoteFightRange: 0.06, remoteFightTimeout: 240, fightTicks: 40, guardRadius: 1.5, raidProtein: 2, huntTicks: 600, mash: 0.15 },
 
   // Networking (GDD 11): human-side effects of events commit at the end of the consequence window
-  net: { commitTicks: 30, stateEvery: 3, remoteTimeout: 45 },
+  // claimTicks (T1-19): how long a pickup waits for the chunk authority's word before it is taken as granted
+  net: { commitTicks: 30, stateEvery: 3, remoteTimeout: 45, claimTicks: 120 },
   // Plausibility checks on what peers send (GDD 11.8). Margins are generous: honest traffic must always pass,
   // only gross violations fail, so honest peers reach the same verdict.
   plaus: { futureTicks: 120, stingReach: 1.6, humanDrift: 3, maxSwatDelay: 240, maxSwats: 4, rateWindow: 120, rateMax: 6,

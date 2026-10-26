@@ -617,6 +617,7 @@ mash = 0.15
 commitTicks = 30
 stateEvery = 3
 remoteTimeout = 45
+claimTicks = 120
 
 [plaus]
 futureTicks = 120

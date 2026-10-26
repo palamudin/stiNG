@@ -17,7 +17,7 @@ The tier-0 slice of the GDD, built in the browser so it can move to Unity. Same 
 | `game.js` | three.js rendering, animation, camera, input, HUD, sound | Unity scene, Animator, UI |
 | `index.html` | Page shell, HUD markup and styles | UI Toolkit |
 | `test/sim.test.mjs` | 207 headless sim checks | `Sting.Core.Tests` |
-| `test/net.test.mjs` | 32 network checks | `Sting.Net.Tests` |
+| `test/net.test.mjs` | 39 network checks | `Sting.Net.Tests` |
 | `test/parity.mjs` | Writes `core/fixtures/parity.txt`: 22 digests the C# core must reproduce bit for bit | `core/Sting.Core.Tests` |
 
 Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 18+, no packages). Play locally with `node serve.mjs`. Any change to `sim/` that changes behaviour must be made in `core/` too: rerun `node test/parity.mjs`, then `dotnet run -c Release` in `core/Sting.Core.Tests`. To retune, edit `../tuning/sting.tune`: the game, the tests, parity and the core all read it, and a different file gives a different tuning hash, so old saves and peers on the old file are refused.
@@ -108,6 +108,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 80 | Tuning as data (T1-22): every tuning value in one plain-text file, `tuning/sting.tune`, read at start by own parsers here and in the C# core. Edit and reload to retune; the file's hash goes into the rules hash and every save, so worlds and peers on different tuning are refused. Shown on the pause screen | 13 | 14 |
 | 81 | Senses for AI wasps (T1-16): foragers find food by scent (reach by source, stretched downwind; spills fade, carrion ripens) and flies by sight in a forward cone. With nothing in reach they search in a widening spiral round the nest. They go back to sources that paid, and the scent of food brought home sends nestmates there. Your scent markers read the same scents | 7.3 | 14 |
 | 82 | Barbecues (T1-10): kettle grills at some picnic tables. On warm dry days the first person at the table cooks: they stand at the lit grill, meat sits on the grate and later on a plate. E takes meat (protein). People slap at a wasp by the meat from the start; the grate burns and the hot air over it cooks you (watch the body temperature) | 4.3, 6.2 | 14 |
+| 83 | Chunk authority and contested pickups (T1-19): one peer per chunk, elected by rendezvous hashing, rules when two players' wasps take the same caterpillar, fly, bee or load of carrion, meat or honey. You take it at once; if the other got to the authority first, your wasp lets go. The lab panel shows who rules your chunk | 11.6 | 14 |
 
 ## Verified
 

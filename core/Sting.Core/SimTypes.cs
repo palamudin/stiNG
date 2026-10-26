@@ -108,6 +108,7 @@ namespace Sting.Core
     public abstract class Msg { public string mk; public int peer, tick; }
 
     /// A network event: one class holds every field any event type uses (sim.js publishes plain objects)
+    public sealed class Claim { public int auth, i, hive, tick; public string key, what, carry; }
     public sealed class NetEv : Msg
     {
         public string type; public int seq, commit;
@@ -117,6 +118,8 @@ namespace Sting.Core
         public string byHex, cause; public Num x, y, z;
         public Num start, end, window; public int kind; public V3 center; public bool kills; public string why; public Num amount;
         public int a, b, toPeer; public Num venom, mash; public bool queen; public int id;
+        /// contested pickups (T1-19): the authority a claim is for, and on a ruling the claiming peer, its wasp and the claim's tick
+        public int auth = -1, claimPeer = -1, claimWasp; public int? ctick;
         public NetEv() { mk = "ev"; }
         public NetEv Copy()
         {

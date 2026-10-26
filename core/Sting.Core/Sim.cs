@@ -14,7 +14,7 @@ namespace Sting.Core
         static Num D2(V3 a, V3 b) { Num dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z; return dx * dx + dy * dy + dz * dz; }
         static Num D2(WaspBase a, V3 b) => D2(a.P, b);
         static Num D2(WaspBase a, WaspBase b) => D2(a.P, b.P);
-        static readonly HashSet<string> IMMEDIATE = new HashSet<string> { "caught", "sip", "beeAlarm", "died", "fight", "fightReq", "fightJoin", "fightRefuse", "fightEnd", "raid" };
+        static readonly HashSet<string> IMMEDIATE = new HashSet<string> { "caught", "claim", "denied", "sip", "beeAlarm", "died", "fight", "fightReq", "fightJoin", "fightRefuse", "fightEnd", "raid" };
 
         public Settings settings;
         public int peer; public bool net, noAI;
@@ -25,6 +25,8 @@ namespace Sting.Core
         public NetStats netStats = new NetStats();
         public Plaus plaus = new Plaus();
         public OrderedMap<int, string> interest = new OrderedMap<int, string>();
+        /// pickups waiting for the chunk authority (T1-19), by wasp id; never saved
+        public OrderedMap<int, Claim> claims = new OrderedMap<int, Claim>();
         public int host;
         public ulong seed;
         public int tpm; public long dayTicks;
@@ -193,7 +195,7 @@ namespace Sting.Core
         public Num BroodSpeed() => BroodSpeed(minute);
         long wcMinute = long.MinValue; V3 wcVal;
         public V3 Wind { get { if (windOverride.HasValue) return windOverride.Value; if (wcMinute != minute) { wcVal = WindAt(seed, minute); wcMinute = minute; } return wcVal; } }
-        internal V3? windOverride; internal System.Func<ChunkRec, int, Num> nectarOverride; // test hooks
+        internal V3? windOverride; internal System.Func<ChunkRec, int, Num> nectarOverride; internal System.Func<ChunkRec, List<Carrion>> carrionOverride; // test hooks
         /// Debug and test hook: force rain on (true) or off (false); null follows the weather
         public bool? rainOverride;
         public bool Raining => rainOverride ?? IsRaining(seed, minute);
@@ -373,6 +375,7 @@ namespace Sting.Core
             if (Driven() == null && !extinct && winter == null && tick >= respawnAt) Respawn();
             UpdateChunks();
             if (net && tick % T.net.stateEvery == 0) SendState();
+            if (claims.Count > 0 && tick % 60 == 0) ExpireClaims();
         }
 
         void Record(Cmd cmd)

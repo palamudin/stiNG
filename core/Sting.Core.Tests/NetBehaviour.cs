@@ -117,6 +117,46 @@ namespace Sting.Core.Tests
                 var c = lab.checks;
                 Okn(sa != 0 && sa == sb && ea != 0 && ea == eb && c.agreed == c.compared, $"both peers run the municipal campaign on the same ticks ({sa}-{ea}) and agree on every human ({c.agreed}/{c.compared})");
             }
+            // chunk authority and contested pickups (T1-19)
+            {
+                var lab = new NetLab(new Settings { seed = 1234, birds = false }, "good");
+                for (int i = 0; i < 120; i++) lab.Step(Idle(), Idle());
+                Sim A = lab.a, B = lab.b;
+                var keys = A.activeChunks.Select(r => r.key).ToList();
+                Okn(keys.All(k => A.ChunkAuthority(k) == B.ChunkAuthority(k)), $"both peers elect the same authority for every chunk ({string.Concat(keys.Select(k => A.ChunkAuthority(k)))})");
+                var before = keys.Select(k => A.ChunkAuthority(k)).ToList();
+                A.interest.Set(2, A.interest.Get(0));
+                var after = keys.Select(k => A.ChunkAuthority(k)).ToList();
+                A.interest.Delete(2);
+                Okn(after.Contains(2) && after.Select((p, j) => p == before[j] || p == 2).All(x => x), $"a third peer takes some chunks and moves no others ({string.Concat(after)})");
+                (bool[] took, bool[] held, int auth) Grab(string what, V3 spot)
+                {
+                    var wa = A.Driven(); var wb = B.Driven();
+                    foreach (var w in new[] { wa, wb }) { w.x = spot.x; w.y = spot.y; w.z = spot.z; w.vx = w.vy = w.vz = 0; w.state = "fly"; w.carry = null; }
+                    lab.Step(Idle(), Idle());
+                    foreach (var w in new[] { wa, wb }) { w.x = spot.x; w.y = spot.y; w.z = spot.z; w.vx = w.vy = w.vz = 0; }
+                    lab.Step(Idle(cm => cm.act = 1), Idle(cm => cm.act = 1));
+                    var took = new[] { wa.carry?.what == what, wb.carry?.what == what };
+                    for (int i = 0; i < 120; i++) lab.Step(Idle(), Idle());
+                    return (took, new[] { wa.carry?.what == what, wb.carry?.what == what }, A.ChunkAuthority("0,0"));
+                }
+                var rec = A.records.Get("0,0"); int ci = -1;
+                for (int i = 0; i < rec.content.caterpillars.Count && ci < 0; i++) if (!A.CS("0,0").caughtCat.ContainsKey(i) && A.CatActive(rec, i)) ci = i;
+                var cp = rec.content.caterpillars[ci];
+                var r1 = Grab("caterpillar", new V3(cp.x, cp.y, cp.z));
+                Okn(r1.took[0] && r1.took[1] && r1.held.Count(x => x) == 1 && r1.held[r1.auth], $"both take the caterpillar at once; the chunk authority (peer {r1.auth}) keeps it, the other lets go");
+                Okn(A.CS("0,0").caughtCat.ContainsKey(ci) && B.CS("0,0").caughtCat.ContainsKey(ci), "both peers have the caterpillar gone");
+                Num cx = rec.cx * 64 + 5, cz = rec.cz * 64 + 5;
+                foreach (var S in new[] { A, B })
+                {
+                    var st = S.CS("0,0"); st.carrion ??= new Dictionary<int, int>(); st.carrion[0] = T.eco.carrionLoads - 1;
+                    S.carrionOverride = r => r.key == "0,0" && T.eco.carrionLoads - (st.carrion.TryGetValue(0, out var n) ? n : 0) > 0 ? new List<Carrion> { new Carrion { x = cx, y = 0.03, z = cz, d = 0, left = 1 } } : new List<Carrion>();
+                }
+                var r2 = Grab("carrion", new V3(cx, 0.05, cz));
+                Okn(r2.held.Count(x => x) == 1 && A.CS("0,0").carrion[0] == T.eco.carrionLoads && B.CS("0,0").carrion[0] == T.eco.carrionLoads, $"the last load of carrion goes to one wasp, counted once on both peers ({A.CS("0,0").carrion[0]}/{B.CS("0,0").carrion[0]})");
+                Okn(A.claims.Count == 0 && B.claims.Count == 0, "no claim is left waiting");
+                A.carrionOverride = B.carrionOverride = null;
+            }
             // wire format: quantization error and size
             {
                 var m = new StateMsg { peer = 1, tick = 123456 };

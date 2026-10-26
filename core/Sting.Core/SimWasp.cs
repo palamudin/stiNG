@@ -526,7 +526,7 @@ namespace Sting.Core
                 AlarmHive(p.key, p.hive, w, T.bees.catchAlarmRadius * 3);
             }
             w.carry = new Carry { kind = "protein", amount = p.protein, what = p.kind };
-            Publish(new NetEv { type = "caught", key = p.key, what = p.kind, i = p.i, hive = p.hive });
+            Pickup(w, new NetEv { type = "caught", key = p.key, what = p.kind, i = p.i, hive = p.hive });
             stats.caught++;
             Emit("caught", ("id", w.id), ("kind", p.kind));
         }
@@ -730,7 +730,7 @@ namespace Sting.Core
             st.robbed[r.h] = (st.robbed.TryGetValue(r.h, out var n) ? n : 0) + 1;
             w.energy = 1; w.ai.cargo = Max(w.ai.cargo, T.feral.honeyCargo);
             w.carry = new Carry { kind = "protein", amount = T.feral.broodProtein, what = "bee brood" };
-            Publish(new NetEv { type = "caught", key = r.key, what = "honey", i = r.h });
+            Pickup(w, new NetEv { type = "caught", key = r.key, what = "honey", i = r.h });
             stats.caught++;
             Emit("robbed", ("id", w.id), ("driven", driven), ("key", r.key), ("h", r.h));
             if (!driven) { w.ai.mode = "return"; w.ai.target = null; }
@@ -786,6 +786,7 @@ namespace Sting.Core
         /// carrion: some days a dead mouse or bird lies in a chunk for a few days, good for a few loads of meat
         public List<Carrion> CarrionIn(ChunkRec rec)
         {
+            if (carrionOverride != null) return carrionOverride(rec);
             long sd = (long)(seed & 0xffffffffUL); Num CSz = T.chunk.size; var o = new List<Carrion>();
             chunkState.TryGet(rec.key, out var st);
             for (long d = day - T.eco.carrionDays + 1; d <= day; d++)

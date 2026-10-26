@@ -15,8 +15,8 @@ sim.idle7 d864800a
 sim.season ab0565d0
 sim.hot 37716397
 sim.restored caecc5b1
-net.good 032e1dbe
-net.awful 4bb5ddbe
-net.join aaffeb06
-net.cheat 6a903c0e
-net.mesh 76756dc0
+net.good 72e87462
+net.awful 0268b5d1
+net.join 0bbad757
+net.cheat 41f993be
+net.mesh 404d8583

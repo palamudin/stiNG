@@ -715,6 +715,7 @@ This is the property that makes rollback unnecessary for humans.
 - Some things can't be resolved by events alone: two wasps grabbing the same caterpillar, the same soda can.
 - Each chunk has one **chunk authority** among the peers interested in it, chosen by rendezvous hashing: the peer with the smallest `Hash(chunkKey, peerId)` wins. Membership changes move as few chunks as possible. Appendix A.9.
 - The chunk authority resolves contested pickups, writes chunk deltas, and sends late-event corrections.
+- As built (18.32): contested pickups in the lab; deltas and late-event corrections are not on the authority yet.
 
 ### 11.7 Topology and interest **[T0] [Infra]** (rendezvous, hole punching, relay)
 
@@ -1138,6 +1139,18 @@ Every can on a table is a hollow cup: a 3 mm wall, open at the top, holding a dr
 
 **Effect.** Over three days with an idle player, seed 7 (two grills) had three barbecues, ten loads of meat taken, six slaps at wasps by the meat and a wasp or two lost to the grill; seed 1234 (one grill) had two. All of it is tuning in `[bbq]`.
 
+### 18.32 Chunk authority and contested pickups as built (T1-19)
+
+**The election.** For each chunk, the peers whose committed interest is within the active window of it (one chunk either way) are candidates, and the one with the smallest `Hash(seed, WorldGen, chunk, peer, 0xA11CE)` is its authority (A.9; ties go to the lower peer id). Interest is committed state, so every peer elects the same authority without messages, JS and C# agree, and a peer arriving or leaving moves only the chunks it wins or loses. Quarantined peers are never elected.
+
+**What is contested.** Anything only one wasp can have: a fly (until it respawns), a caterpillar, a bee, and a load of carrion, barbecue meat or hive honey. Flowers, fruit, spills and bait are not; everyone can feed at once.
+
+**Claims.** A pickup happens at once on the picker's screen, so there is no lag in play. On the authority's peer it is final and is published as before (`caught`). Elsewhere it is also a `claim` addressed to the authority. The authority checks its own state: if the thing is still there it applies the pickup and publishes `caught` for everyone, marked as granting that claim; if not, it publishes `denied`. First to reach the authority wins, and the authority's own wasps reach it first. On `denied` the claimant undoes its share of a load count, and its wasp lets go if it still holds the item ("Another player's wasp got the caterpillar first"); an AI wasp goes back to choosing. A claim that gets no answer in two seconds (the authority left) stands. Claims are not saved; a joining peer starts with none.
+
+**Checked.** Two peers whose wasps take the same caterpillar on the same tick both see it taken; the authority's wasp keeps it, the other lets go, and both peers have it gone. With one load of carrion left, one wasp gets it and both peers count it taken once. The five network parity runs now include claims and rulings, and the C# port reproduces them bit for bit. The lab panel shows who rules the chunk you are in and any claims waiting.
+
+**Limits.** A wasp that deposits its load at the nest before a denial arrives (it would need to be within a few hundred milliseconds of home) keeps it. Honey eaten during a lost robbery stays eaten; only the brood goes back. Chunk deltas and late-event corrections do not go through the authority yet.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1146,7 +1159,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (82 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (83 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -1170,13 +1183,13 @@ Everything in `POC.md` (82 features) and its C# port (18.18), including the Tier
 | T1-16 | **Built (18.30).** Senses for AI wasps: scent fields (sugar, protein, alarm) as decaying point sources and a vision cone, replacing the AI's perfect knowledge of every food source | 7.3 | M | |
 | T1-17 | **Built (18.20).** Line of sight for panic: contagion only between humans who can see each other | 8.9 | S | |
 | T1-18 | **Built (18.20).** Per-human memory: recency and place, so a person stung at this table is jumpy here and calmer elsewhere | 8.10 | S | |
-| T1-19 | Chunk authority and contested pickups in the lab: rendezvous hashing picks one peer per chunk to settle two wasps grabbing the same caterpillar | 11.6 | M | |
+| T1-19 | **Built (18.32).** Chunk authority and contested pickups in the lab: rendezvous hashing picks one peer per chunk to settle two wasps grabbing the same caterpillar | 11.6 | M | |
 | T1-20 | Remaining plausibility checks: carry limits, positions inside solid geometry, chunk deltas consistent with their cause | 11.8 | S | T1-12 for deltas |
 | T1-21 | Relevance tiers in the lab: near, mid and far wasps at different rates, swarm packets; measure bandwidth with a 200-worker colony | 11.12 | M | |
 | T1-22 | **Built (18.29).** Tuning as data: the tuning tables as versioned plain-text files read by own parsers in JS and C#, and the tuning hash in the world record | 13 | M | |
 | T1-23 | **Built (18.21).** Solo time: accelerate time in the colony view, and the Reflex slowdown as a solo option | 5.1, 7.8 | S | |
 
-Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, then the other S items: T1-14, T1-17, T1-18, T1-23, all done; T1-20 waits on regions), then the M items (T1-6 to T1-10, T1-13, T1-15, T1-16 and T1-22 done; then T1-19, T1-21); each batch is built in the PoC and then ported to the core with parity.
+Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, then the other S items: T1-14, T1-17, T1-18, T1-23, all done; T1-20 waits on regions), then the M items (T1-6 to T1-10, T1-13, T1-15, T1-16, T1-19 and T1-22 done; then T1-21); each batch is built in the PoC and then ported to the core with parity.
 
 ### 19.3 Tier 2: later
 

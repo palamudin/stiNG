@@ -1462,6 +1462,7 @@ function updateLab() {
       ['Events sent / received', `${sim.netStats.sent} / ${sim.netStats.recv}`], ['Late events', `${sim.netStats.late + (lab.b ? lab.b.netStats.late : 0)}${sim.netStats.lateMax ? ` (max ${sim.netStats.lateMax} ticks)` : ''}`],
       ['Rules hash', lab.b ? `${rulesHash(sim.settings)} / ${rulesHash(lab.b.settings)}${rulesHash(sim.settings) === rulesHash(lab.b.settings) ? ' · same' : ' · DIFFERENT'}` : rulesHash(sim.settings)],
       ['Rejected by checks', `${sim.netStats.rejected}${sim.plaus.quarantined.length ? ' · player 2 quarantined' : ''}`],
+      ['Rules here (chunk authority)', lab.b ? `player ${sim.chunkAuthority(sim.activeKey) + 1}${sim.claims.size ? ` · ${sim.claims.size} claim${sim.claims.size > 1 ? 's' : ''} waiting` : ''}` : '-'],
       ['Humans agree', c.compared ? `${c.agreed}/${c.compared} checks${c.agreed === c.compared ? '' : ' · diverged at tick ' + c.firstDiverge}` : '-'],
       ['Player 2 drawn off by', err === null ? '-' : `${(err * 100).toFixed(1)} cm`],
       ['Your upstream', (() => { const b = lab.bandwidth(); return `${(b.total / 1024).toFixed(1)} KB/s · ${sim.wasps.length} wasps at 20 Hz`; })()],
@@ -1771,6 +1772,9 @@ function handleEvents(events) {
       case 'robStart': if (e.driven) { toast(e.feral ? 'Into the wild hive · mash LMB to grab' : 'Into the hive · mash LMB to grab', 'var(--red)', 1.8); } break;
       case 'robbed': if (e.driven) toast('Honey and brood · now get out, the hive is up', 'var(--yellow)', 2.2); else logEvent(`worker ${e.id} robbed a hive`); break;
       case 'hiveEmpty': if (e.id === sim.drivenId) toast('Nothing left in this hive today', 'var(--muted)', 2); break;
+      // contested pickups (T1-19): the chunk authority gave it to another player's wasp
+      case 'claimLost': if (e.driven) toast(`Another player's wasp got the ${e.what === 'honey' ? 'brood' : e.what} first`, 'var(--muted)', 2.2); else logEvent(`worker ${e.id} lost the ${e.what} to another player`); break;
+      case 'claimDenied': logEvent(`ruled for the first wasp to the ${e.what}; peer ${e.peer} was too late`); break;
       case 'robAbort': if (e.id === sim.drivenId) toast('Bailed out', 'var(--muted)', 1.2); break;
       case 'cover': logEvent(`#${e.humanHex.slice(0, 4)} covers a drink`); break;
       case 'coveredIn': if (e.driven) toast('Covered! Shut in the cup', 'var(--red)', 2); break;

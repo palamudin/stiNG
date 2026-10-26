@@ -192,7 +192,7 @@ namespace Sting.Core
             public static int maxPhysical = 3, remoteFightTimeout = 240, fightTicks = 40, huntTicks = 600;
             public static Num fightRange = 0.025, remoteFightRange = 0.06, guardRadius = 1.5, raidProtein = 2, mash = 0.15;
         }
-        public static class net { public static int commitTicks = 30, stateEvery = 3, remoteTimeout = 45; }
+        public static class net { public static int commitTicks = 30, stateEvery = 3, remoteTimeout = 45, claimTicks = 120; }
         public static class plaus
         {
             public static int futureTicks = 120, maxSwatDelay = 240, maxSwats = 4, rateWindow = 120, rateMax = 6, strikes = 3;

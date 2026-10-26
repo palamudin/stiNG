@@ -263,11 +263,18 @@ namespace Sting.Core
                     FightResolve(w, aWins, ev.b);
                     break;
                 }
+                case "claim": // a pickup in a chunk this peer rules on (T1-19)
+                    if (!mine && ev.auth == peer) Rule(ev);
+                    break;
+                case "denied":
+                    if (!mine && ev.claimPeer == peer) Denied(ev);
+                    break;
                 case "caught":
                 {
                     if (mine) break;
+                    if (ev.claimPeer == peer) { claims.Delete(ev.claimWasp); break; } // our own claim, granted: applied already
                     var st = CS(ev.key);
-                    if (ev.what == "fly") st.caughtFly[ev.i] = ev.tick + T.prey.flyRespawnTicks;
+                    if (ev.what == "fly") st.caughtFly[ev.i] = (ev.ctick ?? ev.tick) + T.prey.flyRespawnTicks;
                     else if (ev.what == "caterpillar") st.caughtCat[ev.i] = 1;
                     else if (ev.what == "carrion") { st.carrion ??= new Dictionary<int, int>(); st.carrion[ev.i] = (st.carrion.TryGetValue(ev.i, out var cn) ? cn : 0) + 1; }
                     else if (ev.what == "meat") { st.meat ??= new Dictionary<int, int>(); st.meat[ev.i] = (st.meat.TryGetValue(ev.i, out var mn) ? mn : 0) + 1; }

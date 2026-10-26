@@ -197,6 +197,59 @@ for (const name of ['lan', 'good', 'bad', 'awful']) {
   ok(c.agreed === c.compared, `the honest peers agree on every human before and after the cut (${c.agreed}/${c.compared})`);
 }
 
+// Chunk authority and contested pickups (GDD 11.6, T1-19): one peer per chunk, by rendezvous hashing, rules when two
+// players' wasps grab the same thing; the loser lets go and both peers end with the same world.
+{
+  const lab = new NetLab({ seed: 1234, birds: false }, 'good');
+  const idle = (o = {}) => ({ ...idleCmd(), ...o });
+  for (let i = 0; i < 120; i++) lab.step(idle(), idle());
+  const A = lab.a, B = lab.b;
+  const keys = A.activeChunks.map((r) => `${r.cx},${r.cz}`);
+  ok(keys.every((k) => A.chunkAuthority(k) === B.chunkAuthority(k)), `both peers elect the same authority for every chunk (${keys.map((k) => A.chunkAuthority(k)).join('')})`);
+  // rendezvous: a third peer joining moves only the chunks it wins
+  const before = keys.map((k) => A.chunkAuthority(k));
+  A.interest.set(2, A.interest.get(0));
+  const after = keys.map((k) => A.chunkAuthority(k));
+  A.interest.delete(2);
+  ok(after.some((p) => p === 2) && after.every((p, j) => p === before[j] || p === 2), `a third peer takes some chunks and moves no others (${after.join('')})`);
+  // both grab the same caterpillar on the same tick
+  const grab = (what, setup) => {
+    const key = '0,0', rec = A.records.get(key), recB = B.records.get(key);
+    const spot = setup(rec, recB);
+    const wa = A._driven(), wb = B._driven();
+    for (const w of [wa, wb]) { w.x = spot.x; w.y = spot.y; w.z = spot.z; w.vx = w.vy = w.vz = 0; w.state = 'fly'; w.carry = null; }
+    lab.step(idle(), idle());
+    for (const w of [wa, wb]) { w.x = spot.x; w.y = spot.y; w.z = spot.z; w.vx = w.vy = w.vz = 0; }
+    const ev = [];
+    lab.step(idle({ act: 1 }), idle({ act: 1 }));
+    ev.push(...A.drainEvents().map((e) => ({ ...e, at: 'A' })), ...B.drainEvents().map((e) => ({ ...e, at: 'B' })));
+    const took = [wa.carry && wa.carry.what === what, wb.carry && wb.carry.what === what];
+    for (let i = 0; i < 120; i++) { lab.step(idle(), idle()); ev.push(...A.drainEvents().map((e) => ({ ...e, at: 'A' })), ...B.drainEvents().map((e) => ({ ...e, at: 'B' }))); }
+    return { took, held: [wa.carry && wa.carry.what === what, wb.carry && wb.carry.what === what], ev, auth: A.chunkAuthority(key) };
+  };
+  let ci = -1;
+  const r1 = grab('caterpillar', (rec) => {
+    ci = rec.content.caterpillars.findIndex((c, i) => !A.cs('0,0').caughtCat[i] && A.catActive(rec, i));
+    return rec.content.caterpillars[ci];
+  });
+  ok(r1.took[0] && r1.took[1], 'both wasps take the caterpillar at once on their own screens');
+  ok(r1.held.filter(Boolean).length === 1 && r1.held[r1.auth] && r1.ev.some((e) => e.type === 'claimLost'), `the chunk authority (peer ${r1.auth}) rules: its wasp keeps it, the other lets go`);
+  ok(!!A.cs('0,0').caughtCat[ci] && !!B.cs('0,0').caughtCat[ci], 'both peers have the caterpillar gone');
+  // the last load of carrion
+  const r2 = grab('carrion', (rec) => {
+    const cr = { x: rec.cx * 64 + 5, y: 0.03, z: rec.cz * 64 + 5 };
+    for (const S of [A, B]) {
+      const st = S.cs('0,0');
+      S.carrionIn = (r) => (r.cx === rec.cx && r.cz === rec.cz && T.eco.carrionLoads - ((st.carrion && st.carrion[0]) || 0) > 0 ? [{ ...cr, d: 0, left: 1 }] : []);
+      (st.carrion || (st.carrion = {}))[0] = T.eco.carrionLoads - 1;
+    }
+    return { x: cr.x, y: cr.y + 0.02, z: cr.z };
+  });
+  ok(r2.held.filter(Boolean).length === 1 && A.cs('0,0').carrion[0] === T.eco.carrionLoads && B.cs('0,0').carrion[0] === T.eco.carrionLoads,
+    `the last load of carrion goes to one wasp, and both peers count it taken once (${A.cs('0,0').carrion[0]}/${B.cs('0,0').carrion[0]} of ${T.eco.carrionLoads})`);
+  ok(A.claims.size === 0 && B.claims.size === 0, 'no claim is left waiting');
+}
+
 // Wire format: quantization error and bandwidth (GDD 11.12)
 {
   const m = { mk: 'state', peer: 1, tick: 123456, wasps: [
