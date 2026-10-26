@@ -1615,7 +1615,7 @@ function updateHud() {
   const h = sim.hint || {};
   if (w.state === 'balled') hint = `Mash ${kbd('Shift')} to break out`;
   else if (w.state === 'webbed') hint = `Mash ${kbd('Shift')} to tear free`;
-  else if (w.state === 'drowning') hint = `Mash ${kbd('Shift')} to climb out`;
+  else if (w.state === 'drowning') hint = `Mash ${kbd('Space')} or ${kbd('Shift')} to climb out over the side`;
   else if (w.state === 'fighting') hint = `Mash ${kbd('LMB')} to sting it first`;
   else if (w.state === 'landed') hint = w.walking ? 'Walking · it follows the surface round edges, up trunks and under tables · look where you want to go' : `Resting costs no sugar in the warmth · mouse turns · ${kbd('W')}${kbd('A')}${kbd('S')}${kbd('D')} walk on any surface · ${kbd('LMB')} sting someone within reach · ${kbd('Space')} or ${kbd('Shift')} take off`;
   else if (w.state === 'perched') hint = `${kbd('W')}${kbd('A')}${kbd('S')}${kbd('D')} crawl (look up or down to climb) · ${kbd('LMB')} sting · ${kbd('Space')} take off · ${kbd('E')} crawl under at an opening`;
@@ -1723,7 +1723,7 @@ function deathWhy(e) {
   if (e.cause === 'eaten by a spider') return 'Webs hang between trees. Mash Shift the moment you stick.';
   if (e.cause === 'cooked by bees') return 'Bees ball an intruder and heat it. Mash Shift before it reaches 46 °C.';
   if (e.cause === 'drowned in a trap') return 'Sweet-smelling bottles at alert level 3 are traps.';
-  if (e.cause === 'drowned in a drink') return 'Cups are deep. Feed just above the drink without touching it, and mash Shift the moment you slip in.';
+  if (e.cause === 'drowned in a drink') return 'Cups are deep. Feed just above the drink without touching it, and mash Space or Shift the moment you slip in.';
   if (e.cause === 'stung inside a hive') return 'Every second inside a hive is a chance for the bees to get you. Mash to grab fast, or bail out with Space.';
   if (e.cause === 'burned on a grill') return 'A lit grate burns on contact. Grab the meat from just above it, never land on it.';
   if (e.cause === 'cooked over a grill') return 'The air over a lit grill heats you in a second or two. Dive in, grab, and get out; watch your body temperature.';
@@ -1856,7 +1856,7 @@ function handleEvents(events) {
       case 'queenDied': toast('The queen is dead', 'var(--red)', 3); logEvent(`the queen died · ${e.cause}`); break;
       case 'webbed': if (e.driven) { toast('Stuck in a web · mash Shift', 'var(--red)', 2); blip(300, 260, 0.2, 0.05, 'triangle'); } break;
       case 'webEscape': if (e.id === sim.drivenId) toast('Tore free', 'var(--yellow)', 1.2); break;
-      case 'fellIn': if (e.driven) { toast('Slipped into the drink · mash Shift', 'var(--red)', 2); blip(420, 180, 0.25, 0.05, 'sine'); } break;
+      case 'fellIn': if (e.driven) { toast('Slipped into the drink · mash Space or Shift', 'var(--red)', 2); blip(420, 180, 0.25, 0.05, 'sine'); } break;
       case 'climbedOut': if (e.id === sim.drivenId) toast('Climbed out, sticky', 'var(--yellow)', 1.2); break;
       case 'robStart': if (e.driven) { toast(e.feral ? 'Into the wild hive · mash LMB to grab' : 'Into the hive · mash LMB to grab', 'var(--red)', 1.8); } break;
       case 'robbed': if (e.driven) toast('Honey and brood · now get out, the hive is up', 'var(--yellow)', 2.2); else logEvent(`worker ${e.id} robbed a hive`); break;

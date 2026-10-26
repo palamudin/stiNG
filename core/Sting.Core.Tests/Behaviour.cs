@@ -764,7 +764,7 @@ namespace Sting.Core.Tests
             RunS(c2, 900, (sim, i) => { var w = sim.Driven(); if (w != null && w.state == "perched") w.perch.quietUntil = sim.tick + 10; return Idle(); });
             Ok(perched && c2.Driven() != null && c2.wasp.bodyT > 25, $"perched on a person it stays warm in the cold ({D(c2.wasp.bodyT):0.0} °C)");
 
-            (bool fell, List<SimEvent> ev) IntoCan(bool mash)
+            (bool fell, List<SimEvent> ev) IntoCan(bool mash, bool space = false)
             {
                 var t = Calm(new Sim(new Settings { seed = 1234, birds = false })); // nobody at the table swats or covers the cup
                 var cup = t.CupsIn(t.records.Get("0,0"))[0];
@@ -773,7 +773,7 @@ namespace Sting.Core.Tests
                 {
                     var w = sim.Driven();
                     if (w == null) return Idle();
-                    if (w.state == "drowning") { fell = true; return Idle(c => c.burst = mash ? i % 2 : 0); }
+                    if (w.state == "drowning") { fell = true; return Idle(c => { if (space) c.my = mash ? (i % 2) * 100 : 0; else c.burst = mash ? i % 2 : 0; }); }
                     if (!fell && (w.state == "fly" || w.state == "landed")) { Place(w, P(cup.x, cup.level + 0.015, cup.z)); w.energy = 0.3; }
                     return Idle();
                 });
@@ -782,7 +782,10 @@ namespace Sting.Core.Tests
             var a = IntoCan(false); var b = IntoCan(true);
             var drowned = a.ev.FirstOrDefault(e => e.type == "waspDied" && (bool)e["driven"]);
             Ok(a.fell && Cause(drowned) == "drowned in a drink", $"a wasp feeding at an open can slips in and drowns ({Cause(drowned)})");
-            Ok(b.fell && Count(b.ev, "climbedOut") >= 1, "mashing burst climbs out of the drink");
+            var spc = IntoCan(true, true);
+            Ok(spc.fell && Count(spc.ev, "climbedOut") >= 1, "mashing Space climbs out too");
+            int outAt = b.ev.FindIndex(e => e.type == "climbedOut"); int back = outAt < 0 ? 0 : b.ev.Skip(outAt).Count(e => e.type == "fellIn");
+            Ok(b.fell && outAt >= 0 && back == 0, $"mashing burst climbs out of the drink, over the side, and it does not fall back in ({back} times)");
             // cups are hollow (GDD 7.5)
             {
                 var t = Calm(new Sim(new Settings { seed = 1234, birds = false }));

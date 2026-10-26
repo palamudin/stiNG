@@ -903,14 +903,20 @@ namespace Sting.Core
         void DrownStep(Wasp w, Cmd cmd, bool driven)
         {
             var d = w.drown;
-            if (driven) { if (cmd.burst != 0 && d.prevBurst == 0) d.progress += T.drown.escapePerPress; d.prevBurst = cmd.burst; }
+            if (driven) { int press = cmd.burst != 0 || cmd.my > 0 ? 1 : 0; if (press != 0 && d.prevBurst == 0) d.progress += T.drown.escapePerPress; d.prevBurst = press; } // Shift or Space
             else if (H32(w.id, tick, 57) < T.drown.aiEscape) d.progress = 1;
             if (d.progress >= 1)
             {
-                // out over the rim (GDD 7.5)
+                // out over the rim and down the outside of the cup (GDD 7.5), the way it faces (see sim.js)
                 Cup cp = d.i >= 0 && records.TryGet(d.key, out var drec) ? CupsIn(drec)[d.i] : null;
-                w.drown = null; w.state = "stunned"; w.stateTicks = 30; w.vy = 0.6;
-                if (cp != null) { w.x = cp.x; w.y = T.cup.rim + 0.02; w.z = cp.z; } else w.y += 0.04;
+                w.drown = null; w.state = "stunned"; w.stateTicks = 30;
+                if (cp != null)
+                {
+                    Num sx = DSin(w.yaw), sz = DCos(w.yaw), o = T.cup.r + T.wasp.radius + 0.012;
+                    w.x = cp.x + sx * o; w.y = T.cup.rim + T.wasp.radius; w.z = cp.z + sz * o;
+                    w.vx = sx * 0.3; w.vy = 0.3; w.vz = sz * 0.3;
+                }
+                else { w.y += 0.04; w.vy = 0.6; }
                 w.energy = Min(1, w.energy + 0.1); // a sticky, sugary escape
                 Emit("climbedOut", ("id", w.id));
                 return;

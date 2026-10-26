@@ -802,7 +802,7 @@ function seated(sim, pred) {
   ok(perched && c2._driven() && c2.wasp.bodyT > 25, `perched on a person it stays warm in the cold (${c2.wasp.bodyT.toFixed(1)} °C)`);
 
   // drowning in a drink: feed long enough at an open can and you may slip in; mash to climb out
-  const intoCan = (mash) => {
+  const intoCan = (mash, space = false) => {
     const t = new Sim({ seed: 1234, birds: false });
     for (const h of t.active) h.tr = { ...h.tr, style: Style.Freezer }; // nobody at the table swats or covers the cup
     const cup = t.cupsIn(t.records.get('0,0'))[0];
@@ -810,7 +810,7 @@ function seated(sim, pred) {
     const ev2 = run(t, 9000, (sim, i) => {
       const w = sim._driven();
       if (!w) return idle();
-      if (w.state === 'drowning') { fell = true; return idle({ burst: mash ? i % 2 : 0 }); }
+      if (w.state === 'drowning') { fell = true; return idle(space ? { my: mash ? (i % 2) * 100 : 0 } : { burst: mash ? i % 2 : 0 }); }
       if (!fell && (w.state === 'fly' || w.state === 'landed')) { place(w, { x: cup.x, y: cup.level + 0.015, z: cup.z }); w.energy = 0.3; }
       return idle();
     });
@@ -819,7 +819,10 @@ function seated(sim, pred) {
   const a = intoCan(false), b = intoCan(true);
   const drowned = a.ev.find((e) => e.type === 'waspDied' && e.driven);
   ok(a.fell && drowned && drowned.cause === 'drowned in a drink', `a wasp feeding at an open can slips in and drowns (${drowned && drowned.cause})`);
-  ok(b.fell && count(b.ev, 'climbedOut') >= 1, 'mashing burst climbs out of the drink');
+  const outAt = b.ev.findIndex((e) => e.type === 'climbedOut'), back = b.ev.slice(outAt).filter((e) => e.type === 'fellIn').length;
+  const spc = intoCan(true, true);
+  ok(spc.fell && count(spc.ev, 'climbedOut') >= 1, 'mashing Space climbs out too');
+  ok(b.fell && outAt >= 0 && back === 0, `mashing burst climbs out of the drink, over the side, and it does not fall back in (${back} times)`);
 
   // cups are hollow (GDD 7.5): in through the top, feed at the drink, fall in if you touch it; a hand or a lid over
   // the cup shuts you in to drown

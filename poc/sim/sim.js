@@ -1521,13 +1521,18 @@ export class Sim {
   // Mash burst to climb out before the drink takes you; AI wasps get a small chance each tick
   _drownStep(w, cmd, driven) {
     const d = w.drown, D = T.drown;
-    if (driven) { if (cmd.burst && !d.prevBurst) d.progress += D.escapePerPress; d.prevBurst = cmd.burst; }
+    if (driven) { const press = cmd.burst || cmd.my > 0 ? 1 : 0; if (press && !d.prevBurst) d.progress += D.escapePerPress; d.prevBurst = press; } // Shift or Space
     else if (h32(w.id, this.tick, 57) < D.aiEscape) d.progress = 1;
     if (d.progress >= 1) {
-      // out over the rim (GDD 7.5)
+      // out over the rim and down the outside of the cup (GDD 7.5), the way it faces: dropped back over the middle,
+      // a wet, stunned wasp would only fall straight back in
       const rec = this.records.get(d.key), cp = rec && d.i !== undefined ? this.cupsIn(rec)[d.i] : null;
-      w.drown = null; w.state = 'stunned'; w.stateTicks = 30; w.vy = 0.6;
-      if (cp) { w.x = cp.x; w.y = T.cup.rim + 0.02; w.z = cp.z; } else w.y += 0.04;
+      w.drown = null; w.state = 'stunned'; w.stateTicks = 30;
+      if (cp) {
+        const yw = w.yaw || 0, sx = dsin(yw), sz = dcos(yw), out = T.cup.r + T.wasp.radius + 0.012;
+        w.x = cp.x + sx * out; w.y = T.cup.rim + T.wasp.radius; w.z = cp.z + sz * out;
+        w.vx = sx * 0.3; w.vy = 0.3; w.vz = sz * 0.3;
+      } else { w.y += 0.04; w.vy = 0.6; }
       w.energy = Math.min(1, w.energy + 0.1); // a sticky, sugary escape
       this.emit('climbedOut', { id: w.id });
       return;
