@@ -3,19 +3,23 @@
 import { h32, rnd, sq } from './rng.js';
 import { T } from './tuning.js';
 import { Sim } from './sim.js';
-import { chunkOf } from './world.js';
+import { chunkOf, chunkKey } from './world.js';
 
 // ---------------------------------------------------------------- wire format for state packets (GDD 11.12)
 // Positions are chunk-relative, 16 bits per axis (1 mm horizontally, 0.6 mm vertically); velocity 8 bits per axis.
 const STATES = ['fly', 'stunned', 'attached', 'under', 'chewing', 'trapped', 'balled', 'landed', 'webbed', 'fighting', 'dead', 'perched', 'drowning', 'robbing'];
-const CARRY = [null, 'fly', 'caterpillar', 'bee', 'pulp', 'larva'];
+const CARRY = [null, 'fly', 'caterpillar', 'bee', 'pulp', 'larva', 'carrion', 'meat', 'bee brood', 'bait'];
 const CS = T.chunk.size, YMAX = 40, VMAX = 8;
 export const BYTES_PER_WASP = 19;
 
+// A state packet (driven and near wasps): peer, tick, count, the sender's driven wasp, the wasps gone since the last one
+const STATE_HEAD = 11;
 export function encodeState(m) {
-  const buf = new ArrayBuffer(6 + m.wasps.length * BYTES_PER_WASP), v = new DataView(buf);
-  v.setUint8(0, m.peer); v.setUint32(1, m.tick); v.setUint8(5, m.wasps.length);
-  let o = 6;
+  const gone = m.gone || [];
+  const buf = new ArrayBuffer(STATE_HEAD + gone.length * 4 + m.wasps.length * BYTES_PER_WASP), v = new DataView(buf);
+  v.setUint8(0, m.peer); v.setUint32(1, m.tick); v.setUint8(5, m.wasps.length); v.setUint32(6, m.driven || 0); v.setUint8(10, gone.length);
+  let o = STATE_HEAD;
+  for (const id of gone) { v.setUint32(o, id); o += 4; }
   const q16 = (x, lo, hi) => Math.max(0, Math.min(65535, rnd((x - lo) / (hi - lo) * 65535)));
   const q8 = (x) => Math.max(-127, Math.min(127, rnd(x / VMAX * 127)));
   for (const w of m.wasps) {
@@ -31,9 +35,10 @@ export function encodeState(m) {
 }
 
 export function decodeState(buf, underHex = null) {
-  const v = new DataView(buf), n = v.getUint8(5), wasps = [];
+  const v = new DataView(buf), n = v.getUint8(5), ng = v.getUint8(10), wasps = [], gone = [];
   const d16 = (x, lo, hi) => lo + x / 65535 * (hi - lo);
-  let o = 6;
+  let o = STATE_HEAD;
+  for (let i = 0; i < ng; i++) { gone.push(v.getUint32(o)); o += 4; }
   for (let i = 0; i < n; i++) {
     const cx = v.getInt16(o + 4), cz = v.getInt16(o + 6), flags = v.getUint8(o + 18);
     wasps.push({
@@ -43,8 +48,86 @@ export function decodeState(buf, underHex = null) {
     });
     o += BYTES_PER_WASP;
   }
-  return { mk: 'state', peer: v.getUint8(0), tick: v.getUint32(1), wasps };
+  return { mk: 'state', peer: v.getUint8(0), tick: v.getUint32(1), driven: v.getUint32(6), gone, wasps };
 }
+
+// A swarm packet (mid-tier wasps, GDD 11.12): one header per chunk (cx, cz, base id, count), then per wasp an id
+// offset, a chunk-relative position and a state byte (state, queen, rival). No velocity: the receiver works it out.
+export const BYTES_PER_SWARM_WASP = 9;
+const GROUP_HEAD = 9;
+function swarmGroups(wasps) {
+  const groups = [], byKey = new Map();
+  for (const w of wasps) {
+    const k = chunkKey(chunkOf(w.x), chunkOf(w.z));
+    let g = byKey.get(k);
+    if (!g) { g = { cx: chunkOf(w.x), cz: chunkOf(w.z), ws: [] }; byKey.set(k, g); groups.push(g); }
+    g.ws.push(w);
+  }
+  // within a chunk by id; a new group whenever the id offset or the count would overflow
+  const out = [];
+  for (const g of groups) {
+    g.ws.sort((a, b) => a.id - b.id);
+    let cur = null;
+    for (const w of g.ws) {
+      if (!cur || w.id - cur.base > 65535 || cur.ws.length >= 255) { cur = { cx: g.cx, cz: g.cz, base: w.id, ws: [] }; out.push(cur); }
+      cur.ws.push(w);
+    }
+  }
+  return out;
+}
+export function encodeSwarm(m) {
+  const groups = swarmGroups(m.wasps);
+  const buf = new ArrayBuffer(6 + groups.length * GROUP_HEAD + m.wasps.length * BYTES_PER_SWARM_WASP), v = new DataView(buf);
+  v.setUint8(0, m.peer); v.setUint32(1, m.tick); v.setUint8(5, groups.length);
+  const q16 = (x, lo, hi) => Math.max(0, Math.min(65535, rnd((x - lo) / (hi - lo) * 65535)));
+  let o = 6;
+  for (const g of groups) {
+    v.setInt16(o, g.cx); v.setInt16(o + 2, g.cz); v.setUint32(o + 4, g.base); v.setUint8(o + 8, g.ws.length); o += GROUP_HEAD;
+    for (const w of g.ws) {
+      v.setUint16(o, w.id - g.base);
+      v.setUint16(o + 2, q16(w.x - g.cx * CS, -CS / 2, CS / 2)); v.setUint16(o + 4, q16(w.y, 0, YMAX)); v.setUint16(o + 6, q16(w.z - g.cz * CS, -CS / 2, CS / 2));
+      v.setUint8(o + 8, Math.max(0, STATES.indexOf(w.state)) | (w.caste === 'queen' ? 16 : 0) | (w.rival ? 32 : 0));
+      o += BYTES_PER_SWARM_WASP;
+    }
+  }
+  return buf;
+}
+export function decodeSwarm(buf) {
+  const v = new DataView(buf), ng = v.getUint8(5), wasps = [];
+  const d16 = (x, lo, hi) => lo + x / 65535 * (hi - lo);
+  let o = 6;
+  for (let gi = 0; gi < ng; gi++) {
+    const cx = v.getInt16(o), cz = v.getInt16(o + 2), base = v.getUint32(o + 4), n = v.getUint8(o + 8); o += GROUP_HEAD;
+    for (let i = 0; i < n; i++) {
+      const s = v.getUint8(o + 8);
+      wasps.push({ id: base + v.getUint16(o), x: cx * CS + d16(v.getUint16(o + 2), -CS / 2, CS / 2), y: d16(v.getUint16(o + 4), 0, YMAX), z: cz * CS + d16(v.getUint16(o + 6), -CS / 2, CS / 2),
+        state: STATES[s & 15], caste: s & 16 ? 'queen' : 'worker', rival: !!(s & 32) });
+      o += BYTES_PER_SWARM_WASP;
+    }
+  }
+  return { mk: 'swarm', peer: v.getUint8(0), tick: v.getUint32(1), wasps };
+}
+
+// A traffic packet (far tier): how many of the sender's wasps are out in each chunk beyond the receiver's interest
+export function encodeTraffic(m) {
+  const buf = new ArrayBuffer(7 + m.chunks.length * 6), v = new DataView(buf);
+  v.setUint8(0, m.peer); v.setUint32(1, m.tick); v.setUint16(5, m.chunks.length);
+  let o = 7;
+  for (const [k, n] of m.chunks) { const [cx, cz] = k.split(',').map(Number); v.setInt16(o, cx); v.setInt16(o + 2, cz); v.setUint16(o + 4, Math.min(65535, n)); o += 6; }
+  return buf;
+}
+export function decodeTraffic(buf) {
+  const v = new DataView(buf), n = v.getUint16(5), chunks = [];
+  let o = 7;
+  for (let i = 0; i < n; i++) { chunks.push([chunkKey(v.getInt16(o), v.getInt16(o + 2)), v.getUint16(o + 4)]); o += 6; }
+  return { mk: 'traffic', peer: v.getUint8(0), tick: v.getUint32(1), chunks };
+}
+
+const ENCODE = { state: encodeState, swarm: encodeSwarm, traffic: encodeTraffic }, DECODE = { state: decodeState, swarm: decodeSwarm, traffic: decodeTraffic };
+// what goes on the wire for a message: binary for the unreliable channels, the event itself otherwise
+export function wire(m) { return ENCODE[m.mk] ? { mk: 'bin', kind: m.mk, bin: ENCODE[m.mk](m) } : m; }
+export function unwire(m) { return m.mk === 'bin' ? DECODE[m.kind](m.bin) : m; }
+
 import { stingBot } from './bots.js';
 import { snapshot, joinFrom } from './persist.js';
 
@@ -67,7 +150,7 @@ export class Link {
     this.stats.sent++;
     const n = this.n++;
     let at = tick + this.latency + Math.floor(h32(this.seed, n, 2) * (this.jitter + 1));
-    if (msg.mk === 'state') {
+    if (msg.bin) { // the unreliable channel: state, swarm and traffic packets
       if (h32(this.seed, n, 1) < this.loss) { this.stats.dropped++; return; }
     } else {
       let k = 0;
@@ -75,7 +158,7 @@ export class Link {
       at = Math.max(at, this.lastEventAt);
       this.lastEventAt = at;
     }
-    this.q.push({ at, n, msg: msg.bin ? { mk: 'bin', bin: msg.bin.slice(0) } : JSON.parse(JSON.stringify(msg)) });
+    this.q.push({ at, n, msg: msg.bin ? { mk: 'bin', kind: msg.kind, bin: msg.bin.slice(0) } : JSON.parse(JSON.stringify(msg)) });
   }
   poll(tick) {
     const out = [], keep = [];
@@ -99,25 +182,25 @@ export class NetLab {
     this.ba = new Link({ ...L, seed: 22 });
     this.botB = stingBot({ plan: 'jab', rest: 240, ...botOpts });
     this.checks = { compared: 0, agreed: 0, skipped: 0, firstDiverge: 0 };
-    this.bytes = { ab: 0, ba: 0, abState: 0, abEvents: 0, since: 0 };
+    this.bytes = { ab: 0, ba: 0, abState: 0, abSwarm: 0, abTraffic: 0, abEvents: 0, since: 0 };
   }
   _out(sim, link, dir) {
+    const to = dir === 'ab' ? 1 : 0;
     for (const m of sim.outbox) {
-      if (m.mk === 'state') {
-        const bin = encodeState(m);
-        this.bytes[dir] += bin.byteLength + 28; if (dir === 'ab') this.bytes.abState += bin.byteLength + 28; // + UDP/IP headers
-        link.send({ mk: 'state', bin }, sim.tick);
-      } else {
-        const len = JSON.stringify(m).length + 28;
-        this.bytes[dir] += len; if (dir === 'ab') this.bytes.abEvents += len;
-        link.send(m, sim.tick);
-      }
+      if (m.to !== undefined && m.to !== to) continue;
+      const w = wire(m), len = (w.bin ? w.bin.byteLength : JSON.stringify(m).length) + 28; // + UDP/IP headers
+      this.bytes[dir] += len;
+      if (dir === 'ab') this.bytes[w.bin ? { state: 'abState', swarm: 'abSwarm', traffic: 'abTraffic' }[w.kind] : 'abEvents'] += len;
+      link.send(w, sim.tick);
     }
     sim.outbox.length = 0;
   }
-  _in(msgs) { return msgs.map((m) => (m.mk === 'bin' ? decodeState(m.bin) : m)); }
-  // Average upstream bandwidth of peer A (state packets + events), bytes per second
-  bandwidth() { const secs = Math.max(1, this.a.tick) / 60; return { total: this.bytes.ab / secs, state: this.bytes.abState / secs, events: this.bytes.abEvents / secs }; }
+  _in(msgs) { return msgs.map(unwire); }
+  // Average upstream bandwidth of peer A by channel, bytes per second
+  bandwidth() {
+    const secs = Math.max(1, this.a.tick) / 60, b = this.bytes;
+    return { total: b.ab / secs, state: b.abState / secs, swarm: b.abSwarm / secs, traffic: b.abTraffic / secs, events: b.abEvents / secs };
+  }
   step(cmdA, cmdB) {
     const t = this.a.tick + 1;
     if (!this.b) {
@@ -166,12 +249,13 @@ export class MeshLab {
   }
   step(cmd0) {
     const t = this.sims[0].tick + 1, n = this.sims.length;
-    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) if (i !== j) this.sims[j].receive(this.links[i][j].poll(t).map((m) => (m.mk === 'bin' ? decodeState(m.bin) : m)));
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) if (i !== j) this.sims[j].receive(this.links[i][j].poll(t).map(unwire));
     this.sims.forEach((s, i) => s.step(i ? this.bots[i](s) : cmd0));
     this.sims.forEach((s, i) => {
       for (const m of s.outbox) {
         if (this.tamper) this.tamper(i, m, s);
-        for (let j = 0; j < n; j++) if (j !== i) this.links[i][j].send(m.mk === 'state' ? { mk: 'state', bin: encodeState(m) } : m, s.tick);
+        const w = wire(m);
+        for (let j = 0; j < n; j++) if (j !== i && (m.to === undefined || m.to === j)) this.links[i][j].send(w, s.tick);
       }
       s.outbox.length = 0;
     });

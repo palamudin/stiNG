@@ -619,6 +619,14 @@ stateEvery = 3
 remoteTimeout = 45
 claimTicks = 120
 
+[relevance]
+nearDist = 50
+interestChunks = 3
+nearEvery = 6
+midEvery = 20
+farEvery = 60
+midTtl = 75
+
 [plaus]
 futureTicks = 120
 stingReach = 1.6

@@ -27,6 +27,8 @@ namespace Sting.Core
         public OrderedMap<int, string> interest = new OrderedMap<int, string>();
         /// pickups waiting for the chunk authority (T1-19), by wasp id; never saved
         public OrderedMap<int, Claim> claims = new OrderedMap<int, Claim>();
+        /// relevance tiers (T1-21): each peer's driven wasp, the far traffic each peer reports, the wasps last sent; never saved
+        public OrderedMap<int, int> remoteDriven = new OrderedMap<int, int>(); public OrderedMap<int, TrafficMsg> remoteTraffic = new OrderedMap<int, TrafficMsg>(); List<int> lastIds = new List<int>();
         public int host;
         public ulong seed;
         public int tpm; public long dayTicks;
@@ -374,7 +376,7 @@ namespace Sting.Core
             // 5. respawn of the driven wasp
             if (Driven() == null && !extinct && winter == null && tick >= respawnAt) Respawn();
             UpdateChunks();
-            if (net && tick % T.net.stateEvery == 0) SendState();
+            if (net) SendState();
             if (claims.Count > 0 && tick % 60 == 0) ExpireClaims();
         }
 

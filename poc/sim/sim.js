@@ -36,6 +36,8 @@ export class Sim {
     this.netStats = { sent: 0, recv: 0, late: 0, lateMax: 0, rejected: 0, dropped: 0 };
     this.plaus = { strikes: {}, quarantined: [], lastSeq: {}, stingTicks: {} };
     this.claims = new Map(); // pickups waiting for the chunk authority (T1-19), by wasp id
+    // relevance tiers (T1-21): each peer's driven wasp, the far traffic each peer reports, the wasps last sent
+    this.remoteDriven = new Map(); this.remoteTraffic = new Map(); this.lastIds = [];
     // Which chunks each peer is near. Humans are simulated over the union, changes commit like any event (Q-16)
     this.interest = new Map();
     for (const p of opts.peers || [this.peer]) this.interest.set(p, chunkKey(chunkOf(SPAWN.x), chunkOf(SPAWN.z)));
@@ -303,7 +305,7 @@ export class Sim {
     // 5. respawn of the driven wasp
     if (!this._driven() && !this.extinct && !this.winter && this.tick >= this.respawnAt) this._respawn();
     this._updateChunks();
-    if (this.net && this.tick % T.net.stateEvery === 0) this._sendState();
+    if (this.net) this._sendState();
     if (this.claims.size && this.tick % 60 === 0) this._expireClaims();
   }
 
@@ -332,6 +334,8 @@ export class Sim {
       this.netStats.recv++;
       if (this.plaus.quarantined.includes(m.peer)) { this.netStats.dropped++; continue; }
       if (m.mk === 'state') { this._remoteState(m); continue; }
+      if (m.mk === 'swarm') { this._remoteSwarm(m); continue; }
+      if (m.mk === 'traffic') { this.remoteTraffic.set(m.peer, { tick: m.tick, chunks: new Map(m.chunks) }); continue; }
       const why = this._implausible(m);
       if (why) { this._strike(m.peer, m.type, why); continue; }
       this._applyImmediate(m);
@@ -345,12 +349,44 @@ export class Sim {
     while (this.pending.length && this.pending[0].commit <= this.tick) this._applyCommit(this.pending.shift());
   }
 
+  // State to each other peer by relevance tier (GDD 11.12, T1-21), judged from where that peer's wasp is
   _sendState() {
-    const wasps = this.wasps.map((w) => ({
+    const R = T.relevance, t = this.tick;
+    const dueD = t % T.net.stateEvery === 0, dueN = t % R.nearEvery === 0, dueM = t % R.midEvery === 0, dueF = t % R.farEvery === 0;
+    if (!dueD && !dueN && !dueM && !dueF) return;
+    const pack = (w) => ({
       id: w.id, caste: w.caste, x: w.x, y: w.y, z: w.z, vx: w.vx, vy: w.vy, vz: w.vz, state: w.state,
       carry: w.carry ? w.carry.what : null, under: w.under ? w.under.hex : null, rival: w.colony !== 'own',
-    }));
-    this.outbox.push({ mk: 'state', peer: this.peer, tick: this.tick, wasps });
+    });
+    // wasps gone since the last state packets, so receivers drop them at once
+    let gone = [];
+    if (dueD) {
+      const now = new Set(this.wasps.map((w) => w.id));
+      gone = this.lastIds.filter((id) => !now.has(id));
+      this.lastIds = this.wasps.map((w) => w.id);
+    }
+    const drivenId = this._driven() ? this.drivenId : 0;
+    for (const [p] of this.interest) {
+      if (p === this.peer || this.plaus.quarantined.includes(p)) continue;
+      const ref = this._peerRef(p), rcx = chunkOf(ref.x), rcz = chunkOf(ref.z);
+      const near = [], mid = [], far = new Map();
+      for (const w of this.wasps) {
+        if (w.id === this.drivenId) { if (dueD) near.push(pack(w)); continue; }
+        if (sq(w.x - ref.x) + sq(w.z - ref.z) <= R.nearDist * R.nearDist) { if (dueN) near.push(pack(w)); }
+        else if (Math.max(Math.abs(chunkOf(w.x) - rcx), Math.abs(chunkOf(w.z) - rcz)) <= R.interestChunks) { if (dueM) mid.push(pack(w)); }
+        else if (dueF) { const k = chunkKey(chunkOf(w.x), chunkOf(w.z)); far.set(k, (far.get(k) || 0) + 1); }
+      }
+      if (dueD || near.length) this.outbox.push({ mk: 'state', peer: this.peer, to: p, tick: t, driven: drivenId, gone, wasps: near });
+      if (mid.length) this.outbox.push({ mk: 'swarm', peer: this.peer, to: p, tick: t, wasps: mid });
+      if (dueF) this.outbox.push({ mk: 'traffic', peer: this.peer, to: p, tick: t, chunks: [...far] });
+    }
+  }
+  // where a peer is: its driven wasp as last heard, or the middle of the chunk it has interest in
+  _peerRef(p) {
+    const r = this.remote.get(this.remoteDriven.get(p));
+    if (r && r.peer === p) return r;
+    const [cx, cz] = (this.interest.get(p) || '0,0').split(',').map(Number);
+    return { x: cx * T.chunk.size, z: cz * T.chunk.size };
   }
 
   // GDD 11.8. Checks on events read only the event and shared human state, so every honest peer drops the same ones.
@@ -416,16 +452,37 @@ export class Sim {
       }
       ids.add(r.id);
       const e = this.remote.get(r.id) || {};
-      Object.assign(e, r, { peer: m.peer, stamp: m.tick, px: r.x, py: r.y, pz: r.z, seen: this.tick });
+      Object.assign(e, r, { peer: m.peer, stamp: m.tick, px: r.x, py: r.y, pz: r.z, seen: this.tick, ttl: T.net.remoteTimeout });
       this.remote.set(r.id, e);
     }
-    for (const [id, e] of this.remote) if (e.peer === m.peer && !ids.has(id) && e.stamp < m.tick) this.remote.delete(id);
+    // a wasp missing from a packet may just be in another tier now (T1-21); gone ones are listed
+    if (m.driven) this.remoteDriven.set(m.peer, m.driven);
+    for (const id of m.gone || []) { const e = this.remote.get(id); if (e && e.peer === m.peer) this.remote.delete(id); }
+  }
+
+  // Mid-tier wasps: position and state at a few hertz; velocity from the last two positions, for drawing in between
+  _remoteSwarm(m) {
+    for (const r of m.wasps) {
+      const prev = this.remote.get(r.id);
+      let vx = 0, vy = 0, vz = 0;
+      if (prev && prev.peer === m.peer && m.tick > prev.stamp) {
+        const dt = (m.tick - prev.stamp) / 60;
+        vx = (r.x - prev.px) / dt; vy = (r.y - prev.py) / dt; vz = (r.z - prev.pz) / dt;
+        if (Math.sqrt(vx * vx + vy * vy + vz * vz) > T.plaus.maxSpeed && (prev.bad = (prev.bad || 0) + 1) < 4) { this.netStats.dropped++; prev.seen = this.tick; continue; }
+        prev.bad = 0;
+        if (dt > 1) vx = vy = vz = 0;
+      } else if (prev && prev.peer === m.peer) continue; // older than what we have
+      const e = prev || {};
+      Object.assign(e, { id: r.id, caste: r.caste, x: r.x, y: r.y, z: r.z, vx, vy, vz, state: r.state, carry: prev ? prev.carry : null, under: null, rival: r.rival,
+        peer: m.peer, stamp: m.tick, px: r.x, py: r.y, pz: r.z, seen: this.tick, ttl: T.relevance.midTtl });
+      this.remote.set(r.id, e);
+    }
   }
 
   // Remote wasps are drawn where they probably are now: last state plus velocity (GDD 11.4)
   _extrapolateRemote() {
     for (const [id, e] of this.remote) {
-      if (this.tick - e.seen > T.net.remoteTimeout) { this.remote.delete(id); continue; }
+      if (this.tick - e.seen > (e.ttl || T.net.remoteTimeout)) { this.remote.delete(id); continue; }
       const dt = (this.tick - e.stamp) / 60;
       const moving = e.state === 'fly' || e.state === 'stunned';
       e.x = e.px + (moving ? e.vx * dt : 0); e.y = Math.max(T.wasp.radius, e.py + (moving ? e.vy * dt : 0)); e.z = e.pz + (moving ? e.vz * dt : 0);

@@ -193,6 +193,8 @@ namespace Sting.Core
             public static Num fightRange = 0.025, remoteFightRange = 0.06, guardRadius = 1.5, raidProtein = 2, mash = 0.15;
         }
         public static class net { public static int commitTicks = 30, stateEvery = 3, remoteTimeout = 45, claimTicks = 120; }
+        /// Relevance tiers (GDD 11.12, T1-21), judged per receiving peer from where its own wasp is
+        public static class relevance { public static Num nearDist = 50; public static int interestChunks = 3, nearEvery = 6, midEvery = 20, farEvery = 60, midTtl = 75; }
         public static class plaus
         {
             public static int futureTicks = 120, maxSwatDelay = 240, maxSwats = 4, rateWindow = 120, rateMax = 6, strikes = 3;

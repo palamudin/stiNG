@@ -785,6 +785,7 @@ On Main the entity count is dominated by AI wasps: one player's colony can hold 
 - **Swarm packets:** one header per chunk, then a run of quantized positions and state bits for many wasps.
 - **Rough downstream budget per client** *(tune)*: 50 driven wasps at 30 Hz × 20 bytes ≈ 30 KB/s; 500 near wasps at 10 Hz × 10 bytes ≈ 50 KB/s; 5,000 mid wasps at 2 Hz × 6 bytes ≈ 60 KB/s. About 140 KB/s, or 1.1 Mbit/s, for a crowded spot.
 - Offshoot and Personal worlds use the same tiers, with caps set by modifiers (4.8).
+- As built in the lab (18.33): driven 20 Hz, near 10 Hz, mid 3 Hz in swarm packets of 9 bytes a wasp, far as counts per chunk once a second; measured with 143 to 200 workers out.
 
 **Offline players on Main [Q] Q-15.** Seasons keep running on Main when a player logs off, but an offline player's colony has no owner to simulate it. Proposed: the cell server runs offline colonies at the abstract tier only (economy and statistical foraging risk, no individual wasps). This is a deliberate, narrow exception to "servers don't simulate."
 
@@ -1151,6 +1152,31 @@ Every can on a table is a hollow cup: a 3 mm wall, open at the top, holding a dr
 
 **Limits.** A wasp that deposits its load at the nest before a denial arrives (it would need to be within a few hundred milliseconds of home) keeps it. Honey eaten during a lost robbery stays eaten; only the brood goes back. Chunk deltas and late-event corrections do not go through the authority yet.
 
+### 18.33 Relevance tiers as built (T1-21)
+
+**Per receiver.** Each peer decides, for every other peer, how often that peer hears about each of its wasps, judged from where the other peer's own wasp is (from the driven wasp id it announces in its state packets, or the middle of its interest chunk until it has one). Every packet carries a recipient; the labs route by it.
+
+| Tier | Which of my wasps | How often | Packet |
+|---|---|---|---|
+| Driven | the one I drive | 20 Hz (every 3 ticks) | state: 19 bytes, position, velocity, state, carry |
+| Near | AI wasps within 50 m of the other player's wasp | 10 Hz | state, as above |
+| Mid | AI wasps within 3 chunks of it | 3 Hz | swarm: per chunk a 9-byte header (chunk, base id, count), then 9 bytes a wasp (id offset, position, state, queen, rival) |
+| Far | the rest | 1 Hz | traffic: 6 bytes per chunk with the number of my wasps out there |
+
+The driven wasp stays at the rate the lab tuned the remote view against (20 Hz rather than the 30 in the table above). State packets also list the sender's driven wasp and the wasps that are gone since the last one, so a receiver drops those at once; a wasp missing from a packet may only have changed tier, and goes after its tier's timeout (0.75 s for state, 1.25 s for swarm). A receiver works out a swarm wasp's velocity from its last two positions, so it is still drawn moving between packets. Traffic counts are kept per peer for the presentation (not drawn yet).
+
+**Nothing shared depends on it.** Shared decisions never read live remote positions (11.5), so the tiers change only what each player sees and what local AI reacts to (guards at the entrance react to wasps near them, which are near-tier for whoever drives them). Humans agree on both peers in every run, and the C# port reproduces the five network parity runs bit for bit with the tiers in place.
+
+**Measured.** A colony of 600 with 200 foragers sent out at once (143 still out after a minute), over the good link, peer A's upstream:
+
+| Where player 2 is | Every wasp at 20 Hz | With tiers |
+|---|---|---|
+| At the nest, among them (137 near, 6 mid) | 51.2 KB/s | 25.4 KB/s |
+| 150 m off (all mid) | 51.2 KB/s | 5.2 KB/s |
+| 400 m off (all far) | 51.2 KB/s | 1.4 KB/s, of which 1.1 is the driven wasp |
+
+The ordinary lab colony (23 wasps) now sends 2.8 KB/s instead of 4.8. Two players among each other's foragers is the expensive case; there the near rate is the lever (5 Hz would halve it again).
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1159,7 +1185,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (83 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (84 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -1185,11 +1211,11 @@ Everything in `POC.md` (83 features) and its C# port (18.18), including the Tier
 | T1-18 | **Built (18.20).** Per-human memory: recency and place, so a person stung at this table is jumpy here and calmer elsewhere | 8.10 | S | |
 | T1-19 | **Built (18.32).** Chunk authority and contested pickups in the lab: rendezvous hashing picks one peer per chunk to settle two wasps grabbing the same caterpillar | 11.6 | M | |
 | T1-20 | Remaining plausibility checks: carry limits, positions inside solid geometry, chunk deltas consistent with their cause | 11.8 | S | T1-12 for deltas |
-| T1-21 | Relevance tiers in the lab: near, mid and far wasps at different rates, swarm packets; measure bandwidth with a 200-worker colony | 11.12 | M | |
+| T1-21 | **Built (18.33).** Relevance tiers in the lab: near, mid and far wasps at different rates, swarm packets; measure bandwidth with a 200-worker colony | 11.12 | M | |
 | T1-22 | **Built (18.29).** Tuning as data: the tuning tables as versioned plain-text files read by own parsers in JS and C#, and the tuning hash in the world record | 13 | M | |
 | T1-23 | **Built (18.21).** Solo time: accelerate time in the colony view, and the Reflex slowdown as a solo option | 5.1, 7.8 | S | |
 
-Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, then the other S items: T1-14, T1-17, T1-18, T1-23, all done; T1-20 waits on regions), then the M items (T1-6 to T1-10, T1-13, T1-15, T1-16, T1-19 and T1-22 done; then T1-21); each batch is built in the PoC and then ported to the core with parity.
+Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, then the other S items: T1-14, T1-17, T1-18, T1-23, all done; T1-20 waits on regions), then the M items (T1-6 to T1-10, T1-13, T1-15, T1-16, T1-19, T1-21 and T1-22 done; the L items T1-11 and T1-12 and then T1-20 remain); each batch is built in the PoC and then ported to the core with parity.
 
 ### 19.3 Tier 2: later
 

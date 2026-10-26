@@ -157,6 +157,39 @@ namespace Sting.Core.Tests
                 Okn(A.claims.Count == 0 && B.claims.Count == 0, "no claim is left waiting");
                 A.carrionOverride = B.carrionOverride = null;
             }
+            // relevance tiers (T1-21): swarm and traffic packets round-trip; a far peer gets swarm packets, not state
+            {
+                var sw = new SwarmMsg { peer = 0, tick = 777 };
+                sw.wasps.Add(new RemoteWasp { id = 17, x = 3.25, y = 1.5, z = -7.75, state = "fly" });
+                sw.wasps.Add(new RemoteWasp { id = 900017, caste = "queen", x = 70.5, y = 0.2, z = -95.25, state = "landed" });
+                sw.wasps.Add(new RemoteWasp { id = 18, x = 4.5, y = 2.5, z = -8.5, state = "chewing", rival = true });
+                var ds = Wire.DecodeSwarm(Wire.EncodeSwarm(sw)); double e = 0;
+                foreach (var o in sw.wasps) { var w = ds.wasps.Find(x => x.id == o.id); e = Math.Max(e, w == null ? 9 : Math.Max(Math.Abs(D(w.x - o.x)), Math.Max(Math.Abs(D(w.y - o.y)), Math.Abs(D(w.z - o.z))))); }
+                var tm = new TrafficMsg { peer = 0, tick = 5 }; tm.chunks.Add(new KeyValuePair<string, int>("3,-2", 41)); tm.chunks.Add(new KeyValuePair<string, int>("-1,0", 7));
+                var tr = Wire.DecodeTraffic(Wire.EncodeTraffic(tm));
+                Okn(e < 0.001 && ds.wasps.Count == 3 && ds.wasps.Find(x => x.id == 900017).caste == "queen" && ds.wasps.Find(x => x.id == 18).rival && tr.chunks[0].Key == "3,-2" && tr.chunks[1].Value == 7,
+                    $"swarm packets round-trip within 1 mm ({e * 1000:0.00} mm), {Wire.BYTES_PER_SWARM_WASP} bytes per wasp; traffic counts too");
+                int mp = T.ai.maxPhysical, le = T.ai.launchEvery;
+                T.ai.maxPhysical = 200; T.ai.launchEvery = 3;
+                Num Run(Num away, out int nWasps)
+                {
+                    var lab = new NetLab(new Settings { seed = 1234, birds = false, dayMinutes = 20 }, "good");
+                    lab.a.colony.adults = 600; lab.a.colony.young = 0;
+                    for (int k = 0; k < 200; k++) { var w = lab.a.SpawnWasp(false); w.role = k % 2 != 0 ? "sugar" : "protein"; }
+                    Num b0 = 0;
+                    for (int i = 0; i < 2400; i++)
+                    {
+                        var bw = lab.b.Driven(); if (bw != null && away > 0) { bw.x = lab.a.nest.x + away; bw.y = 2; bw.z = lab.a.nest.z; bw.vx = bw.vy = bw.vz = 0; }
+                        lab.Step(Idle(), Idle()); lab.a.DrainEvents();
+                        if (i == 1200) b0 = lab.bytesAB;
+                    }
+                    nWasps = lab.a.wasps.Count;
+                    return (lab.bytesAB - b0) / 20 / 1024;
+                }
+                Num near = Run(0, out int n1), mid = Run(150, out int n2);
+                T.ai.maxPhysical = mp; T.ai.launchEvery = le;
+                Okn(n1 >= 120 && mid < near * 0.3, $"with {n1} wasps out: {D(near):0.0} KB/s to a peer among them, {D(mid):0.0} KB/s to one 150 m off");
+            }
             // wire format: quantization error and size
             {
                 var m = new StateMsg { peer = 1, tick = 123456 };
@@ -165,7 +198,7 @@ namespace Sting.Core.Tests
                 var bin = Wire.EncodeState(m); var d = Wire.DecodeState(bin);
                 double err = 0;
                 for (int i = 0; i < 2; i++) { var a = d.wasps[i]; var o = m.wasps[i]; err = Math.Max(err, Math.Max(Math.Abs(D(a.x - o.x)), Math.Max(Math.Abs(D(a.y - o.y)), Math.Abs(D(a.z - o.z))))); }
-                Okn(err < 0.001 && d.wasps[1].caste == "queen" && d.wasps[0].carry == "fly" && d.wasps[1].state == "landed" && bin.Length == 6 + 2 * Wire.BYTES_PER_WASP && d.tick == 123456,
+                Okn(err < 0.001 && d.wasps[1].caste == "queen" && d.wasps[0].carry == "fly" && d.wasps[1].state == "landed" && bin.Length == Wire.STATE_HEAD + 2 * Wire.BYTES_PER_WASP && d.tick == 123456,
                     $"state packet round-trips within 1 mm ({err * 1000:0.00} mm), {Wire.BYTES_PER_WASP} bytes per wasp");
             }
         }

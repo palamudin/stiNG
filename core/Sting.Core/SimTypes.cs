@@ -77,7 +77,7 @@ namespace Sting.Core
     public sealed class RemoteWasp : WaspBase
     {
         public string carry, under; public bool rival;
-        public int peer, stamp, seen, bad; public Num px, py, pz;
+        public int peer, stamp, seen, bad, ttl; public Num px, py, pz;
     }
 
     public sealed class MemRec { public Num m, x, z; }
@@ -105,7 +105,7 @@ namespace Sting.Core
     }
 
     /// Anything sent between peers
-    public abstract class Msg { public string mk; public int peer, tick; }
+    public abstract class Msg { public string mk; public int peer, tick; public int to = -1; }
 
     /// A network event: one class holds every field any event type uses (sim.js publishes plain objects)
     public sealed class Claim { public int auth, i, hive, tick; public string key, what, carry; }
@@ -143,7 +143,11 @@ namespace Sting.Core
         public int ApproxJsonLength() => 64 + type.Length + (humanHex != null ? 32 : 0) + (key != null ? key.Length + 8 : 0) + (swats?.Count ?? 0) * 112 + 48;
     }
 
-    public sealed class StateMsg : Msg { public List<RemoteWasp> wasps = new List<RemoteWasp>(); public StateMsg() { mk = "state"; } }
+    public sealed class StateMsg : Msg { public List<RemoteWasp> wasps = new List<RemoteWasp>(); public int driven; public List<int> gone = new List<int>(); public StateMsg() { mk = "state"; } }
+    /// mid-tier wasps (T1-21): position and state only
+    public sealed class SwarmMsg : Msg { public List<RemoteWasp> wasps = new List<RemoteWasp>(); public SwarmMsg() { mk = "swarm"; } }
+    /// far tier (T1-21): how many wasps are out in each chunk
+    public sealed class TrafficMsg : Msg { public List<KeyValuePair<string, int>> chunks = new List<KeyValuePair<string, int>>(); public TrafficMsg() { mk = "traffic"; } }
 
     /// Something that happened, for the presentation and for tests (sim.js emit)
     public sealed class SimEvent

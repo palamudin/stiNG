@@ -212,6 +212,10 @@ export const T = {
   // Networking (GDD 11): human-side effects of events commit at the end of the consequence window
   // claimTicks (T1-19): how long a pickup waits for the chunk authority's word before it is taken as granted
   net: { commitTicks: 30, stateEvery: 3, remoteTimeout: 45, claimTicks: 120 },
+  // Relevance tiers (GDD 11.12, T1-21), judged per receiving peer from where its own wasp is: my driven wasp every
+  // stateEvery ticks; AI wasps within nearDist of its wasp every nearEvery ticks, full state; within interestChunks
+  // chunks every midEvery ticks in swarm packets (position and state only); beyond that a count per chunk every farEvery.
+  relevance: { nearDist: 50, interestChunks: 3, nearEvery: 6, midEvery: 20, farEvery: 60, midTtl: 75 },
   // Plausibility checks on what peers send (GDD 11.8). Margins are generous: honest traffic must always pass,
   // only gross violations fail, so honest peers reach the same verdict.
   plaus: { futureTicks: 120, stingReach: 1.6, humanDrift: 3, maxSwatDelay: 240, maxSwats: 4, rateWindow: 120, rateMax: 6,

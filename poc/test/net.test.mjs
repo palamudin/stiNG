@@ -1,6 +1,6 @@
 // Two peers over a simulated link must agree on every shared human (GDD 11.5). Run: node test/net.test.mjs
 import { readFileSync } from 'node:fs';
-import { NetLab, MeshLab, Sim, stingBot, idleCmd, encodeState, decodeState, BYTES_PER_WASP, T, applyTuning } from '../sim/index.js';
+import { NetLab, MeshLab, Sim, stingBot, idleCmd, encodeState, decodeState, encodeSwarm, decodeSwarm, encodeTraffic, decodeTraffic, BYTES_PER_WASP, BYTES_PER_SWARM_WASP, T, applyTuning } from '../sim/index.js';
 applyTuning(T, readFileSync(new URL('../../tuning/sting.tune', import.meta.url), 'utf8')); // T1-22: the shipped tuning
 
 let failures = 0;
@@ -264,8 +264,60 @@ for (const name of ['lan', 'good', 'bad', 'awful']) {
   const botA = stingBot({ plan: 'jab', rest: 200 });
   for (let i = 0; i < 7200; i++) { lab.step(botA(lab.a)); lab.a.drainEvents(); }
   const bw = lab.bandwidth();
-  console.log(`  peer A upstream: ${(bw.total / 1024).toFixed(1)} KB/s total, ${(bw.state / 1024).toFixed(1)} KB/s state at 20 Hz for ${lab.a.wasps.length} wasps, ${(bw.events / 1024).toFixed(2)} KB/s events`);
+  console.log(`  peer A upstream: ${(bw.total / 1024).toFixed(1)} KB/s total, ${(bw.state / 1024).toFixed(1)} KB/s state, ${(bw.swarm / 1024).toFixed(2)} swarm, ${(bw.traffic / 1024).toFixed(2)} traffic for ${lab.a.wasps.length} wasps, ${(bw.events / 1024).toFixed(2)} KB/s events`);
   ok(bw.total < 16 * 1024, `a colony's upstream stays small (${(bw.total / 1024).toFixed(1)} KB/s)`);
+}
+
+// Relevance tiers (GDD 11.12, T1-21): a 200-worker colony out at once, measured against sending every wasp at 20 Hz
+{
+  const sw = { mk: 'swarm', peer: 0, tick: 777, wasps: [
+    { id: 17, caste: 'worker', x: 3.25, y: 1.5, z: -7.75, state: 'fly', rival: false },
+    { id: 900017, caste: 'queen', x: 70.5, y: 0.2, z: -95.25, state: 'landed', rival: false },
+    { id: 18, caste: 'worker', x: 4.5, y: 2.5, z: -8.5, state: 'chewing', rival: true },
+  ] };
+  const ds = decodeSwarm(encodeSwarm(sw));
+  let e = 0;
+  for (const o of sw.wasps) { const w = ds.wasps.find((x) => x.id === o.id); e = Math.max(e, w ? Math.max(Math.abs(w.x - o.x), Math.abs(w.y - o.y), Math.abs(w.z - o.z)) : 9); }
+  const tr = decodeTraffic(encodeTraffic({ peer: 0, tick: 5, chunks: [['3,-2', 41], ['-1,0', 7]] }));
+  ok(e < 0.001 && ds.wasps.length === 3 && ds.wasps.find((x) => x.id === 900017).caste === 'queen' && ds.wasps.find((x) => x.id === 18).rival && tr.chunks[0][0] === '3,-2' && tr.chunks[1][1] === 7,
+    `swarm packets round-trip within 1 mm (${(e * 1000).toFixed(2)} mm), ${BYTES_PER_SWARM_WASP} bytes per wasp; traffic counts too`);
+  const measure = (flat, away) => {
+    const rel = { ...T.relevance }, ai = { ...T.ai };
+    if (flat) Object.assign(T.relevance, { nearDist: 1e9, nearEvery: T.net.stateEvery });
+    Object.assign(T.ai, { maxPhysical: 200, launchEvery: 3 });
+    const lab = new NetLab({ seed: 1234, birds: false, dayMinutes: 20 }, 'good');
+    lab.a.colony.adults = 600; lab.a.colony.young = 0;
+    for (let k = 0; k < 200; k++) { const w = lab.a._spawnWasp(false); w.role = k % 2 ? 'sugar' : 'protein'; }
+    const hold = () => { const w = lab.b._driven(); if (w && away) { w.x = lab.a.nest.x + away; w.y = 2; w.z = lab.a.nest.z; w.vx = w.vy = w.vz = 0; } };
+    let b0 = null, tiers = null;
+    for (let i = 0; i < 3600; i++) {
+      hold();
+      lab.step(idleCmd(), idleCmd());
+      lab.a.drainEvents();
+      if (i % 60 === 0) lab.check();
+      if (i === 1800) b0 = { ...lab.bytes };
+    }
+    const ref = lab.a._peerRef(1), R = T.relevance;
+    tiers = { near: 0, mid: 0, far: 0 };
+    for (const w of lab.a.wasps) {
+      const d = Math.hypot(w.x - ref.x, w.z - ref.z);
+      tiers[d <= R.nearDist ? 'near' : Math.max(Math.abs(Math.round(w.x / 64) - Math.round(ref.x / 64)), Math.abs(Math.round(w.z / 64) - Math.round(ref.z / 64))) <= R.interestChunks ? 'mid' : 'far']++;
+    }
+    const secs = 1800 / 60, kb = (k) => (lab.bytes[k] - b0[k]) / secs / 1024;
+    Object.assign(T.relevance, rel); Object.assign(T.ai, ai);
+    return { total: kb('ab'), state: kb('abState'), swarm: kb('abSwarm'), traffic: kb('abTraffic'), events: kb('abEvents'), wasps: lab.a.wasps.length, tiers, agree: lab.checks.agreed === lab.checks.compared && lab.checks.compared > 0 };
+  };
+  const fmt = (r) => `${r.total.toFixed(1)} KB/s (state ${r.state.toFixed(1)}, swarm ${r.swarm.toFixed(1)}, traffic ${r.traffic.toFixed(2)}, events ${r.events.toFixed(1)}) for ${r.wasps} wasps, tiers ${r.tiers.near}/${r.tiers.mid}/${r.tiers.far}`;
+  const flatNear = measure(true, 0), near = measure(false, 0), flatMid = measure(true, 150), mid = measure(false, 150), far = measure(false, 400);
+  console.log(`  every wasp at 20 Hz, B at the nest: ${fmt(flatNear)}`);
+  console.log(`  tiers, B at the nest:              ${fmt(near)}`);
+  console.log(`  every wasp at 20 Hz, B 150 m off:  ${fmt(flatMid)}`);
+  console.log(`  tiers, B 150 m off:                ${fmt(mid)}`);
+  console.log(`  tiers, B 400 m off:                ${fmt(far)}`);
+  ok(near.wasps >= 120 && near.tiers.near > near.wasps * 0.9 && near.total < flatNear.total * 0.6, `with B among them, near wasps go at 10 Hz: ${near.total.toFixed(1)} against ${flatNear.total.toFixed(1)} KB/s`);
+  ok(mid.tiers.mid > mid.wasps * 0.9 && mid.total < flatMid.total * 0.15, `with B 150 m off they go in swarm packets: ${mid.total.toFixed(1)} against ${flatMid.total.toFixed(1)} KB/s`);
+  ok(far.tiers.far > far.wasps * 0.9 && far.total < 1.5, `with B 400 m off only counts per chunk go: ${far.total.toFixed(2)} KB/s`);
+  ok(flatNear.agree && near.agree && mid.agree && far.agree, 'humans agree on both peers in every run');
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');

@@ -1465,7 +1465,18 @@ function updateLab() {
       ['Rules here (chunk authority)', lab.b ? `player ${sim.chunkAuthority(sim.activeKey) + 1}${sim.claims.size ? ` · ${sim.claims.size} claim${sim.claims.size > 1 ? 's' : ''} waiting` : ''}` : '-'],
       ['Humans agree', c.compared ? `${c.agreed}/${c.compared} checks${c.agreed === c.compared ? '' : ' · diverged at tick ' + c.firstDiverge}` : '-'],
       ['Player 2 drawn off by', err === null ? '-' : `${(err * 100).toFixed(1)} cm`],
-      ['Your upstream', (() => { const b = lab.bandwidth(); return `${(b.total / 1024).toFixed(1)} KB/s · ${sim.wasps.length} wasps at 20 Hz`; })()],
+      ['Your upstream', (() => { const b = lab.bandwidth(); return `${(b.total / 1024).toFixed(1)} KB/s · state ${(b.state / 1024).toFixed(1)}, swarm ${(b.swarm / 1024).toFixed(1)}, traffic ${(b.traffic / 1024).toFixed(2)}`; })()],
+      // relevance tiers (T1-21): how player 2 hears about your wasps, from where its wasp is
+      ['Your wasps to player 2', (() => {
+        if (!lab.b) return '-';
+        const R = T.relevance, ref = sim._peerRef(1), rc = [chunkOf(ref.x), chunkOf(ref.z)], n = { near: 0, mid: 0, far: 0 };
+        for (const w of sim.wasps) {
+          if (w.id === sim.drivenId) continue;
+          if (Math.hypot(w.x - ref.x, w.z - ref.z) <= R.nearDist) n.near++;
+          else if (Math.max(Math.abs(chunkOf(w.x) - rc[0]), Math.abs(chunkOf(w.z) - rc[1])) <= R.interestChunks) n.mid++; else n.far++;
+        }
+        return `driven at ${60 / T.net.stateEvery} Hz · ${n.near} near at ${60 / R.nearEvery} Hz · ${n.mid} in swarms at ${60 / R.midEvery} Hz · ${n.far} far as counts`;
+      })()],
       ['Player 2 stings', lab.b ? `${lab.b.stats.stings}` : '-'],
     ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
   }

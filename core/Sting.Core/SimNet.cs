@@ -33,6 +33,8 @@ namespace Sting.Core
                 netStats.recv++;
                 if (plaus.quarantined.Contains(m.peer)) { netStats.dropped++; continue; }
                 if (m is StateMsg sm) { RemoteState(sm); continue; }
+                if (m is SwarmMsg wm) { RemoteSwarm(wm); continue; }
+                if (m is TrafficMsg tm) { remoteTraffic.Set(tm.peer, tm); continue; }
                 var ev = (NetEv)m;
                 string why = Implausible(ev);
                 if (why != null) { Strike(ev.peer, ev.type, why); continue; }
@@ -48,16 +50,50 @@ namespace Sting.Core
             while (pending.Count > 0 && pending[0].commit <= tick) { var e = pending[0]; pending.RemoveAt(0); ApplyCommit(e); }
         }
 
+        /// State to each other peer by relevance tier (GDD 11.12, T1-21), judged from where that peer's wasp is
         void SendState()
         {
-            var msg = new StateMsg { peer = peer, tick = tick };
-            foreach (var w in wasps)
-                msg.wasps.Add(new RemoteWasp
+            int t = tick;
+            bool dueD = t % T.net.stateEvery == 0, dueN = t % T.relevance.nearEvery == 0, dueM = t % T.relevance.midEvery == 0, dueF = t % T.relevance.farEvery == 0;
+            if (!dueD && !dueN && !dueM && !dueF) return;
+            RemoteWasp Pack(Wasp w) => new RemoteWasp
+            {
+                id = w.id, caste = w.caste, x = w.x, y = w.y, z = w.z, vx = w.vx, vy = w.vy, vz = w.vz, state = w.state,
+                carry = w.carry?.what, under = w.under?.hex, rival = w.colony != "own",
+            };
+            // wasps gone since the last state packets, so receivers drop them at once
+            var gone = new List<int>();
+            if (dueD)
+            {
+                var now = new HashSet<int>(); foreach (var w in wasps) now.Add(w.id);
+                foreach (var id in lastIds) if (!now.Contains(id)) gone.Add(id);
+                lastIds = wasps.ConvertAll(w => w.id);
+            }
+            int driven = Driven() != null ? drivenId : 0;
+            foreach (var kv in interest)
+            {
+                int p = kv.Key;
+                if (p == peer || plaus.quarantined.Contains(p)) continue;
+                var (rx, rz) = PeerRef(p); int rcx = World.ChunkOf(rx), rcz = World.ChunkOf(rz);
+                var near = new List<RemoteWasp>(); var mid = new List<RemoteWasp>(); var far = new OrderedMap<string, int>();
+                foreach (var w in wasps)
                 {
-                    id = w.id, caste = w.caste, x = w.x, y = w.y, z = w.z, vx = w.vx, vy = w.vy, vz = w.vz, state = w.state,
-                    carry = w.carry?.what, under = w.under?.hex, rival = w.colony != "own",
-                });
-            outbox.Add(msg);
+                    if (w.id == drivenId) { if (dueD) near.Add(Pack(w)); continue; }
+                    if (Sq(w.x - rx) + Sq(w.z - rz) <= T.relevance.nearDist * T.relevance.nearDist) { if (dueN) near.Add(Pack(w)); }
+                    else if (System.Math.Max(System.Math.Abs(World.ChunkOf(w.x) - rcx), System.Math.Abs(World.ChunkOf(w.z) - rcz)) <= T.relevance.interestChunks) { if (dueM) mid.Add(Pack(w)); }
+                    else if (dueF) { string k = World.ChunkKey(World.ChunkOf(w.x), World.ChunkOf(w.z)); far.Set(k, far.Get(k) + 1); }
+                }
+                if (dueD || near.Count > 0) outbox.Add(new StateMsg { peer = peer, to = p, tick = t, driven = driven, gone = gone, wasps = near });
+                if (mid.Count > 0) outbox.Add(new SwarmMsg { peer = peer, to = p, tick = t, wasps = mid });
+                if (dueF) outbox.Add(new TrafficMsg { peer = peer, to = p, tick = t, chunks = far.Snapshot() });
+            }
+        }
+        /// where a peer is: its driven wasp as last heard, or the middle of the chunk it has interest in
+        internal (Num x, Num z) PeerRef(int p)
+        {
+            if (remoteDriven.TryGet(p, out int id) && remote.TryGet(id, out var r) && r.peer == p) return (r.x, r.z);
+            var parts = (interest.Get(p) ?? "0,0").Split(',');
+            return (int.Parse(parts[0]) * T.chunk.size, int.Parse(parts[1]) * T.chunk.size);
         }
 
         // GDD 11.8. Checks on events read only the event and shared human state, so every honest peer drops the same ones.
@@ -136,10 +172,36 @@ namespace Sting.Core
                 var e = remote.Get(r.id) ?? new RemoteWasp();
                 e.id = r.id; e.caste = r.caste; e.x = r.x; e.y = r.y; e.z = r.z; e.vx = r.vx; e.vy = r.vy; e.vz = r.vz; e.state = r.state;
                 e.carry = r.carry; e.under = r.under; e.rival = r.rival;
-                e.peer = m.peer; e.stamp = m.tick; e.px = r.x; e.py = r.y; e.pz = r.z; e.seen = tick;
+                e.peer = m.peer; e.stamp = m.tick; e.px = r.x; e.py = r.y; e.pz = r.z; e.seen = tick; e.ttl = T.net.remoteTimeout;
                 remote.Set(r.id, e);
             }
-            foreach (var kv in remote) if (kv.Value.peer == m.peer && !ids.Contains(kv.Key) && kv.Value.stamp < m.tick) remote.Delete(kv.Key);
+            // a wasp missing from a packet may just be in another tier now (T1-21); gone ones are listed
+            if (m.driven != 0) remoteDriven.Set(m.peer, m.driven);
+            foreach (var id in m.gone) { var e = remote.Get(id); if (e != null && e.peer == m.peer) remote.Delete(id); }
+        }
+
+        /// Mid-tier wasps: position and state at a few hertz; velocity from the last two positions, for drawing in between
+        void RemoteSwarm(SwarmMsg m)
+        {
+            foreach (var r in m.wasps)
+            {
+                var prev = remote.Get(r.id);
+                Num vx = 0, vy = 0, vz = 0;
+                if (prev != null && prev.peer == m.peer && m.tick > prev.stamp)
+                {
+                    Num dt = (Num)(m.tick - prev.stamp) / 60;
+                    vx = (r.x - prev.px) / dt; vy = (r.y - prev.py) / dt; vz = (r.z - prev.pz) / dt;
+                    if (Sqrt(vx * vx + vy * vy + vz * vz) > T.plaus.maxSpeed && (prev.bad = prev.bad + 1) < 4) { netStats.dropped++; prev.seen = tick; continue; }
+                    prev.bad = 0;
+                    if (dt > 1) vx = vy = vz = 0;
+                }
+                else if (prev != null && prev.peer == m.peer) continue; // older than what we have
+                var e = prev ?? new RemoteWasp();
+                e.id = r.id; e.caste = r.caste; e.x = r.x; e.y = r.y; e.z = r.z; e.vx = vx; e.vy = vy; e.vz = vz; e.state = r.state;
+                e.carry = prev?.carry; e.under = null; e.rival = r.rival;
+                e.peer = m.peer; e.stamp = m.tick; e.px = r.x; e.py = r.y; e.pz = r.z; e.seen = tick; e.ttl = T.relevance.midTtl;
+                remote.Set(r.id, e);
+            }
         }
 
         // Remote wasps are drawn where they probably are now: last state plus velocity (GDD 11.4)
@@ -148,7 +210,7 @@ namespace Sting.Core
             foreach (var kv in remote)
             {
                 var e = kv.Value;
-                if (tick - e.seen > T.net.remoteTimeout) { remote.Delete(kv.Key); continue; }
+                if (tick - e.seen > (e.ttl > 0 ? e.ttl : T.net.remoteTimeout)) { remote.Delete(kv.Key); continue; }
                 Num dt = (Num)(tick - e.stamp) / 60;
                 bool moving = e.state == "fly" || e.state == "stunned";
                 e.x = e.px + (moving ? e.vx * dt : 0); e.y = Max(T.wasp.radius, e.py + (moving ? e.vy * dt : 0)); e.z = e.pz + (moving ? e.vz * dt : 0);
