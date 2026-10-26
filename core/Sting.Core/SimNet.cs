@@ -392,7 +392,7 @@ namespace Sting.Core
                     // at level 3 a person with it in them goes for a can once things calm down (T1-6)
                     if (!hm.special && !(hm.sprayCount > 0) && hm.tr.escalation >= T.esc.sprayTrait && EscAt(hm.x, hm.z) >= 3) hm.wantSpray = true;
                     Emit("sting", ("waspId", ev.waspId), ("remote", !mine), ("driven", mine && ev.driven), ("humanHex", hm.hex), ("zone", ev.zone), ("first", first), ("under", ev.under));
-                    if (ev.flee && hm.state == "idle") StartFlee(hm, new LastSting { x = ev.sx, z = ev.sz });
+                    if (ev.flee && Calm(hm)) StartFlee(hm, new LastSting { x = ev.sx, z = ev.sz });
                     break;
                 }
                 case "deepen":
@@ -402,7 +402,7 @@ namespace Sting.Core
                     hm.panic = Min(1, hm.panic + ev.extra);
                     AddEsc(hm.x, hm.z, T.esc.full);
                     Emit("deepen", ("humanHex", hm.hex), ("zone", ev.zone));
-                    if (hm.panic >= T.resolve.fleePanic && hm.state == "idle") StartFlee(hm, new LastSting { x = ev.sx, z = ev.sz });
+                    if (hm.panic >= T.resolve.fleePanic && Calm(hm)) StartFlee(hm, new LastSting { x = ev.sx, z = ev.sz });
                     break;
                 }
                 case "preSwat":
@@ -433,7 +433,7 @@ namespace Sting.Core
                     if (hm == null || hm.clothing.topOff) break;
                     hm.clothing = hm.clothing.Clone(); hm.clothing.topOff = true; hm.clothing.stiffness = 0;
                     Emit("rip", ("humanHex", hm.hex));
-                    if (hm.state == "idle") StartFlee(hm, new LastSting { x = ev.sx, z = ev.sz });
+                    if (Calm(hm)) StartFlee(hm, new LastSting { x = ev.sx, z = ev.sz });
                     break;
                 }
                 case "killed":

@@ -3,7 +3,7 @@
 import { Domain, hash, unit, rangeInt, u64, h32, hseq, dsin, dcos, clamp, clamp01, fnv32, hex64, rnd, sq, datan2, TAU } from './rng.js';
 import { T, DT, GEN_VERSION, DEFAULT_SETTINGS } from './tuning.js';
 import {
-  Zone, ZONES, SwatKind, SwatKindName, Style, humanTraits, humanClothing, suitClothing, zoneCover, bodyParts,
+  Zone, ZONES, SwatKind, SwatKindName, Style, humanTraits, humanClothing, suitClothing, zoneCover, bodyParts, humanParts,
   segClosest, classify, toWorld, toLocal, dirToWorld, resolveSting, windowFor, selfReach, garmentGraph, Top,
 } from './body.js';
 import {
@@ -213,11 +213,11 @@ export class Sim {
           const ax = hs.x + T.panic.approachDist * dcos(hs.exit), az = hs.z + T.panic.approachDist * dsin(hs.exit);
           hm = {
             id, hex, short: hex.slice(0, 4), tr, clothing: humanClothing(this.seed, id, this.day), chunk: k,
-            home: { x: hs.x, z: hs.z, fx: hs.fx, fz: hs.fz, posture: hs.posture, ax, az },
+            home: { x: hs.x, z: hs.z, fx: hs.fx, fz: hs.fz, posture: hs.posture, ax, az, act: hs.act || null, path: hs.path || null },
             x: hs.x, z: hs.z, fx: hs.fx, fz: hs.fz, posture: hs.posture,
             state: 'idle', panic: 0, fleeSteps: 0, dirX: 0, dirZ: 0, stungCount: 0, winDay: -1, win: null,
             annoyId: 0, annoy: 0, cooldown: 0, sprayCount: 0, fetchT: 0, wantSpray: false, clothesDay: this.day,
-            parts: { sit: bodyParts(tr, 'sit'), stand: bodyParts(tr, 'stand') },
+            parts: humanParts(tr),
           };
           this.humans.set(hex, hm);
         }
@@ -232,8 +232,26 @@ export class Sim {
   }
 
   _window(hm) {
-    if (hm.winDay !== this.day) { hm.winDay = this.day; hm.win = hm.special ? null : humanWindow(this.seed, hm.id, this.day, this.settings.humanDensity); }
+    if (hm.winDay !== this.day) {
+      hm.winDay = this.day;
+      hm.win = hm.special ? null : humanWindow(this.seed, hm.id, this.day, this.settings.humanDensity);
+      if (hm.win && hm.home && hm.home.act) hm.win = this._actWindow(hm.home.act, hm.win);
+    }
     return hm.win;
+  }
+  // The weather picks who comes out (GDD 8.2, T1-11): nobody strolls, gardens or sunbathes in the rain; gardeners need
+  // a mild day, sunbathers a warm one and only stay through the warm hours
+  _actWindow(act, win) {
+    const D = T.days;
+    if (dayWeather(this.seed, this.day).rain) return null;
+    const warm = this.airAt(this.day * 1440 + 13 * 60);
+    if (act === 'garden' && warm < D.gardenTemp) return null;
+    if (act === 'sun') {
+      if (warm < D.sunTemp) return null;
+      const arrive = Math.max(win.arrive, D.sunFrom), leave = Math.min(win.leave, D.sunTo);
+      return leave - arrive >= D.minStay ? { arrive, leave } : null;
+    }
+    return win;
   }
 
   // On (re)activation, put a human where their schedule says they are (GDD 8.2)
@@ -249,6 +267,7 @@ export class Sim {
     hm.x = h.x; hm.z = h.z; hm.fx = h.fx; hm.fz = h.fz; hm.posture = h.posture; hm.state = 'idle';
     if (hm.clothesDay !== this.day) { hm.clothing = humanClothing(this.seed, hm.id, this.day); hm.clothesDay = this.day; }
   }
+  _calm(hm) { return hm.state === 'idle' || hm.state === 'stroll' || hm.state === 'garden'; } // at their table, or out for a walk or in the beds (T1-11)
   _goAway(hm) { hm.x = hm.home.ax; hm.z = hm.home.az; hm.state = 'away'; hm.posture = 'stand'; hm.panic = 0; }
   present(hm) { return hm.state !== 'away'; }
 
@@ -635,7 +654,7 @@ export class Sim {
         // at level 3 a person with it in them goes for a can once things calm down (T1-6)
         if (!hm.special && !(hm.sprayCount > 0) && hm.tr.escalation >= T.esc.sprayTrait && this.escAt(hm.x, hm.z) >= 3) hm.wantSpray = true;
         this.emit('sting', { waspId: ev.waspId, remote: !mine, driven: mine && ev.driven, humanHex: hm.hex, zone: ev.zone, first, under: ev.under });
-        if (ev.flee && hm.state === 'idle') this._startFlee(hm, { x: ev.sx, z: ev.sz });
+        if (ev.flee && this._calm(hm)) this._startFlee(hm, { x: ev.sx, z: ev.sz });
         break;
       }
       case 'deepen': {
@@ -644,7 +663,7 @@ export class Sim {
         hm.panic = Math.min(1, hm.panic + ev.extra);
         this.addEsc(hm.x, hm.z, T.esc.full);
         this.emit('deepen', { humanHex: hm.hex, zone: ev.zone });
-        if (hm.panic >= T.resolve.fleePanic && hm.state === 'idle') this._startFlee(hm, { x: ev.sx, z: ev.sz });
+        if (hm.panic >= T.resolve.fleePanic && this._calm(hm)) this._startFlee(hm, { x: ev.sx, z: ev.sz });
         break;
       }
       case 'preSwat': {
@@ -670,7 +689,7 @@ export class Sim {
         if (!hm || hm.clothing.topOff) break;
         hm.clothing = { ...hm.clothing, topOff: true, stiffness: 0 };
         this.emit('rip', { humanHex: hm.hex });
-        if (hm.state === 'idle') this._startFlee(hm, { x: ev.sx, z: ev.sz });
+        if (this._calm(hm)) this._startFlee(hm, { x: ev.sx, z: ev.sz });
         break;
       }
       case 'killed': {
@@ -697,7 +716,7 @@ export class Sim {
     const buf = new Float64Array(1), bytes = new Uint8Array(buf.buffer);
     let h = 0x811c9dc5;
     const f = (v) => { buf[0] = v; for (let i = 0; i < 8; i++) { h ^= bytes[i]; h = Math.imul(h, 0x01000193); } };
-    const states = ['away', 'arrive', 'idle', 'flee', 'return', 'leave', 'treat', 'fetch', 'seek', 'watch'];
+    const states = ['away', 'arrive', 'idle', 'flee', 'return', 'leave', 'treat', 'fetch', 'seek', 'watch', 'toGrill', 'cook', 'stroll', 'garden'];
     // the exterminator works for one colony and searches by what that colony does (T1-7), so he is not a shared human
     for (const hm of this.active) { if (hm.special) continue; f(hm.x); f(hm.z); f(hm.panic); f(states.indexOf(hm.state)); f(hm.stungCount); f(hm.clothing.topOff ? 1 : 0); f(hm.sprayCount || 0); }
     // alert points, in key order; chunks a peer never touched count as zero on both sides
@@ -1955,7 +1974,7 @@ export class Sim {
         if (dx * dx + dz * dz <= r2 && this.canSee(hm, o)) gain += P.contagionRate * old[j] * hm.tr.sociability * hm.tr.panicSusceptibility;
       }
       hm.panic = Math.min(1, old[i] * P.decayPerStep + gain);
-      if ((hm.state === 'idle' || hm.state === 'cook' || hm.state === 'toGrill') && hm.panic >= T.resolve.fleePanic) this._startFlee(hm, this.cs(hm.chunk).lastSting || null);
+      if ((hm.state === 'idle' || hm.state === 'cook' || hm.state === 'toGrill' || hm.state === 'stroll' || hm.state === 'garden') && hm.panic >= T.resolve.fleePanic) this._startFlee(hm, this.cs(hm.chunk).lastSting || null);
       if (hm.state === 'flee') {
         hm.x += hm.dirX * P.fleeSpeed * 3 * DT; hm.z += hm.dirZ * P.fleeSpeed * 3 * DT;
         if (--hm.fleeSteps <= 0) hm.state = 'return';
@@ -1964,12 +1983,27 @@ export class Sim {
         if (this._walkTo(hm, hm.home.x, hm.home.z, P.walkSpeed)) { this._seat(hm); this.emit('settled', { humanHex: hm.hex }); }
       } else if (hm.state === 'fetch') this._fetchStep(hm);
       else if (hm.state === 'toGrill' || hm.state === 'cook') this._cookStep(hm);
+      else if (hm.state === 'stroll' || hm.state === 'garden') this._actStep(hm);
       else if (hm.state === 'idle') {
         if (hm.wantSpray) { hm.wantSpray = false; hm.state = 'fetch'; hm.posture = 'stand'; hm.fetchT = 0; this.emit('fetchSpray', { humanHex: hm.hex }); }
         else if (this._cookNow(hm)) { hm.state = 'toGrill'; hm.posture = 'stand'; this.emit('cookStart', { humanHex: hm.hex }); }
+        else if (hm.home.act === 'stroll' || hm.home.act === 'garden') { hm.state = hm.home.act; hm.wp = 1 % (hm.home.path.length / 2); hm.until = 0; hm.walking = true; }
         else this._annoyance(hm);
       }
     }
+  }
+
+  // Strollers walk their loop; gardeners work each spot a while, then move on (T1-11). Both notice wasps as they go.
+  _actStep(hm) {
+    const p = hm.home.path, n = p.length / 2, D = T.days;
+    if (hm.state === 'garden' && hm.until > this.minute) { hm.walking = false; this._annoyance(hm); return; }
+    hm.walking = true;
+    const speed = hm.state === 'stroll' ? D.strollSpeed * (1 - 0.3 * hm.tr.ageStiffness) : T.panic.walkSpeed;
+    if (this._walkTo(hm, p[hm.wp * 2], p[hm.wp * 2 + 1], speed)) {
+      if (hm.state === 'garden') hm.until = this.minute + D.gardenMin + Math.floor(h32(Number(hm.id & 0xffffffffn), this.day, hm.wp, 7) * (D.gardenMax - D.gardenMin));
+      hm.wp = (hm.wp + 1) % n;
+    }
+    this._annoyance(hm);
   }
 
   // The cook (T1-10): to the grill while it is lit, standing at it facing the grate, back to the seat when it goes out
@@ -2136,7 +2170,7 @@ export class Sim {
         home: { x: goal.x, z: goal.z, fx: -dxn / dn, fz: -dzn / dn, posture: 'stand', ax, az },
         x: ax, z: az, fx: 0, fz: 1, posture: 'stand', state: near ? 'arrive' : 'seek', panic: 0, fleeSteps: 0, dirX: 0, dirZ: 0, stungCount: 0,
         annoyId: 0, annoy: 0, cooldown: 0, treat: 0, wpx: st.x, wpz: st.z, watch: 0, clue: 0, lines: 0,
-        parts: { sit: bodyParts(tr, 'sit'), stand: bodyParts(tr, 'stand') },
+        parts: humanParts(tr),
       };
       e.state = 'active';
       this.emit('extArrive', { visit: e.visit, taped: e.visit > 1, known: near });

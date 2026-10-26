@@ -204,7 +204,7 @@ export function generateChunk(seed, cx, cz) {
           const hx = axisX ? px + along : px + side * 0.67;
           const hz = axisX ? pz + side * 0.67 : pz + along;
           const fx = axisX ? 0 : -side, fz = axisX ? -side : 0;
-          c.humans.push({ slot: slotBase + k, x: hx, z: hz, fx, fz, posture: 'sit', exit: range(H(slotBase + 200 + k), 0, 6.28) });
+          c.humans.push({ slot: slotBase + k, x: hx, z: hz, fx, fz, posture: 'sit', exit: range(H(slotBase + 200 + k), 0, 6.28), act: null, path: null });
         }
         k++;
       }
@@ -227,7 +227,7 @@ export function generateChunk(seed, cx, cz) {
     const offs = [[0, 0.75], [0.75, 0], [0, -0.75], [-0.75, 0]];
     for (let k = 0; k < count; k++) {
       const [dx, dz] = offs[k];
-      c.humans.push({ slot: slotBase + k, x: gx + dx, z: gz + dz, fx: -dx / 0.75, fz: -dz / 0.75, posture: 'stand', exit: range(H(slotBase + 200 + k), 0, 6.28) });
+      c.humans.push({ slot: slotBase + k, x: gx + dx, z: gz + dz, fx: -dx / 0.75, fz: -dz / 0.75, posture: 'stand', exit: range(H(slotBase + 200 + k), 0, 6.28), act: null, path: null });
     }
     addFly(gx, 1.7, gz, slotBase + 300);
   };
@@ -256,6 +256,11 @@ export function generateChunk(seed, cx, cz) {
     const hive = { x, z, fx, fz, ex: x + fx * 0.24, ey: 0.47, ez: z + fz * 0.24, bees: [], slot };
     c.boxes.push({ minx: x - 0.225, maxx: x + 0.225, miny: 0, maxy: 0.98, minz: z - 0.225, maxz: z + 0.225, wood: true, hive: true });
     c.hives.push(hive);
+  };
+  // Someone with something to do (GDD 8.2, T1-11): a stroller walks a loop (path: x, z pairs), a gardener works the
+  // spots on its path in turn, a sunbather lies at the spot
+  const addActor = (slot, x, z, fx, fz, posture, act, path) => {
+    c.humans.push({ slot, x, z, fx, fz, posture, exit: range(H(slot + 200), 0, 6.28), act, path });
   };
   // A garden shed (GDD 6.6: wall and attic nest sites); a house is a big one that is not wood
   const addShed = (sx, sz, axisX, slot, house) => {
@@ -295,7 +300,20 @@ export function generateChunk(seed, cx, cz) {
       if (unit(H(base + 500)) < 0.3) { const sx = lx + (unit(H(base + 501)) < 0.5 ? -12.5 : 12.5), sz = oz + s * 28.7; if (free(sx, sz, 2)) addShed(sx, sz, true, base + 502, false); }
       if (unit(H(base + 510)) < 0.08) { const hx = lx + range(H(base + 511), -10, 10), hz = oz + s * 22; if (free(hx, hz, 2)) addHive(hx, hz, base + 600); }
       if (unit(H(base + 800)) < 0.2) { const gx = lx + range(H(base + 801), -8, 8), gz = oz + s * 7; if (free(gx, gz, 2)) addGroup(gx, gz, rangeInt(H(base + 802), 2, 4), base + 1000); }
+      // a gardener working the beds along the back fence and the lawn; someone sunbathing in the backyard (T1-11)
+      if (unit(H(base + 1400)) < 0.3) {
+        const p = [lx + range(H(base + 1401), -10, 10), oz + s * 28.8, lx + range(H(base + 1402), -12, 12), oz + s * 26, lx + range(H(base + 1403), -12, 12), oz + s * 22.5];
+        addActor(base + 1410, p[0], p[1], 0, s, 'stand', 'garden', p);
+      }
+      if (unit(H(base + 1450)) < 0.25) {
+        const x = lx + range(H(base + 1451), -11, 11), z = oz + s * 22.5;
+        if (free(x, z, 1.2)) { occupied.push({ x, z, r: 1.2 }); addActor(base + 1460, x, z, unit(H(base + 1452)) < 0.5 ? 1 : -1, 0, 'lie', 'sun', null); }
+      }
     }
+    // people out for a walk round the block, along one sidewalk and back along the other
+    const x0 = ox + (endW ? -18 : -30), x1 = ox + (endE ? 18 : 30);
+    if (unit(H(2500)) < 0.6) addActor(2510, x0, oz - 5.2, 1, 0, 'stand', 'stroll', [x0, oz - 5.2, x1, oz - 5.2, x1, oz + 5.2, x0, oz + 5.2]);
+    if (unit(H(2600)) < 0.3) addActor(2610, x1, oz + 5.2, -1, 0, 'stand', 'stroll', [x1, oz + 5.2, x0, oz + 5.2, x0, oz - 5.2, x1, oz - 5.2]);
   };
   // A strip mall on the region's edge: a long low building facing in, its parking lot, outdoor seating by the doors
   const addMall = () => {
@@ -311,6 +329,11 @@ export function generateChunk(seed, cx, cz) {
     if (unit(H(4900)) < 0.5) { const p = at(range(H(4901), -20, 20), 6); if (free(p.x, p.z, 2)) addGroup(p.x, p.z, rangeInt(H(4902), 2, 5), 4910); }
     const nf = rangeInt(H(4950), 0, 3);
     for (let i = 0; i < nf; i++) { const p = at(range(H(4951 + i), -24, 24), 13); addFlowers(p.x, p.z, 4960 + i * 80); }
+    // a shopper crossing the lot to the doors and back (T1-11)
+    if (unit(H(5200)) < 0.7) {
+      const a = at(-14, -12), b = at(-14, 11), d = at(14, 11), e = at(14, -12);
+      addActor(5210, a.x, a.z, out[0], out[1], 'stand', 'stroll', [a.x, a.z, b.x, b.z, d.x, d.z, e.x, e.z]);
+    }
   };
 
   if (isOrigin) {
@@ -359,6 +382,16 @@ export function generateChunk(seed, cx, cz) {
     const x = ox + range(H(150 + i * 4), -30, 30), z = oz + range(H(151 + i * 4), -30, 30);
     if (free(x, z, c.use === 'forest' ? 1.5 : 3)) { addTree(x, z, 200 + i * 4); occupied.push({ x, z, r: c.use === 'forest' ? 1 : 2 }); }
   }
+  // people out for the day in the open (T1-11): a walk round the park or through the woods, sunbathers on the grass
+  if (!isOrigin && c.use === 'park') {
+    if (unit(H(6000)) < 0.6) { const r = range(H(6001), 12, 22); addActor(6010, ox - r, oz - r, 1, 0, 'stand', 'stroll', [ox - r, oz - r, ox + r, oz - r, ox + r, oz + r, ox - r, oz + r]); }
+    const ns = rangeInt(H(6100), 0, 3);
+    for (let k = 0; k < ns; k++) {
+      const x = ox + range(H(6101 + k * 10), -26, 26), z = oz + range(H(6102 + k * 10), -26, 26), a = range(H(6103 + k * 10), 0, 6.28);
+      if (free(x, z, 1.5)) { occupied.push({ x, z, r: 1.5 }); addActor(6110 + k * 10, x, z, dsin(a), dcos(a), 'lie', 'sun', null); }
+    }
+  }
+  if (c.use === 'forest' && unit(H(6300)) < 0.3) addActor(6310, ox - 26, oz - 20, 1, 0, 'stand', 'stroll', [ox - 26, oz - 20, ox + 26, oz + 20]);
   // Spider webs: vertical discs beside tree trunks (GDD 9.3)
   c.trees.forEach((t, i) => {
     if (unit(H(700 + i)) > 0.45) return;

@@ -112,7 +112,7 @@ namespace Sting.Core
                     if (dx * dx + dz * dz <= r2 && CanSee(hm.x, hm.z, o.x, o.z)) gain += T.panic.contagionRate * oj * hm.tr.sociability * hm.tr.panicSusceptibility;
                 }
                 hm.panic = Min(1, oldI * T.panic.decayPerStep + gain);
-                if ((hm.state == "idle" || hm.state == "cook" || hm.state == "toGrill") && hm.panic >= T.resolve.fleePanic) StartFlee(hm, CS(hm.chunk).lastSting);
+                if ((hm.state == "idle" || hm.state == "cook" || hm.state == "toGrill" || hm.state == "stroll" || hm.state == "garden") && hm.panic >= T.resolve.fleePanic) StartFlee(hm, CS(hm.chunk).lastSting);
                 if (hm.state == "flee")
                 {
                     hm.x += hm.dirX * T.panic.fleeSpeed * 3 * T.DT; hm.z += hm.dirZ * T.panic.fleeSpeed * 3 * T.DT;
@@ -125,13 +125,30 @@ namespace Sting.Core
                 }
                 else if (hm.state == "fetch") FetchStep(hm);
                 else if (hm.state == "toGrill" || hm.state == "cook") CookStep(hm);
+                else if (hm.state == "stroll" || hm.state == "garden") ActStep(hm);
                 else if (hm.state == "idle")
                 {
                     if (hm.wantSpray) { hm.wantSpray = false; hm.state = "fetch"; hm.posture = "stand"; hm.fetchT = 0; Emit("fetchSpray", ("humanHex", hm.hex)); }
                     else if (CookNow(hm)) { hm.state = "toGrill"; hm.posture = "stand"; Emit("cookStart", ("humanHex", hm.hex)); }
+                    else if (hm.home.act == "stroll" || hm.home.act == "garden") { hm.state = hm.home.act; hm.wp = 1 % (hm.home.path.Length / 2); hm.until = 0; hm.walking = true; }
                     else Annoyance(hm);
                 }
             }
+        }
+
+        /// Strollers walk their loop; gardeners work each spot a while, then move on (T1-11). Both notice wasps as they go.
+        void ActStep(Human hm)
+        {
+            var p = hm.home.path; int n = p.Length / 2;
+            if (hm.state == "garden" && hm.until > minute) { hm.walking = false; Annoyance(hm); return; }
+            hm.walking = true;
+            Num speed = hm.state == "stroll" ? T.days.strollSpeed * (1 - 0.3 * hm.tr.ageStiffness) : T.panic.walkSpeed;
+            if (WalkTo(hm, p[hm.wp * 2], p[hm.wp * 2 + 1], speed))
+            {
+                if (hm.state == "garden") hm.until = minute + (long)T.days.gardenMin + (long)Floor(H32(unchecked((long)(hm.id & 0xffffffffUL)), day, hm.wp, 7) * (T.days.gardenMax - T.days.gardenMin));
+                hm.wp = (hm.wp + 1) % n;
+            }
+            Annoyance(hm);
         }
 
         /// Off to the house for a can and back (T1-6): out of sight at the exit, then back to the seat armed

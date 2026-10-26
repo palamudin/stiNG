@@ -111,6 +111,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 83 | Chunk authority and contested pickups (T1-19): one peer per chunk, elected by rendezvous hashing, rules when two players' wasps take the same caterpillar, fly, bee or load of carrion, meat or honey. You take it at once; if the other got to the authority first, your wasp lets go. The lab panel shows who rules your chunk | 11.6 | 14 |
 | 84 | Relevance tiers (T1-21): each peer hears about your wasps by how far they are from its own wasp: your wasp at 20 Hz, AI wasps within 50 m at 10 Hz, within 3 chunks at 3 Hz in compact swarm packets, the rest as counts per chunk. With 143 foragers out, 25 KB/s to a player among them, 5 KB/s to one 150 m away, 1.4 KB/s far off, against 51 KB/s at full rate. The lab panel shows the split | 11.12 | 14 |
 | 85 | Regions (T1-12): the world is laid out 8×8 chunks at a time as American suburbia: a park strip through home, suburban yards with streets, cul-de-sacs, houses and fenced backyards (patio tables, flower beds, sheds, bee boxes), a strip mall with its parking lot and outdoor seating, and a forest edge. Houses and fences block sight; houses have wall and eave nest sites. Wooden fences, tables and sheds hold a limited amount of pulp and go grey as they are stripped (a chunk delta) | 4.2, 4.3, 4.5 | 14 |
+| 86 | Human days (T1-11): strollers on the sidewalks, round the park, across the mall lot and through the woods; gardeners working their backyard beds; sunbathers lying on towels in backyards and the park (the standing body turned onto its back, so perching, stinging, crawling under clothing and swats all work). The day's weather picks who comes out: nobody in rain, gardeners on mild days, sunbathers on warm days through the warm hours. A stung stroller or gardener runs and then carries on | 8.2, 8.3 | 14 |
 
 ## Verified
 
@@ -137,6 +138,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 - Far-tier traffic counts are received but not drawn.
 - A wasp walking on a surface keeps its heading over edges, but the eye view while landed still turns with the world yaw.
 - Two players' colonies meet only through guards at the entrance (T1-13); colony-against-colony raids are not built.
+- A stroller or gardener who ran from a sting walks back to the start of their path rather than to where they were.
 
 ## Controls
 

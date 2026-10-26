@@ -86,7 +86,7 @@ namespace Sting.Core
 
     public static class Persist
     {
-        public const int SAVE_VERSION = 15; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home); 14: barbecue meat taken; 15: regions, pulp taken from wood
+        public const int SAVE_VERSION = 16; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home); 14: barbecue meat taken; 15: regions, pulp taken from wood; 16: strolls and garden rounds
         const uint MAGIC = 0x474E4953; // "SING"
 
         // ---------------------------------------------------------------- one Io per type
@@ -189,6 +189,7 @@ namespace Sting.Core
             a.I(ref h.annoyId); a.D(ref h.annoy); a.D(ref h.cooldown); a.D(ref h.sprayCount); a.D(ref h.treat); a.L(ref h.clothesDay); a.B(ref h.special);
             a.List(ref h.mem, () => new MemRec(), e => { a.D(ref e.m); a.D(ref e.x); a.D(ref e.z); });
             a.I(ref h.fetchT); a.B(ref h.wantSpray); a.D(ref h.wpx); a.D(ref h.wpz); a.D(ref h.clue); a.I(ref h.watch); a.I(ref h.lines);
+            a.I(ref h.wp); a.L(ref h.until); a.B(ref h.walking);
         }
 
         static void IoNest(Archive a, Nest n)
@@ -381,7 +382,7 @@ namespace Sting.Core
                     string hex = R.Hex64(id);
                     if (!saved.TryGetValue(hex, out var hm)) continue;
                     hm.id = id; hm.hex = hex; hm.@short = hex.Substring(0, 4); hm.tr = sim.TraitsFor(id); hm.chunk = rec.cx + "," + rec.cz;
-                    hm.home = new Home { x = hs.x, z = hs.z, fx = hs.fx, fz = hs.fz, posture = hs.posture, ax = hs.x + T.panic.approachDist * R.DCos(hs.exit), az = hs.z + T.panic.approachDist * R.DSin(hs.exit) };
+                    hm.home = new Home { x = hs.x, z = hs.z, fx = hs.fx, fz = hs.fz, posture = hs.posture, ax = hs.x + T.panic.approachDist * R.DCos(hs.exit), az = hs.z + T.panic.approachDist * R.DSin(hs.exit), act = hs.act, path = hs.path };
                     hm.sit = Body.BodyParts(hm.tr, "sit"); hm.stand = Body.BodyParts(hm.tr, "stand");
                     sim.humans.Set(hex, hm);
                 }

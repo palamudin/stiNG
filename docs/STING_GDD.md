@@ -486,10 +486,13 @@ Humans in the world are adults only.
 - Each human's day is a pure function of (traits, day index, weather): sleep, commute, work, errands, leisure (picnic, barbecue, beer garden, gardening).
 - Position at any tick is computed from the schedule, not simulated forward. A peer that loads a chunk at any time places every human correctly without asking anyone.
 - Deviations (fleeing, avoiding, fetching spray) come only from events, and events are synced (Section 11). So a human's full state is a function of (seed, time, event history).
+- As built (T1-11, 18.35): besides people at tables and in groups, the generator places strollers (round the block on the sidewalks, round the park, across the mall lot, through the woods), gardeners working the beds in a backyard and sunbathers on lawns and in the park. The day's weather picks who comes out: nobody strolls, gardens or sunbathes in rain, gardeners need a mild day and sunbathers a warm one and lie out only through the warm hours.
 
 ### 8.3 Body zones **[T0] [T1]** (walk and lie postures)
 
 The sim body is a set of zone capsules in a body frame, scaled by height and girth, in one of a few postures: stand, sit, walk, lie. The rendered skeleton is presentation; the zone capsules are the truth.
+
+As built (T1-11): walking is the standing body moving (the gait is drawn, not simulated). Lying is the standing body turned onto its back by the body frame itself: the same capsules, zones and garments, head toward the facing, front to the sky, 0.18 m above the grass. Everything that works in the body frame (perching, stinging, crawling under clothing, swats) works on a sunbather unchanged.
 
 | Zone | Base self-reach | Response policy | Helper may swat |
 |---|---|---|---|
@@ -1190,7 +1193,19 @@ The ordinary lab colony (23 wasps) now sends 2.8 KB/s instead of 4.8. Two player
 
 **Pulp runs out.** Every wooden box (fence section, table, bench, garden shed) holds 1.5 loads of pulp per metre of its longest side, at least two; a 4 m fence section holds six. Each load taken is a chunk delta (`pulp` in the chunk state), saved with the world and claimed through the chunk authority like any pickup (18.32), so two players cannot strip the same board twice. A stripped section is not offered for chewing and pulp foragers go past it to wood that has some left; the PoC draws it greyer as it is stripped. Trees never run out.
 
-**Found on the way.** An event that reached a peer on its commit tick, after that tick's commits were applied, was applied one tick late without being counted as late; it is now counted (and the late-event log no longer overwrote its own type). Past the commit window (the awful link) such an event can still make the peers' humans diverge from that tick on; correcting it is the chunk authority's job (11.6) and not built. The test bot that stings anyone seated now has to get past houses and fences, so the behaviour checks aim it at the home park.
+**Found on the way (T1-12).** An event that reached a peer on its commit tick, after that tick's commits were applied, was applied one tick late without being counted as late; it is now counted (and the late-event log no longer overwrote its own type). Past the commit window (the awful link) such an event can still make the peers' humans diverge from that tick on; correcting it is the chunk authority's job (11.6) and not built. The test bot that stings anyone seated now has to get past houses and fences, so the behaviour checks aim it at the home park.
+
+### 18.35 Human days as built (T1-11)
+
+**Who is out.** The chunk generator places people with something to do alongside the people at tables (8.2). A chunk slot now carries an activity and, for walkers, a path (pairs of points), so where they go is part of the frozen chunk and every peer has it. In yards chunks: a gardener in 30% of backyards, working three spots (the bed along the back fence, the lawn, the patio edge); a sunbather in 25%, lying in the backyard; a couple out for a walk round the block on the sidewalks, one each way. In the park strip (not the home chunk, which plays as before): a stroller on a square loop and up to three sunbathers on the grass. At the mall: a shopper crossing the lot to the doors and back. In the forest: now and then a hiker on a path through it. In the home region that is 53 stroller, 62 gardener and 25 sunbather slots. The generator version is 5.
+
+**The weather picks.** Each activity narrows the person's arrival window (8.2) by the day's weather: a rainy day keeps all three indoors, gardeners need 12 °C at 1 pm, sunbathers 23 °C and lie out only between 10:00 and 17:30 (at least an hour or they stay in). The window is a pure function of seed, person and day, so a peer that loads the chunk at any time agrees on who is there.
+
+**Walking and working.** A stroller walks its loop at 1 m/s, slower with age; a gardener walks to each spot, works it for 20–45 game minutes (a hash of person, day and spot) and moves to the next. Both notice wasps as they go (the same annoyance rules as at a table), and a sting, a sting that goes deep or a ripped shirt sends them running exactly as it does a seated person; when they calm down they walk back to the start of their path and carry on. Their state (the next point, when the gardener moves on, whether they are on their feet) is saved, and goes into the human hash the peers compare.
+
+**Lying.** A sunbather lies on a towel: the standing body turned onto its back in the body frame (8.3), head toward the facing. The frame maps the standing capsules to the world and back, so a wasp can perch on a sunbather, sting one, crawl under a shirt or be swatted by one with no new code; the hands reach as they do standing. A stung sunbather gets up and runs, then comes back and lies down again.
+
+**Checks.** JS and C# check the slots in the home region, the lying frame (to the world and back, the front faces the sky, a body lies full length a hand above the grass), the weather rules, strollers walking their loops (the same distances to the metre in both), gardeners stopping at their beds, sunbathers lying still with skin to sting, a stung stroller running and walking on, and a walk surviving save and restore. The parity digests now cover the slots' activities and paths, the lying frame, and the stroll and garden states in the human hash (the cook's states were missing from it and are now in).
 
 ---
 
@@ -1200,7 +1215,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (85 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (86 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -1216,7 +1231,7 @@ Everything in `POC.md` (85 features) and its C# port (18.18), including the Tier
 | T1-8 | **Built (18.27).** Seasonal ecology: flowers bloom and fade by season, nectar is drawn down by bees and wasps and regrows in an ecology tick (0.2 Hz); prey by season; carrion appears | 9.4, 3.3 | M | |
 | T1-9 | **Built (18.28).** Feral hives and robbing: hives in hollow trees and walls; a wasp that gets inside takes honey (sugar) as well as brood | 9.1 | M | |
 | T1-10 | **Built (18.31).** Barbecues: grills as human anchors with meat, a protein source at people's tables and a new kind of conflict | 4.3, 6.2 | M | T1-11 helps |
-| T1-11 | Human days: walk and lie postures, people strolling on paths, sunbathers lying on the grass, gardeners; the schedule picks the activity by weather and traits | 8.2, 8.3 | L | Q-06 for the paths |
+| T1-11 | **Built (18.35).** Human days: walk and lie postures, people strolling on paths, sunbathers lying on the grass, gardeners; the schedule picks the activity by weather and traits | 8.2, 8.3 | L | Q-06 for the paths |
 | T1-12 | **Built (18.34).** Regions: an 8×8 chunk layout pass (park, gardens, houses with fences, farmland, forest edge) under the chunk pass, with pulp from fences that runs out (a chunk delta) | 4.2, 4.3, 4.5 | L | Q-06 |
 | T1-13 | **Built (18.23).** Worker ages and guards: young workers stay in, older ones forage, the oldest guard the entrance and attack intruders (rivals, raiders, other players' wasps) | 6.5 | M | Q-07 for players |
 | T1-14 | **Built (18.21).** Hollow-tree nest site and nest thermals: site insulation sets how cold snaps and heat slow the brood | 6.6 | S | |
@@ -1230,7 +1245,7 @@ Everything in `POC.md` (85 features) and its C# port (18.18), including the Tier
 | T1-22 | **Built (18.29).** Tuning as data: the tuning tables as versioned plain-text files read by own parsers in JS and C#, and the tuning hash in the world record | 13 | M | |
 | T1-23 | **Built (18.21).** Solo time: accelerate time in the colony view, and the Reflex slowdown as a solo option | 5.1, 7.8 | S | |
 
-Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, then the other S items: T1-14, T1-17, T1-18, T1-23, all done; T1-20 waits on regions), then the M items (T1-6 to T1-10, T1-12, T1-13, T1-15, T1-16, T1-19, T1-21 and T1-22 done; T1-11 human days and T1-20 remain); each batch is built in the PoC and then ported to the core with parity.
+Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, then the other S items: T1-14, T1-17, T1-18, T1-23, all done; T1-20 waits on regions), then the M items (T1-6 to T1-10, T1-12, T1-13, T1-15, T1-16, T1-19, T1-21 and T1-22 done, then T1-11 human days; T1-20 remains); each batch is built in the PoC and then ported to the core with parity.
 
 ### 19.3 Tier 2: later
 

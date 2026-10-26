@@ -29,7 +29,8 @@ namespace Sting.Core
     public sealed class Part { public string name; public V3 a, b; public Num r, side; }
     public struct SegQ { public Num t, x, y, z; }
     /// A body frame: position and facing on the ground plane
-    public struct Frame { public Num x, z, fx, fz; public Frame(Num x, Num z, Num fx, Num fz) { this.x = x; this.z = z; this.fx = fx; this.fz = fz; } }
+    /// A person's body frame: where they stand and which way they face; lying (T1-11) turns the standing body onto its back, head toward the facing
+    public struct Frame { public Num x, z, fx, fz; public bool lie; public Frame(Num x, Num z, Num fx, Num fz, bool lie = false) { this.x = x; this.z = z; this.fx = fx; this.fz = fz; this.lie = lie; } }
 
     public sealed class Swat
     {
@@ -206,9 +207,22 @@ namespace Sting.Core
         }
 
         // Body frame: forward f = (fx, 0, fz), right r = (fz, 0, -fx), up = y.
-        public static V3 ToWorld(Frame hm, V3 p) => new V3(hm.x + hm.fz * p.x + hm.fx * p.z, p.y, hm.z - hm.fx * p.x + hm.fz * p.z);
-        public static V3 ToLocal(Frame hm, V3 w) { Num dx = w.x - hm.x, dz = w.z - hm.z; return new V3(dx * hm.fz - dz * hm.fx, w.y, dx * hm.fx + dz * hm.fz); }
-        public static V3 DirToWorld(Frame hm, V3 d) => new V3(hm.fz * d.x + hm.fx * d.z, d.y, -hm.fx * d.x + hm.fz * d.z);
+        public static V3 ToWorld(Frame hm, V3 p)
+        {
+            if (hm.lie) { Num x = -p.x, z = p.y; return new V3(hm.x + hm.fz * x + hm.fx * z, p.z + T.days.lieLift, hm.z - hm.fx * x + hm.fz * z); }
+            return new V3(hm.x + hm.fz * p.x + hm.fx * p.z, p.y, hm.z - hm.fx * p.x + hm.fz * p.z);
+        }
+        public static V3 ToLocal(Frame hm, V3 w)
+        {
+            Num dx = w.x - hm.x, dz = w.z - hm.z;
+            if (hm.lie) return new V3(-(dx * hm.fz - dz * hm.fx), dx * hm.fx + dz * hm.fz, w.y - T.days.lieLift);
+            return new V3(dx * hm.fz - dz * hm.fx, w.y, dx * hm.fx + dz * hm.fz);
+        }
+        public static V3 DirToWorld(Frame hm, V3 d)
+        {
+            if (hm.lie) return new V3(-hm.fz * d.x + hm.fx * d.y, d.z, hm.fx * d.x + hm.fz * d.y);
+            return new V3(hm.fz * d.x + hm.fx * d.z, d.y, -hm.fx * d.x + hm.fz * d.z);
+        }
 
         /// Flailers and runners shake their head where others brush or slap it (GDD 8.5)
         static bool Shaker(Num style) => style == Style.Flailer || style == Style.Runner;

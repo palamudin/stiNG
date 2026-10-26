@@ -85,7 +85,7 @@ namespace Sting.Core
     public sealed class MemRec { public Num m, x, z; }
     public sealed class Land { public Num nx, ny, nz; public string kind; public bool hasH; public Num hx, hy, hz; public int yawQ; }
     public sealed class Surf { public Num x, y, z, nx, ny, nz, gap; public string kind; }
-    public sealed class Home { public Num x, z, fx, fz, ax, az; public string posture; }
+    public sealed class Home { public Num x, z, fx, fz, ax, az; public string posture; public string act; public Num[] path; }
     public sealed class Human
     {
         public ulong id; public string hex, @short; public Traits tr; public Clothing clothing; public string chunk; public Home home;
@@ -97,13 +97,15 @@ namespace Sting.Core
         public List<MemRec> mem = new List<MemRec>();
         /// Fetching spray (T1-6)
         public int fetchT; public bool wantSpray;
+        /// A stroll or a round of the beds (T1-11): the next point on the path, when the gardener moves on, on their feet
+        public int wp; public long until; public bool walking;
         /// The exterminator's search (T1-7): where he walks next, how long he has watched, the lines he has seen
         public Num wpx, wpz, clue; public int watch, lines;
         // the garment graph is a pure function of traits, clothing and posture; clothing is replaced, never edited
         internal List<GNode> gCache; internal Clothing gClothing; internal string gPosture;
         public List<Part> Parts(string posture) => posture == "sit" ? sit : stand;
         public List<Part> PartsNow => posture == "sit" ? sit : stand;
-        public Frame F => new Frame(x, z, fx, fz);
+        public Frame F => new Frame(x, z, fx, fz, posture == "lie");
     }
 
     /// Anything sent between peers

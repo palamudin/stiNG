@@ -281,7 +281,7 @@ namespace Sting.Core
                         hm = new Human
                         {
                             id = id, hex = hex, @short = hex.Substring(0, 4), tr = tr, clothing = Body.HumanClothing(seed, id, day), chunk = k,
-                            home = new Home { x = hs.x, z = hs.z, fx = hs.fx, fz = hs.fz, posture = hs.posture, ax = ax, az = az },
+                            home = new Home { x = hs.x, z = hs.z, fx = hs.fx, fz = hs.fz, posture = hs.posture, ax = ax, az = az, act = hs.act, path = hs.path },
                             x = hs.x, z = hs.z, fx = hs.fx, fz = hs.fz, posture = hs.posture, clothesDay = day,
                             sit = Body.BodyParts(tr, "sit"), stand = Body.BodyParts(tr, "stand"),
                         };
@@ -299,8 +299,27 @@ namespace Sting.Core
 
         HumanWin Window(Human hm)
         {
-            if (hm.winDay != day) { hm.winDay = day; hm.win = hm.special ? null : HumanWindow(seed, hm.id, day, settings.humanDensity); }
+            if (hm.winDay != day)
+            {
+                hm.winDay = day; hm.win = hm.special ? null : HumanWindow(seed, hm.id, day, settings.humanDensity);
+                if (hm.win != null && hm.home != null && hm.home.act != null) hm.win = ActWindow(hm.home.act, hm.win);
+            }
             return hm.win;
+        }
+        /// The weather picks who comes out (GDD 8.2, T1-11): nobody strolls, gardens or sunbathes in the rain; gardeners need
+        /// a mild day, sunbathers a warm one and only stay through the warm hours
+        internal HumanWin ActWindow(string act, HumanWin win)
+        {
+            if (World.Weather(seed, day).rain) return null;
+            Num warm = AirAt(day * 1440 + 13 * 60);
+            if (act == "garden" && warm < T.days.gardenTemp) return null;
+            if (act == "sun")
+            {
+                if (warm < T.days.sunTemp) return null;
+                Num arrive = Max(win.arrive, T.days.sunFrom), leave = Min(win.leave, T.days.sunTo);
+                return leave - arrive >= T.days.minStay ? new HumanWin { arrive = arrive, leave = leave } : null;
+            }
+            return win;
         }
 
         /// On (re)activation, put a human where their schedule says they are (GDD 8.2)
@@ -318,6 +337,8 @@ namespace Sting.Core
             hm.x = h.x; hm.z = h.z; hm.fx = h.fx; hm.fz = h.fz; hm.posture = h.posture; hm.state = "idle";
             if (hm.clothesDay != day) { hm.clothing = Body.HumanClothing(seed, hm.id, day); hm.clothesDay = day; }
         }
+        /// at their table, or out for a walk or in the beds (T1-11)
+        internal static bool Calm(Human hm) => hm.state == "idle" || hm.state == "stroll" || hm.state == "garden";
         void GoAway(Human hm) { hm.x = hm.home.ax; hm.z = hm.home.az; hm.state = "away"; hm.posture = "stand"; hm.panic = 0; }
         public bool Present(Human hm) => hm.state != "away";
 
@@ -497,7 +518,7 @@ namespace Sting.Core
             }
             public string Hex => h.ToString("x8");
         }
-        static readonly string[] HSTATES = { "away", "arrive", "idle", "flee", "return", "leave", "treat", "fetch", "seek", "watch" };
+        static readonly string[] HSTATES = { "away", "arrive", "idle", "flee", "return", "leave", "treat", "fetch", "seek", "watch", "toGrill", "cook", "stroll", "garden" };
 
         public string StateHash()
         {

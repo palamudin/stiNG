@@ -672,6 +672,51 @@ namespace Sting.Core.Tests
                 var r2 = Persist.Restore(Persist.Snapshot(s));
                 Ok(r2.PulpLeft("0,1", fi) == 0, "a stripped fence stays stripped after save and restore (a chunk delta)");
             }
+            // 40. human days (T1-11): strollers, gardeners, sunbathers; the weather picks who comes out
+            {
+                var acts = new Dictionary<string, int>(); bool shapes = true;
+                for (int z = -4; z < 4; z++) for (int x = -4; x < 4; x++) foreach (var h in World.GenerateChunk(1234, x, z).humans)
+                {
+                    if (h.act == null) continue;
+                    acts[h.act] = (acts.TryGetValue(h.act, out var n0) ? n0 : 0) + 1;
+                    if (h.act == "sun" ? h.posture != "lie" || h.path != null : h.posture != "stand" || h.path == null || h.path.Length < 4 || h.path.Length % 2 != 0) shapes = false;
+                }
+                Ok(acts.GetValueOrDefault("stroll") >= 10 && acts.GetValueOrDefault("garden") >= 10 && acts.GetValueOrDefault("sun") >= 10 && shapes, $"the home region has strollers, gardeners and sunbathers ({string.Join(", ", acts.Select(kv => kv.Key + " " + kv.Value))})");
+                var lie = new Frame(3, -2, 0.6, 0.8, true); var parts = Body.BodyParts(Body.HumanTraits(7, 77), "stand");
+                var head = Body.ToWorld(lie, parts[0].a); var foot = Body.ToWorld(lie, parts.First(q => q.name == "ShinL").b); var up = Body.DirToWorld(lie, P(0, 0, 1));
+                Ok(head.y < 0.5 && foot.y < 0.5 && (head.x - foot.x) * lie.fx + (head.z - foot.z) * lie.fz > 1.2 && Abs(up.y - 1) < 1e-9, $"a sunbather lies on their back along the facing (head {D(head.y):0.00} m up)");
+                var s = new Sim(new Settings { seed = 1234, dayMinutes = 20 }, new SimOpts { noAI = true });
+                var win = new HumanWin { arrive = 480, leave = 1200 };
+                HumanWin At(long d, string a) { s.day = d; return s.ActWindow(a, win); }
+                Ok(new[] { "stroll", "garden", "sun" }.All(a => At(8, a) == null) && At(22, "sun") == null && At(22, "garden") != null, "nobody is out in the rain; a 21 degree day brings gardeners but no sunbathers");
+                var w2 = At(2, "sun");
+                Ok(w2 != null && w2.arrive == T.days.sunFrom && w2.leave == T.days.sunTo, "on a hot day sunbathers lie out through the warm hours");
+                s.day = 0;
+                RunS(s, 3);
+                var moved = new Dictionary<string, double>(); var pos = new Dictionary<string, (Num x, Num z)>(); int dwell = 0, lying = 0;
+                for (int t = 0; t < 6000; t++)
+                {
+                    RunS(s, 1);
+                    if (t % 30 != 0) continue;
+                    foreach (var hm in s.active)
+                    {
+                        if (hm.home.act == null) continue;
+                        if (pos.TryGetValue(hm.hex, out var p0)) moved[hm.hex] = moved.GetValueOrDefault(hm.hex) + D(Hypot(hm.x - p0.x, hm.z - p0.z));
+                        pos[hm.hex] = (hm.x, hm.z);
+                        if (hm.state == "garden" && !hm.walking) dwell++;
+                        if (hm.home.act == "sun" && hm.state == "idle" && hm.posture == "lie") lying++;
+                    }
+                }
+                var strollers = s.active.Where(h => h.home.act == "stroll").ToList();
+                Ok(strollers.Any(h => moved.GetValueOrDefault(h.hex) > 60) && dwell > 0 && lying > 0, $"strollers walk their loops, gardeners stop at their beds, sunbathers lie out ({string.Join(", ", strollers.Select(h => moved.GetValueOrDefault(h.hex).ToString("0") + " m"))})");
+                var st = strollers.First(h => h.state == "stroll");
+                s.ApplyCommit(new NetEv { type = "sting", peer = s.peer, humanHex = st.hex, panicGain = 0, driven = false, sx = st.x - st.fx, sz = st.z - st.fz, zone = 0, flee = true, waspId = 0 });
+                bool ran = st.state == "flee", back = false;
+                for (int t = 0; t < 3000 && !back; t++) { RunS(s, 1); back = st.state == "stroll"; }
+                Ok(ran && back, "a stroller who is stung runs, then walks on");
+                var r = Persist.Restore(Persist.Snapshot(s));
+                Ok(r.HumanHash() == s.HumanHash() && r.HumanByHex(st.hex).wp == st.wp && r.HumanByHex(st.hex).home.path.Length == st.home.path.Length, "a walk in progress survives save and restore");
+            }
         }
 
         // 26. Tier 1, batch 1: wind, cold, drowning, clothes by the weather, shaking and flailing

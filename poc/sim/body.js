@@ -192,16 +192,24 @@ export function classify(part, q, n, p, s) {
 }
 
 // Body frame: forward f = (fx, 0, fz), right r = (fz, 0, -fx), up = y.
+// The body frame: +z forward, +y up, at the feet. Lying down (T1-11) is the standing body turned onto its back, head
+// forward: body x goes to -x, body y (up the body) to forward, body z (the front) to up, lifted so the back rests on
+// the ground. A proper rotation, so left and right stay themselves.
 export function toWorld(hm, p) {
+  if (hm.posture === 'lie') { const x = -p.x, z = p.y; return { x: hm.x + hm.fz * x + hm.fx * z, y: p.z + T.days.lieLift, z: hm.z - hm.fx * x + hm.fz * z }; }
   return { x: hm.x + hm.fz * p.x + hm.fx * p.z, y: p.y, z: hm.z - hm.fx * p.x + hm.fz * p.z };
 }
 export function toLocal(hm, w) {
   const dx = w.x - hm.x, dz = w.z - hm.z;
+  if (hm.posture === 'lie') return { x: -(dx * hm.fz - dz * hm.fx), y: dx * hm.fx + dz * hm.fz, z: w.y - T.days.lieLift };
   return { x: dx * hm.fz - dz * hm.fx, y: w.y, z: dx * hm.fx + dz * hm.fz };
 }
 export function dirToWorld(hm, d) {
+  if (hm.posture === 'lie') return { x: -hm.fz * d.x + hm.fx * d.y, y: d.z, z: hm.fx * d.x + hm.fz * d.y };
   return { x: hm.fz * d.x + hm.fx * d.z, y: d.y, z: -hm.fx * d.x + hm.fz * d.z };
 }
+// the capsules for each posture: lying uses the standing body (turned by the frame above)
+export function humanParts(tr) { const stand = bodyParts(tr, 'stand'); return { sit: bodyParts(tr, 'sit'), stand, lie: stand }; }
 
 // ---------------------------------------------------------------- sting resolution (GDD 8.6, A.6)
 

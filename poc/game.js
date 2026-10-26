@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import {
   Sim, Act, T, DT, ZONES, ZoneName, SwatKind, SwatKindName, StyleName, TopName, BottomName, Top, Bottom,
-  toWorld, toLocal, chunkKey, chunkOf, hash, Domain, rangeInt, resolveSting, zoneCover, segClosest, classify, predictedKind,
+  toWorld, toLocal, dirToWorld, chunkKey, chunkOf, hash, Domain, rangeInt, resolveSting, zoneCover, segClosest, classify, predictedKind,
   NEST, NEST_ENTRANCE, flyPos, beePos, fmtClock, minuteOfDay, isLowerZone, broodTotal, sugarCap, proteinCap, garmentGraph, dayWeather,
   NetLab, LINKS, birdPos, dragonPos, shedSites, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE,
 } from './sim/index.js';
@@ -781,6 +781,13 @@ function rebuildHuman(view) {
   }
   const can = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.19, 12), mat('#2f8f3a')); // a spray can (T1-6), green so it doesn't read as a cup
   view.meshes.Can = can; group.add(can);
+  if (hm.posture === 'lie') { // a towel under a sunbather (T1-11), flat on the grass in the lying frame
+    const towels = ['#d9534f', '#3a7bd5', '#f0c419', '#ffffff', '#2bb3a3'];
+    const towel = new THREE.Mesh(new THREE.BoxGeometry(0.8, hm.tr.height + 0.25, 0.012), mat(towels[parseInt(hm.hex.slice(0, 2), 16) % towels.length]));
+    towel.position.set(0, hm.tr.height * 0.5, 0.012 - T.days.lieLift);
+    towel.receiveShadow = true;
+    view.meshes.Towel = towel; group.add(towel);
+  }
   view.posture = hm.posture;
   view.zonesOn = false;
 }
@@ -834,8 +841,9 @@ function poseHuman(view, t, dt) {
   view.ang += da * Math.min(1, dt * 10);
   view.flinch = Math.max(0, view.flinch - dt * 4);
 
-  const moving = hm.state === 'flee' || hm.state === 'return' || hm.state === 'arrive' || hm.state === 'leave' || hm.state === 'fetch' || hm.state === 'seek';
-  if (moving) view.walk += dt * (hm.state === 'flee' ? 13 : 7);
+  const moving = hm.state === 'flee' || hm.state === 'return' || hm.state === 'arrive' || hm.state === 'leave' || hm.state === 'fetch' || hm.state === 'seek' ||
+    ((hm.state === 'stroll' || hm.state === 'garden') && hm.walking); // T1-11
+  if (moving) view.walk += dt * (hm.state === 'flee' ? 13 : hm.state === 'stroll' ? 5 : 7);
 
   const P = {};
   for (const p of view.rest) P[p.name] = { a: V(p.a), b: V(p.b) };
@@ -924,7 +932,12 @@ function poseHuman(view, t, dt) {
   const jolt = view.flinch > 0 ? Math.sin(view.flinch * 40) * 0.015 * view.flinch : 0;
   group.position.set(view.x + view.lean.x, jolt + view.bob, view.z + view.lean.z);
   group.rotation.y = view.ang + (hm.state === 'watch' ? Math.sin(t * 0.03 + hm.lines) * 0.9 : 0); // scanning for flight lines (T1-7)
+  if (hm.posture === 'lie') { // on a towel (T1-11): the standing body turned onto its back, head toward the facing
+    group.quaternion.setFromAxisAngle(UP, view.ang).multiply(LIE_Q);
+    group.position.y += T.days.lieLift;
+  }
 }
+const LIE_Q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 1).normalize(), Math.PI);
 
 // The world normal of the surface a wasp stands on: a landed wasp keeps its own; a perched one takes the skin's,
 // turned from the person's body frame into the world
@@ -936,7 +949,8 @@ function surfaceNormal(w) {
   const hm = sim.humanByHex(on.hex);
   if (!hm) return null;
   const n = on.n;
-  return new THREE.Vector3(hm.fz * n.x + hm.fx * n.z, n.y, -hm.fx * n.x + hm.fz * n.z).normalize();
+  const d = dirToWorld(hm, n);
+  return new THREE.Vector3(d.x, d.y, d.z).normalize();
 }
 
 // Lab: color every vertex by what the human does if stung there (GDD 8.3-8.5)

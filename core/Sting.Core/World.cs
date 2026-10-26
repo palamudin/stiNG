@@ -13,7 +13,7 @@ namespace Sting.Core
     public sealed class Flower { public Num x, y, z; public int color; }
     public sealed class Caterpillar { public Num x, y, z; }
     public sealed class Fly { public Num x, y, z, r, w1, w2, w3, p1, p2, p3; }
-    public sealed class HumanSlot { public int slot; public Num x, z, fx, fz, exit; public string posture; }
+    public sealed class HumanSlot { public int slot; public Num x, z, fx, fz, exit; public string posture; public string act; public Num[] path; }
     public sealed class Box { public Num minx, maxx, miny, maxy, minz, maxz; public bool wood, hive, shed, fence, mall; }
     public sealed class Cyl { public Num x, z, r, h; public bool wood, grill; }
     /// A sugar source: a can, a flower, a puddle ('spill') or fallen 'fruit'. i identifies spills and fruit.
@@ -290,6 +290,13 @@ namespace Sting.Core
                 AddFly(gx, 1.7, gz, slotBase + 300);
             }
 
+            // someone with something to do (T1-11): a stroller walks a loop (path: x, z pairs), a gardener works the spots on
+            // its path in turn, a sunbather lies at the spot
+            void AddActor(long slot, Num x, Num z, Num fx, Num fz, string posture, string act, Num[] path)
+            {
+                c.humans.Add(new HumanSlot { slot = (int)slot, x = x, z = z, fx = fx, fz = fz, posture = posture, exit = Range(H(slot + 200), 0, 6.28), act = act, path = path });
+            }
+
             void AddTree(Num x, Num z, long slot)
             {
                 Num r = Range(H(slot), 0.15, 0.35), h = Range(H(slot + 1), 3.2, 6.0), cr = Range(H(slot + 2), 1.4, 2.8);
@@ -359,7 +366,22 @@ namespace Sting.Core
                     if (Unit(H(b + 500)) < 0.3) { Num sx = lx + (Unit(H(b + 501)) < 0.5 ? -12.5 : 12.5), sz = oz + s * 28.7; if (Free(sx, sz, 2)) AddShed(sx, sz, true, b + 502, false); }
                     if (Unit(H(b + 510)) < 0.08) { Num hx = lx + Range(H(b + 511), -10, 10), hz = oz + s * 22; if (Free(hx, hz, 2)) AddHive(hx, hz, b + 600); }
                     if (Unit(H(b + 800)) < 0.2) { Num gx = lx + Range(H(b + 801), -8, 8), gz = oz + s * 7; if (Free(gx, gz, 2)) AddGroup(gx, gz, RangeInt(H(b + 802), 2, 4), b + 1000); }
+                    // a gardener working the beds along the back fence and the lawn; someone sunbathing in the backyard (T1-11)
+                    if (Unit(H(b + 1400)) < 0.3)
+                    {
+                        var p = new Num[] { lx + Range(H(b + 1401), -10, 10), oz + s * 28.8, lx + Range(H(b + 1402), -12, 12), oz + s * 26, lx + Range(H(b + 1403), -12, 12), oz + s * 22.5 };
+                        AddActor(b + 1410, p[0], p[1], 0, s, "stand", "garden", p);
+                    }
+                    if (Unit(H(b + 1450)) < 0.25)
+                    {
+                        Num x = lx + Range(H(b + 1451), -11, 11), z = oz + s * 22.5;
+                        if (Free(x, z, 1.2)) { occupied.Add(new Occ { x = x, z = z, r = 1.2 }); AddActor(b + 1460, x, z, Unit(H(b + 1452)) < 0.5 ? 1 : -1, 0, "lie", "sun", null); }
+                    }
                 }
+                // people out for a walk round the block, along one sidewalk and back along the other
+                Num x0 = ox + (endW ? -18 : -30), x1 = ox + (endE ? 18 : 30);
+                if (Unit(H(2500)) < 0.6) AddActor(2510, x0, oz - 5.2, 1, 0, "stand", "stroll", new Num[] { x0, oz - 5.2, x1, oz - 5.2, x1, oz + 5.2, x0, oz + 5.2 });
+                if (Unit(H(2600)) < 0.3) AddActor(2610, x1, oz + 5.2, -1, 0, "stand", "stroll", new Num[] { x1, oz + 5.2, x0, oz + 5.2, x0, oz - 5.2, x1, oz - 5.2 });
             }
             // a strip mall on the region's edge (see world.js addMall)
             void AddMall()
@@ -377,6 +399,12 @@ namespace Sting.Core
                 if (Unit(H(4900)) < 0.5) { var p = At(Range(H(4901), -20, 20), 6); if (Free(p.x, p.z, 2)) AddGroup(p.x, p.z, RangeInt(H(4902), 2, 5), 4910); }
                 int nf = RangeInt(H(4950), 0, 3);
                 for (int i = 0; i < nf; i++) { var p = At(Range(H(4951 + i), -24, 24), 13); AddFlowers(p.x, p.z, 4960 + i * 80); }
+                // a shopper crossing the lot to the doors and back (T1-11)
+                if (Unit(H(5200)) < 0.7)
+                {
+                    var a = At(-14, -12); var bb = At(-14, 11); var dd = At(14, 11); var e = At(14, -12);
+                    AddActor(5210, a.x, a.z, o0, o1, "stand", "stroll", new Num[] { a.x, a.z, bb.x, bb.z, dd.x, dd.z, e.x, e.z });
+                }
             }
 
             if (isOrigin)
@@ -436,6 +464,18 @@ namespace Sting.Core
                 Num x = ox + Range(H(150 + i * 4), -30, 30), z = oz + Range(H(151 + i * 4), -30, 30);
                 if (Free(x, z, forest ? 1.5 : 3)) { AddTree(x, z, 200 + i * 4); occupied.Add(new Occ { x = x, z = z, r = forest ? 1 : 2 }); }
             }
+            // people out for the day in the open (T1-11): a walk round the park or through the woods, sunbathers on the grass
+            if (!isOrigin && c.use == "park")
+            {
+                if (Unit(H(6000)) < 0.6) { Num r = Range(H(6001), 12, 22); AddActor(6010, ox - r, oz - r, 1, 0, "stand", "stroll", new Num[] { ox - r, oz - r, ox + r, oz - r, ox + r, oz + r, ox - r, oz + r }); }
+                int ns = RangeInt(H(6100), 0, 3);
+                for (int k = 0; k < ns; k++)
+                {
+                    Num x = ox + Range(H(6101 + k * 10), -26, 26), z = oz + Range(H(6102 + k * 10), -26, 26), a = Range(H(6103 + k * 10), 0, 6.28);
+                    if (Free(x, z, 1.5)) { occupied.Add(new Occ { x = x, z = z, r = 1.5 }); AddActor(6110 + k * 10, x, z, DSin(a), DCos(a), "lie", "sun", null); }
+                }
+            }
+            if (forest && Unit(H(6300)) < 0.3) AddActor(6310, ox - 26, oz - 20, 1, 0, "stand", "stroll", new Num[] { ox - 26, oz - 20, ox + 26, oz + 20 });
             for (int i = 0; i < c.trees.Count; i++)
             {
                 var t = c.trees[i];

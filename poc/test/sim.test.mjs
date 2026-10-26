@@ -1,7 +1,7 @@
 // Headless tests for the STING sim core. Run: node test/sim.test.mjs
 import { readFileSync } from 'node:fs';
 import {
-  Sim, Act, hash, Domain, humanTraits, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
+  Sim, Act, hash, Domain, humanTraits, humanParts, toLocal, dirToWorld, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
   garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, CMD_FIELDS,
 } from '../sim/index.js';
 import { applyTuning, parseTuning, tuningHash, tuningLeaves, TUNE } from '../sim/tunefile.js';
@@ -1287,6 +1287,68 @@ function seated(sim, pred) {
   place(a, { x: fb.maxx + 0.3, y: 1, z: (fb.minz + fb.maxz) / 2 });
   s._aiPick(a);
   ok(a.ai.target && a.ai.target.kind === 'wood' && !(a.ai.target.key === key && a.ai.target.i === fi), 'pulp foragers go past a stripped section to wood that has some left');
+}
+
+// Human days (GDD 8.2, 8.3, T1-11): people stroll the streets and the park, sunbathe on lawns and work their beds,
+// and the weather decides who comes out
+{
+  const acts = {};
+  let pathsOk = true;
+  for (let z = -4; z < 4; z++) for (let x = -4; x < 4; x++) for (const h of generateChunk(1234n, x, z).humans) {
+    if (!h.act) continue;
+    acts[h.act] = (acts[h.act] || 0) + 1;
+    if (h.act === 'sun' ? h.posture !== 'lie' || h.path : h.posture !== 'stand' || !h.path || h.path.length < 4 || h.path.length % 2) pathsOk = false;
+  }
+  ok(acts.stroll >= 10 && acts.garden >= 10 && acts.sun >= 10 && pathsOk, `the home region has strollers, gardeners and sunbathers (${Object.entries(acts).map(([k, n]) => k + ' ' + n).join(', ')})`);
+  // lying down: the standing body turned onto its back, head toward the facing, just above the grass
+  const lie = { x: 3, z: -2, fx: 0.6, fz: 0.8, posture: 'lie', parts: humanParts(humanTraits(7n, 77n)) };
+  const p = { x: 0.13, y: 1.2, z: -0.05 }, back = toLocal(lie, toWorld(lie, p));
+  const head = toWorld(lie, lie.parts.lie[0].a), foot = toWorld(lie, lie.parts.lie.find((q) => q.name === 'ShinL').b);
+  const n = dirToWorld(lie, { x: 0, y: 0, z: 1 });
+  ok(Math.abs(back.x - p.x) + Math.abs(back.y - p.y) + Math.abs(back.z - p.z) < 1e-12 && Math.abs(n.y - 1) < 1e-12, 'the lying frame goes to the world and back, and the body front faces the sky');
+  ok(head.y < 0.5 && foot.y < 0.5 && (head.x - foot.x) * lie.fx + (head.z - foot.z) * lie.fz > 1.2, `a sunbather lies full length along the facing (head ${head.y.toFixed(2)} m up)`);
+  // the weather
+  const s = new Sim({ seed: 1234, dayMinutes: 20 }, { noAI: true });
+  const win = { arrive: 480, leave: 1200 }, at = (d, a) => { s.day = d; return s._actWindow(a, win); };
+  ok(['stroll', 'garden', 'sun'].every((a) => at(8, a) === null), 'nobody strolls, gardens or sunbathes on a rainy day');
+  ok(at(22, 'sun') === null && at(22, 'garden') !== null, 'a dry 21 degree day brings out gardeners but no sunbathers');
+  const w2 = at(2, 'sun');
+  ok(w2 && w2.arrive === T.days.sunFrom && w2.leave === T.days.sunTo, `on a hot day sunbathers lie out through the warm hours (${w2 && w2.arrive}-${w2 && w2.leave})`);
+  s.day = 0;
+  // out and about
+  const track = new Map();
+  run(s, 3);
+  for (let t = 0; t < 6000; t++) {
+    s.step(idle()); s.drainEvents();
+    if (t % 30) continue;
+    for (const hm of s.active) {
+      if (!hm.home.act) continue;
+      const r = track.get(hm.hex) || { hm, moved: 0, wps: new Set(), dwell: 0, lie: 0, x: hm.x, z: hm.z };
+      r.moved += Math.hypot(hm.x - r.x, hm.z - r.z); r.x = hm.x; r.z = hm.z;
+      if (hm.state === hm.home.act) r.wps.add(hm.wp);
+      if (hm.state === 'garden' && !hm.walking) r.dwell++;
+      if (hm.state === 'idle' && hm.posture === 'lie') r.lie++;
+      track.set(hm.hex, r);
+    }
+  }
+  const all = [...track.values()], of = (a) => all.filter((r) => r.hm.home.act === a);
+  ok(of('stroll').some((r) => r.moved > 60 && r.wps.size >= 3), `strollers walk their loops (${of('stroll').map((r) => r.moved.toFixed(0) + ' m').join(', ')})`);
+  ok(of('garden').some((r) => r.dwell > 0 && r.wps.size >= 2), 'gardeners stop and work a spot, then move to the next');
+  const sun = of('sun').find((r) => r.lie > 0);
+  ok(!!sun && sun.moved < 1e-9, `sunbathers lie still on their towels (${of('sun').length} out)`);
+  // a stung stroller runs, comes back and walks on
+  const st = of('stroll').map((r) => r.hm).find((h) => h.state === 'stroll');
+  s._applyCommit({ type: 'sting', peer: s.peer, humanHex: st.hex, panicGain: 0, driven: false, sx: st.x - st.fx, sz: st.z - st.fz, zone: 0, flee: true, waspId: 0 });
+  ok(st.state === 'flee', 'a stroller who is stung runs');
+  let back2 = false;
+  for (let t = 0; t < 3000 && !back2; t++) { s.step(idle()); s.drainEvents(); back2 = st.state === 'stroll'; }
+  ok(back2, 'and once calm, walks on');
+  // a wasp can reach a sunbather
+  if (sun) {
+    const hm = sun.hm, w = s.wasp; place(w, toWorld(hm, { x: 0.3, y: 1.0, z: 0.6 }));
+    const pt = s._aiStingPoint(w, hm), wp = pt && toWorld(hm, pt.p);
+    ok(wp && wp.y < 0.6 && Math.hypot(wp.x - hm.x, wp.z - hm.z) < 2, 'there is skin to sting on a sunbather, low on the lawn');
+  }
 }
 
 // Tuning as data (GDD 13, T1-22): one plain-text file feeds both sims

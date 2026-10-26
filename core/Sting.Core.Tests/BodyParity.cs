@@ -28,6 +28,8 @@ namespace Sting.Core.Tests
                         {
                             var wp = new V3(hm.x + DSin(k * 1.7) * 0.4, 0.2 + (k % 8) * 0.22, hm.z + DSin(k * 2.3 + 1) * 0.4);
                             var lp = Body.ToLocal(hm, wp); var back = Body.ToWorld(hm, lp); d.F(lp.x); d.F(lp.y); d.F(lp.z); d.F(back.x); d.F(back.z);
+                            var lie = new Frame(hm.x, hm.z, hm.fx, hm.fz, true); var ll = Body.ToLocal(lie, wp); var lb = Body.ToWorld(lie, ll); var ld = Body.DirToWorld(lie, new V3(DSin(k), 0.3, DSin(k + 1))); // T1-11
+                            d.F(ll.x); d.F(ll.y); d.F(ll.z); d.F(lb.x); d.F(lb.y); d.F(lb.z); d.F(ld.x); d.F(ld.y); d.F(ld.z);
                             foreach (var part in parts)
                             {
                                 var q = Body.SegClosest(part.a, part.b, lp);

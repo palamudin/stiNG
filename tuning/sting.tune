@@ -417,6 +417,17 @@ protBase = 0.5
 protCat = 0.35
 protFly = 0.4
 
+[days]
+lieLift = 0.18
+sunTemp = 23
+sunFrom = 600
+sunTo = 1050
+minStay = 60
+gardenTemp = 12
+gardenMin = 20
+gardenMax = 45
+strollSpeed = 1
+
 [bbq]
 share = 0.35
 gap = 1.1

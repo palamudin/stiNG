@@ -5,7 +5,7 @@ import { TUNE } from './tunefile.js';
 
 export const TICK_RATE = 60;
 export const DT = 1 / TICK_RATE;
-export const GEN_VERSION = 4; // 3: sheds and dragonflies; 4: regions (T1-12)
+export const GEN_VERSION = 5; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11)
 
 export const T = {
   population: 8200000000,
@@ -152,6 +152,11 @@ export const T = {
     carrionChance: 0.2, carrionDays: 3, carrionLoads: 4, carrionProtein: 1.5, carrionReach: 0.05,
     sugarBase: 0.5, sugarBloom: 0.9, sugarFruit: 0.35, protBase: 0.5, protCat: 0.35, protFly: 0.4,
   },
+  // Human days (GDD 8.2, 8.3, T1-11): strollers, sunbathers and gardeners, out by the weather. A lying body is the
+  // standing one turned onto its back, its back lieLift below the body's middle line; sunbathers come on warm dry days
+  // between sunFrom and sunTo (minutes of the day), gardeners on dry days from gardenTemp, working a spot for
+  // gardenMin to gardenMax game minutes; strollers walk their loop at strollSpeed, slower when stiff with age.
+  days: { lieLift: 0.18, sunTemp: 23, sunFrom: 600, sunTo: 1050, minStay: 60, gardenTemp: 12, gardenMin: 20, gardenMax: 45, strollSpeed: 1.0 },
   // Barbecues (GDD 4.3, 6.2, T1-10). Some picnic tables have a kettle grill at one end. On a warm dry day the first
   // person at the table may cook a lunchtime barbecue: they stand at the grill while it is lit, meat sits on the grate
   // and later on a plate on the table. Meat is protein; people guard it and slap at wasps near it from the start; the

@@ -11,7 +11,7 @@ import { Sim } from '../sim/sim.js';
 import { NetLab, MeshLab } from '../sim/net.js';
 import { snapshot, restore } from '../sim/persist.js';
 import { stingBot, idleCmd } from '../sim/bots.js';
-import { humanTraits, humanClothing, suitClothing, bodyParts, segClosest, classify, toWorld, toLocal, resolveSting, ZONES, selfReach, zoneCover, predictedKind, garmentGraph } from '../sim/body.js';
+import { humanTraits, humanClothing, suitClothing, bodyParts, segClosest, classify, toWorld, toLocal, dirToWorld, resolveSting, ZONES, selfReach, zoneCover, predictedKind, garmentGraph } from '../sim/body.js';
 
 export function Digest() {
   const buf = new Float64Array(1), bytes = new Uint8Array(buf.buffer);
@@ -32,7 +32,7 @@ export function digestChunk(c, d) {
   f(c.flowers.length); for (const t of c.flowers) { f(t.x); f(t.y); f(t.z); f(t.color); }
   f(c.caterpillars.length); for (const t of c.caterpillars) { f(t.x); f(t.y); f(t.z); }
   f(c.flies.length); for (const t of c.flies) { for (const k of ['x', 'y', 'z', 'r', 'w1', 'w2', 'w3', 'p1', 'p2', 'p3']) f(t[k]); }
-  f(c.humans.length); for (const t of c.humans) { f(t.slot); f(t.x); f(t.z); f(t.fx); f(t.fz); f(t.posture === 'sit'); f(t.exit); }
+  f(c.humans.length); for (const t of c.humans) { f(t.slot); f(t.x); f(t.z); f(t.fx); f(t.fz); f(t.posture === 'sit'); f(t.exit); f(t.posture === 'lie'); f(t.act === 'stroll' ? 1 : t.act === 'garden' ? 2 : t.act === 'sun' ? 3 : 0); f(t.path ? t.path.length : 0); if (t.path) for (const v of t.path) f(v); }
   f(c.boxes.length); for (const t of c.boxes) { for (const k of ['minx', 'maxx', 'miny', 'maxy', 'minz', 'maxz']) f(t[k]); f(!!t.wood); f(!!t.hive); f(!!t.shed); f(!!t.fence); f(!!t.mall); }
   f(c.cylinders.length); for (const t of c.cylinders) { f(t.x); f(t.z); f(t.r); f(t.h); }
   f(c.sugar.length); for (const t of c.sugar) { f(t.x); f(t.y); f(t.z); f(t.rate); f(KIND[t.kind]); f(t.table ?? -1); }
@@ -106,6 +106,8 @@ for (const seed of seeds) {
       for (let k = 0; k < 24; k++) {
         const wp = { x: hm.x + dsin(k * 1.7) * 0.4, y: 0.2 + (k % 8) * 0.22, z: hm.z + dsin(k * 2.3 + 1) * 0.4 };
         const lp = toLocal(hm, wp), back = toWorld(hm, lp); d.f(lp.x); d.f(lp.y); d.f(lp.z); d.f(back.x); d.f(back.z);
+        const lie = { ...hm, posture: 'lie' }, ll = toLocal(lie, wp), lb = toWorld(lie, ll), ld = dirToWorld(lie, { x: dsin(k), y: 0.3, z: dsin(k + 1) }); // T1-11
+        d.f(ll.x); d.f(ll.y); d.f(ll.z); d.f(lb.x); d.f(lb.y); d.f(lb.z); d.f(ld.x); d.f(ld.y); d.f(ld.z);
         for (const part of parts) {
           const q = segClosest(part.a, part.b, lp);
           const nx = lp.x - q.x, ny = lp.y - q.y, nz = lp.z - q.z, nl = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;

@@ -4,7 +4,7 @@
 import { Domain, hash, u64, fnv32, dcos, dsin } from './rng.js';
 import { T, GEN_VERSION } from './tuning.js';
 import { TUNE } from './tunefile.js';
-import { humanTraits, bodyParts, Style } from './body.js';
+import { humanTraits, bodyParts, humanParts, Style } from './body.js';
 import { generateChunk, makeNest, NEST } from './world.js';
 import { newColony } from './colony.js';
 import { Sim } from './sim.js';
@@ -73,8 +73,8 @@ export function restore(json) {
       if (!saved) return;
       const tr = sim.traitsFor(id);
       const ax = hs.x + T.panic.approachDist * dcos(hs.exit), az = hs.z + T.panic.approachDist * dsin(hs.exit);
-      const home = { x: hs.x, z: hs.z, fx: hs.fx, fz: hs.fz, posture: hs.posture, ax, az };
-      const hm = { id, hex, short: hex.slice(0, 4), tr, chunk: rec.cx + ',' + rec.cz, parts: { sit: bodyParts(tr, 'sit'), stand: bodyParts(tr, 'stand') }, home };
+      const home = { x: hs.x, z: hs.z, fx: hs.fx, fz: hs.fz, posture: hs.posture, ax, az, act: hs.act || null, path: hs.path || null };
+      const hm = { id, hex, short: hex.slice(0, 4), tr, chunk: rec.cx + ',' + rec.cz, parts: humanParts(tr), home };
       Object.assign(hm, saved);
       sim.humans.set(hex, hm);
     });
@@ -84,7 +84,7 @@ export function restore(json) {
   if (d.ext.hm) {
     const id = hash(sim.seed, Domain.WorldGen, 0xE77n, BigInt(d.ext.visit));
     const tr = { ...humanTraits(sim.seed, id), height: 1.8, armRatio: 1, girth: 0.4, reactionTicks: 12, style: Style.Precise, accuracy: 0.9, panicSusceptibility: 0.45, sociability: 0, escalation: 1 };
-    sim.ext.hm = { ...d.ext.hm, id, tr, parts: { sit: bodyParts(tr, 'sit'), stand: bodyParts(tr, 'stand') } };
+    sim.ext.hm = { ...d.ext.hm, id, tr, parts: humanParts(tr) };
   }
   // derived views
   const [cx, cz] = sim.activeKey.split(',').map(Number), A = T.chunk.activeRadius;

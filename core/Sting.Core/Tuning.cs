@@ -10,7 +10,7 @@ namespace Sting.Core
     {
         public const int TICK_RATE = 60;
         public static readonly Num DT = 1.0 / TICK_RATE;
-        public const int GEN_VERSION = 4; // 3: sheds and dragonflies; 4: regions (T1-12)
+        public const int GEN_VERSION = 5; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11)
 
         public static Num population = 8200000000;
         public static class chunk { public static Num size = 64; public static int activeRadius = 1, discoverRadius = 2; }
@@ -139,6 +139,8 @@ namespace Sting.Core
                 sugarBase = 0.5, sugarBloom = 0.9, sugarFruit = 0.35, protBase = 0.5, protCat = 0.35, protFly = 0.4;
             public static int carrionDays = 3, carrionLoads = 4;
         }
+        /// Human days (GDD 8.2, T1-11): sunbathers lie this high; who comes out in what weather; gardeners' dwell; stroll pace
+        public static class days { public static Num lieLift = 0.18, sunTemp = 23, sunFrom = 600, sunTo = 1050, minStay = 60, gardenTemp = 12, gardenMin = 20, gardenMax = 45, strollSpeed = 1.0; }
         /// Barbecues (GDD 4.3, 6.2, T1-10): grills at some tables, a cook, meat on the grate and the plate, a hot grate
         public static class bbq
         {
