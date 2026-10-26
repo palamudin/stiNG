@@ -150,16 +150,19 @@ namespace Sting.Core
                 if (w.carry != null) top *= T.wasp.carrySpeedMul;
                 if (w.caste == "queen") top *= T.queen.speedMul;
                 if (rain) top *= T.weather.rainSpeedMul;
-                dx *= top; dy *= top; dz *= top;
-                // the air moves: the wasp holds most of its course but drifts with the wind, less near the ground (GDD 5.3)
-                var wd = Drift(w);
-                dx += wd.x; dz += wd.z;
-                Num ex = dx - w.vx, ey = dy - w.vy, ez = dz - w.vz;
+                // the wasp flies in moving air (GDD 5.3): airspeed capped at its top speed plus the wind; no input leans into the
+                // wind and holds its place, full input flies the course at top airspeed (see sim.js)
+                var wd = Drift(w); Num thr = Min(1, Sqrt(dx * dx + dy * dy + dz * dz));
+                Num ax = dx * top - wd.x * (1 - thr), ay = dy * top, az = dz * top - wd.z * (1 - thr);
+                Num am = Sqrt(ax * ax + ay * ay + az * az);
+                if (am > top) { ax *= top / am; ay *= top / am; az *= top / am; }
+                Num ex = ax + wd.x - w.vx, ey = ay - w.vy, ez = az + wd.z - w.vz;
                 Num el = Sqrt(ex * ex + ey * ey + ez * ez), amax = (burst ? T.wasp.burstAccel : T.wasp.accel) * T.DT;
                 if (el > amax) { ex *= amax / el; ey *= amax / el; ez *= amax / el; }
                 w.vx += ex; w.vy += ey; w.vz += ez;
-                Num speed = Sqrt(w.vx * w.vx + w.vy * w.vy + w.vz * w.vz);
-                Num drain = T.energy.cruisePerSec * T.DT * (T.energy.hoverShare + (1 - T.energy.hoverShare) * Min(speed / T.wasp.cruise, 2)) * (burst ? T.energy.burstMul : 1);
+                // the work is in the airspeed: holding still in a breeze costs like flying
+                Num rx = w.vx - wd.x, rz = w.vz - wd.z, air = Sqrt(rx * rx + w.vy * w.vy + rz * rz);
+                Num drain = T.energy.cruisePerSec * T.DT * (T.energy.hoverShare + (1 - T.energy.hoverShare) * Min(air / T.wasp.cruise, 2)) * (burst ? T.energy.burstMul : 1);
                 if (rain) drain *= T.weather.rainDrainMul;
                 if (NearCitronella(w)) drain *= T.esc.citronellaDrain;
                 w.energy -= drain;
@@ -195,7 +198,7 @@ namespace Sting.Core
         {
             var wind = Wind; int t = tick;
             Num gust = 1 + T.wind.gust * DSin((Num)t * 0.031) * DSin((Num)t * 0.0137 + 1);
-            Num k = T.wind.drift * gust * Clamp01(w.y / T.wind.refHeight);
+            Num k = T.wind.felt * gust * Clamp01(w.y / T.wind.refHeight);
             return new V3(wind.x * k, 0, wind.z * k);
         }
 

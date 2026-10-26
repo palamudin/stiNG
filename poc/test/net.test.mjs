@@ -216,6 +216,7 @@ for (const name of ['lan', 'good', 'bad', 'awful']) {
   const grab = (what, setup) => {
     const key = '0,0', rec = A.records.get(key), recB = B.records.get(key);
     const spot = setup(rec, recB);
+    for (let i = 0; i < 400 && !(A._driven() && B._driven()); i++) lab.step(idle(), idle()); // a wasp lost earlier respawns
     const wa = A._driven(), wb = B._driven();
     for (const w of [wa, wb]) { w.x = spot.x; w.y = spot.y; w.z = spot.z; w.vx = w.vy = w.vz = 0; w.state = 'fly'; w.carry = null; }
     lab.step(idle(), idle());

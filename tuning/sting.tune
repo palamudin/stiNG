@@ -34,7 +34,7 @@ autumnChill = 7
 min = 0
 max = 3
 rainMul = 1.4
-drift = 0.35
+felt = 0.7
 refHeight = 3
 gust = 0.4
 

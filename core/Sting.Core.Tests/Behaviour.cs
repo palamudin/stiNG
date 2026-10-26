@@ -650,16 +650,21 @@ namespace Sting.Core.Tests
             for (; seed < 200; seed++) { var w = World.Weather(seed, 0); if (!w.rain && w.wind > 2.2) { day0 = w; break; } }
             double At(long m) { var v = World.WindAt(seed, m); return Hypot(v.x, v.z); }
             Ok(day0 != null && At(15 * 60) > At(7 * 60) * 1.5, $"wind is calm at dawn and stronger mid-afternoon ({At(7 * 60):0.00} -> {At(15 * 60):0.00} m/s)");
-            double Drift(Num y)
+            // with no input the wasp leans into the wind and holds its place, paying for it; flat out it is faster downwind
+            (double along, double off, double used, double wind) Fly(Num y, int mz, int sign, bool calm)
             {
                 var s = new Sim(new Settings { seed = seed, birds = false });
-                var p0 = P(40, y, 40); var w = s.wasp; Place(w, p0);
-                RunS(s, 180);
-                var v = s.Wind; double n = Hypot(v.x, v.z);
-                return (D(w.x - p0.x) * D(v.x) + D(w.z - p0.z) * D(v.z)) / n;
+                RunS(s, 1);
+                if (calm) s.windOverride = new V3(0, 0, 0);
+                var p0 = P(40, y, 40); var w = s.wasp; Place(w, p0); w.energy = 1;
+                var v = World.WindAt(seed, s.minute); double n = Hypot(v.x, v.z), yaw = Math.Atan2(sign * D(v.x), sign * D(v.z));
+                RunS(s, 180, (sim, i) => Idle(c => { c.mz = mz; c.yawQ = (int)Math.Round(yaw * 1e4); c.pitchQ = 0; }));
+                return ((D(w.x - p0.x) * D(v.x) + D(w.z - p0.z) * D(v.z)) / n, Hypot(w.x - p0.x, w.z - p0.z), 1 - D(w.energy), n);
             }
-            double high = Drift(3), low = Drift(0.3);
-            Ok(high > 0.3 && low < high * 0.3, $"a hovering wasp drifts downwind, less near the ground ({high:0.00} m at 3 m, {low:0.00} m at 30 cm in 3 s)");
+            var hold = Fly(3, 0, 1, false); var calmF = Fly(3, 0, 1, true); var down = Fly(3, 100, 1, false); var up = Fly(3, 100, -1, false);
+            Ok(hold.off < 0.1, $"hovering in a {hold.wind:0.0} m/s wind the wasp holds its place ({hold.off * 100:0.0} cm off in 3 s)");
+            Ok(hold.used > calmF.used * 1.2, $"holding against the wind costs like flying ({hold.used * 1000:0.00} vs {calmF.used * 1000:0.00})");
+            Ok(down.along / 3 > D(T.wasp.cruise) * 0.9 && -up.along / 3 < D(T.wasp.cruise) * 0.9, $"flat out it covers {down.along / 3:0.00} m/s downwind and {-up.along / 3:0.00} m/s upwind");
 
             var s0 = new Sim(new Settings { seed = 1234, birds = false });
             Ok(s0.wasp.bodyT >= T.cold.flyBody, $"a wasp leaves the nest warm ({D(s0.wasp.bodyT):0.0} °C)");

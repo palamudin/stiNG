@@ -924,17 +924,21 @@ export class Sim {
       if (w.carry) top *= W.carrySpeedMul;
       if (w.caste === 'queen') top *= T.queen.speedMul;
       if (rain) top *= T.weather.rainSpeedMul;
-      dx *= top; dy *= top; dz *= top;
-      // the air moves: the wasp holds most of its course but drifts with the wind, less near the ground (GDD 5.3)
-      const wd = this._drift(w);
-      dx += wd.x; dz += wd.z;
-      let ex = dx - w.vx, ey = dy - w.vy, ez = dz - w.vz;
+      // The wasp flies in moving air (GDD 5.3): its airspeed is capped at its top speed and the wind adds to it, so it
+      // is faster downwind and slower upwind. With no input it leans into the wind and holds its place, which is flying
+      // all the same; with full input it flies its course at top airspeed. A wind stronger than it can fly carries it off.
+      const wd = this._drift(w), thr = Math.min(1, Math.sqrt(dx * dx + dy * dy + dz * dz));
+      let ax = dx * top - wd.x * (1 - thr), ay = dy * top, az = dz * top - wd.z * (1 - thr);
+      const am = Math.sqrt(ax * ax + ay * ay + az * az);
+      if (am > top) { ax *= top / am; ay *= top / am; az *= top / am; }
+      let ex = ax + wd.x - w.vx, ey = ay - w.vy, ez = az + wd.z - w.vz;
       const el = Math.sqrt(ex * ex + ey * ey + ez * ez), amax = (burst ? W.burstAccel : W.accel) * DT;
       if (el > amax) { ex *= amax / el; ey *= amax / el; ez *= amax / el; }
       w.vx += ex; w.vy += ey; w.vz += ez;
-      const speed = Math.sqrt(w.vx * w.vx + w.vy * w.vy + w.vz * w.vz);
+      // the work is in the airspeed, not the ground speed: holding still in a breeze costs like flying
+      const rx = w.vx - wd.x, rz = w.vz - wd.z, air = Math.sqrt(rx * rx + w.vy * w.vy + rz * rz);
       const E = T.energy;
-      let drain = E.cruisePerSec * DT * (E.hoverShare + (1 - E.hoverShare) * Math.min(speed / W.cruise, 2)) * (burst ? E.burstMul : 1);
+      let drain = E.cruisePerSec * DT * (E.hoverShare + (1 - E.hoverShare) * Math.min(air / W.cruise, 2)) * (burst ? E.burstMul : 1);
       if (rain) drain *= T.weather.rainDrainMul;
       if (this._nearCitronella(w)) drain *= T.esc.citronellaDrain;
       w.energy -= drain;
@@ -959,11 +963,12 @@ export class Sim {
     } else w.groundTicks = 0;
   }
 
-  // The wind a wasp feels: the day's wind, gusting, falling off toward the ground, times the share it cannot hold against
+  // The air where a wasp is: the day's wind, gusting, falling off toward the ground (felt: the share of it in the air
+  // a wasp's size flies in, among the grass and leaves)
   _drift(w) {
     const W = T.wind, wind = this.wind, t = this.tick;
     const gust = 1 + W.gust * dsin(t * 0.031) * dsin(t * 0.0137 + 1);
-    const k = W.drift * gust * clamp01(w.y / W.refHeight);
+    const k = W.felt * gust * clamp01(w.y / W.refHeight);
     return { x: wind.x * k, z: wind.z * k };
   }
 

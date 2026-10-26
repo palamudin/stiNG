@@ -183,7 +183,7 @@ export const NET_SCENARIOS = [
   { name: 'good', link: 'good', ticks: 9000 },
   { name: 'awful', link: 'awful', ticks: 6000 },
   { name: 'join', link: 'good', ticks: 9000, joinAt: 3000 },
-  { name: 'cheat', link: 'good', ticks: 9000, cheat: true },
+  { name: 'cheat', link: 'good', ticks: 14000, cheat: true },
 ];
 for (const sc of NET_SCENARIOS) {
   const d = Digest(), lab = new NetLab({ seed: 1234 }, sc.link, {}, sc.joinAt || 0), botA = stingBot({ plan: 'jab', rest: 200 });

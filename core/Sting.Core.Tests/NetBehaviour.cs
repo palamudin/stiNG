@@ -131,6 +131,7 @@ namespace Sting.Core.Tests
                 Okn(after.Contains(2) && after.Select((p, j) => p == before[j] || p == 2).All(x => x), $"a third peer takes some chunks and moves no others ({string.Concat(after)})");
                 (bool[] took, bool[] held, int auth) Grab(string what, V3 spot)
                 {
+                    for (int i = 0; i < 400 && (A.Driven() == null || B.Driven() == null); i++) lab.Step(Idle(), Idle()); // a wasp lost earlier respawns
                     var wa = A.Driven(); var wb = B.Driven();
                     foreach (var w in new[] { wa, wb }) { w.x = spot.x; w.y = spot.y; w.z = spot.z; w.vx = w.vy = w.vz = 0; w.state = "fly"; w.carry = null; }
                     lab.Step(Idle(), Idle());

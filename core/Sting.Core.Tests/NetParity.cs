@@ -23,7 +23,7 @@ namespace Sting.Core.Tests
             Lab("good", "good", 9000);
             Lab("awful", "awful", 6000);
             Lab("join", "good", 9000, 3000);
-            Lab("cheat", "good", 9000, 0, true);
+            Lab("cheat", "good", 14000, 0, true);
             {
                 var d = new Digest(); var lab = new MeshLab(new Settings { seed = 1234 }, 3, "bad"); var botA = Bots.StingBot("jab", null, 200);
                 lab.tamper = (from, m, sim) => { if (from == 2 && sim.tick > 1500 && m is NetEv ev && ev.type == "sting") foreach (var sw in ev.swats) sw.start += 1000; };

@@ -751,21 +751,28 @@ function seated(sim, pred) { return sim.active.find((h) => !h.special && h.postu
 
 // 26. Tier 1, batch 1: wind, cold, drowning, clothes by the weather, shaking and flailing
 {
-  // wind: a pure function of the day, calm at dawn, stronger in the afternoon; it carries a hovering wasp off
+  // wind: a pure function of the day, calm at dawn, stronger in the afternoon
   let seed = 1, day0 = null;
   for (; seed < 200; seed++) { const w = dayWeather(BigInt(seed), 0); if (!w.rain && w.wind > 2.2) { day0 = w; break; } }
   const at = (m) => { const v = windAt(BigInt(seed), m); return Math.hypot(v.x, v.z); };
   ok(day0 && at(15 * 60) > at(7 * 60) * 1.5 && at(15 * 60) === at(15 * 60), `wind is calm at dawn and stronger mid-afternoon (${at(7 * 60).toFixed(2)} -> ${at(15 * 60).toFixed(2)} m/s)`);
-  const drift = (y) => {
+  // the wasp flies in the moving air: with no input it leans into the wind and holds its place, paying for it like
+  // flying; with input it is faster downwind than upwind (GDD 5.3)
+  const fly = (y, mz, sign, calm) => {
     const s = new Sim({ seed, birds: false });
-    const p0 = { x: 40, y, z: 40 }; // open grass in chunk (1,1)? place far from the nest
-    const w = s.wasp; place(w, p0);
-    run(s, 180, () => idle());
-    const v = s.wind, n = Math.hypot(v.x, v.z);
-    return ((w.x - p0.x) * v.x + (w.z - p0.z) * v.z) / n;
+    run(s, 1, () => idle());
+    if (calm) Object.defineProperty(s, 'wind', { value: { x: 0, z: 0 }, configurable: true });
+    const p0 = { x: 40, y, z: 40 }, w = s.wasp; place(w, p0); w.energy = 1;
+    const v = windAt(BigInt(seed), s.minute), n = Math.hypot(v.x, v.z), yaw = Math.atan2(sign * v.x, sign * v.z);
+    let low = Infinity;
+    for (let i = 0; i < 180; i++) { run(s, 1, () => idle({ mz, yawQ: Math.round(yaw * 1e4), pitchQ: 0 })); low = Math.min(low, w.y); }
+    return { along: ((w.x - p0.x) * v.x + (w.z - p0.z) * v.z) / n, off: Math.hypot(w.x - p0.x, w.z - p0.z), used: 1 - w.energy, low, wind: n };
   };
-  const high = drift(3), low = drift(0.3);
-  ok(high > 0.3 && low < high * 0.3, `a hovering wasp drifts downwind, less near the ground (${high.toFixed(2)} m at 3 m, ${low.toFixed(2)} m at 30 cm in 3 s)`);
+  const hold = fly(3, 0, 1, false), calm = fly(3, 0, 1, true), down = fly(3, 100, 1, false), up = fly(3, 100, -1, false);
+  ok(hold.off < 0.1, `hovering in a ${hold.wind.toFixed(1)} m/s wind the wasp holds its place (${(hold.off * 100).toFixed(1)} cm off in 3 s)`);
+  ok(hold.used > calm.used * 1.2, `holding against the wind costs like flying (${(hold.used * 1000).toFixed(2)} vs ${(calm.used * 1000).toFixed(2)} of the crop in still air)`);
+  ok(down.along > up.along * -1 + 1 && down.along / 3 > T.wasp.cruise * 0.9 && -up.along / 3 < T.wasp.cruise * 0.9,
+    `flat out it covers ${(down.along / 3).toFixed(2)} m/s downwind and ${(-up.along / 3).toFixed(2)} m/s upwind (cruise ${T.wasp.cruise})`);
 
   // cold: a resting wasp shivers to stay ready; in the cold it cannot fly, and in torpor it dies unless it finds warmth
   const s = new Sim({ seed: 1234, birds: false });

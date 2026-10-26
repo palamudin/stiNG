@@ -19,8 +19,9 @@ export const T = {
     springChill: 6, autumnChill: 7,
   },
   // Wind (GDD 5.3, T1-1): one direction and strength per day, calm at dawn, strongest mid-afternoon, gusting.
-  // A wasp flies in the moving air: drift is the share of the wind it cannot hold against, less near the ground.
-  wind: { min: 0, max: 3, rainMul: 1.4, drift: 0.35, refHeight: 3, gust: 0.4 },
+  // A wasp flies in the moving air: airspeed capped at its top speed, plus the wind, which falls off toward the ground
+  // below refHeight. felt scales the day's wind to the air a wasp's size flies in.
+  wind: { min: 0, max: 3, rainMul: 1.4, felt: 0.7, refHeight: 3, gust: 0.4 },
   // Body temperature (GDD 7.1, 10.2, T1-2). bio: Vespula warm their flight muscles before take-off and fly from
   // about 18-20 °C thorax temperature; on human skin they sit near 31 °C; cold torpor below about 8 °C.
   cold: { flightHeat: 12, shiverHeat: 8, shiverMinAir: 8, skinTemp: 31, nestTemp: 30, flyBody: 18, torpor: 8, rate: 1 / 300, lethalTicks: 5400, shiverCost: 0.5 },

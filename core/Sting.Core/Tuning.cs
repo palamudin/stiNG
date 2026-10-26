@@ -17,7 +17,7 @@ namespace Sting.Core
         public static class time { public static Num startMinute = 11 * 60, dawn = 7 * 60, dusk = 20 * 60 + 30; }
         public static class weather { public static Num rainChance = 0.2, baseMin = 17, baseMax = 29, diurnalAmp = 6, flyMinTemp = 11, rainSpeedMul = 0.35, rainDrainMul = 3, springChill = 6, autumnChill = 7; }
         /// Wind (GDD 5.3, T1-1)
-        public static class wind { public static Num min = 0, max = 3, rainMul = 1.4, drift = 0.35, refHeight = 3, gust = 0.4; }
+        public static class wind { public static Num min = 0, max = 3, rainMul = 1.4, felt = 0.7, refHeight = 3, gust = 0.4; }
         /// Body temperature (GDD 7.1, 10.2, T1-2)
         public static class cold
         {
