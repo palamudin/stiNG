@@ -1158,14 +1158,17 @@ function buildWasp(remote = false, rival = false, caste = 'worker', species = 'w
     ring.rotation.x = Math.PI / 2; ring.position.y = 0.007;
     g.add(ring);
   }
+  if (species === 'bee') return buildBee(g, caste);
   const L = SPECIES_LOOK[species] || SPECIES_LOOK.wasp;
   const black = mat(L.dark), yellow = mat(rival ? '#e0901a' : L.band);
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.0021, 12, 10), L.head ? mat(L.head) : yellow); head.position.z = 0.0058; head.scale.set(1.15, 1, 0.9);
   const eyes = new THREE.Mesh(new THREE.SphereGeometry(0.0013, 8, 6), mat('#15120c')); eyes.scale.set(2.0, 1.1, 0.8); eyes.position.set(0, 0.0004, 0.0062);
-  const thorax = new THREE.Mesh(new THREE.SphereGeometry(0.0026, 12, 10), L.thorax ? mat(L.thorax) : black); thorax.position.z = 0.0025; thorax.scale.set(1, 0.95, 1.2);
-  const abdomen = new THREE.Group(); abdomen.position.z = 0.0004;
+  const thorax = new THREE.Mesh(new THREE.SphereGeometry(0.0026, 12, 10), L.thorax ? mat(L.thorax) : black); thorax.position.z = 0.0025; thorax.scale.set(1, 0.95, 1.05);
+  // the wasp waist: a thin stalk between the thorax and a gaster that starts narrow (a bee has none)
+  const petiole = new THREE.Mesh(new THREE.CylinderGeometry(0.00042, 0.00055, 0.0016, 8), black); petiole.rotation.x = Math.PI / 2; petiole.position.z = -0.0006;
+  const abdomen = new THREE.Group(); abdomen.position.z = -0.0012;
   let z = -0.0012;
-  for (const [r, m] of [[0.0027, yellow], [0.003, black], [0.0029, yellow], [0.0025, black], [0.0021, yellow], [0.0014, black]]) {
+  for (const [r, m] of [[0.0019, yellow], [0.0029, black], [0.003, yellow], [0.0026, black], [0.0021, yellow], [0.0014, black]]) {
     const s = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 8), m); s.position.z = z; s.scale.set(1, 0.9, 0.8); abdomen.add(s); z -= r * 1.05;
   }
   if (caste === 'male') { // a male: a seventh segment and no sting, long antennae (T2-3)
@@ -1187,9 +1190,67 @@ function buildWasp(remote = false, rival = false, caste = 'worker', species = 'w
     hip.userData = { side, base: (1 - k) * 0.55, phase: (k + (side > 0 ? 0 : 1)) % 2 };
     legs.push(hip); g.add(hip);
   }
-  g.add(head, eyes, thorax, abdomen, wl, wr, carry);
+  g.add(head, eyes, thorax, petiole, abdomen, wl, wr, carry);
   g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
   Object.assign(g.userData, { abdomen, wl, wr, carry, legs, head, eyes, yaw: 0, step: 0 });
+  scene.add(g);
+  return g;
+}
+// Fur: a ball whose surface is pushed in and out at random, flat shaded, so it reads as tufts against the light
+function fuzzBall(r, color, amp = 0.18, detail = 2) {
+  const geo = new THREE.IcosahedronGeometry(r, detail), p = geo.attributes.position, v = new THREE.Vector3();
+  const seen = new Map();
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i);
+    const k = `${v.x.toFixed(6)},${v.y.toFixed(6)},${v.z.toFixed(6)}`; // shared corners move together, so the ball stays closed
+    if (!seen.has(k)) { const h = Math.sin(v.x * 91731 + v.y * 37199 + v.z * 51787) * 43758.5453; seen.set(k, 1 + amp * (2 * (h - Math.floor(h)) - 1)); }
+    v.multiplyScalar(seen.get(k)); p.setXYZ(i, v.x, v.y, v.z);
+  }
+  geo.computeVertexNormals();
+  return new THREE.Mesh(geo, mat(color, { flatShading: true }));
+}
+// A honeybee (GDD 6.8): no waist; a furry tan thorax; a stout, rounded abdomen in amber and dark brown with pale hair
+// at the band edges; big eyes on the sides of a dark head; elbowed antennae; broad hind legs whose pollen baskets
+// fill with orange pellets when it carries pollen
+function buildBee(g, caste) {
+  const dark = mat('#2b2013'), amber = '#c58a2e', fur = '#b48b52';
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.0021, 12, 10), dark); head.position.set(0, -0.0002, 0.0061); head.scale.set(1.3, 1.1, 0.8);
+  const eyes = new THREE.Group();
+  for (const sd of [-1, 1]) { const e = new THREE.Mesh(new THREE.SphereGeometry(0.0011, 10, 8), mat('#120d08')); e.scale.set(0.6, 1.35, 0.95); e.position.set(sd * 0.0019, 0.0001, 0.0062); eyes.add(e); }
+  for (const sd of [-1, 1]) { // elbowed antennae: a short stalk up, then the whip forward and down
+    const sc = new THREE.Mesh(new THREE.BoxGeometry(0.00028, 0.0021, 0.00028), dark); sc.position.set(sd * 0.0006, 0.0015, 0.0078); sc.rotation.x = 0.35;
+    const fl = new THREE.Mesh(new THREE.BoxGeometry(0.00026, 0.00026, 0.0032), dark); fl.position.set(sd * 0.001, 0.0021, 0.0098); fl.rotation.set(0.55, sd * 0.25, 0);
+    eyes.add(sc, fl);
+  }
+  const thorax = fuzzBall(0.0031, fur, 0.2); thorax.position.z = 0.0026; thorax.scale.set(1.05, 1, 1.05);
+  const abdomen = new THREE.Group(); abdomen.position.z = 0.0011; // tight against the thorax: no waist
+  let z = -0.0012;
+  const bands = [[0.0031, amber], [0.0034, '#3a2a16'], [0.0034, amber], [0.003, '#3a2a16'], [0.0025, '#3a2a16'], [0.0016, '#2b2013']];
+  bands.forEach(([r, c], i) => {
+    const seg = fuzzBall(r, c, i % 2 ? 0.05 : 0.08, 2); seg.position.z = z; seg.scale.set(1.05, 0.95, 0.72); abdomen.add(seg);
+    if (i > 0 && i < 5) { const hair = new THREE.Mesh(new THREE.TorusGeometry(r * 0.93, r * 0.07, 5, 18), mat('#d8c39a')); hair.position.z = z + r * 0.45; hair.scale.set(1.05, 0.95, 1); abdomen.add(hair); }
+    z -= r * 0.9;
+  });
+  if (caste !== 'male') { const sting = new THREE.Mesh(new THREE.ConeGeometry(0.00028, 0.0013, 6), dark); sting.rotation.x = -Math.PI / 2; sting.position.z = z - 0.0002; abdomen.add(sting); }
+  const wingMat = new THREE.MeshBasicMaterial({ color: '#eef1e8', transparent: true, opacity: 0.3, side: THREE.DoubleSide, depthWrite: false });
+  const wingGeo = new THREE.PlaneGeometry(0.0034, 0.0076); wingGeo.translate(0.0017, 0, -0.0027);
+  const wl = new THREE.Mesh(wingGeo, wingMat), wr = new THREE.Mesh(wingGeo, wingMat);
+  wl.position.set(0.0012, 0.0026, 0.0032); wr.position.set(-0.0012, 0.0026, 0.0032); wr.scale.x = -1;
+  const carry = new THREE.Mesh(new THREE.SphereGeometry(0.0035, 8, 6), mat('#1b1a17')); carry.position.set(0, -0.004, 0.004); carry.visible = false;
+  const legGeo = new THREE.BoxGeometry(0.0052, 0.0004, 0.0004); legGeo.translate(0.0026, 0, 0);
+  const hindGeo = new THREE.BoxGeometry(0.0062, 0.00075, 0.0005); hindGeo.translate(0.0031, 0, 0); // broad hind legs: the pollen baskets
+  const legs = [], pollen = [];
+  for (let i = 0; i < 6; i++) {
+    const side = i < 3 ? 1 : -1, k = i % 3;
+    const hip = new THREE.Group(); hip.position.set(side * 0.0013, -0.0014, 0.0038 - k * 0.0011);
+    hip.add(new THREE.Mesh(k === 2 ? hindGeo : legGeo, dark));
+    if (k === 2) { const pel = new THREE.Mesh(new THREE.SphereGeometry(0.0011, 8, 6), mat('#f2a51c')); pel.scale.set(1.5, 1, 1); pel.position.set(0.0038, -0.0002, 0); pel.visible = false; hip.add(pel); pollen.push(pel); }
+    hip.userData = { side, base: (1 - k) * 0.55, phase: (k + (side > 0 ? 0 : 1)) % 2 };
+    legs.push(hip); g.add(hip);
+  }
+  g.add(head, eyes, thorax, abdomen, wl, wr, carry);
+  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  Object.assign(g.userData, { abdomen, wl, wr, carry, legs, head, eyes, pollen, yaw: 0, step: 0 });
   scene.add(g);
   return g;
 }
@@ -1250,9 +1311,10 @@ function renderWasps(alpha, t, dt) {
       hip.rotation.z = -(onSurface ? 0.75 - lift : 1.2);
     }
     g.userData.abdomen.rotation.x = w.state === 'attached' ? 0.5 + Math.sin(t * 0.8) * 0.06 : 0;
-    const cv = g.userData.carry;
-    cv.visible = !!w.carry;
+    const cv = g.userData.carry, packed = !!(w.carry && w.carry.what === 'pollen' && g.userData.pollen); // a bee's pollen sits in its leg baskets
+    cv.visible = !!w.carry && !packed;
     if (w.carry) cv.material = CARRY_MAT[w.carry.what] || CARRY_MAT.fly;
+    if (g.userData.pollen) for (const pel of g.userData.pollen) pel.visible = packed;
     if (w.state === 'under') {
       const hv = humanViews.get(w.under.hex);
       bulge.visible = true;
@@ -1275,7 +1337,9 @@ function renderWasps(alpha, t, dt) {
     const flap = r.state === 'attached' ? 0.15 : Math.sin(performance.now() * 0.9 + id) * 0.9;
     g.userData.wl.rotation.z = flap; g.userData.wr.rotation.z = -flap;
     g.userData.abdomen.rotation.x = r.state === 'attached' ? 0.5 : 0;
-    g.userData.carry.visible = !!r.carry;
+    const rp = r.carry === 'pollen' && !!g.userData.pollen;
+    g.userData.carry.visible = !!r.carry && !rp;
+    if (g.userData.pollen) for (const pel of g.userData.pollen) pel.visible = rp;
   }
   for (const [id, g] of waspViews) if (!seen.has(id)) { scene.remove(g); waspViews.delete(id); pos.delete(id); }
   return drivenPos;

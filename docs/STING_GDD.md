@@ -1502,7 +1502,7 @@ Any slam startles the people within `scareR` (1.5 m) by `nearPanic`. A `startle`
 
 **Network.** Nest events carry the species, so other players' wasps are drawn as theirs. Fight events carry the hornet's weight. Sting and deepen events carry their pain, which the checks bound. State packets know the new loads (moth, pollen, wasp).
 
-**Game.** Hornets are red-brown and larger, with the chase camera further back, and build tan paper nests. Bees are brown and furry, and their comb is wax-coloured. Lamps glow on houses at night, the nearest one lights its yard, and moths circle. Toasts tell pollen, swarms and robbers. The HUD names the species' workers, drones and pollen foragers.
+**Game.** Hornets are red-brown and larger, with the chase camera further back, and build tan paper nests. Bees are built differently, not recoloured: no waist, a furry thorax, a stout rounded abdomen in amber and dark brown with pale hair bands, big eyes on the sides of the head, elbowed antennae, and broad hind legs that show orange pollen pellets when loaded. Wasps and hornets show their thin waist. Bee comb is wax-coloured. Lamps glow on houses at night, the nearest one lights its yard, and moths circle. Toasts tell pollen, swarms and robbers. The HUD names the species' workers, drones and pollen foragers.
 
 **Checks.** JS and C# agree on every figure:
 - **Starting colonies:** 30 wasps, 10.5 hornets, 75 bees.
