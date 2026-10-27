@@ -893,6 +893,38 @@ namespace Sting.Core.Tests
                 var ev2 = RunS(u, 120);
                 Ok(Count(ev2, "sisterTakeover") == 1 && u.nest == strong.nest && u.colony == strong.colony && !u.line.Contains(strong) && !u.extinct, $"your colony gone, you go on in the strongest sister colony ({D(Floor(u.colony.adults))} adults)");
             }
+            // 45. town centres and beer gardens (T2-5): a paved 2x2 block in every region, shops, a fountain, a packed beer garden
+            {
+                int towns = 0, regions = 0; bool apart = true;
+                foreach (ulong seed in new ulong[] { 1234, 7 }) for (int rz = -2; rz <= 2; rz++) for (int rx = -2; rx <= 2; rx++)
+                {
+                    regions++;
+                    var L = World.Region(seed, rx, rz); if (L.tx < 0) continue;
+                    var cs = new List<(int x, int z)>(); for (int dz = 0; dz < 2; dz++) for (int dx = 0; dx < 2; dx++) cs.Add((rx * 8 - 4 + L.tx + dx, rz * 8 - 4 + L.tz + dz));
+                    if (cs.All(t => World.LandUse(seed, t.x, t.z) == "town" && World.TownQuarter(seed, t.x, t.z) != null)) towns++;
+                    if (rx == 0 && rz == 0 && cs.Any(t => System.Math.Abs(t.x) <= 1 && System.Math.Abs(t.z) <= 1)) apart = false;
+                }
+                Ok(towns == regions && apart, $"every region has one 2x2 town centre ({towns} of {regions}); the home region's is never beside the nest");
+                var HL = World.Region(1234, 0, 0); var q = new List<ChunkContent>();
+                for (int dz = 0; dz < 2; dz++) for (int dx = 0; dx < 2; dx++) q.Add(World.GenerateChunk(1234, HL.tx - 4 + dx, HL.tz - 4 + dz));
+                var garden = q.Where(c => c.gardens.Count > 0).ToList(); var g = garden[0]; var fountains = q.SelectMany(c => c.baths.Where(b => b.fountain)).ToList();
+                int beers = g.cans.Count(k => k.color == 4), seated = g.humans.Count(h => h.posture == "sit");
+                Ok(garden.Count == 1 && g.tables.Count == 6 && seated == 36 && beers == 18 && g.sugar.Count(k => k.kind == "can") >= 24,
+                    $"one quarter is a beer garden: 6 full tables, {seated} drinkers, {beers} beers among {g.cans.Count} drinks");
+                Ok(q.All(c => c.plazas.Count == 1 && c.shops.Count == 3 && c.boxes.Count(b => b.shop && !b.wood) == 3 && c.roads.Count == 0),
+                    "every quarter is paved over, with three shops (solid, not wood) and no street through it");
+                Ok(fountains.Count == 1 && !garden.Any(c => c.baths.Count > 0), "the block has one fountain, across from the beer garden");
+                var s = new Sim(new Settings { seed = 1234, birds = false, dayMinutes = 20 }, new SimOpts { noAI = true }); var w = s.wasp; var f = fountains[0];
+                RunS(s, 2);
+                Place(w, P(f.x + 0.3, f.h + T.wasp.radius + 0.004, f.z)); w.state = "fly"; w.carry = null;
+                RunS(s, 2);
+                var sh = q[0].shops[0];
+                Ok(s.hint.water && !s.hint.wood && s.InSolid(sh.x, sh.h / 2, sh.z) && !s.InSolid(sh.x + sh.hw + 0.5, 1, sh.z), "over the fountain the wasp can take water; inside a shop is solid");
+                long rd = 1; while (!World.Weather(s.seed, rd).rain) rd++;
+                var rec = s.records.Get(World.ChunkKey(q[0].cx, q[0].cz)); var ps = s.PuddlesIn(rec, rd); var pl = rec.content.plazas[0];
+                Ok(ps.Count > 0 && ps.All(p => p.x >= pl.minx && p.x <= pl.maxx && p.z >= pl.minz && p.z <= pl.maxz && !rec.content.boxes.Any(b => p.x > b.minx && p.x < b.maxx && p.z > b.minz && p.z < b.maxz)),
+                    $"after rain puddles lie on the square ({ps.Count}), never in a shop");
+            }
         }
 
         // 26. Tier 1, batch 1: wind, cold, drowning, clothes by the weather, shaking and flailing

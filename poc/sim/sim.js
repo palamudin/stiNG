@@ -1532,7 +1532,7 @@ export class Sim {
     const cache = rec._puddles || (rec._puddles = {});
     if (cache.d === d) return cache.list;
     const W = T.water, c = rec.content, sd = Number(this.seed & 0xffffffffn), CS = T.chunk.size, list = [];
-    const paved = c.roads.concat(c.lots), n = W.puddles * (dayWeather(this.seed, d).pour > 1 ? 2 : 1); // a storm leaves twice as many (T2-2)
+    const paved = c.roads.concat(c.lots, c.plazas || []), n = W.puddles * (dayWeather(this.seed, d).pour > 1 ? 2 : 1); // a storm leaves twice as many (T2-2)
     for (let k = 0; k < n; k++) {
       const u = (j) => hseq(sd, rec.cx, rec.cz, d, k, 990 + j);
       let x, z;

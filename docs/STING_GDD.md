@@ -1280,6 +1280,18 @@ These complete 11.8. Like the earlier checks, each reads only the event and the 
 
 **Limits.** Sister colonies do not raise physical males and young queens or guards near the player, and the exterminator and pest control only ever come for the player's own nest.
 
+### 18.41 Town centres and beer gardens as built (T2-5)
+
+**Where.** Every region has one town centre: a 2x2 block of chunks laid over yards. The region layout scans for it from a hashed start and takes the first 2x2 block that is all yards, never beside the home chunk. In 50 regions over two seeds every one has a town. One quarter of each block, chosen by the region hash, is the beer garden; the quarter diagonally across from it has the fountain.
+
+**What is in it.** Each quarter is paved over with no street through it. It has three shops on its outer edges (7 to 11 m tall, solid, not wood) and up to two trees. The beer garden quarter has six picnic tables, every seat taken (36 drinkers), each table with its usual drinks plus a round of three beers, under string lights. The other quarters have groups of people standing about and flower planters. The fountain is a wide, low basin (1.1 m across, water at 0.55 m) that counts as water like a birdbath (T2-1). Most quarters have someone walking across the square. After rain, puddles lie on the paving as they do on streets and lots.
+
+**Shown.** Paving with joints, shops with windows, awnings and upper floors, beer glasses on the tables, string lights on posts over the garden, the fountain with its jet. On the minimap a town is its own colour.
+
+**Checks.** JS and C# check that every region has its 2x2 town, never next to home; that the beer garden has 6 full tables, 36 drinkers and 18 beers among 26 drinks (identical in both); that every quarter has its paving, three shops and no road; that there is one fountain, outside the garden; that a wasp over the fountain can take water and that inside a shop is solid; and that puddles after rain lie on the square, never inside a shop. The chunk digests now cover plazas, shops, gardens, the shop flag on boxes and the fountain flag on baths. The generator version is 7.
+
+**Limits.** Shops are closed boxes: there is no going inside, and no shop sells anything to wasps. The beer garden's drinkers keep the ordinary park hours rather than staying into the evening.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1288,7 +1300,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (91 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (92 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -1330,7 +1342,7 @@ Agreed 2026-10-27: Tier 2 is built on the current stack in the order that surviv
 | T2-2 | **Built (18.38).** Extreme weather: heatwaves, storms (gusts and downpours), cold snaps | 5.3 | M | sim; makes T2-1 matter |
 | T2-3 | **Built (18.39).** Males as wasps: drones fly physically late in the season, no sting, mating flights with gynes | 6.5, 6.7 | M | sim |
 | T2-4 | **Built (18.40).** Lineage colonies as real AI colonies: the queens the player did not wake found colonies of the line, run by AI | 6.7 | L | sim |
-| T2-5 | Town centers and beer gardens: a new land use with dense outdoor seating and drinks | 4.1, 4.3 | M | generator and sim; new art |
+| T2-5 | **Built (18.41).** Town centers and beer gardens: a new land use with dense outdoor seating and drinks | 4.1, 4.3 | M | generator and sim; new art |
 | T2-6 | Feature modifiers that need the bigger generator: biome mix, town density, terrain | 4.8 | L | terrain touches all collision |
 | T2-7 | The Reflex skill tree | 7.8 | M | mostly UI and progression: after the Unity move |
 | T2-8 | Colonies of thousands of wasps out at once | 11.12 | L | engine performance: after the Unity move |

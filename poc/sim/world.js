@@ -175,14 +175,42 @@ export function regionLayout(seed, rx, rz) {
   if (L) return L;
   const H = (slot) => hash(seed, Domain.WorldGen, u64(rx), u64(rz), BigInt(90000 + slot));
   L = { strip: rx === 0 && rz === 0 ? REGION / 2 : 2 + rangeInt(H(1), 0, 4), mallSide: rangeInt(H(2), 0, 4), mallFrom: rangeInt(H(3), 0, REGION - 2), forest: rangeInt(H(4), 0, 4) };
+  // a town centre (T2-5): a 2x2 block of yards, scanned for from a hashed start; never beside the home chunk
+  L.tx = -1; L.tz = -1; L.garden = rangeInt(H(7), 0, 4);
+  const sx = rangeInt(H(5), 0, REGION - 1), sz = rangeInt(H(6), 0, REGION - 1), home = rx === 0 && rz === 0;
+  for (let i = 0; i < (REGION - 1) * (REGION - 1) && L.tx < 0; i++) {
+    const tx = (sx + i) % (REGION - 1), tz = (sz + Math.floor(i / (REGION - 1))) % (REGION - 1);
+    let ok = true;
+    for (let dz = 0; dz < 2 && ok; dz++) for (let dx = 0; dx < 2 && ok; dx++) {
+      const lx = tx + dx, lz = tz + dz;
+      if (baseUse(L, lx, lz) !== 'yards' || (home && Math.abs(lx - REGION / 2) <= 1 && Math.abs(lz - REGION / 2) <= 1)) ok = false;
+    }
+    if (ok) { L.tx = tx; L.tz = tz; }
+  }
   if (regionCache.size > 256) regionCache.clear();
   regionCache.set(key, L);
   return L;
+}
+// land use before the town centre is laid over it
+function baseUse(L, lx, lz) {
+  if (lz === L.strip) return 'park';
+  const edge = [lz === 0, lx === REGION - 1, lz === REGION - 1, lx === 0][L.mallSide], along = L.mallSide % 2 ? lz : lx;
+  if (edge && along >= L.mallFrom && along < L.mallFrom + 3) return 'mall';
+  const fx = L.forest & 1 ? REGION - 2 : 0, fz = L.forest & 2 ? REGION - 2 : 0;
+  if (lx >= fx && lx < fx + 2 && lz >= fz && lz < fz + 2) return 'forest';
+  return 'yards';
+}
+// which quarter of its region's town centre a chunk is (0 or 1 each way), or null
+export function townQuarter(seed, cx, cz) {
+  const h = REGION / 2, rx = Math.floor((cx + h) / REGION), rz = Math.floor((cz + h) / REGION), lx = cx + h - rx * REGION, lz = cz + h - rz * REGION;
+  const L = regionLayout(seed, rx, rz), qx = lx - L.tx, qz = lz - L.tz;
+  return L.tx >= 0 && qx >= 0 && qx < 2 && qz >= 0 && qz < 2 ? { qx, qz, garden: qx + 2 * qz === L.garden } : null;
 }
 export function landUse(seed, cx, cz) {
   if (cx === 0 && cz === 0) return 'park';
   const h = REGION / 2, rx = Math.floor((cx + h) / REGION), rz = Math.floor((cz + h) / REGION), lx = cx + h - rx * REGION, lz = cz + h - rz * REGION;
   const L = regionLayout(seed, rx, rz);
+  if (townQuarter(seed, cx, cz)) return 'town';
   if (lz === L.strip) return 'park';
   const edge = [lz === 0, lx === REGION - 1, lz === REGION - 1, lx === 0][L.mallSide], along = L.mallSide % 2 ? lz : lx;
   if (edge && along >= L.mallFrom && along < L.mallFrom + 3) return 'mall';
@@ -205,6 +233,7 @@ export function generateChunk(seed, cx, cz) {
     webs: [], birds: [], rival: null, sheds: [], dragonflies: [],
     use: 'park', roads: [], loops: [], lots: [], malls: [], // T1-12: land use, streets, cul-de-sacs, parking lots, mall buildings
     baths: [], // T2-1: birdbaths
+    plazas: [], shops: [], gardens: [], // T2-5: a town centre's paving, its shop buildings, its beer garden
   };
   const occupied = [];
   const isOrigin = cx === 0 && cz === 0;
@@ -369,6 +398,47 @@ export function generateChunk(seed, cx, cz) {
     }
   };
 
+  // A town centre (GDD 4.3, T2-5): one quarter of a 2x2 block, paved, with shops on its two outer edges and a fountain,
+  // benches and planters on the square; one quarter of each block is a beer garden, tables packed in under string lights
+  const addTown = () => {
+    const q = townQuarter(seed, cx, cz), ix = q.qx ? -1 : 1, iz = q.qz ? -1 : 1; // toward the middle of the block
+    c.plazas.push({ minx: ox - 32, maxx: ox + 32, minz: oz - 32, maxz: oz + 32 });
+    const shop = (x, z, hw, hd, slot) => {
+      const h = range(H(slot), 7, 11);
+      c.shops.push({ x, z, hw, hd, h, color: rangeInt(H(slot + 1), 0, 6) });
+      c.boxes.push({ minx: x - hw, maxx: x + hw, miny: 0, maxy: h, minz: z - hd, maxz: z + hd, wood: false, shop: true });
+      occupied.push({ x, z, r: Math.max(hw, hd) + 1.5 });
+    };
+    shop(ox - ix * 22, oz - iz * 22, 9, 9, 7000);
+    shop(ox - ix * 25, oz + iz * 6, 6, 8, 7010);
+    shop(ox + ix * 6, oz - iz * 25, 8, 6, 7020);
+    if (q.garden) {
+      const gx = ox + ix * 12, gz = oz + iz * 12;
+      c.gardens.push({ x: gx, z: gz, hw: 9, hd: 7 });
+      for (let k = 0; k < 6; k++) {
+        const px = gx + ((k % 3) - 1) * 5.5, pz = gz + (Math.floor(k / 3) - 0.5) * 5, base = 7100 + k * 400, ti = c.tables.length;
+        addPicnic(px, pz, true, 0b111111, base);
+        for (let i = 0; i < 3; i++) { // a round of drinks on every table
+          const x = px + range(H(base + 90 + i), -0.8, 0.8), z = pz + range(H(base + 95 + i), -0.22, 0.22);
+          c.cans.push({ x, z, color: 4, table: ti }); c.sugar.push({ x, y: 0.87, z, rate: 1.0, kind: 'can', table: ti });
+        }
+      }
+    } else {
+      const ng = rangeInt(H(7050), 1, 3);
+      for (let k = 0; k < ng; k++) { const gx = ox + ix * range(H(7051 + k * 3), 4, 22), gz = oz + iz * range(H(7052 + k * 3), 4, 22); if (free(gx, gz, 2)) addGroup(gx, gz, rangeInt(H(7053 + k * 3), 2, 4), 7060 + k * 400); }
+      for (let k = 0; k < 2; k++) { const fx = ox + ix * range(H(7070 + k * 2), 2, 24), fz = oz + iz * range(H(7071 + k * 2), 2, 24); if (free(fx, fz, 1.5)) addFlowers(fx, fz, 7080 + k * 80); }
+      if (q.qx + 2 * q.qz === (regionLayout(seed, Math.floor((cx + REGION / 2) / REGION), Math.floor((cz + REGION / 2) / REGION)).garden + 2) % 4) {
+        // a fountain at the middle of the block: water (T2-1)
+        const fx = ox + ix * 27, fz = oz + iz * 27;
+        c.baths.push({ x: fx, z: fz, r: 1.1, h: 0.55, fountain: true });
+        c.cylinders.push({ x: fx, z: fz, r: 1.1, h: 0.55, wood: false, bath: true });
+        occupied.push({ x: fx, z: fz, r: 2.5 });
+      }
+    }
+    // someone crossing the square
+    if (unit(H(7600)) < 0.7) { const a = { x: ox + ix * 2, z: oz + iz * 26 }, b = { x: ox + ix * 26, z: oz + iz * 2 }; addActor(7610, a.x, a.z, 0, -iz, 'stand', 'stroll', [a.x, a.z, b.x, b.z]); }
+  };
+
   if (isOrigin) {
     addTree(NEST.treeX, NEST.treeZ, 100);
     occupied.push({ x: NEST.treeX, z: NEST.treeZ, r: 3 });
@@ -379,6 +449,7 @@ export function generateChunk(seed, cx, cz) {
     addFlowers(3, -5, 480);
   } else if ((c.use = landUse(seed, cx, cz)) === 'yards') addYards();
   else if (c.use === 'mall') addMall();
+  else if (c.use === 'town') addTown();
   else if (c.use === 'forest') {
     const np = rangeInt(H(2010), 1, 3);
     for (let i = 0; i < np; i++) addFlowers(ox + range(H(2020 + i), -26, 26), oz + range(H(2030 + i), -26, 26), 2100 + i * 80);
@@ -410,7 +481,7 @@ export function generateChunk(seed, cx, cz) {
     for (let i = 0; i < np; i++) addFlowers(ox + range(H(20 + i), -28, 28), oz + range(H(40 + i), -28, 28), 400 + i * 80);
   }
   // trees: a few in a park, yard trees, dense at the forest edge, hardly any by a mall
-  const nt = c.use === 'forest' ? rangeInt(H(2000), 16, 26) : c.use === 'yards' ? rangeInt(H(2001), 1, 4) : c.use === 'mall' ? rangeInt(H(2002), 0, 3) : rangeInt(H(11), isOrigin ? 3 : 2, isOrigin ? 6 : 8);
+  const nt = c.use === 'forest' ? rangeInt(H(2000), 16, 26) : c.use === 'yards' ? rangeInt(H(2001), 1, 4) : c.use === 'mall' ? rangeInt(H(2002), 0, 3) : c.use === 'town' ? rangeInt(H(2003), 0, 3) : rangeInt(H(11), isOrigin ? 3 : 2, isOrigin ? 6 : 8);
   for (let i = 0; i < nt; i++) {
     const x = ox + range(H(150 + i * 4), -30, 30), z = oz + range(H(151 + i * 4), -30, 30);
     if (free(x, z, c.use === 'forest' ? 1.5 : 3)) { addTree(x, z, 200 + i * 4); occupied.push({ x, z, r: c.use === 'forest' ? 1 : 2 }); }

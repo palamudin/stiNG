@@ -5,7 +5,7 @@ import { TUNE } from './tunefile.js';
 
 export const TICK_RATE = 60;
 export const DT = 1 / TICK_RATE;
-export const GEN_VERSION = 6; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11); 6: birdbaths (T2-1)
+export const GEN_VERSION = 7; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11); 6: birdbaths (T2-1); 7: town centres (T2-5)
 
 export const T = {
   population: 8200000000,

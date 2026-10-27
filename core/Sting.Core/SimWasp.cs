@@ -592,7 +592,7 @@ namespace Sting.Core
         {
             if (rec.puddles != null && rec.puddleDay == d) return rec.puddles;
             var c = rec.content; long sd = (long)(seed & 0xffffffffUL); Num CSz = T.chunk.size; var list = new List<WaterSrc>();
-            var paved = new List<Rect>(c.roads); paved.AddRange(c.lots);
+            var paved = new List<Rect>(c.roads); paved.AddRange(c.lots); paved.AddRange(c.plazas);
             int pn = T.water.puddles * (World.Weather(seed, d).pour > 1 ? 2 : 1); // a storm leaves twice as many (T2-2)
             for (int k = 0; k < pn; k++)
             {

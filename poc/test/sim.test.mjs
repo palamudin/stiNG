@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, humanParts, malesAbout, chunkOf, toLocal, dirToWorld, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, CMD_FIELDS,
+  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, CMD_FIELDS,
 } from '../sim/index.js';
 import { applyTuning, parseTuning, tuningHash, tuningLeaves, TUNE } from '../sim/tunefile.js';
 
@@ -1560,6 +1560,41 @@ function seated(sim, pred) {
   u.colony.queenAlive = false; u.colony.adults = 0; u.colony.eggs = u.colony.larvae = u.colony.pupae = 0;
   const ev2 = run(u, 120);
   ok(count(ev2, 'sisterTakeover') === 1 && u.nest === strong.nest && u.colony === strong.colony && !u.line.includes(strong) && !u.extinct, `your colony gone, you go on in the strongest sister colony (${Math.floor(u.colony.adults)} adults)`);
+}
+
+// Town centres and beer gardens (GDD 4.3, T2-5): a paved 2x2 block in every region, shops, a fountain, a packed beer garden
+{
+  let towns = 0, regions = 0, apart = true;
+  for (const seed of [1234n, 7n]) for (let rz = -2; rz <= 2; rz++) for (let rx = -2; rx <= 2; rx++) {
+    regions++;
+    const L = regionLayout(seed, rx, rz); if (L.tx < 0) continue;
+    const cs = []; for (let dz = 0; dz < 2; dz++) for (let dx = 0; dx < 2; dx++) cs.push([rx * 8 - 4 + L.tx + dx, rz * 8 - 4 + L.tz + dz]);
+    if (cs.every(([x, z]) => landUse(seed, x, z) === 'town' && townQuarter(seed, x, z))) towns++;
+    if (rx === 0 && rz === 0 && cs.some(([x, z]) => Math.abs(x) <= 1 && Math.abs(z) <= 1)) apart = false;
+  }
+  ok(towns === regions && apart, `every region has one 2x2 town centre (${towns} of ${regions}); the home region's is never beside the nest`);
+  const L = regionLayout(1234n, 0, 0), q = [];
+  for (let dz = 0; dz < 2; dz++) for (let dx = 0; dx < 2; dx++) q.push(generateChunk(1234n, L.tx - 4 + dx, L.tz - 4 + dz));
+  const garden = q.filter((c) => c.gardens.length), g = garden[0], fountains = q.flatMap((c) => c.baths.filter((b) => b.fountain));
+  const beers = g.cans.filter((k) => k.color === 4).length, seated = g.humans.filter((h) => h.posture === 'sit').length;
+  ok(garden.length === 1 && g.tables.length === 6 && seated === 36 && beers === 18 && g.sugar.filter((k) => k.kind === 'can').length >= 24,
+    `one quarter is a beer garden: 6 full tables, ${seated} drinkers, ${beers} beers among ${g.cans.length} drinks`);
+  ok(q.every((c) => c.plazas.length === 1 && c.shops.length === 3 && c.boxes.filter((b) => b.shop && !b.wood).length === 3 && c.roads.length === 0),
+    'every quarter is paved over, with three shops (solid, not wood) and no street through it');
+  ok(fountains.length === 1 && !garden.some((c) => c.baths.length), 'the block has one fountain, across from the beer garden');
+  // the fountain is water, the shops are walls
+  const s = new Sim({ seed: 1234, birds: false, dayMinutes: 20 }, { noAI: true }), w = s.wasp, f = fountains[0];
+  run(s, 2);
+  place(w, { x: f.x + 0.3, y: f.h + T.wasp.radius + 0.004, z: f.z }); w.state = 'fly'; w.carry = null;
+  run(s, 2, () => idle());
+  const sh = q[0].shops[0];
+  ok(s.hint.water && !s.hint.wood && s._inSolid({ x: sh.x, y: sh.h / 2, z: sh.z }) && !s._inSolid({ x: sh.x + sh.hw + 0.5, y: 1, z: sh.z }),
+    'over the fountain the wasp can take water; inside a shop is solid');
+  // after rain, puddles lie on the square
+  let rd = 1; while (!dayWeather(s.seed, rd).rain) rd++;
+  const rec = s.records.get(chunkKey(q[0].cx, q[0].cz)), ps = s.puddlesIn(rec, rd), pl = rec.content.plazas[0];
+  ok(ps.length > 0 && ps.every((p) => p.x >= pl.minx && p.x <= pl.maxx && p.z >= pl.minz && p.z <= pl.maxz && !rec.content.boxes.some((b) => p.x > b.minx && p.x < b.maxx && p.z > b.minz && p.z < b.maxz)),
+    `after rain puddles lie on the square (${ps.length}), never in a shop`);
 }
 
 // Tuning as data (GDD 13, T1-22): one plain-text file feeds both sims

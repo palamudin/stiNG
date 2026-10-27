@@ -10,7 +10,7 @@ namespace Sting.Core
     {
         public const int TICK_RATE = 60;
         public static readonly Num DT = 1.0 / TICK_RATE;
-        public const int GEN_VERSION = 6; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11); 6: birdbaths (T2-1)
+        public const int GEN_VERSION = 7; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11); 6: birdbaths (T2-1); 7: town centres (T2-5)
 
         public static Num population = 8200000000;
         public static class chunk { public static Num size = 64; public static int activeRadius = 1, discoverRadius = 2; }

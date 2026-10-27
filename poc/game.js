@@ -100,7 +100,7 @@ const JACKET = ['#4b513b', '#7a3b2e', '#2b3a55'];
 const JEANS = ['#3c5a86', '#2c3e5c', '#4d6d99'];
 const SHORTS = ['#c7b48d', '#5c6e4a', '#8a8f99', '#a3473a'];
 const SKIRT = ['#7a2e3b', '#2f4858', '#c9a227'];
-const CANS = ['#d42c2c', '#2b6fd6', '#f2f2f2', '#28a35a'];
+const CANS = ['#d42c2c', '#2b6fd6', '#f2f2f2', '#28a35a', '#e8eef0']; // 4: a beer glass (T2-5)
 const FLOWERS = ['#f4f1ea', '#f6c700', '#e5412d', '#b06ad9', '#f08a24'];
 function pick(seed, id, k, arr) { return arr[rangeInt(hash(seed, Domain.Cosmetic, id, BigInt(k)), 0, arr.length)]; }
 
@@ -143,7 +143,7 @@ const geoBox = new THREE.BoxGeometry(1, 1, 1);
 const geoCan = new THREE.CylinderGeometry(0.033, 0.033, 0.12, 18, 1, true); // hollow: open at the top (GDD 7.5)
 const geoCanIn = new THREE.CylinderGeometry(0.030, 0.030, 0.12, 18, 1, true);
 const geoDrink = new THREE.CircleGeometry(0.030, 18);
-const DRINKS = ['#3a1b0c', '#6b3a12', '#d9c27a', '#9fc23a'];
+const DRINKS = ['#3a1b0c', '#6b3a12', '#d9c27a', '#9fc23a', '#e0a526'];
 const geoStem = new THREE.CylinderGeometry(0.0035, 0.0035, 1, 4);
 const geoHead = new THREE.IcosahedronGeometry(0.022, 1);
 const geoBottle = new THREE.CylinderGeometry(0.035, 0.04, 0.2, 12);
@@ -162,6 +162,13 @@ function buildChunk(rec) {
   const dyn = { lids: [], traps: [], candles: [], cans: [], puddles: [], crowns: [], grills: [], wood: [], rain: [], rainDay: -2 };
   // birdbaths (T2-1): a stone basin on a pedestal, water to the brim
   for (const b of c.baths || []) {
+    if (b.fountain) { // a town fountain (T2-5): a low stone basin, a jet in the middle
+      const rim = new THREE.Mesh(new THREE.CylinderGeometry(b.r + 0.15, b.r + 0.2, b.h - 0.02, 28), mat('#b8b0a2')); rim.position.set(b.x, (b.h - 0.02) / 2, b.z); rim.receiveShadow = true;
+      const water = new THREE.Mesh(new THREE.CircleGeometry(b.r, 28), WATER_MAT); water.rotation.x = -Math.PI / 2; water.position.set(b.x, b.h + 0.002, b.z);
+      const jet = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.12, 1.2, 8), new THREE.MeshLambertMaterial({ color: '#d8ecf6', transparent: true, opacity: 0.6 })); jet.position.set(b.x, b.h + 0.6, b.z);
+      g.add(rim, water, jet);
+      continue;
+    }
     const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.11, b.h - 0.08, 10), mat('#a9a49a')); ped.position.set(b.x, (b.h - 0.08) / 2, b.z);
     const basin = new THREE.Mesh(new THREE.CylinderGeometry(b.r + 0.03, b.r * 0.55, 0.1, 18), mat('#bdb8ad')); basin.position.set(b.x, b.h - 0.055, b.z); // its rim just under the water line
     const water = new THREE.Mesh(new THREE.CircleGeometry(b.r, 20), WATER_MAT); water.rotation.x = -Math.PI / 2; water.position.set(b.x, b.h + 0.002, b.z);
@@ -184,6 +191,29 @@ function buildChunk(rec) {
     flat(l.minx, l.maxx, l.minz, l.maxz, '#4b4c50', 0.005);
     const along = l.maxx - l.minx > l.maxz - l.minz;
     for (let k = -12; k <= 12; k++) { const x = (l.minx + l.maxx) / 2 + (along ? k * 2.5 : 0), z = (l.minz + l.maxz) / 2 + (along ? 0 : k * 2.5); flat(x - (along ? 0.06 : 2.4), x + (along ? 0.06 : 2.4), z - (along ? 2.4 : 0.06), z + (along ? 2.4 : 0.06), '#d8d6cf', 0.006); }
+  }
+  // a town centre (T2-5): stone paving, shops with lit windows and awnings, a beer garden under string lights, a fountain
+  for (const p of c.plazas || []) {
+    flat(p.minx, p.maxx, p.minz, p.maxz, '#bdb4a4', 0.005);
+    for (let k = -3; k <= 3; k++) { flat(p.minx, p.maxx, (p.minz + p.maxz) / 2 + k * 9 - 0.04, (p.minz + p.maxz) / 2 + k * 9 + 0.04, '#a99f8e', 0.006); flat((p.minx + p.maxx) / 2 + k * 9 - 0.04, (p.minx + p.maxx) / 2 + k * 9 + 0.04, p.minz, p.maxz, '#a99f8e', 0.006); }
+  }
+  const SHOP = ['#c98f6b', '#d8c7a4', '#9fb3a1', '#b8a1c4', '#e0d0b8', '#a8bccd'], AWN = ['#7a2f24', '#2f5f7a', '#3f7a2f', '#7a6a2f', '#5a2f7a', '#7a2f5a'];
+  for (const sh of c.shops || []) {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(sh.hw * 2, sh.h, sh.hd * 2), mat(SHOP[sh.color % SHOP.length])); b.position.set(sh.x, sh.h / 2, sh.z); b.castShadow = b.receiveShadow = true;
+    // shop windows on every side: one pane across the x faces, one across the z faces
+    const glass = new THREE.Mesh(new THREE.BoxGeometry(sh.hw * 2 - 1, 2.2, sh.hd * 2 + 0.06), mat('#2c3a44')); glass.position.set(sh.x, 1.4, sh.z);
+    const glass2 = new THREE.Mesh(new THREE.BoxGeometry(sh.hw * 2 + 0.06, 2.2, sh.hd * 2 - 1), mat('#2c3a44')); glass2.position.set(sh.x, 1.4, sh.z);
+    const awn = new THREE.Mesh(new THREE.BoxGeometry(sh.hw * 2 + 0.8, 0.12, sh.hd * 2 + 0.8), mat(AWN[sh.color % AWN.length])); awn.position.set(sh.x, 2.75, sh.z);
+    for (let fl = 1; fl < Math.floor(sh.h / 3); fl++) { const wv = new THREE.Mesh(new THREE.BoxGeometry(sh.hw * 2 + 0.04, 1.0, sh.hd * 2 + 0.04), mat('#3a4652')); wv.scale.set(0.8, 1, 0.8); wv.position.set(sh.x, fl * 3 + 1.4, sh.z); g.add(wv); }
+    g.add(b, glass, glass2, awn);
+  }
+  for (const gd of c.gardens || []) {
+    const lights = new THREE.Group(), bulb = new THREE.SphereGeometry(0.05, 6, 4), on = new THREE.MeshBasicMaterial({ color: '#ffe7a8' });
+    for (const [ax, az, bx, bz] of [[-1, -1, 1, -1], [1, -1, 1, 1], [1, 1, -1, 1], [-1, 1, -1, -1], [-1, 0, 1, 0]]) {
+      for (let k = 0; k <= 12; k++) { const f = k / 12, x = gd.x + (ax + (bx - ax) * f) * gd.hw, z = gd.z + (az + (bz - az) * f) * gd.hd; const m = new THREE.Mesh(bulb, on); m.position.set(x, 2.8 - 0.35 * Math.sin(Math.PI * f), z); lights.add(m); }
+    }
+    for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { const post = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2.9, 6), mat('#4a3a2c')); post.position.set(gd.x + sx * gd.hw, 1.45, gd.z + sz * gd.hd); lights.add(post); }
+    g.add(lights);
   }
   for (const m of c.malls || []) {
     const b = new THREE.Mesh(new THREE.BoxGeometry(m.hw * 2, m.h, m.hd * 2), mat('#cdbfa6')); b.position.set(m.x, m.h / 2, m.z); b.castShadow = b.receiveShadow = true;
@@ -1720,7 +1750,7 @@ function drawMap() {
     const rec = sim.records.get(key);
     if (rec) {
       const use = rec.content.use || 'park';
-      ctx.fillStyle = use === 'yards' ? 'hsla(95, 22%, 31%, 0.92)' : use === 'forest' ? 'hsla(100, 35%, 14%, 0.95)' : use === 'mall' ? 'hsla(40, 6%, 30%, 0.92)' : `hsla(${88 + rec.content.tint * 20}, 30%, ${21 + rec.content.tint * 8}%, 0.92)`;
+      ctx.fillStyle = use === 'yards' ? 'hsla(95, 22%, 31%, 0.92)' : use === 'forest' ? 'hsla(100, 35%, 14%, 0.95)' : use === 'mall' ? 'hsla(40, 6%, 30%, 0.92)' : use === 'town' ? 'hsla(30, 18%, 42%, 0.95)' : `hsla(${88 + rec.content.tint * 20}, 30%, ${21 + rec.content.tint * 8}%, 0.92)`;
       ctx.fillRect(sx + 1, sy + 1, cell - 2, cell - 2);
       // streets and buildings (T1-12)
       ctx.fillStyle = 'rgba(30,30,32,.75)';

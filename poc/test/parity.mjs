@@ -33,7 +33,7 @@ export function digestChunk(c, d) {
   f(c.caterpillars.length); for (const t of c.caterpillars) { f(t.x); f(t.y); f(t.z); }
   f(c.flies.length); for (const t of c.flies) { for (const k of ['x', 'y', 'z', 'r', 'w1', 'w2', 'w3', 'p1', 'p2', 'p3']) f(t[k]); }
   f(c.humans.length); for (const t of c.humans) { f(t.slot); f(t.x); f(t.z); f(t.fx); f(t.fz); f(t.posture === 'sit'); f(t.exit); f(t.posture === 'lie'); f(t.act === 'stroll' ? 1 : t.act === 'garden' ? 2 : t.act === 'sun' ? 3 : 0); f(t.path ? t.path.length : 0); if (t.path) for (const v of t.path) f(v); }
-  f(c.boxes.length); for (const t of c.boxes) { for (const k of ['minx', 'maxx', 'miny', 'maxy', 'minz', 'maxz']) f(t[k]); f(!!t.wood); f(!!t.hive); f(!!t.shed); f(!!t.fence); f(!!t.mall); }
+  f(c.boxes.length); for (const t of c.boxes) { for (const k of ['minx', 'maxx', 'miny', 'maxy', 'minz', 'maxz']) f(t[k]); f(!!t.wood); f(!!t.hive); f(!!t.shed); f(!!t.fence); f(!!t.mall); f(!!t.shop); }
   f(c.cylinders.length); for (const t of c.cylinders) { f(t.x); f(t.z); f(t.r); f(t.h); }
   f(c.sugar.length); for (const t of c.sugar) { f(t.x); f(t.y); f(t.z); f(t.rate); f(KIND[t.kind]); f(t.table ?? -1); }
   f(c.hives.length); for (const t of c.hives) {
@@ -47,11 +47,15 @@ export function digestChunk(c, d) {
   f(c.sheds.length); for (const t of c.sheds) { for (const k of ['x', 'z', 'hw', 'hd', 'h', 'crack', 'eave']) f(t[k]); f(!!t.house); }
   f(!!c.nest);
   // regions (T1-12)
-  f(['park', 'yards', 'mall', 'forest'].indexOf(c.use));
+  f(['park', 'yards', 'mall', 'forest', 'town'].indexOf(c.use));
   for (const list of [c.roads, c.lots]) { f(list.length); for (const t of list) for (const k of ['minx', 'maxx', 'minz', 'maxz']) f(t[k]); }
   f(c.loops.length); for (const t of c.loops) { f(t.x); f(t.z); f(t.r); }
   f(c.malls.length); for (const t of c.malls) for (const k of ['x', 'z', 'hw', 'hd', 'h']) f(t[k]);
-  f(c.baths.length); for (const t of c.baths) for (const k of ['x', 'z', 'r', 'h']) f(t[k]); // T2-1
+  f(c.baths.length); for (const t of c.baths) { for (const k of ['x', 'z', 'r', 'h']) f(t[k]); f(!!t.fountain); } // T2-1, T2-5
+  // town centres (T2-5)
+  f(c.plazas.length); for (const t of c.plazas) for (const k of ['minx', 'maxx', 'minz', 'maxz']) f(t[k]);
+  f(c.shops.length); for (const t of c.shops) for (const k of ['x', 'z', 'hw', 'hd', 'h', 'color']) f(t[k]);
+  f(c.gardens.length); for (const t of c.gardens) for (const k of ['x', 'z', 'hw', 'hd']) f(t[k]);
 }
 
 const lines = [];
