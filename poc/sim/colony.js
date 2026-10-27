@@ -21,6 +21,8 @@ export function newColony(founding = false) {
 
 export const proteinCap = (c) => T.colony.proteinCapBase + (c.larvae + c.rLarvae * T.season.reproProtein) * T.colony.larvaProtein * T.colony.proteinCapDays;
 export const sugarCap = (c) => T.colony.sugarCapBase + c.adults * T.colony.adultSugar * T.colony.sugarCapDays;
+// The males a young queen can meet (T2-3): her colony's and the neighbourhood's, which peak with the breeding season
+export const malesAbout = (c, frac) => clamp01((c.males + T.males.area * reproShare(frac)) / T.males.need);
 export const waterCap = (c) => T.water.capBase + c.adults * T.water.capPerAdult; // T2-1
 export const broodTotal = (c) => c.eggs + c.larvae + c.pupae + c.rEggs + c.rLarvae + c.rPupae;
 
@@ -116,8 +118,8 @@ export function colonyStep(c, dtDay, physical, foraging, frac = 0.3, bio = 1, th
   c.young += newWorkers - c.young / (C.youngDays * bio) * dtDay;
   c.gynes += newRepro * S.gyneShare; c.males += newRepro * (1 - S.gyneShare); c.stats.gynesRaised += newRepro * S.gyneShare;
 
-  // Gynes fly out to mate on fair days (GDD 6.7)
-  if (foraging && c.gynes > 0) { const m = c.gynes * S.matePerDay * dtDay; c.gynes -= m; c.mated += m * S.mateSuccess; }
+  // Gynes fly out to mate on fair days (GDD 6.7); how many find a male depends on the males about (T2-3)
+  if (foraging && c.gynes > 0) { const m = c.gynes * S.matePerDay * dtDay; c.gynes -= m; c.mated += m * S.mateSuccess * malesAbout(c, frac); }
 
   // Adult mortality rises as the colony collapses in autumn
   const late = frac > S.collapseFrom ? 1 + S.collapseMul * (frac - S.collapseFrom) / (1 - S.collapseFrom) : 1;

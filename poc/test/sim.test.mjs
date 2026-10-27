@@ -1,7 +1,7 @@
 // Headless tests for the STING sim core. Run: node test/sim.test.mjs
 import { readFileSync } from 'node:fs';
 import {
-  Sim, Act, hash, Domain, humanTraits, humanParts, toLocal, dirToWorld, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
+  Sim, Act, hash, Domain, humanTraits, humanParts, malesAbout, chunkOf, toLocal, dirToWorld, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
   garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, CMD_FIELDS,
 } from '../sim/index.js';
 import { applyTuning, parseTuning, tuningHash, tuningLeaves, TUNE } from '../sim/tunefile.js';
@@ -1459,6 +1459,60 @@ function seated(sim, pred) {
   const m = hd.day * 1440 + 15 * 60;
   h.nest.site = 'attic'; const att = h.nestHeat(m); h.nest.site = 'hollow'; const hol = h.nestHeat(m); h.nest.site = 'trunk';
   ok(att.cook > 0 && hol.cook === 0, `on a heatwave afternoon an attic comb reaches ${att.nestT.toFixed(1)} °C and its brood cooks without water; in a hollow tree ${hol.nestT.toFixed(1)} °C`);
+}
+
+// Males and mating flights (GDD 6.5, 6.7, T2-3)
+{
+  const M = T.males, S2 = T.season;
+  const c0 = newColony(); c0.males = 0;
+  const early = malesAbout(c0, S2.reproStart + 0.01), full = malesAbout(c0, S2.reproFull);
+  c0.males = M.need; const own = malesAbout(c0, S2.reproStart + 0.01);
+  ok(early < 0.2 && full === 1 && own === 1, `a young queen's chance to find a male: ${early.toFixed(2)} early in the breeding season with none of her own, ${full.toFixed(2)} at its height, ${own.toFixed(2)} early with ${M.need} brothers`);
+  const mate = (males) => { const c = newColony(); c.gynes = 20; c.males = males; colonyStep(c, 0.5, 0, true, S2.reproStart + 0.02, 1); return c.mated; };
+  ok(mate(0) < mate(M.need) * 0.3, `with no males about few young queens mate (${mate(0).toFixed(2)} vs ${mate(M.need).toFixed(2)} with ${M.need} males)`);
+  // physical: the breeding season, near the nest, on a fair day
+  const s = new Sim({ seed: 1234, birds: false, dayMinutes: 20 });
+  run(s, 2);
+  s.season.startMinute -= 0.45 * s.settings.seasonDays * 1440;
+  s.colony.males = 12; s.colony.gynes = 4;
+  const lek = s.lekSpot(), trees = [-1, 0, 1].flatMap((dz) => [-1, 0, 1].flatMap((dx) => generateChunk(s.seed, chunkOf(s.nest.x) + dx, chunkOf(s.nest.z) + dz).trees));
+  const tree = trees.find((t) => t.x === lek.x && t.z === lek.z);
+  ok(tree && lek.y > tree.h && Math.hypot(lek.x - s.nest.x, lek.z - s.nest.z) <= M.lekRange, `the mating spot is over the crown of a tall tree near the nest (${tree && tree.h.toFixed(1)} m tree, ${Math.hypot(lek.x - s.nest.x, lek.z - s.nest.z).toFixed(0)} m away)`);
+  const males0 = s.colony.males + s.colony.gynes;
+  let ev = [], outM = 0, near = 0, w = s.wasp;
+  for (let i = 0; i < 9000; i++) {
+    if (s.wasp) { place(s.wasp, { x: s.nest.x + 2, y: 2, z: s.nest.z + 2 }); s.wasp.born = s.minute; }
+    s.step(idle()); ev.push(...s.drainEvents());
+    const ms = s.wasps.filter((x) => x.caste === 'male');
+    outM = Math.max(outM, ms.length);
+    if (i % 60 === 0) near += ms.filter((x) => Math.hypot(x.x - lek.x, x.z - lek.z) < M.patrolR + 2 && Math.abs(x.y - lek.y) < 1.5).length;
+  }
+  const mated = ev.filter((e) => e.type === 'mated'), spent = ev.filter((e) => e.type === 'waspDied' && e.cause === 'mated');
+  ok(outM >= 2 && near > 20, `males fly out (up to ${outM} at once) and patrol the crown`);
+  ok(mated.length >= 2 && spent.length >= 1 && spent.length <= mated.length, `young queens fly out and mate (${mated.length} matings, ${spent.length} with males of the line, who die after)`);
+  // a male: no sting, no work, and the player can fly one
+  const t = new Sim({ seed: 1234, birds: false }, { noAI: true });
+  run(t, 2);
+  const m = t.wasp; m.caste = 'male'; m.venom = 0;
+  const hm = seated(t, () => true), arm = hm.parts.sit.find((p) => p.name === 'ForearmR');
+  const spot = toWorld(hm, { x: (arm.a.x + arm.b.x) / 2, y: (arm.a.y + arm.b.y) / 2 + arm.r + 0.006, z: (arm.a.z + arm.b.z) / 2 });
+  ev = run(t, 30, () => { place(m, spot); return idle({ sting: 1 }); });
+  ok(count(ev, 'sting') === 0 && m.state !== 'attached', 'a male pressed against an arm cannot sting');
+  const rec = t.records.get('0,0'), ci = rec.content.caterpillars.findIndex((q, i) => t.catActive(rec, i));
+  if (ci >= 0) { const cp = rec.content.caterpillars[ci]; place(m, { x: cp.x, y: cp.y + 0.01, z: cp.z }); m.state = 'fly'; ev = run(t, 2, (sim, i) => idle({ act: i === 1 ? Act.Interact : 0 })); }
+  ok(ci < 0 || (!m.carry && count(ev, 'caught') === 0), 'nor catch prey');
+  // flying a male into a young queen at the spot
+  const u = new Sim({ seed: 1234, birds: false, dayMinutes: 20 }, { noAI: true });
+  run(u, 2);
+  u.season.startMinute -= 0.45 * u.settings.seasonDays * 1440; u.colony.gynes = 1;
+  const me = u.wasp; me.caste = 'male'; me.venom = 0;
+  u._launchRepro = Sim.prototype._launchRepro; // noAI keeps the launch off: start one by hand
+  const g = u._spawnWasp(false, 'gyne'); g.role = 'gyne'; g.ai.mode = 'mate'; g.ai.timer = u.tick + M.gyneTicks; u.colony.gynes -= 1;
+  const mated0 = u.colony.mated;
+  ev = [];
+  for (let i = 0; i < 3000 && u.wasps.includes(g); i++) { u.step(idle()); ev.push(...u.drainEvents()); if (u.wasp === me) { place(me, g); me.born = u.minute; } }
+  const mine = ev.find((e) => e.type === 'mated');
+  ok(mine && mine.driven && ev.some((e) => e.type === 'waspDied' && e.driven && e.cause === 'mated') && u.colony.mated === mated0 + 1, 'a player flying a male into a young queen mates with her, and his life ends there');
 }
 
 // Tuning as data (GDD 13, T1-22): one plain-text file feeds both sims

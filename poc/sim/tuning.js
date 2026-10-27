@@ -219,6 +219,17 @@ export const T = {
     winterSurvival: 0.03, lineageSurvival: 0.3, winterShare: 0.5,
   },
   queen: { speedMul: 0.8, venomMul: 1.5 },
+  // Males and mating flights (GDD 6.5, 6.7, T2-3). bio: Vespula males have no sting, feed on nectar, and patrol
+  // landmarks near nests (often prominent trees) where young queens come to mate; a male mates once and dies. A gyne's
+  // chance to mate depends on the males about: her own colony's and the neighbourhood's (area males at full breeding
+  // season, need for a sure mating). Near the nest, up to physMales males and physGynes gynes fly out on fair days to
+  // the mating spot: the tallest tree near the nest (lekRange), patrolled at patrolR round its crown. A gyne that
+  // meets a male within mateDist mates; at the spot she may also meet one of the area's males (areaRate per second at
+  // full season). She gives up after gyneTicks.
+  males: {
+    area: 30, need: 20, physMales: 4, physGynes: 2, launchChance: 0.25, lekRange: 40, lekAbove: 0.6, patrolR: 1.6,
+    mateDist: 0.25, areaRate: 0.02, gyneTicks: 3600, speedMul: 1.1, maleLifeDays: 3,
+  },
   // Winter with choices (T1-15): mated gynes winter at sites near the nest; site quality sets survival. A worker can
   // scout one site in late season (E) and most gynes go there; in spring the player picks which queen to wake as.
   hiber: {

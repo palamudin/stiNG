@@ -1007,7 +1007,8 @@ function applyZoneColors(view, on) {
 
 // ------------------------------------------------------------------ wasps
 
-function buildWasp(remote = false, rival = false) {
+const CASTE_SCALE = { queen: 1.3, gyne: 1.25, male: 1.1, worker: 1 }; // T2-3
+function buildWasp(remote = false, rival = false, caste = 'worker') {
   const g = new THREE.Group();
   if (remote) {
     const ring = new THREE.Mesh(new THREE.TorusGeometry(0.009, 0.0009, 6, 24), new THREE.MeshBasicMaterial({ color: '#4fd1ff' }));
@@ -1023,7 +1024,10 @@ function buildWasp(remote = false, rival = false) {
   for (const [r, m] of [[0.0027, yellow], [0.003, black], [0.0029, yellow], [0.0025, black], [0.0021, yellow], [0.0014, black]]) {
     const s = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 8), m); s.position.z = z; s.scale.set(1, 0.9, 0.8); abdomen.add(s); z -= r * 1.05;
   }
-  const sting = new THREE.Mesh(new THREE.ConeGeometry(0.0004, 0.002, 6), black); sting.rotation.x = -Math.PI / 2; sting.position.z = z - 0.0004; abdomen.add(sting);
+  if (caste === 'male') { // a male: a seventh segment and no sting, long antennae (T2-3)
+    const s7 = new THREE.Mesh(new THREE.SphereGeometry(0.0011, 10, 6), yellow); s7.position.z = z; s7.scale.set(1, 0.9, 0.8); abdomen.add(s7);
+    for (const sd of [-1, 1]) { const ant = new THREE.Mesh(new THREE.BoxGeometry(0.00025, 0.00025, 0.0062), black); ant.position.set(sd * 0.0009, 0.0016, 0.0085); ant.rotation.set(-0.45, sd * 0.35, 0); g.add(ant); }
+  } else { const sting = new THREE.Mesh(new THREE.ConeGeometry(0.0004, 0.002, 6), black); sting.rotation.x = -Math.PI / 2; sting.position.z = z - 0.0004; abdomen.add(sting); }
   const wingMat = new THREE.MeshBasicMaterial({ color: '#e8eef2', transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false });
   const wingGeo = new THREE.PlaneGeometry(0.0034, 0.0085); wingGeo.translate(0.0017, 0, -0.003);
   const wl = new THREE.Mesh(wingGeo, wingMat), wr = new THREE.Mesh(wingGeo, wingMat);
@@ -1059,7 +1063,7 @@ function renderWasps(alpha, t, dt) {
   for (const w of sim.wasps) {
     seen.add(w.id);
     let g = waspViews.get(w.id);
-    if (!g) { g = buildWasp(false, w.colony !== 'own'); waspViews.set(w.id, g); }
+    if (!g) { g = buildWasp(false, w.colony !== 'own', w.caste); waspViews.set(w.id, g); }
     const pp = pos.get(w.id);
     const p = pp ? new THREE.Vector3().lerpVectors(pp.p, pp.c, alpha) : V(w);
     const driven = w.id === sim.drivenId;
@@ -1067,7 +1071,7 @@ function renderWasps(alpha, t, dt) {
     // looking out of its own eyes: the body is not drawn (compound eyes see nearly all the way round)
     g.visible = w.state !== 'under' && w.state !== 'robbing' && !(driven && eyeBlend > 0.5); // inside clothes or a hive
     g.position.copy(p);
-    g.scale.setScalar(w.caste === 'queen' ? 1.3 : 1);
+    g.scale.setScalar(CASTE_SCALE[w.caste] || 1);
     g.rotation.order = 'YXZ';
     if (driven && w.state !== 'balled') { g.rotation.y = input.yaw; g.rotation.x = w.state === 'landed' ? 0 : -input.pitch * 0.6; }
     else {
@@ -1116,11 +1120,11 @@ function renderWasps(alpha, t, dt) {
   for (const [id, r] of sim.remote) {
     seen.add(id);
     let g = waspViews.get(id);
-    if (!g) { g = buildWasp(!r.rival, !!r.rival); waspViews.set(id, g); g.position.set(r.x, r.y, r.z); }
+    if (!g) { g = buildWasp(!r.rival, !!r.rival, r.caste); waspViews.set(id, g); g.position.set(r.x, r.y, r.z); }
     const tgt = new THREE.Vector3(r.x, r.y, r.z);
     if (g.position.distanceTo(tgt) > 0.5) g.position.copy(tgt); else g.position.lerp(tgt, 1 - Math.exp(-dt * 25));
     g.visible = r.state !== 'under';
-    g.scale.setScalar(r.caste === 'queen' ? 1.3 : 1);
+    g.scale.setScalar(CASTE_SCALE[r.caste] || 1);
     const sp = Math.hypot(r.vx, r.vz);
     if (sp > 0.05) { let d = Math.atan2(r.vx, r.vz) - g.userData.yaw; d = Math.atan2(Math.sin(d), Math.cos(d)); g.userData.yaw += d * Math.min(1, dt * 10); }
     g.rotation.order = 'YXZ'; g.rotation.y = g.userData.yaw; g.rotation.x = 0; g.rotation.z = 0;
@@ -1466,7 +1470,7 @@ function logEvent(text) {
 }
 
 // Colony view (GDD 10.3): the workers that are out, nearest first, each one a button to drive her
-const ROLE_NAME = { sugar: 'sugar forager', protein: 'hunter', pulp: 'pulp forager', guard: 'guard', water: 'water carrier' };
+const ROLE_NAME = { sugar: 'sugar forager', protein: 'hunter', pulp: 'pulp forager', guard: 'guard', water: 'water carrier', male: 'patrolling the mating spot', gyne: 'on her mating flight' };
 const MODE_NAME = { pick: 'choosing', search: 'searching', outbound: 'flying out', collect: 'collecting', return: 'flying home', attack: 'attacking', evade: 'getting away', guard: 'guarding', hunt: 'chasing' };
 $('nWorkers').addEventListener('pointerdown', (e) => {
   const b = e.target.closest('button[data-id]');
@@ -1481,7 +1485,7 @@ function updateWorkers() {
   $('nWorkers').innerHTML = list.length ? list.map(({ x, d }) => {
     const what = x.state === 'fly' ? (MODE_NAME[x.ai.mode] || x.ai.mode) : x.state;
     const carry = x.carry ? ` · carrying ${x.carry.what}` : '';
-    return `<div class="wk"><span>${x.caste === 'queen' ? 'Queen' : 'Worker ' + x.id} · ${ROLE_NAME[x.role] || x.role} · ${what}${carry}</span><span class="n">${d < 1 ? '<1' : Math.round(d)} m</span><button class="ghost" data-id="${x.id}">${d <= T.possess.freeRange ? 'Drive' : 'Relay'}</button></div>`;
+    return `<div class="wk"><span>${x.caste === 'queen' ? 'Queen' : x.caste === 'male' ? 'Male ' + x.id : x.caste === 'gyne' ? 'Young queen ' + x.id : 'Worker ' + x.id} · ${ROLE_NAME[x.role] || x.role} · ${what}${carry}</span><span class="n">${d < 1 ? '<1' : Math.round(d)} m</span><button class="ghost" data-id="${x.id}">${d <= T.possess.freeRange ? 'Drive' : 'Relay'}</button></div>`;
   }).join('') : '<p class="label">Nobody is out. Workers leave the nest when you are near it in daylight.</p>';
 }
 
@@ -1600,7 +1604,7 @@ function updateHud() {
   $('stungN').textContent = fmt(sim.stung.size);
   $('adults').textContent = fmt(c.adults);
   $('brood').textContent = fmt(broodTotal(c));
-  $('serial').textContent = w ? (w.caste === 'queen' ? 'The queen' : 'Worker ' + w.id) : '-';
+  $('serial').textContent = w ? (w.caste === 'queen' ? 'The queen' : w.caste === 'male' ? 'Male ' + w.id : 'Worker ' + w.id) : '-';
   const md = minuteOfDay(sim.minute);
   { const sc = timeScale(); $('clockT').textContent = `Day ${sim.day + 1} · ${fmtClock(sim.minute)}${sc > 1 ? ` · ${sc}×` : sc < 1 ? ' · REFLEX' : ''}`; }
   const wnd = sim.wind, ws = Math.hypot(wnd.x, wnd.z);
@@ -1676,7 +1680,10 @@ function updateHud() {
   else if (h.nest && (md < T.time.dawn || md >= T.time.dusk)) hint = `${kbd('R')} rest until morning`;
   else if (w.carry) hint = 'Bring it to the nest';
   else if (h.site) hint = `${kbd('E')} found the nest ${T.sites[h.site].name} · ${SITE_NOTE[h.site]}`;
-  else if (w.caste === 'queen' && sim.colony.sited === false) hint = 'Pick a nest site and press E: a trunk, a burrow in the grass, under a branch, or a gap in a shed';
+  else if (w.caste === 'male') { // T2-3
+    const lk = sim.lekSpot(), dd = Math.round(Math.hypot(lk.x - w.x, lk.z - w.z));
+    hint = `A male: no sting, no work. Young queens come to the tallest tree near the nest (${dd} m) · fly into one to mate`;
+  } else if (w.caste === 'queen' && sim.colony.sited === false) hint = 'Pick a nest site and press E: a trunk, a burrow in the grass, under a branch, or a gap in a shed';
   else if (w.caste === 'queen' && sim.colony.adults < 1) hint = 'Founding: chew pulp for cells, catch prey for the brood, bring both to the nest';
   $('hint').innerHTML = hint;
 
@@ -1841,6 +1848,7 @@ function handleEvents(events) {
       case 'swatHit': if (e.waspId === sim.drivenId) logEvent(`${SwatKindName[e.kind].toLowerCase()} by #${e.actorHex.slice(0, 4)} at ${ms(e.delayTicks)} ms`); break;
       case 'stunned': if (e.driven) toast('Knocked away · stunned', 'var(--yellow)', 1.6); break;
       case 'flee': logEvent(`#${e.humanHex.slice(0, 4)} runs`); break;
+      case 'mated': if (e.driven) toast('Mated. A male mates once, and that is his life.', 'var(--yellow)', 3); else if (sim.wasps.length) toast('A young queen of the line has mated', 'var(--yellow)', 1.6); break; // T2-3
       case 'knockedDown': if (e.driven) toast('Knocked down by the rain · get under a table, a roof or a tree', 'var(--red)', 2.4); break; // T2-2
       case 'exhausted': if (e.id === sim.drivenId) toast('Crop empty · feed on flowers or soda', 'var(--red)', 2.6); break;
       case 'caught': if (e.id === sim.drivenId) { toast(`Caught a ${e.kind}`, 'var(--yellow)', 1.4); blip(900, 600, 0.08, 0.05, 'square'); } break;

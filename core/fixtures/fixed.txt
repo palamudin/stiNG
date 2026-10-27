@@ -12,7 +12,7 @@ colony 0d48209f
 sim.jab d34ebbb7
 sim.full e6a593f7
 sim.idle7 92bca189
-sim.season 302cbd14
+sim.season d05e9ef0
 sim.hot 2dae5e8f
 sim.restored 239290a5
 net.good ccfdcda2

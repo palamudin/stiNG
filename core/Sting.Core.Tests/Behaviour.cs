@@ -808,6 +808,49 @@ namespace Sting.Core.Tests
                 h.nest.site = "attic"; var att = h.NestHeat(hm); h.nest.site = "hollow"; var hol = h.NestHeat(hm); h.nest.site = "trunk";
                 Ok(att.cook > 0 && hol.cook == 0, $"on a heatwave afternoon an attic comb reaches {D(att.nestT):0.0} °C and its brood cooks without water; in a hollow tree {D(hol.nestT):0.0} °C");
             }
+            // 43. males and mating flights (T2-3)
+            {
+                var c0 = Colony.New(); c0.males = 0;
+                Num early = Colony.MalesAbout(c0, T.season.reproStart + 0.01), full = Colony.MalesAbout(c0, T.season.reproFull);
+                c0.males = T.males.need; Num ownM = Colony.MalesAbout(c0, T.season.reproStart + 0.01);
+                Ok(early < 0.2 && full == 1 && ownM == 1, $"a young queen's chance to find a male: {D(early):0.00} early with none of her own, {D(full):0.00} at the height of the season, {D(ownM):0.00} with brothers");
+                Num MateN(Num males) { var c = Colony.New(); c.gynes = 20; c.males = males; Colony.Step(c, 0.5, 0, true, T.season.reproStart + 0.02, 1); return c.mated; }
+                Ok(MateN(0) < MateN(T.males.need) * 0.3, $"with no males about few young queens mate ({D(MateN(0)):0.00} vs {D(MateN(T.males.need)):0.00})");
+                var s = new Sim(new Settings { seed = 1234, birds = false, dayMinutes = 20 });
+                RunS(s, 2);
+                s.season.startMinute -= 0.45 * s.settings.seasonDays * 1440;
+                s.colony.males = 12; s.colony.gynes = 4;
+                var (lek, lr) = s.LekSpot();
+                Ok(Hypot(lek.x - s.nest.x, lek.z - s.nest.z) <= T.males.lekRange && lek.y > 2, "the mating spot is over a tree crown near the nest");
+                var ev = new List<SimEvent>(); int outM = 0, near = 0;
+                for (int i = 0; i < 9000; i++)
+                {
+                    if (s.wasp != null) { Place(s.wasp, P(s.nest.x + 2, 2, s.nest.z + 2)); s.wasp.born = s.minute; }
+                    ev.AddRange(RunS(s, 1));
+                    var ms = s.wasps.Where(x => x.caste == "male").ToList();
+                    outM = System.Math.Max(outM, ms.Count);
+                    if (i % 60 == 0) near += ms.Count(x => Hypot(x.x - lek.x, x.z - lek.z) < T.males.patrolR + 2 && Abs(x.y - lek.y) < 1.5);
+                }
+                int mated = Count(ev, "mated"), spent = ev.Count(e => e.type == "waspDied" && Cause(e) == "mated");
+                Ok(outM >= 2 && near > 20, $"males fly out (up to {outM} at once) and patrol the crown");
+                Ok(mated >= 2 && spent >= 1 && spent <= mated, $"young queens fly out and mate ({mated} matings, {spent} with males of the line, who die after)");
+                var t = new Sim(new Settings { seed = 1234, birds = false }, new SimOpts { noAI = true });
+                RunS(t, 2);
+                var m = t.wasp; m.caste = "male"; m.venom = 0;
+                var hm = Seated(t, h => true); var arm = hm.sit.First(p => p.name == "ForearmR");
+                var spot = Body.ToWorld(hm.F, P((arm.a.x + arm.b.x) / 2, (arm.a.y + arm.b.y) / 2 + arm.r + 0.006, (arm.a.z + arm.b.z) / 2));
+                ev = RunS(t, 30, (sim, i) => { Place(m, spot); return Idle(c => c.sting = 1); });
+                Ok(Count(ev, "sting") == 0 && m.state != "attached", "a male pressed against an arm cannot sting");
+                var u = new Sim(new Settings { seed = 1234, birds = false, dayMinutes = 20 }, new SimOpts { noAI = true });
+                RunS(u, 2);
+                u.season.startMinute -= 0.45 * u.settings.seasonDays * 1440; u.colony.gynes = 1;
+                var me = u.wasp; me.caste = "male"; me.venom = 0;
+                var g = u.SpawnWasp(false, "gyne"); g.role = "gyne"; g.ai.mode = "mate"; g.ai.timer = u.tick + T.males.gyneTicks; u.colony.gynes -= 1;
+                Num mated0 = u.colony.mated; ev = new List<SimEvent>();
+                for (int i = 0; i < 3000 && u.wasps.Contains(g); i++) { ev.AddRange(RunS(u, 1)); if (u.wasp == me) { Place(me, P(g.x, g.y, g.z)); me.born = u.minute; } }
+                var mine = ev.FirstOrDefault(e => e.type == "mated");
+                Ok(mine != null && (bool)mine["driven"] && ev.Any(e => e.type == "waspDied" && (bool)e["driven"] && Cause(e) == "mated") && u.colony.mated == mated0 + 1, "a player flying a male into a young queen mates with her, and his life ends there");
+            }
         }
 
         // 26. Tier 1, batch 1: wind, cold, drowning, clothes by the weather, shaking and flailing

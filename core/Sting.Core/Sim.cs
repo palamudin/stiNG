@@ -230,7 +230,7 @@ namespace Sting.Core
         }
         public int PhysicalCount => Own().Count;
         List<Wasp> Own() { var l = new List<Wasp>(); foreach (var w in wasps) if (w.colony == "own") l.Add(w); return l; }
-        int OwnWorkers() { int n = 0; foreach (var w in wasps) if (w.colony == "own" && w.caste != "queen") n++; return n; }
+        int OwnWorkers() { int n = 0; foreach (var w in wasps) if (w.colony == "own" && w.caste == "worker") n++; return n; } // males and gynes out are not workers (T2-3)
         public Num SeasonFrac => (minute - season.startMinute) / (settings.seasonDays * 1440);
         public bool CanFly() => Temperature >= T.weather.flyMinTemp;
 
@@ -471,12 +471,12 @@ namespace Sting.Core
             if (pick != 0)
             {
                 var w = WaspById(pick);
-                if (w == null || w.colony != "own" || w == d) return;
+                if (w == null || w.colony != "own" || w == d || w.caste == "gyne") return;
                 best = w; bd = D2(w, d);
             }
             else foreach (var w in wasps)
                 {
-                    if (w == d || w.state == "dead" || w.colony != "own") continue;
+                    if (w == d || w.state == "dead" || w.colony != "own" || w.caste == "gyne") continue; // a young queen is not yours to fly (T2-3)
                     Num q = D2(w, d);
                     if (q < bd) { bd = q; best = w; }
                 }

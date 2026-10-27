@@ -27,7 +27,7 @@ export function encodeState(m) {
     v.setUint32(o, w.id); v.setInt16(o + 4, cx); v.setInt16(o + 6, cz);
     v.setUint16(o + 8, q16(w.x - cx * CS, -CS / 2, CS / 2)); v.setUint16(o + 10, q16(w.y, 0, YMAX)); v.setUint16(o + 12, q16(w.z - cz * CS, -CS / 2, CS / 2));
     v.setInt8(o + 14, q8(w.vx)); v.setInt8(o + 15, q8(w.vy)); v.setInt8(o + 16, q8(w.vz));
-    v.setUint8(o + 17, Math.max(0, STATES.indexOf(w.state)));
+    v.setUint8(o + 17, Math.max(0, STATES.indexOf(w.state)) | (w.caste === 'male' ? 64 : 0) | (w.caste === 'gyne' ? 128 : 0)); // males and young queens (T2-3)
     v.setUint8(o + 18, (w.caste === 'queen' ? 128 : 0) | (w.under ? 64 : 0) | (w.rival ? 32 : 0) | Math.max(0, CARRY.indexOf(w.carry)));
     o += BYTES_PER_WASP;
   }
@@ -40,11 +40,11 @@ export function decodeState(buf, underHex = null) {
   let o = STATE_HEAD;
   for (let i = 0; i < ng; i++) { gone.push(v.getUint32(o)); o += 4; }
   for (let i = 0; i < n; i++) {
-    const cx = v.getInt16(o + 4), cz = v.getInt16(o + 6), flags = v.getUint8(o + 18);
+    const cx = v.getInt16(o + 4), cz = v.getInt16(o + 6), flags = v.getUint8(o + 18), sb = v.getUint8(o + 17);
     wasps.push({
       id: v.getUint32(o), x: cx * CS + d16(v.getUint16(o + 8), -CS / 2, CS / 2), y: d16(v.getUint16(o + 10), 0, YMAX), z: cz * CS + d16(v.getUint16(o + 12), -CS / 2, CS / 2),
       vx: v.getInt8(o + 14) / 127 * VMAX, vy: v.getInt8(o + 15) / 127 * VMAX, vz: v.getInt8(o + 16) / 127 * VMAX,
-      state: STATES[v.getUint8(o + 17)], caste: flags & 128 ? 'queen' : 'worker', under: flags & 64 ? underHex || 'yes' : null, rival: !!(flags & 32), carry: CARRY[flags & 31],
+      state: STATES[sb & 63], caste: flags & 128 ? 'queen' : sb & 64 ? 'male' : sb & 128 ? 'gyne' : 'worker', under: flags & 64 ? underHex || 'yes' : null, rival: !!(flags & 32), carry: CARRY[flags & 31],
     });
     o += BYTES_PER_WASP;
   }
@@ -86,7 +86,7 @@ export function encodeSwarm(m) {
     for (const w of g.ws) {
       v.setUint16(o, w.id - g.base);
       v.setUint16(o + 2, q16(w.x - g.cx * CS, -CS / 2, CS / 2)); v.setUint16(o + 4, q16(w.y, 0, YMAX)); v.setUint16(o + 6, q16(w.z - g.cz * CS, -CS / 2, CS / 2));
-      v.setUint8(o + 8, Math.max(0, STATES.indexOf(w.state)) | (w.caste === 'queen' ? 16 : 0) | (w.rival ? 32 : 0));
+      v.setUint8(o + 8, Math.max(0, STATES.indexOf(w.state)) | (w.caste === 'queen' ? 16 : 0) | (w.rival ? 32 : 0) | (w.caste === 'male' ? 64 : 0) | (w.caste === 'gyne' ? 128 : 0));
       o += BYTES_PER_SWARM_WASP;
     }
   }
@@ -101,7 +101,7 @@ export function decodeSwarm(buf) {
     for (let i = 0; i < n; i++) {
       const s = v.getUint8(o + 8);
       wasps.push({ id: base + v.getUint16(o), x: cx * CS + d16(v.getUint16(o + 2), -CS / 2, CS / 2), y: d16(v.getUint16(o + 4), 0, YMAX), z: cz * CS + d16(v.getUint16(o + 6), -CS / 2, CS / 2),
-        state: STATES[s & 15], caste: s & 16 ? 'queen' : 'worker', rival: !!(s & 32) });
+        state: STATES[s & 15], caste: s & 16 ? 'queen' : s & 64 ? 'male' : s & 128 ? 'gyne' : 'worker', rival: !!(s & 32) });
       o += BYTES_PER_SWARM_WASP;
     }
   }

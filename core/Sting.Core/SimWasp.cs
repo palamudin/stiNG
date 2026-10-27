@@ -8,7 +8,7 @@ namespace Sting.Core
     public sealed partial class Sim
     {
         /// A worker's span is that of her sisters (GDD 7.5): 1/adultMortality days, scaled to the season, ±20% by hash.
-        public Num LifespanMinutes(Wasp w) => (1 / T.colony.adultMortality) * bio * 1440 * (0.8 + 0.4 * H32(w.id, 7));
+        public Num LifespanMinutes(Wasp w) => (w.caste == "male" ? T.males.maleLifeDays : 1 / T.colony.adultMortality) * bio * 1440 * (0.8 + 0.4 * H32(w.id, 7));
 
         static bool Free3(string s) => s == "fly" || s == "landed" || s == "chewing";
 
@@ -19,7 +19,7 @@ namespace Sting.Core
                 Die(w, "old age", null);
                 return;
             }
-            bool armed = driven ? cmd.sting != 0 && !pressUsed : cmd.sting != 0;
+            bool armed = w.caste != "male" && (driven ? cmd.sting != 0 && !pressUsed : cmd.sting != 0); // males have no sting (T2-3)
             switch (w.state)
             {
                 case "fly":
@@ -81,7 +81,7 @@ namespace Sting.Core
             }
             if (WaspById(w.id) != null)
             {
-                w.venom = Min(w.caste == "queen" ? T.queen.venomMul : 1, w.venom + T.venom.regenPerSec * T.DT);
+                w.venom = w.caste == "male" ? 0 : Min(w.caste == "queen" ? T.queen.venomMul : 1, w.venom + T.venom.regenPerSec * T.DT);
                 BodyHeat(w);
             }
         }
@@ -149,6 +149,7 @@ namespace Sting.Core
                 Num top = burst ? T.wasp.burst : T.wasp.cruise;
                 if (w.carry != null) top *= T.wasp.carrySpeedMul;
                 if (w.caste == "queen") top *= T.queen.speedMul;
+                else if (w.caste == "male") top *= T.males.speedMul;
                 if (rain) top *= T.weather.rainSpeedMul;
                 // the wasp flies in moving air (GDD 5.3): airspeed capped at its top speed plus the wind; no input leans into the
                 // wind and holds its place, full input flies the course at top airspeed (see sim.js)
@@ -451,6 +452,7 @@ namespace Sting.Core
 
         void Interact(Wasp w)
         {
+            if (w.caste == "male") { var mc = w.contact; if (mc != null && w.state == "fly") PerchOn(w, mc.humanHex, mc.zone, mc.surf, mc.n, mc.part); return; } // a male does no work (T2-3)
             if (w.caste == "queen" && !colony.sited) { var site = SiteNear(w); if (site != null) { FoundNest(w, site); return; } }
             if (w.caste != "queen" && SeasonFrac >= T.season.reproStart && colony.mated + colony.gynes >= 1)
             {
@@ -1266,7 +1268,7 @@ namespace Sting.Core
             w.state = "dead";
             if (w.colony != "own") { /* a rival worker */ }
             else if (w.caste == "queen") { colony.queenAlive = false; Emit("queenDied", ("cause", cause)); }
-            else colony.adults = Max(0, colony.adults - 1);
+            else if (w.caste == "worker") colony.adults = Max(0, colony.adults - 1); // a male or gyne out was already counted out (T2-3)
             if (w.fight != null) { var o = WaspById(w.fight.other); if (o != null && o.state == "fighting") { o.state = "fly"; o.fight = null; } }
             stats.deaths++;
             stats.causes.TryGetValue(cause, out Num cn); stats.causes[cause] = cn + 1;
@@ -1288,6 +1290,8 @@ namespace Sting.Core
 
         void Despawn(Wasp w)
         {
+            if (w.colony == "own" && w.caste == "male") colony.males += 1; // back in the nest (T2-3)
+            else if (w.colony == "own" && w.caste == "gyne") { if (w.mated) colony.mated += 1; else colony.gynes += 1; }
             wasps = wasps.FindAll(x => x != w);
             Publish(new NetEv { type = "died", waspId = w.id, cause = "home", x = w.x, y = w.y, z = w.z });
             ReleaseBees(w.id);

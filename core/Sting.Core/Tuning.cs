@@ -196,6 +196,13 @@ namespace Sting.Core
                 collapseFrom = 0.82, collapseMul = 5, queenDiesAt = 0.95, winterSurvival = 0.03, lineageSurvival = 0.3, winterShare = 0.5;
         }
         public static class queen { public static Num speedMul = 0.8, venomMul = 1.5; }
+        /// Males and mating flights (GDD 6.5, 6.7, T2-3); see tuning.js
+        public static class males
+        {
+            public static Num area = 30, need = 20; public static int physMales = 4, physGynes = 2;
+            public static Num launchChance = 0.25, lekRange = 40, lekAbove = 0.6, patrolR = 1.6, mateDist = 0.25, areaRate = 0.02;
+            public static int gyneTicks = 3600; public static Num speedMul = 1.1, maleLifeDays = 3;
+        }
         public static class web { public static Num spiderSpeed = 0.06, escapePerPress = 0.22, aiEscape = 0.004; public static int spiderDelay = 60; }
         public class Hunter { public Num sight, speed, accel, @catch; public int diveTicks, coolTicks; }
         /// dragonflies hunt low (they never go above maxY); birds hunt high (from minY, giving up below abortY)

@@ -65,6 +65,8 @@ namespace Sting.Core
         public int stateTicks;
         public Attach attach; public Under under; public Ball ball; public Num born;
         public Carry carry; public int groundTicks, chew; public string role = "sugar", colony = "own";
+        /// a young queen who has mated on her flight (T2-3)
+        public bool mated;
         /// the wood being chewed (T1-12): a box in a chunk, or a tree (i = -1)
         public WoodSpot chewAt;
         public WebHold web; public Drown drown; public Fight fight; public Ai ai = new Ai(); public Contact contact; public Perch perch;

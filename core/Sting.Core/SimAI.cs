@@ -46,6 +46,8 @@ namespace Sting.Core
             if (w.state == "balled") { BallEscape(w, false); return cmd; }
             if (w.state != "fly") return cmd;
             if (w.colony != "own") return ThinkRival(w, cmd);
+            if (w.caste == "male") return ThinkMale(w, cmd); // T2-3
+            if (w.caste == "gyne") return ThinkGyne(w, cmd);
             // alarm pheromone pulls nearby workers into an attack
             if (ai.mode != "attack" && ai.mode != "evade")
             {
@@ -230,6 +232,88 @@ namespace Sting.Core
 
         /// Alarm pheromone is a decaying scent too: strongest when fresh, carried downwind
         internal Num AlarmReach(Wasp w, Alarm a) => T.alarm.radius * (0.5 + 0.5 * Clamp01((a.until - tick) / (Num)T.alarm.ticks)) * ScentRange(w.x, w.z, new V3(a.x, a.y, a.z), 1) / T.sense.smell;
+
+        // ---------------- males and mating flights (GDD 6.5, 6.7, T2-3); see sim.js
+
+        internal void LaunchRepro(ColonyState col)
+        {
+            int males = 0, gynes = 0;
+            foreach (var w in Own()) { if (w.caste == "male") males++; else if (w.caste == "gyne") gynes++; }
+            if (col.males >= 1 && males < T.males.physMales && H32(tick, 501) < T.males.launchChance)
+            {
+                col.males -= 1;
+                var w = SpawnWasp(false, "male"); w.role = "male"; w.venom = 0; w.ai.mode = "patrol";
+            }
+            else if (col.gynes >= 1 && gynes < T.males.physGynes && H32(tick, 502) < T.males.launchChance)
+            {
+                col.gynes -= 1;
+                var w = SpawnWasp(false, "gyne"); w.role = "gyne"; w.ai.mode = "mate"; w.ai.timer = tick + T.males.gyneTicks;
+            }
+        }
+        string lekKey; V3 lekP; Num lekR;
+        /// the mating spot: over the crown of the tallest tree near the nest, nearer ones preferred
+        public (V3 p, Num r) LekSpot()
+        {
+            var n = nest; string key = n.key + ":" + n.x + ":" + n.z;
+            if (lekKey == key) return (lekP, lekR);
+            int cx = World.ChunkOf(n.x), cz = World.ChunkOf(n.z);
+            Tree best = null; Num bs = Num.MinValue;
+            for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++) foreach (var t in Content(cx + dx, cz + dz).trees)
+            {
+                Num dd = Sqrt(Sq(t.x - n.x) + Sq(t.z - n.z));
+                if (dd > T.males.lekRange) continue;
+                Num s = t.h - 0.05 * dd;
+                if (s > bs) { bs = s; best = t; }
+            }
+            if (best != null) { lekP = new V3(best.x, best.h + T.males.lekAbove, best.z); lekR = best.cr; } else { lekP = new V3(n.x, n.y + 3, n.z); lekR = 1; }
+            lekKey = key;
+            return (lekP, lekR);
+        }
+        Cmd ThinkMale(Wasp w, Cmd cmd)
+        {
+            var ai = w.ai; var (lek, lr) = LekSpot();
+            if (!IsDaylight(minute) || Raining || w.energy < 0.3) ai.mode = "home";
+            if (ai.mode == "home")
+            {
+                Steer(w, nest.entrance, cmd);
+                if (D2(w, nest.entrance) < 0.07 * 0.07) Despawn(w);
+                return cmd;
+            }
+            Num a = tick * 0.02 + w.id, r = Max(T.males.patrolR, lr * 0.8);
+            Steer(w, new V3(lek.x + r * DCos(a), lek.y + 0.4 * DSin(a * 1.7), lek.z + r * DSin(a)), cmd);
+            return cmd;
+        }
+        Cmd ThinkGyne(Wasp w, Cmd cmd)
+        {
+            var ai = w.ai; var (lek, lr) = LekSpot();
+            if (ai.mode == "mate" && (tick > ai.timer || !IsDaylight(minute) || Raining)) ai.mode = "home";
+            if (ai.mode == "home")
+            {
+                Steer(w, nest.entrance, cmd);
+                if (D2(w, nest.entrance) < 0.07 * 0.07) Despawn(w);
+                return cmd;
+            }
+            Num a = -tick * 0.015 + w.id * 2, r = Max(T.males.patrolR, lr * 0.8) * 0.9;
+            Steer(w, new V3(lek.x + r * DCos(a), lek.y + 0.2 * DSin(a * 1.3), lek.z + r * DSin(a)), cmd);
+            if (D2(w, lek) > Sq(r + 3)) return cmd;
+            Wasp mate = null; Num md = T.males.mateDist * T.males.mateDist;
+            foreach (var x in wasps)
+            {
+                if (x.caste != "male" || x.colony != "own" || (x.state != "fly" && x.state != "landed")) continue;
+                Num q = D2(x, w);
+                if (q <= md) { md = q; mate = x; }
+            }
+            Num area = T.males.area * Colony.ReproShare(SeasonFrac) / T.males.need;
+            if (mate != null || H32(w.id, tick, 503) < T.males.areaRate * T.DT * Min(1, area)) Mate(w, mate);
+            return cmd;
+        }
+        void Mate(Wasp g, Wasp male)
+        {
+            g.mated = true;
+            Emit("mated", ("gyne", g.id), ("male", male != null ? male.id : 0), ("driven", male != null && male.id == drivenId));
+            Despawn(g); // she leaves to find a place to winter: counted as mated
+            if (male != null) Die(male, "mated", null); // a male mates once and dies
+        }
 
         internal void AiPick(Wasp w) => AiPick(w, nest.entrance);
         internal void AiPick(Wasp w, V3 home)

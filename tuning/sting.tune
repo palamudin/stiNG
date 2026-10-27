@@ -580,6 +580,21 @@ winterShare = 0.5
 speedMul = 0.8
 venomMul = 1.5
 
+[males]
+area = 30
+need = 20
+physMales = 4
+physGynes = 2
+launchChance = 0.25
+lekRange = 40
+lekAbove = 0.6
+patrolR = 1.6
+mateDist = 0.25
+areaRate = 0.02
+gyneTicks = 3600
+speedMul = 1.1
+maleLifeDays = 3
+
 [hiber]
 range = 40
 spread = 5

@@ -366,7 +366,7 @@ Economy step in Appendix A.4.
 | Queen | Founds the nest alone, then lays. Her death dooms the colony |
 | Worker | Sterile female. Roles: protein forager, sugar forager, pulp forager, builder, nurse, guard |
 | Gyne | Unmated new queen. Leaves to mate, then hibernates |
-| Male | Mates and dies. Does not sting |
+| Male | Mates and dies. Does not sting (built as a wasp: 18.39) |
 
 - **Role allocation:** the player sets target ratios; the colony assigns idle workers to fill them.
 - **Default allocation by age:** young workers nurse and build inside; older workers forage; the oldest guard the entrance *(bio-inspired)*.
@@ -379,7 +379,7 @@ Economy step in Appendix A.4.
 
 ### 6.7 Succession and the line **[D] D-05** **[T0] [T2]** (lineage colonies as real AI colonies T2)
 
-- Gynes leave in autumn, mate with males present in the mating area, then search for a hibernation site.
+- Gynes leave in autumn, mate with males present in the mating area, then search for a hibernation site. As built (18.39): the mating area is the crown of a tall tree near the nest, and the males present are the colony's own and the neighbourhood's.
 - Winter mortality per hibernating queen depends on site quality *(tune)*.
 - In spring the player picks which surviving queen continues as the controlled colony. The other surviving queens found **lineage colonies** run by AI. **[Q] Q-10**
 - **The line** is the player's founding queen and all colonies descended from her. Game over when the line is extinct.
@@ -1250,6 +1250,22 @@ These complete 11.8. Like the earlier checks, each reads only the event and the 
 
 **Checks.** JS and C# check that spells run their length and day 0 is ordinary, that heatwaves are dry and storms are afternoon gales, a downpour knocking a wasp down in the open but not under a table, the gale carrying off a hovering wasp, the extra cost of flying in heat, and an attic against a hollow tree on a heatwave afternoon. The weather digest now covers 240 days so it sees spells.
 
+### 18.39 Males and mating flights as built (T2-3)
+
+**Who a young queen meets.** A gyne's chance to mate now depends on the males about: her own colony's males plus the neighbourhood's, which rise with the breeding season (30 at its height). With 20 or more about every gyne that flies out finds one; early in the breeding season, with no brothers yet, fewer than one in ten does. So a colony that raises males early mates its queens early.
+
+**The mating spot.** The tree near the nest with the best height for its distance (within 40 m) is where males wait: over its crown, 60 cm above the top. It is a pure function of the nest and the frozen chunks.
+
+**Males and gynes in the air.** Near the nest in the breeding season on a fair day, up to four males and two young queens fly out at a time, taken from the colony's counts and returned to them if they come home. Males circle the crown; at dusk, in rain or when tired they go home. A young queen circles the spot; a male of the line within 25 cm mates with her, or she meets one of the neighbourhood's males now and then (2% a second at the height of the season). She leaves to winter (counted as mated), and the male, who mates once, dies. A gyne who finds no one in a minute goes home.
+
+**A male's body.** No sting and no venom: he cannot sting or press a sting, and does no work (no prey, pulp, water, robbing or crawling under clothes; he can perch, and feeds at flowers like anyone). He flies 10% faster than a worker and lives about three days of season time. He is drawn with a seventh abdominal segment, no stinger and long antennae; a young queen is drawn at queen size.
+
+**Playing as a male.** The player can switch to a male (never to a young queen). The HUD says where the mating spot is; flying into a young queen there mates with her, and his life ends there (the player then takes a worker, as after any death).
+
+**On the wire.** State and swarm packets carry the male and young-queen castes in spare bits, so other players see them as such.
+
+**Checks.** JS and C# check the mating chance with and without males, the spot over a crown near the nest, males patrolling and young queens mating (three matings with males of the line in the same run in both), a male unable to sting or catch prey, and a player's male mating with a young queen. The save format is 19.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1258,7 +1274,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (89 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (90 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -1298,7 +1314,7 @@ Agreed 2026-10-27: Tier 2 is built on the current stack in the order that surviv
 |---|---|---|---|---|
 | T2-1 | **Built (18.37).** Water as a resource: birdbaths and rain puddles, water loads carried home, a hot nest cooled by water, brood that cooks without it | 6.2, 6.6 | M | sim and generator |
 | T2-2 | **Built (18.38).** Extreme weather: heatwaves, storms (gusts and downpours), cold snaps | 5.3 | M | sim; makes T2-1 matter |
-| T2-3 | Males as wasps: drones fly physically late in the season, no sting, mating flights with gynes | 6.5, 6.7 | M | sim |
+| T2-3 | **Built (18.39).** Males as wasps: drones fly physically late in the season, no sting, mating flights with gynes | 6.5, 6.7 | M | sim |
 | T2-4 | Lineage colonies as real AI colonies: the queens the player did not wake found colonies of the line, run by AI | 6.7 | L | sim |
 | T2-5 | Town centers and beer gardens: a new land use with dense outdoor seating and drinks | 4.1, 4.3 | M | generator and sim; new art |
 | T2-6 | Feature modifiers that need the bigger generator: biome mix, town density, terrain | 4.8 | L | terrain touches all collision |

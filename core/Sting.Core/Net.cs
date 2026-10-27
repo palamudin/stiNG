@@ -40,7 +40,7 @@ namespace Sting.Core
                 U32(b, o, (uint)w.id); U16(b, o + 4, (short)cx); U16(b, o + 6, (short)cz);
                 U16(b, o + 8, Q16(w.x - cx * CS, -CS / 2, CS / 2)); U16(b, o + 10, Q16(w.y, 0, YMAX)); U16(b, o + 12, Q16(w.z - cz * CS, -CS / 2, CS / 2));
                 b[o + 14] = (byte)(sbyte)Q8(w.vx); b[o + 15] = (byte)(sbyte)Q8(w.vy); b[o + 16] = (byte)(sbyte)Q8(w.vz);
-                U8(b, o + 17, Math.Max(0, Array.IndexOf(STATES, w.state)));
+                U8(b, o + 17, Math.Max(0, Array.IndexOf(STATES, w.state)) | (w.caste == "male" ? 64 : 0) | (w.caste == "gyne" ? 128 : 0)); // males and young queens (T2-3)
                 U8(b, o + 18, (w.caste == "queen" ? 128 : 0) | (w.under != null ? 64 : 0) | (w.rival ? 32 : 0) | Math.Max(0, Array.IndexOf(CARRY, w.carry)));
                 o += BYTES_PER_WASP;
             }
@@ -60,7 +60,7 @@ namespace Sting.Core
                 {
                     id = (int)R32(b, o), x = cx * CS + D16(R16(b, o + 8), -CS / 2, CS / 2), y = D16(R16(b, o + 10), 0, YMAX), z = cz * CS + D16(R16(b, o + 12), -CS / 2, CS / 2),
                     vx = (Num)(sbyte)b[o + 14] / 127 * VMAX, vy = (Num)(sbyte)b[o + 15] / 127 * VMAX, vz = (Num)(sbyte)b[o + 16] / 127 * VMAX,
-                    state = b[o + 17] < STATES.Length ? STATES[b[o + 17]] : null, caste = (flags & 128) != 0 ? "queen" : "worker",
+                    state = (b[o + 17] & 63) < STATES.Length ? STATES[b[o + 17] & 63] : null, caste = (flags & 128) != 0 ? "queen" : (b[o + 17] & 64) != 0 ? "male" : (b[o + 17] & 128) != 0 ? "gyne" : "worker",
                     under = (flags & 64) != 0 ? underHex ?? "yes" : null, rival = (flags & 32) != 0, carry = (flags & 31) < CARRY.Length ? CARRY[flags & 31] : null,
                 });
                 o += BYTES_PER_WASP;
@@ -105,7 +105,7 @@ namespace Sting.Core
                 {
                     U16(b, o, w.id - g.@base);
                     U16(b, o + 2, Q16(w.x - g.cx * CS, -CS / 2, CS / 2)); U16(b, o + 4, Q16(w.y, 0, YMAX)); U16(b, o + 6, Q16(w.z - g.cz * CS, -CS / 2, CS / 2));
-                    U8(b, o + 8, Math.Max(0, Array.IndexOf(STATES, w.state)) | (w.caste == "queen" ? 16 : 0) | (w.rival ? 32 : 0));
+                    U8(b, o + 8, Math.Max(0, Array.IndexOf(STATES, w.state)) | (w.caste == "queen" ? 16 : 0) | (w.rival ? 32 : 0) | (w.caste == "male" ? 64 : 0) | (w.caste == "gyne" ? 128 : 0));
                     o += BYTES_PER_SWARM_WASP;
                 }
             }
@@ -123,7 +123,7 @@ namespace Sting.Core
                 {
                     int s = b[o + 8];
                     m.wasps.Add(new RemoteWasp { id = (int)(bs + (uint)R16(b, o)), x = cx * CS + D16(R16(b, o + 2), -CS / 2, CS / 2), y = D16(R16(b, o + 4), 0, YMAX), z = cz * CS + D16(R16(b, o + 6), -CS / 2, CS / 2),
-                        state = (s & 15) < STATES.Length ? STATES[s & 15] : null, caste = (s & 16) != 0 ? "queen" : "worker", rival = (s & 32) != 0 });
+                        state = (s & 15) < STATES.Length ? STATES[s & 15] : null, caste = (s & 16) != 0 ? "queen" : (s & 64) != 0 ? "male" : (s & 128) != 0 ? "gyne" : "worker", rival = (s & 32) != 0 });
                     o += BYTES_PER_SWARM_WASP;
                 }
             }

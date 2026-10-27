@@ -1467,11 +1467,12 @@ namespace Sting.Core
                 foreach (var w in Own()) if (w.id != drivenId) Despawn(w);
                 return;
             }
-            int own = Own().Count;
+            int own = OwnWorkers(); // males and gynes out are not workers (T2-3)
             Num inside2 = col.adults - own;
             var d = Driven();
             int guards = 0; foreach (var w in Own()) if (w.role == "guard" && w != d) guards++;
-            int ai = own - (d != null ? 1 : 0) - guards;
+            int ai = own - (d != null && d.caste == "worker" ? 1 : 0) - guards;
+            if (!noAI && daylight && col.nestAlive && frac >= T.season.reproStart) LaunchRepro(col);
             // the oldest workers guard the entrance first (T1-13); the rest of the cap is foragers, and the young stay in
             Num mature = col.adults - col.young;
             Num cap = Min(T.ai.maxPhysical, Floor(mature * 0.4 * T.alloc[col.alloc].traffic));

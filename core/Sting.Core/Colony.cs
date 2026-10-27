@@ -43,6 +43,8 @@ namespace Sting.Core
 
         public static Num ProteinCap(ColonyState c) => T.colony.proteinCapBase + (c.larvae + c.rLarvae * T.season.reproProtein) * T.colony.larvaProtein * T.colony.proteinCapDays;
         public static Num SugarCap(ColonyState c) => T.colony.sugarCapBase + c.adults * T.colony.adultSugar * T.colony.sugarCapDays;
+        /// the males a young queen can meet (T2-3): her colony's and the neighbourhood's, which peak with the breeding season
+        public static Num MalesAbout(ColonyState c, Num frac) => Clamp01((c.males + T.males.area * ReproShare(frac)) / T.males.need);
         public static Num WaterCap(ColonyState c) => T.water.capBase + c.adults * T.water.capPerAdult; // T2-1
         public static Num BroodTotal(ColonyState c) => c.eggs + c.larvae + c.pupae + c.rEggs + c.rLarvae + c.rPupae;
 
@@ -137,7 +139,7 @@ namespace Sting.Core
             c.young += newWorkers - c.young / (T.colony.youngDays * bio) * dtDay;
             c.gynes += newRepro * T.season.gyneShare; c.males += newRepro * (1 - T.season.gyneShare); c.stats.gynesRaised += newRepro * T.season.gyneShare;
 
-            if (foraging && c.gynes > 0) { Num m = c.gynes * T.season.matePerDay * dtDay; c.gynes -= m; c.mated += m * T.season.mateSuccess; }
+            if (foraging && c.gynes > 0) { Num m = c.gynes * T.season.matePerDay * dtDay; c.gynes -= m; c.mated += m * T.season.mateSuccess * MalesAbout(c, frac); } // T2-3
 
             Num late = frac > T.season.collapseFrom ? 1 + T.season.collapseMul * (frac - T.season.collapseFrom) / (1 - T.season.collapseFrom) : 1;
             Num die = inside * T.colony.adultMortality / bio * late * dtDay;

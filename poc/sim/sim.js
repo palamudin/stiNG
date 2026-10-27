@@ -10,7 +10,7 @@ import {
   chunkOf, chunkKey, NEST, NEST_ENTRANCE, SPAWN, generateChunk, ticksPerMinute, clockMinutes, dayOf, minuteOfDay,
   isRaining, dayWeather, tempAt, windAt, isDaylight, humanWindow, flyPos, beePos, birdPos, dragonPos, shedSites, makeNest,
 } from './world.js';
-import { newColony, colonyStep, destroyNest, colonyFinished, seasonPhase } from './colony.js';
+import { newColony, colonyStep, destroyNest, colonyFinished, seasonPhase, reproShare } from './colony.js';
 
 export const CMD_FIELDS = 10; // mx, my, mz, burst, sting, yawQ, pitchQ, act, alloc, pick (a wasp id to switch to, from the colony view)
 export const Act = { Interact: 1, Switch: 2, Rest: 4 };
@@ -803,16 +803,16 @@ export class Sim {
     if (pick) {
       // the colony view asked for this one
       const w = this.waspById(pick);
-      if (!w || w.colony !== 'own' || w === d) return;
+      if (!w || w.colony !== 'own' || w === d || w.caste === 'gyne') return;
       best = w; bd = dist2(w, d);
     } else for (const w of this.wasps) {
-      if (w === d || w.state === 'dead' || w.colony !== 'own') continue;
+      if (w === d || w.state === 'dead' || w.colony !== 'own' || w.caste === 'gyne') continue; // a young queen is not yours to fly (T2-3)
       const q = dist2(w, d);
       if (q < bd) { bd = q; best = w; }
     }
     const P = T.possess;
     if (best && bd <= P.freeRange * P.freeRange) { this._possess(d, best); return; }
-    const inside = this.colony.nestAlive && this.colony.sited !== false && this.colony.adults - this._own().filter((x) => x.caste !== 'queen').length >= 1;
+    const inside = this.colony.nestAlive && this.colony.sited !== false && this.colony.adults - this._own().filter((x) => x.caste === 'worker').length >= 1;
     if (!best && !inside) { this.emit('noSwitch'); return; }
     this.pendingSwitch = { at: this.tick + P.relayTicks, target: best ? best.id : 0 };
     this.emit('switchPending', { seconds: P.relayTicks / 60, toNest: !best });
@@ -834,7 +834,7 @@ export class Sim {
     if (!d) return;
     let to = ps.target ? this.waspById(ps.target) : null;
     if (!to) {
-      if (!(this.colony.nestAlive && this.colony.adults - this._own().filter((x) => x.caste !== 'queen').length >= 1)) { this.emit('noSwitch'); return; }
+      if (!(this.colony.nestAlive && this.colony.adults - this._own().filter((x) => x.caste === 'worker').length >= 1)) { this.emit('noSwitch'); return; }
       to = this._spawnWasp(true); // a worker from inside the nest
     }
     this._possess(d, to);
@@ -864,14 +864,14 @@ export class Sim {
   // ---------------------------------------------------------------- one wasp per tick
 
   // A worker's span is that of her sisters (GDD 7.5): 1/adultMortality days, scaled to the season, ±20% by hash.
-  lifespanMinutes(w) { return (1 / T.colony.adultMortality) * this.bio * 1440 * (0.8 + 0.4 * h32(w.id, 7)); }
+  lifespanMinutes(w) { return (w.caste === 'male' ? T.males.maleLifeDays : 1 / T.colony.adultMortality) * this.bio * 1440 * (0.8 + 0.4 * h32(w.id, 7)); }
 
   _stepWasp(w, cmd, edge, driven) {
     if (driven && w.caste !== 'queen' && w.colony === 'own' && this.minute - (w.born ?? this.minute) > this.lifespanMinutes(w) && (w.state === 'fly' || w.state === 'landed')) {
       this._die(w, 'old age', null);
       return;
     }
-    const armed = driven ? cmd.sting && !this.pressUsed : cmd.sting;
+    const armed = w.caste !== 'male' && (driven ? cmd.sting && !this.pressUsed : cmd.sting); // males have no sting (T2-3)
     switch (w.state) {
       case 'fly':
       case 'stunned':
@@ -929,7 +929,7 @@ export class Sim {
         break;
     }
     if (this.waspById(w.id)) {
-      w.venom = Math.min(w.caste === 'queen' ? T.queen.venomMul : 1, w.venom + T.venom.regenPerSec * DT);
+      w.venom = w.caste === 'male' ? 0 : Math.min(w.caste === 'queen' ? T.queen.venomMul : 1, w.venom + T.venom.regenPerSec * DT);
       this._bodyHeat(w);
     }
   }
@@ -986,6 +986,7 @@ export class Sim {
       let top = burst ? W.burst : W.cruise;
       if (w.carry) top *= W.carrySpeedMul;
       if (w.caste === 'queen') top *= T.queen.speedMul;
+      else if (w.caste === 'male') top *= T.males.speedMul;
       if (rain) top *= T.weather.rainSpeedMul;
       // The wasp flies in moving air (GDD 5.3): its airspeed is capped at its top speed and the wind adds to it, so it
       // is faster downwind and slower upwind. With no input it leans into the wind and holds its place, which is flying
@@ -1240,6 +1241,7 @@ export class Sim {
   // ---------------- interactions (E): crawl under, catch prey, chew pulp
 
   _interact(w) {
+    if (w.caste === 'male') { if (w.contact && w.state === 'fly') this._perch(w, w.contact); return; } // a male does no work (T2-3)
     if (w.caste === 'queen' && !this.colony.sited) { const site = this._siteNear(w); if (site) { this._foundNest(w, site); return; } }
     if (w.caste !== 'queen' && this.seasonFrac >= T.season.reproStart && this.colony.mated + this.colony.gynes >= 1) {
       const hs = this._hiberNear(w);
@@ -1927,7 +1929,7 @@ export class Sim {
     w.state = 'dead';
     if (w.colony !== 'own') { /* a rival worker */ }
     else if (w.caste === 'queen') { this.colony.queenAlive = false; this.emit('queenDied', { cause }); }
-    else this.colony.adults = Math.max(0, this.colony.adults - 1);
+    else if (w.caste === 'worker') this.colony.adults = Math.max(0, this.colony.adults - 1); // a male or gyne out was already counted out (T2-3)
     if (w.fight) { const o = this.waspById(w.fight.other); if (o && o.state === 'fighting') { o.state = 'fly'; o.fight = null; } }
     this.stats.deaths++;
     this.stats.causes[cause] = (this.stats.causes[cause] || 0) + 1;
@@ -1946,6 +1948,8 @@ export class Sim {
   }
 
   _despawn(w) {
+    if (w.colony === 'own' && w.caste === 'male') this.colony.males += 1; // back in the nest (T2-3)
+    else if (w.colony === 'own' && w.caste === 'gyne') { if (w.mated) this.colony.mated += 1; else this.colony.gynes += 1; }
     this.wasps = this.wasps.filter((x) => x !== w);
     this._publish({ type: 'died', waspId: w.id, cause: 'home', x: w.x, y: w.y, z: w.z });
     this._releaseBees(w.id);
@@ -3347,7 +3351,7 @@ export class Sim {
   // A poisoned load reaches the nest: it is fed to larvae and shared with adults
   _poison(amount, byId) {
     const M = T.muni, col = this.colony;
-    const inside = Math.max(0, col.adults - this._own().filter((x) => x.caste !== 'queen').length);
+    const inside = Math.max(0, col.adults - this._own().filter((x) => x.caste === 'worker').length);
     const adults = Math.min(inside, col.adults * M.poisonAdults * amount);
     const lf = Math.min(1, M.poisonLarvae * amount), larvae = col.larvae * lf + col.rLarvae * lf;
     col.adults -= adults; col.larvae -= col.larvae * lf; col.rLarvae -= col.rLarvae * lf;
@@ -3564,7 +3568,7 @@ export class Sim {
       this.colony.maxCells = T.sites[this.nest.site].maxCells;
       this.emit('nestFounded', { x: this.nest.x, y: this.nest.y, z: this.nest.z, key: this.nest.key, auto: true });
     }
-    colonyStep(col, 60 / this.dayTicks, this._own().filter((w) => w.caste !== 'queen').length, daylight, frac, this.bio, this.broodSpeed(), this.ecoAvail(), this.nestHeat());
+    colonyStep(col, 60 / this.dayTicks, this._own().filter((w) => w.caste === 'worker').length, daylight, frac, this.bio, this.broodSpeed(), this.ecoAvail(), this.nestHeat());
     if (this.raining && col.nestAlive && col.sited) {
       // the site decides what rain costs: burrows flood, open nests chill (GDD 6.6)
       const st = T.sites[this.nest.site || 'trunk'], dt = 60 / this.dayTicks;
@@ -3586,11 +3590,12 @@ export class Sim {
       for (const w of this._own()) if (w.id !== this.drivenId) this._despawn(w);
       return;
     }
-    const own = this._own().length;
+    const own = this._own().filter((w) => w.caste === 'worker').length; // males and gynes out are not workers (T2-3)
     const inside = col.adults - own;
     const d = this._driven();
     const guards = this._own().filter((w) => w.role === 'guard' && w !== d).length;
-    const ai = own - (d ? 1 : 0) - guards;
+    const ai = own - (d && d.caste === 'worker' ? 1 : 0) - guards;
+    if (!this.noAI && daylight && col.nestAlive && frac >= T.season.reproStart) this._launchRepro(col);
     // the oldest workers guard the entrance first (T1-13); the rest of the cap is foragers, and the young stay in
     const mature = col.adults - col.young;
     const cap = Math.min(T.ai.maxPhysical, Math.floor(mature * 0.4 * T.alloc[col.alloc].traffic));
@@ -3600,6 +3605,81 @@ export class Sim {
       w.role = 'guard'; w.ai.mode = 'guard';
       this.emit('guardOut', { id: w.id });
     } else if (ai < cap) this._spawnWasp(false);
+  }
+
+  // ---------------------------------------------------------------- males and mating flights (GDD 6.5, 6.7, T2-3)
+
+  // Near the nest in the breeding season, males go out to the mating spot and young queens follow
+  _launchRepro(col) {
+    const M = T.males, own = this._own();
+    const males = own.filter((w) => w.caste === 'male').length, gynes = own.filter((w) => w.caste === 'gyne').length;
+    if (col.males >= 1 && males < M.physMales && h32(this.tick, 501) < M.launchChance) {
+      col.males -= 1;
+      const w = this._spawnWasp(false, 'male'); w.role = 'male'; w.venom = 0; w.ai.mode = 'patrol';
+    } else if (col.gynes >= 1 && gynes < M.physGynes && h32(this.tick, 502) < M.launchChance) {
+      col.gynes -= 1;
+      const w = this._spawnWasp(false, 'gyne'); w.role = 'gyne'; w.ai.mode = 'mate'; w.ai.timer = this.tick + M.gyneTicks;
+    }
+  }
+  // The mating spot: over the crown of the tallest tree near the nest, nearer ones preferred. A pure function of the
+  // nest and the frozen chunks, so every peer has the same one.
+  lekSpot() {
+    const n = this.nest, key = n.key + ':' + n.x + ':' + n.z;
+    if (this._lek && this._lek.key === key) return this._lek.p;
+    const M = T.males, cx = chunkOf(n.x), cz = chunkOf(n.z);
+    let best = null, bs = -Infinity;
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) for (const t of this._content(cx + dx, cz + dz).trees) {
+      const d = Math.sqrt(sq(t.x - n.x) + sq(t.z - n.z));
+      if (d > M.lekRange) continue;
+      const s = t.h - 0.05 * d;
+      if (s > bs) { bs = s; best = t; }
+    }
+    const p = best ? { x: best.x, y: best.h + M.lekAbove, z: best.z, r: best.cr } : { x: n.x, y: n.y + 3, z: n.z, r: 1 };
+    this._lek = { key, p };
+    return p;
+  }
+  // A male patrols round the crown, and goes home at dusk or when tired
+  _thinkMale(w, cmd) {
+    const ai = w.ai, lek = this.lekSpot(), M = T.males;
+    if (!isDaylight(this.minute) || this.raining || w.energy < 0.3) ai.mode = 'home';
+    if (ai.mode === 'home') {
+      this._steer(w, this.nest.entrance, cmd);
+      if (dist2(w, this.nest.entrance) < 0.07 * 0.07) this._despawn(w);
+      return cmd;
+    }
+    const a = this.tick * 0.02 + w.id, r = Math.max(M.patrolR, lek.r * 0.8);
+    this._steer(w, { x: lek.x + r * dcos(a), y: lek.y + 0.4 * dsin(a * 1.7), z: lek.z + r * dsin(a) }, cmd);
+    return cmd;
+  }
+  // A young queen flies to the spot and circles until she meets a male (one of ours, the player's, or the
+  // neighbourhood's), then leaves to winter; she gives up and goes home after a while
+  _thinkGyne(w, cmd) {
+    const ai = w.ai, lek = this.lekSpot(), M = T.males;
+    if (ai.mode === 'mate' && (this.tick > ai.timer || !isDaylight(this.minute) || this.raining)) ai.mode = 'home';
+    if (ai.mode === 'home') {
+      this._steer(w, this.nest.entrance, cmd);
+      if (dist2(w, this.nest.entrance) < 0.07 * 0.07) this._despawn(w);
+      return cmd;
+    }
+    const a = -this.tick * 0.015 + w.id * 2, r = Math.max(M.patrolR, lek.r * 0.8) * 0.9;
+    this._steer(w, { x: lek.x + r * dcos(a), y: lek.y + 0.2 * dsin(a * 1.3), z: lek.z + r * dsin(a) }, cmd);
+    if (dist2(w, lek) > sq(r + 3)) return cmd;
+    // a male of ours within reach: the closest, by id on a tie
+    let mate = null, md = M.mateDist * M.mateDist;
+    for (const x of this.wasps) {
+      if (x.caste !== 'male' || x.colony !== 'own' || (x.state !== 'fly' && x.state !== 'landed')) continue;
+      const q = dist2(x, w);
+      if (q <= md) { md = q; mate = x; }
+    }
+    const area = T.males.area * reproShare(this.seasonFrac) / T.males.need;
+    if (mate || h32(w.id, this.tick, 503) < M.areaRate * DT * Math.min(1, area)) this._mate(w, mate);
+    return cmd;
+  }
+  _mate(g, male) {
+    g.mated = true;
+    this.emit('mated', { gyne: g.id, male: male ? male.id : 0, driven: !!male && male.id === this.drivenId });
+    this._despawn(g); // she leaves to find a place to winter: counted as mated
+    if (male) this._die(male, 'mated', null); // a male mates once and dies
   }
 
   // ---------------------------------------------------------------- AI brain (one decision per tick per AI wasp)
@@ -3615,6 +3695,8 @@ export class Sim {
     if (w.state === 'balled') { this._ballEscape(w, false); return cmd; }
     if (w.state !== 'fly') return cmd;
     if (w.colony !== 'own') return this._thinkRival(w, cmd);
+    if (w.caste === 'male') return this._thinkMale(w, cmd); // T2-3
+    if (w.caste === 'gyne') return this._thinkGyne(w, cmd);
     // alarm pheromone pulls nearby workers into an attack
     if (ai.mode !== 'attack' && ai.mode !== 'evade') {
       for (const a of this.alarms) {

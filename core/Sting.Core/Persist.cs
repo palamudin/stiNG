@@ -86,7 +86,7 @@ namespace Sting.Core
 
     public static class Persist
     {
-        public const int SAVE_VERSION = 18; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home); 14: barbecue meat taken; 15: regions, pulp taken from wood; 16: strolls and garden rounds; 17: the carry ledger and sips (T1-20); 18: water (T2-1)
+        public const int SAVE_VERSION = 19; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home); 14: barbecue meat taken; 15: regions, pulp taken from wood; 16: strolls and garden rounds; 17: the carry ledger and sips (T1-20); 18: water (T2-1); 19: young queens on their mating flight (T2-3)
         const uint MAGIC = 0x474E4953; // "SING"
 
         // ---------------------------------------------------------------- one Io per type
@@ -145,7 +145,7 @@ namespace Sting.Core
             if (a.Opt(ref w.ball)) { var b = w.ball; a.D(ref b.temp); a.D(ref b.progress); a.D(ref b.prevBurst); a.D(ref b.bees); }
             a.D(ref w.born);
             if (a.Opt(ref w.carry)) { var c = w.carry; a.S(ref c.kind); a.S(ref c.what); a.D(ref c.amount); a.B(ref c.poison); }
-            a.B(ref w.pubLoad);
+            a.B(ref w.pubLoad); a.B(ref w.mated); // T2-3
             a.I(ref w.groundTicks); a.I(ref w.chew); a.S(ref w.role); a.S(ref w.colony);
             if (a.Opt(ref w.chewAt)) { a.S(ref w.chewAt.key); a.I(ref w.chewAt.i); a.B(ref w.chewAt.water); }
             if (a.Opt(ref w.web)) { var b = w.web; a.S(ref b.key); a.I(ref b.i); a.D(ref b.progress); a.D(ref b.prevBurst); a.I(ref b.start); a.D(ref b.spiderAt); }
