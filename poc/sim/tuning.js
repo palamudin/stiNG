@@ -226,8 +226,10 @@ export const T = {
   relevance: { nearDist: 50, interestChunks: 3, nearEvery: 6, midEvery: 20, farEvery: 60, midTtl: 75 },
   // Plausibility checks on what peers send (GDD 11.8). Margins are generous: honest traffic must always pass,
   // only gross violations fail, so honest peers reach the same verdict.
+  // T1-20: a pickup or a sip must be within pickupReach of the thing taken, and no wasp position may lie more than
+  // solidDepth inside a house, shed, table, trunk or grill, or under the ground; a sip is at most sipMax
   plaus: { futureTicks: 120, stingReach: 1.6, humanDrift: 3, maxSwatDelay: 240, maxSwats: 4, rateWindow: 120, rateMax: 6,
-    maxSpeed: 12, strikes: 3 },
+    maxSpeed: 12, strikes: 3, pickupReach: 0.3, solidDepth: 0.08, sipMax: 0.12 },
 };
 
 export const DEFAULT_SETTINGS = {

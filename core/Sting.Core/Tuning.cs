@@ -202,6 +202,8 @@ namespace Sting.Core
         {
             public static int futureTicks = 120, maxSwatDelay = 240, maxSwats = 4, rateWindow = 120, rateMax = 6, strikes = 3;
             public static Num stingReach = 1.6, humanDrift = 3, maxSpeed = 12;
+            /// T1-20: pickups and sips within reach of what they take, no position deep inside anything solid, a sip's size
+            public static Num pickupReach = 0.3, solidDepth = 0.08, sipMax = 0.12;
         }
     }
 

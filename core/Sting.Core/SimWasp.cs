@@ -456,7 +456,7 @@ namespace Sting.Core
             var c = w.contact;
             if (c != null && c.opening >= 0 && w.carry == null) { EnterUnder(w, c.humanHex, c.opening); return; }
             if (c != null && w.state == "fly") { PerchOn(w, c.humanHex, c.zone, c.surf, c.n, c.part); return; }
-            var prey = PreyNear(w);
+            var prey = w.carry == null ? PreyNear(w) : null; // one load at a time (T1-20)
             if (prey != null) { Catch(w, prey); return; }
             if (w.carry == null && BaitNear(w) != null) { TakeBait(w); return; }
             var wood = w.carry == null ? WoodNear(w) : null;
@@ -652,10 +652,11 @@ namespace Sting.Core
                     {
                         // tell the other peers in sips of a tenth (T1-8)
                         var sp = w.sipPend;
-                        if (sp != null && (sp.key != key || sp.i != i)) { Publish(new NetEv { type = "sip", key = sp.key, i = sp.i, amount = sp.amount }); sp = null; }
+                        void Out(SipPend q) => Publish(new NetEv { type = "sip", key = q.key, i = q.i, amount = q.amount, waspId = w.id, x = q.x, y = q.y, z = q.z });
+                        if (sp != null && (sp.key != key || sp.i != i)) { Out(sp); sp = null; }
                         if (sp == null) sp = w.sipPend = new SipPend { key = key, i = i, amount = 0 };
-                        sp.amount += take;
-                        if (sp.amount >= 0.1) { Publish(new NetEv { type = "sip", key = key, i = i, amount = sp.amount }); w.sipPend = null; }
+                        sp.amount += take; sp.x = w.x; sp.y = w.y; sp.z = w.z; // where it last drank, for the check (T1-20)
+                        if (sp.amount >= 0.1) { Out(sp); w.sipPend = null; }
                     }
                     return;
                 }
@@ -817,17 +818,26 @@ namespace Sting.Core
         public List<Carrion> CarrionIn(ChunkRec rec)
         {
             if (carrionOverride != null) return carrionOverride(rec);
-            long sd = (long)(seed & 0xffffffffUL); Num CSz = T.chunk.size; var o = new List<Carrion>();
+            var o = new List<Carrion>();
             chunkState.TryGet(rec.key, out var st);
             for (long d = day - T.eco.carrionDays + 1; d <= day; d++)
             {
-                if (d < 0 || HSeq(sd, rec.cx, rec.cz, d, 974) >= T.eco.carrionChance) continue;
+                var p = CarrionSpot(rec.cx, rec.cz, d);
+                if (p == null) continue;
                 int taken = st != null && st.carrion != null && st.carrion.TryGetValue((int)d, out var tk) ? tk : 0;
                 int left = T.eco.carrionLoads - taken;
                 if (left <= 0) continue;
-                o.Add(new Carrion { x = (rec.cx + (HSeq(sd, rec.cx, rec.cz, d, 975) - 0.5) * 0.8) * CSz, y = 0.03, z = (rec.cz + (HSeq(sd, rec.cx, rec.cz, d, 976) - 0.5) * 0.8) * CSz, d = d, left = left });
+                o.Add(new Carrion { x = p.Value.x, y = p.Value.y, z = p.Value.z, d = d, left = left });
             }
             return o;
+        }
+        /// where the carrion of day d lies in a chunk, if that day has any: a pure function of the seed
+        public V3? CarrionSpot(int cx, int cz, long d)
+        {
+            if (carrionSpotOverride != null) return carrionSpotOverride(cx, cz, d);
+            long sd = (long)(seed & 0xffffffffUL); Num CSz = T.chunk.size;
+            if (d < 0 || HSeq(sd, cx, cz, d, 974) >= T.eco.carrionChance) return null;
+            return new V3((cx + (HSeq(sd, cx, cz, d, 975) - 0.5) * 0.8) * CSz, 0.03, (cz + (HSeq(sd, cx, cz, d, 976) - 0.5) * 0.8) * CSz);
         }
         /// what the season offers the abstract foragers: multipliers on sugar and protein income
         public (Num sugar, Num protein) EcoAvail()

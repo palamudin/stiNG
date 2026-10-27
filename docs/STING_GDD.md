@@ -739,6 +739,8 @@ Owner authority means anyone can claim anything, so every peer checks what it re
 
 Violations: drop the update, quarantine the peer, and report to the world holder, which can remove it. The persistence node applies the same checks to deltas before storing them.
 
+As built (18.36): speed is checked on state packets for drawing only; contact distance, venom rate, the event window, carry limits, positions inside solids and pickups and sips against what they took are checked on events, by every peer alike.
+
 ### 11.9 Clock sync **[Infra]**
 
 - World tick = (synchronized time − epoch) / tick length.
@@ -1207,6 +1209,20 @@ The ordinary lab colony (23 wasps) now sends 2.8 KB/s instead of 4.8. Two player
 
 **Checks.** JS and C# check the slots in the home region, the lying frame (to the world and back, the front faces the sky, a body lies full length a hand above the grass), the weather rules, strollers walking their loops (the same distances to the metre in both), gardeners stopping at their beds, sunbathers lying still with skin to sting, a stung stroller running and walking on, and a walk surviving save and restore. The parity digests now cover the slots' activities and paths, the lying frame, and the stroll and garden states in the human hash (the cook's states were missing from it and are now in).
 
+### 18.36 The remaining plausibility checks as built (T1-20)
+
+These complete 11.8. Like the earlier checks, each reads only the event and the frozen world (chunk content is a pure function of the seed, so a peer that has not discovered the chunk generates it to check), never live state that peers may hold differently, so every honest peer reaches the same verdict, and only the host rules on a peer (11.11).
+
+**Chunk deltas match their cause.** Every pickup (a fly, caterpillar, carrion, meat, a bee, honey, a load of pulp), whether taken directly or claimed through the chunk authority (18.32), now carries the wasp and where it was. Every peer checks that the thing exists (a fly or caterpillar of that index in that chunk, carrion on that day there, a grill at that table, a bee of that hive, a wooden box) and that the wasp was within 30 cm of it at that tick: flies and bees move by pure functions of time, so their positions at the event's tick are exact. A sip from a flower carries the wasp and where it last drank; the flower must be there and within reach, the sip at most 0.12, and one wasp cannot drink more than a wasp's rate allows over two seconds. A forged pickup is dropped before it touches the world and counts a strike.
+
+**Carry limits.** A wasp carries one load. Every peer keeps a ledger of which of the other peers' wasps hold a load they took in view of everyone; a second pickup by the same wasp before it lets go is rejected. When a wasp lets go of such a load (delivered at the nest, taken back by a denied claim, or lost any other way) its owner publishes a `drop` (once per load, from a sweep at the end of each tick), and a death clears it too. The ledger is saved with the world. Building it found that a player's wasp could catch a fly while already holding one, the second replacing the first; that is no longer possible, for players or AI.
+
+**Positions inside solid geometry.** No pickup or sip may come from more than 8 cm inside a house, shed, table, mall, trunk or grill, or below the ground; a wasp robs a bee box from its entrance, so bee boxes are left out. A player's own wasp in a state packet is not drawn where it is deep inside something solid, like a wasp that moved too fast (display only, so it cannot desync). The other wasps of a colony are not checked there: far from their owner they fly where that peer does not collide them.
+
+**Checks.** JS and C# run two minutes of honest two-peer play (14 of A's pickups and 84 sips checked on B, none rejected on either peer, the same counts in both), and forged events: a second pickup without letting go, a pickup after a drop, a fly taken from 5 m away, a claim on a caterpillar that does not exist, pulp chewed from inside a shed wall and from outside it, an oversized sip, a sip from 3 m away, a wasp drinking too fast, a forged pickup that strikes and changes nothing, and a player's wasp reported inside a house. The save format is 17 (the ledger and recent sips, and whether a wasp holds a load it must say it let go of).
+
+**Limits.** Fences and table tops are thinner than the 8 cm margin, so passing through one is not caught; houses, sheds and trunks are. A cheat that takes things within reach and only within its own carry limit (honest-looking play with an aimbot) is not something these checks can see.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1215,7 +1231,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (86 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (87 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -1240,12 +1256,12 @@ Everything in `POC.md` (86 features) and its C# port (18.18), including the Tier
 | T1-17 | **Built (18.20).** Line of sight for panic: contagion only between humans who can see each other | 8.9 | S | |
 | T1-18 | **Built (18.20).** Per-human memory: recency and place, so a person stung at this table is jumpy here and calmer elsewhere | 8.10 | S | |
 | T1-19 | **Built (18.32).** Chunk authority and contested pickups in the lab: rendezvous hashing picks one peer per chunk to settle two wasps grabbing the same caterpillar | 11.6 | M | |
-| T1-20 | Remaining plausibility checks: carry limits, positions inside solid geometry, chunk deltas consistent with their cause | 11.8 | S | T1-12 for deltas |
+| T1-20 | **Built (18.36).** Remaining plausibility checks: carry limits, positions inside solid geometry, chunk deltas consistent with their cause | 11.8 | S | T1-12 for deltas |
 | T1-21 | **Built (18.33).** Relevance tiers in the lab: near, mid and far wasps at different rates, swarm packets; measure bandwidth with a 200-worker colony | 11.12 | M | |
 | T1-22 | **Built (18.29).** Tuning as data: the tuning tables as versioned plain-text files read by own parsers in JS and C#, and the tuning hash in the world record | 13 | M | |
 | T1-23 | **Built (18.21).** Solo time: accelerate time in the colony view, and the Reflex slowdown as a solo option | 5.1, 7.8 | S | |
 
-Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, then the other S items: T1-14, T1-17, T1-18, T1-23, all done; T1-20 waits on regions), then the M items (T1-6 to T1-10, T1-12, T1-13, T1-15, T1-16, T1-19, T1-21 and T1-22 done, then T1-11 human days; T1-20 remains); each batch is built in the PoC and then ported to the core with parity.
+Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, then the other S items: T1-14, T1-17, T1-18, T1-23, all done; T1-20 waits on regions), then the M items (T1-6 to T1-10, T1-12, T1-13, T1-15, T1-16, T1-19, T1-21 and T1-22 done, then T1-11 human days and T1-20; Tier 1 is complete); each batch is built in the PoC and then ported to the core with parity.
 
 ### 19.3 Tier 2: later
 

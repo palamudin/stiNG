@@ -152,11 +152,12 @@ namespace Sting.Core.Tests
                 {
                     var st = S.CS("0,0"); st.carrion ??= new Dictionary<int, int>(); st.carrion[0] = T.eco.carrionLoads - 1;
                     S.carrionOverride = r => r.key == "0,0" && T.eco.carrionLoads - (st.carrion.TryGetValue(0, out var n) ? n : 0) > 0 ? new List<Carrion> { new Carrion { x = cx, y = 0.03, z = cz, d = 0, left = 1 } } : new List<Carrion>();
+                    S.carrionSpotOverride = (x, z, d) => x == rec.cx && z == rec.cz && d == 0 ? new V3(cx, 0.03, cz) : (V3?)null; // what every peer checks a pickup against (T1-20)
                 }
                 var r2 = Grab("carrion", new V3(cx, 0.05, cz));
                 Okn(r2.held.Count(x => x) == 1 && A.CS("0,0").carrion[0] == T.eco.carrionLoads && B.CS("0,0").carrion[0] == T.eco.carrionLoads, $"the last load of carrion goes to one wasp, counted once on both peers ({A.CS("0,0").carrion[0]}/{B.CS("0,0").carrion[0]})");
                 Okn(A.claims.Count == 0 && B.claims.Count == 0, "no claim is left waiting");
-                A.carrionOverride = B.carrionOverride = null;
+                A.carrionOverride = B.carrionOverride = null; A.carrionSpotOverride = B.carrionSpotOverride = null;
             }
             // relevance tiers (T1-21): swarm and traffic packets round-trip; a far peer gets swarm packets, not state
             {
@@ -201,6 +202,50 @@ namespace Sting.Core.Tests
                 for (int i = 0; i < 2; i++) { var a = d.wasps[i]; var o = m.wasps[i]; err = Math.Max(err, Math.Max(Math.Abs(D(a.x - o.x)), Math.Max(Math.Abs(D(a.y - o.y)), Math.Abs(D(a.z - o.z))))); }
                 Okn(err < 0.001 && d.wasps[1].caste == "queen" && d.wasps[0].carry == "fly" && d.wasps[1].state == "landed" && bin.Length == Wire.STATE_HEAD + 2 * Wire.BYTES_PER_WASP && d.tick == 123456,
                     $"state packet round-trips within 1 mm ({err * 1000:0.00} mm), {Wire.BYTES_PER_WASP} bytes per wasp");
+            }
+            // carry limits, solid geometry, chunk deltas that match their cause (T1-20)
+            {
+                var lab = new NetLab(new Settings { seed = 1234, birds = false }, "good");
+                Sim A = lab.a, B = lab.b;
+                for (int i = 0; i < 7200; i++) lab.Step(Idle(), Idle());
+                Okn(B.plausPickups > 0 && B.plausSips > 0 && A.netStats.rejected == 0 && B.netStats.rejected == 0,
+                    $"honest play passes every check: {B.plausPickups} of A's pickups and {B.plausSips} sips checked on B, none rejected on either peer");
+                int seq = 0;
+                NetEv Ev(string type, Action<NetEv> f) { var e = new NetEv { type = type, peer = 7, seq = ++seq, tick = A.tick, commit = A.tick + T.net.commitTicks }; f(e); return e; }
+                var c = A.records.Get("0,0").content;
+                int ci = -1; for (int i = 0; i < c.caterpillars.Count && ci < 0; i++) if (!A.CS("0,0").caughtCat.ContainsKey(i)) ci = i;
+                var cat = c.caterpillars[ci]; var fa = World.FlyPos(c.flies[0], A.tick);
+                Okn(A.Implausible(Ev("caught", e => { e.key = "0,0"; e.what = "caterpillar"; e.i = ci; e.waspId = 5; e.x = cat.x + 0.02; e.y = cat.y; e.z = cat.z; })) == null, "a pickup at the caterpillar passes");
+                Okn(A.Implausible(Ev("caught", e => { e.key = "0,0"; e.what = "fly"; e.i = 0; e.waspId = 5; e.x = fa.x; e.y = fa.y; e.z = fa.z; })) == "already carrying", "the same wasp taking a fly without letting go is caught: one load at a time");
+                Okn(A.Implausible(Ev("drop", e => e.waspId = 5)) == null && A.Implausible(Ev("caught", e => { e.key = "0,0"; e.what = "fly"; e.i = 0; e.waspId = 5; e.x = fa.x; e.y = fa.y; e.z = fa.z; })) == null, "once it says it let go, the next pickup passes");
+                Okn(A.Implausible(Ev("caught", e => { e.key = "0,0"; e.what = "fly"; e.i = 0; e.waspId = 6; e.x = fa.x + 5; e.y = fa.y; e.z = fa.z; })) == "taken from out of reach", "a fly taken from 5 m away is rejected");
+                Okn(A.Implausible(Ev("claim", e => { e.key = "0,0"; e.what = "caterpillar"; e.i = 9999; e.waspId = 6; e.auth = 0; e.x = cat.x; e.y = cat.y; e.z = cat.z; })) == "no such thing", "a claim on a caterpillar that does not exist is rejected");
+                string sk = null; int si = -1; Box sb = null; Shed house = null;
+                for (int x = -4; x < 4; x++) for (int z = -4; z < 4; z++)
+                {
+                    var cc = World.GenerateChunk(A.seed, x, z);
+                    if (sk == null) { int k = cc.boxes.FindIndex(b => b.shed && b.wood); if (k >= 0) { sk = x + "," + z; si = k; sb = cc.boxes[k]; } }
+                    if (house == null) house = cc.sheds.FirstOrDefault(h => h.house);
+                }
+                Num mx = (sb.minx + sb.maxx) / 2, my = (sb.miny + sb.maxy) / 2, mz = (sb.minz + sb.maxz) / 2;
+                Okn(A.Implausible(Ev("caught", e => { e.key = sk; e.what = "pulp"; e.i = si; e.waspId = 6; e.x = mx; e.y = my; e.z = mz; })) == "inside something solid", "pulp chewed from inside a shed wall is rejected");
+                Okn(A.Implausible(Ev("caught", e => { e.key = sk; e.what = "pulp"; e.i = si; e.waspId = 6; e.x = sb.maxx + 0.02; e.y = my; e.z = mz; })) == null, "the same shed chewed from outside passes");
+                var fl = c.flowers[0];
+                Okn(A.Implausible(Ev("sip", e => { e.key = "0,0"; e.i = 0; e.amount = 5; e.waspId = 8; e.x = fl.x; e.y = fl.y + 0.02; e.z = fl.z; })) == "sip out of range", "a sip of more than a sip is rejected");
+                Okn(A.Implausible(Ev("sip", e => { e.key = "0,0"; e.i = 0; e.amount = 0.1; e.waspId = 8; e.x = fl.x + 3; e.y = fl.y + 0.02; e.z = fl.z; })) == "sipped from out of reach", "a sip from 3 m away is rejected");
+                string fast = null;
+                for (int k = 0; k < 12 && fast == null; k++) fast = A.Implausible(Ev("sip", e => { e.key = "0,0"; e.i = 0; e.amount = 0.1; e.waspId = 9; e.x = fl.x; e.y = fl.y + 0.02; e.z = fl.z; }));
+                Okn(fast == "drinking faster than a wasp can", "a wasp that drinks a flower faster than any wasp can is rejected");
+                string Caught(Sim s) => string.Join(",", s.CS("0,0").caughtCat.Keys.OrderBy(k => k));
+                string before = Caught(A); A.plaus.strikes.TryGetValue(1, out int strikes);
+                B.evSeq++;
+                A.Receive(new Msg[] { new NetEv { type = "caught", peer = 1, seq = B.evSeq, tick = A.tick, commit = A.tick + T.net.commitTicks, key = "0,0", what = "caterpillar", i = ci, waspId = 77, x = cat.x + 4, y = cat.y, z = cat.z } });
+                Okn(A.plaus.strikes[1] == strikes + 1 && Caught(A) == before, "a forged pickup counts a strike against its peer and takes nothing from the world");
+                Num dropped = A.netStats.dropped;
+                var sm = new StateMsg { peer = 1, tick = A.tick + 1, driven = 4242 };
+                sm.wasps.Add(new RemoteWasp { id = 4242, caste = "worker", x = house.x, y = 2, z = house.z, state = "fly" });
+                A.Receive(new Msg[] { sm });
+                Okn(A.remote.Get(4242) == null && A.netStats.dropped == dropped + 1, "a player's wasp reported inside a house is not drawn there");
             }
         }
     }

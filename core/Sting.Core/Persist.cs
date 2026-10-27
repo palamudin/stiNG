@@ -86,7 +86,7 @@ namespace Sting.Core
 
     public static class Persist
     {
-        public const int SAVE_VERSION = 16; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home); 14: barbecue meat taken; 15: regions, pulp taken from wood; 16: strolls and garden rounds
+        public const int SAVE_VERSION = 17; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home); 14: barbecue meat taken; 15: regions, pulp taken from wood; 16: strolls and garden rounds; 17: the carry ledger and sips (T1-20)
         const uint MAGIC = 0x474E4953; // "SING"
 
         // ---------------------------------------------------------------- one Io per type
@@ -145,6 +145,7 @@ namespace Sting.Core
             if (a.Opt(ref w.ball)) { var b = w.ball; a.D(ref b.temp); a.D(ref b.progress); a.D(ref b.prevBurst); a.D(ref b.bees); }
             a.D(ref w.born);
             if (a.Opt(ref w.carry)) { var c = w.carry; a.S(ref c.kind); a.S(ref c.what); a.D(ref c.amount); a.B(ref c.poison); }
+            a.B(ref w.pubLoad);
             a.I(ref w.groundTicks); a.I(ref w.chew); a.S(ref w.role); a.S(ref w.colony);
             if (a.Opt(ref w.chewAt)) { a.S(ref w.chewAt.key); a.I(ref w.chewAt.i); }
             if (a.Opt(ref w.web)) { var b = w.web; a.S(ref b.key); a.I(ref b.i); a.D(ref b.progress); a.D(ref b.prevBurst); a.I(ref b.start); a.D(ref b.spiderAt); }
@@ -253,6 +254,20 @@ namespace Sting.Core
             if (a.Reading) { p.stingTicks.Clear(); for (int i = 0; i < n; i++) { string k = null; a.S(ref k); List<int> l = null; a.Ints(ref l); p.stingTicks[k] = l; } }
             else { var ks = new List<string>(p.stingTicks.Keys); ks.Sort(string.CompareOrdinal); foreach (var k in ks) { string kk = k; a.S(ref kk); var l = p.stingTicks[k]; a.Ints(ref l); } }
             a.Ints(ref p.ruled);
+            int hn = p.held.Count; a.I(ref hn);
+            if (a.Reading) { p.held.Clear(); for (int i = 0; i < hn; i++) { string k = null; a.S(ref k); int v = 0; a.I(ref v); p.held[k] = v; } }
+            else { var hk = new List<string>(p.held.Keys); hk.Sort(string.CompareOrdinal); foreach (var k in hk) { string kk = k; a.S(ref kk); int v = p.held[k]; a.I(ref v); } }
+            int m = p.sips.Count; a.I(ref m);
+            if (a.Reading)
+            {
+                p.sips.Clear();
+                for (int i = 0; i < m; i++) { string k = null; a.S(ref k); var l = new List<SipRec>(); int c = 0; a.I(ref c); for (int j = 0; j < c; j++) { var r = new SipRec(); a.I(ref r.t); a.D(ref r.amount); l.Add(r); } p.sips[k] = l; }
+            }
+            else
+            {
+                var ks = new List<string>(p.sips.Keys); ks.Sort(string.CompareOrdinal);
+                foreach (var k in ks) { string kk = k; a.S(ref kk); var l = p.sips[k]; int c = l.Count; a.I(ref c); foreach (var r in l) { a.I(ref r.t); a.D(ref r.amount); } }
+            }
         }
 
         // ---------------------------------------------------------------- the whole sim

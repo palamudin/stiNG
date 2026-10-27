@@ -79,7 +79,7 @@ namespace Sting.Core
                     var t = ai.target;
                     if (t.kind == "prey")
                     {
-                        var p = PreyNear(w);
+                        var p = w.carry == null ? PreyNear(w) : null;
                         if (p != null) { Catch(w, p); ai.mode = "return"; ai.target = null; }
                         else if (tick > ai.timer) ai.mode = "pick";
                     }

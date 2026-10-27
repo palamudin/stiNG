@@ -1,6 +1,6 @@
 // Two peers over a simulated link must agree on every shared human (GDD 11.5). Run: node test/net.test.mjs
 import { readFileSync } from 'node:fs';
-import { NetLab, MeshLab, Sim, stingBot, idleCmd, encodeState, decodeState, encodeSwarm, decodeSwarm, encodeTraffic, decodeTraffic, BYTES_PER_WASP, BYTES_PER_SWARM_WASP, T, applyTuning } from '../sim/index.js';
+import { NetLab, MeshLab, Sim, stingBot, idleCmd, flyPos, encodeState, decodeState, encodeSwarm, decodeSwarm, encodeTraffic, decodeTraffic, BYTES_PER_WASP, BYTES_PER_SWARM_WASP, T, applyTuning } from '../sim/index.js';
 applyTuning(T, readFileSync(new URL('../../tuning/sting.tune', import.meta.url), 'utf8')); // T1-22: the shipped tuning
 
 let failures = 0;
@@ -248,6 +248,7 @@ for (const name of ['lan', 'good', 'bad', 'awful']) {
     for (const S of [A, B]) {
       const st = S.cs('0,0');
       S.carrionIn = (r) => (r.cx === rec.cx && r.cz === rec.cz && T.eco.carrionLoads - ((st.carrion && st.carrion[0]) || 0) > 0 ? [{ ...cr, d: 0, left: 1 }] : []);
+      S.carrionSpot = (x, z, d) => (x === rec.cx && z === rec.cz && d === 0 ? cr : null); // what every peer checks a pickup against (T1-20)
       (st.carrion || (st.carrion = {}))[0] = T.eco.carrionLoads - 1;
     }
     return { x: cr.x, y: cr.y + 0.02, z: cr.z };
@@ -325,6 +326,60 @@ for (const name of ['lan', 'good', 'bad', 'awful']) {
   ok(mid.tiers.mid > mid.wasps * 0.9 && mid.total < flatMid.total * 0.15, `with B 150 m off they go in swarm packets: ${mid.total.toFixed(1)} against ${flatMid.total.toFixed(1)} KB/s`);
   ok(far.tiers.far > far.wasps * 0.9 && far.total < 1.5, `with B 400 m off only counts per chunk go: ${far.total.toFixed(2)} KB/s`);
   ok(flatNear.agree && near.agree && mid.agree && far.agree, 'humans agree on both peers in every run');
+}
+
+// Carry limits, solid geometry, and chunk deltas that match their cause (GDD 11.8, T1-20)
+{
+  const lab = new NetLab({ seed: 1234, birds: false }, 'good');
+  const A = lab.a, B = lab.b;
+  let checked = 0, sips = 0;
+  // B runs no AI in the lab; A's foragers catch, chew and sip, and B checks every one
+  const pc = B._pickupCause.bind(B), sc = B._sipCause.bind(B);
+  B._pickupCause = (ev) => { checked++; return pc(ev); };
+  B._sipCause = (ev) => { sips++; return sc(ev); };
+  for (let i = 0; i < 7200; i++) lab.step(idleCmd(), idleCmd());
+  B._pickupCause = pc; B._sipCause = sc;
+  ok(checked > 0 && sips > 0 && A.netStats.rejected === 0 && B.netStats.rejected === 0,
+    `honest play passes every check: ${checked} of A's pickups and ${sips} sips checked on B, none rejected on either peer`);
+  // forged events from a peer 7, checked on A
+  let seq = 0;
+  const ev = (type, f) => ({ mk: 'ev', type, peer: 7, seq: ++seq, tick: A.tick, commit: A.tick + T.net.commitTicks, ...f });
+  const rec = A.records.get('0,0'), c = rec.content;
+  const ci = c.caterpillars.findIndex((q, i) => !A.cs('0,0').caughtCat[i]), cat = c.caterpillars[ci];
+  const fi = c.flies.findIndex(() => true), fly = A.records.get('0,0') && c.flies[fi];
+  const at = (p, d = 0) => ({ x: p.x + d, y: p.y, z: p.z });
+  ok(A._implausible(ev('caught', { key: '0,0', what: 'caterpillar', i: ci, waspId: 5, ...at(cat, 0.02) })) === null, 'a pickup at the caterpillar passes');
+  const flyAt = flyPos(fly, A.tick);
+  ok(A._implausible(ev('caught', { key: '0,0', what: 'fly', i: fi, waspId: 5, ...at(flyAt) })) === 'already carrying', 'the same wasp taking a fly without letting go of it is caught: one load at a time');
+  ok(A._implausible(ev('drop', { waspId: 5 })) === null && A._implausible(ev('caught', { key: '0,0', what: 'fly', i: fi, waspId: 5, ...at(flyAt) })) === null, 'once it says it let go, the next pickup passes');
+  ok(A._implausible(ev('caught', { key: '0,0', what: 'fly', i: fi, waspId: 6, ...at(flyAt, 5) })) === 'taken from out of reach', 'a fly taken from 5 m away is rejected');
+  ok(A._implausible(ev('claim', { key: '0,0', what: 'caterpillar', i: 9999, waspId: 6, auth: 0, ...at(cat) })) === 'no such thing', 'a claim on a caterpillar that does not exist is rejected');
+  // a load of pulp chewed from inside a garden shed
+  let shed = null;
+  for (let x = -4; x < 4 && !shed; x++) for (let z = -4; z < 4 && !shed; z++) {
+    const bs = A._content(x, z).boxes, i = bs.findIndex((b) => b.shed && b.wood);
+    if (i >= 0) shed = { key: x + ',' + z, i, b: bs[i] };
+  }
+  const mid = { x: (shed.b.minx + shed.b.maxx) / 2, y: (shed.b.miny + shed.b.maxy) / 2, z: (shed.b.minz + shed.b.maxz) / 2 };
+  ok(A._implausible(ev('caught', { key: shed.key, what: 'pulp', i: shed.i, waspId: 6, ...mid })) === 'inside something solid', 'pulp chewed from inside a shed wall is rejected');
+  ok(A._implausible(ev('caught', { key: shed.key, what: 'pulp', i: shed.i, waspId: 6, x: shed.b.maxx + 0.02, y: mid.y, z: mid.z })) === null, 'the same shed chewed from outside passes');
+  // sips
+  const fl = c.flowers[0], fp = { x: fl.x, y: fl.y + 0.02, z: fl.z };
+  ok(A._implausible(ev('sip', { key: '0,0', i: 0, amount: 5, waspId: 8, ...fp })) === 'sip out of range', 'a sip of more than a sip is rejected');
+  ok(A._implausible(ev('sip', { key: '0,0', i: 0, amount: 0.1, waspId: 8, ...at(fp, 3) })) === 'sipped from out of reach', 'a sip from 3 m away is rejected');
+  let fast = null;
+  for (let k = 0; k < 12 && !fast; k++) fast = A._implausible(ev('sip', { key: '0,0', i: 0, amount: 0.1, waspId: 9, ...fp }));
+  ok(fast === 'drinking faster than a wasp can', 'a wasp that drinks a flower faster than any wasp can is rejected');
+  // end to end: a forged pickup strikes and changes nothing; a player's own wasp inside a house is not drawn there
+  const before = JSON.stringify(A.cs('0,0').caughtCat), strikes = A.plaus.strikes[1] || 0;
+  B.evSeq++;
+  A.receive([{ mk: 'ev', type: 'caught', peer: 1, seq: B.evSeq, tick: A.tick, commit: A.tick + T.net.commitTicks, key: '0,0', what: 'caterpillar', i: ci, waspId: 77, ...at(cat, 4) }]);
+  ok(A.plaus.strikes[1] === strikes + 1 && JSON.stringify(A.cs('0,0').caughtCat) === before, 'a forged pickup counts a strike against its peer and takes nothing from the world');
+  let house = null;
+  for (let x = -4; x < 4 && !house; x++) for (let z = -4; z < 4 && !house; z++) { const h = A._content(x, z).sheds.find((q) => q.house); if (h) house = h; }
+  const dropped = A.netStats.dropped;
+  A.receive([{ mk: 'state', peer: 1, tick: A.tick + 1, driven: 4242, gone: [], wasps: [{ id: 4242, caste: 'worker', x: house.x, y: 2, z: house.z, vx: 0, vy: 0, vz: 0, state: 'fly', carry: null, under: null, rival: false }] }]);
+  ok(!A.remote.has(4242) && A.netStats.dropped === dropped + 1, 'a player\'s wasp reported inside a house is not drawn there');
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');

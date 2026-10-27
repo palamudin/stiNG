@@ -34,7 +34,7 @@ namespace Sting.Core
     public sealed class Nectar { public Num lv; public long m; }
     public sealed class Rob { public string key; public int h; public Num progress, prevSting; }
     public sealed class Carrion { public Num x, y, z; public long d; public int left; }
-    public sealed class SipPend { public string key; public int i; public Num amount; }
+    public sealed class SipPend { public string key; public int i; public Num amount, x, y, z; }
     public sealed class WebHold { public string key; public int i; public Num progress, prevBurst; public int start; public Num spiderAt; }
     public sealed class Fight
     {
@@ -72,6 +72,8 @@ namespace Sting.Core
         /// the surface a landed wasp holds on to, and a short window after takeoff before it can settle again
         public Land land; public int noLandUntil; public string trapCause;
         internal SipPend sipPend; // net only: sips not yet told to the other peers
+        /// net only: holds a load the other peers saw it pick up, so letting go of it is told too (T1-20)
+        public bool pubLoad;
         public Rob rob;
         public Wasp Ghost() { var g = (Wasp)MemberwiseClone(); g.state = "dead"; return g; }
     }
@@ -219,7 +221,10 @@ namespace Sting.Core
         public Dictionary<int, int> strikes = new Dictionary<int, int>(); public List<int> quarantined = new List<int>();
         public Dictionary<int, int> lastSeq = new Dictionary<int, int>(); public Dictionary<string, List<int>> stingTicks = new Dictionary<string, List<int>>();
         public List<int> ruled = new List<int>();
+        /// T1-20: which of other peers' wasps hold a load they picked up ("peer:wasp"), and each one's recent sips
+        public Dictionary<string, int> held = new Dictionary<string, int>(); public Dictionary<string, List<SipRec>> sips = new Dictionary<string, List<SipRec>>();
     }
+    public sealed class SipRec { public int t; public Num amount; }
     public sealed class Hint { public string opening, prey, site, hiber; public bool bait, wood, nest, rival, hive; }
     /// A hibernation site and the queens waking there (T1-15)
     public sealed class HiberSite { public string kind; public Num x, y, z, q; public int n; public bool scouted; }

@@ -104,7 +104,7 @@ namespace Sting.Core
         }
 
         // GDD 11.8. Checks on events read only the event and shared human state, so every honest peer drops the same ones.
-        string Implausible(NetEv ev)
+        internal string Implausible(NetEv ev)
         {
             plaus.lastSeq.TryGetValue(ev.peer, out int last);
             if (ev.commit != ev.tick + T.net.commitTicks) return "commit tick";
@@ -133,6 +133,115 @@ namespace Sting.Core
                     if (ts.Count > T.plaus.rateMax) return "stinging faster than venom allows";
                 }
             }
+            // T1-20: what a wasp takes must be where it says, it must not be inside anything solid, and it carries one load
+            var held = plaus.held;
+            if (ev.type == "claim" || (ev.type == "caught" && ev.claimPeer < 0))
+            {
+                string why = PickupCause(ev);
+                if (why != null) return why;
+                string k = ev.peer + ":" + ev.waspId;
+                if (held.ContainsKey(k)) return "already carrying";
+                held[k] = 1;
+            }
+            else if (ev.type == "sip") return SipCause(ev);
+            else if (ev.type == "drop" || ev.type == "died") held.Remove(ev.peer + ":" + ev.waspId);
+            else if (ev.type == "denied") held.Remove(ev.claimPeer + ":" + ev.claimWasp);
+            return null;
+        }
+
+        /// A wasp carries one load (GDD 11.8, T1-20): when one of ours lets go of a load the other peers saw it pick up, say so
+        void DropSweep()
+        {
+            foreach (var w in wasps) if (w.pubLoad && w.carry == null) { w.pubLoad = false; Publish(new NetEv { type = "drop", waspId = w.id }); }
+        }
+        // the world as frozen chunks hold it, for chunks this peer may not have discovered (see sim.js _plausRec)
+        readonly Dictionary<string, ChunkRec> plausCache = new Dictionary<string, ChunkRec>();
+        ChunkRec PlausRec(int cx, int cz)
+        {
+            string key = KeyOf(cx, cz);
+            if (records.TryGet(key, out var rec)) return rec;
+            if (!plausCache.TryGetValue(key, out var r)) { if (plausCache.Count > 32) plausCache.Clear(); plausCache[key] = r = new ChunkRec { cx = cx, cz = cz, content = Content(cx, cz) }; }
+            return r;
+        }
+        /// A position deep inside something solid (a house, shed, table, trunk, grill) or under the ground
+        internal bool InSolid(Num x, Num y, Num z)
+        {
+            Num D = T.plaus.solidDepth;
+            if (y < -D) return true;
+            var rec = PlausRec(World.ChunkOf(x), World.ChunkOf(z));
+            foreach (var b in rec.content.boxes)
+            {
+                if (b.hive) continue; // a wasp robs a bee box from its entrance
+                if (x > b.minx + D && x < b.maxx - D && y > b.miny + D && y < b.maxy - D && z > b.minz + D && z < b.maxz - D) return true;
+            }
+            foreach (var cy in CylsOf(rec)) if (cy.r > D && y < cy.h - D && Sq(x - cy.x) + Sq(z - cy.z) < Sq(cy.r - D)) return true;
+            return false;
+        }
+        static bool ParseKey(string key, out int cx, out int cz)
+        {
+            cx = cz = 0;
+            if (key == null) return false;
+            var p = key.Split(',');
+            return p.Length == 2 && int.TryParse(p[0], out cx) && int.TryParse(p[1], out cz);
+        }
+        /// Was the thing taken there, at that tick, within reach of where the wasp says it was? Null if so, else why not.
+        internal int plausPickups, plausSips; // how many were checked (tests only; never saved or hashed)
+        string PickupCause(NetEv ev)
+        {
+            plausPickups++;
+            if (!ParseKey(ev.key, out int cx, out int cz)) return "no such thing";
+            var rec = PlausRec(cx, cz); var c = rec.content; Num R = T.plaus.pickupReach; int i = ev.i;
+            V3? at = null;
+            switch (ev.what)
+            {
+                case "fly": if (i >= 0 && i < c.flies.Count) at = World.FlyPos(c.flies[i], ev.tick); break;
+                case "caterpillar": if (i >= 0 && i < c.caterpillars.Count) { var q = c.caterpillars[i]; at = new V3(q.x, q.y, q.z); } break;
+                case "carrion": if (i <= day && i >= day - T.eco.carrionDays) at = CarrionSpot(cx, cz, i); break;
+                case "meat":
+                {
+                    if (i < 0) break;
+                    foreach (var g in GrillsIn(rec)) if (g.ti == i / 2) { at = i % 2 != 0 ? new V3(g.px, 0.77, g.pz) : new V3(g.x, T.bbq.grateY + 0.025, g.z); break; }
+                    break;
+                }
+                case "bee":
+                {
+                    var hs = HivesIn(rec);
+                    if (ev.hive >= 0 && ev.hive < hs.Count && i >= 0 && i < hs[ev.hive].bees.Count) at = World.BeePos(hs[ev.hive], i, ev.tick);
+                    break;
+                }
+                case "honey": { var hs = HivesIn(rec); if (i >= 0 && i < hs.Count) at = new V3(hs[i].ex, hs[i].ey, hs[i].ez); break; }
+                case "pulp":
+                {
+                    if (i < 0 || i >= c.boxes.Count) break;
+                    var b = c.boxes[i];
+                    if (b.wood && !b.hive) at = new V3(Clamp(ev.x, b.minx, b.maxx), Clamp(ev.y, b.miny, b.maxy), Clamp(ev.z, b.minz, b.maxz));
+                    break;
+                }
+                default: return "no such thing";
+            }
+            if (at == null) return "no such thing";
+            var a = at.Value;
+            if (Sq(ev.x - a.x) + Sq(ev.y - a.y) + Sq(ev.z - a.z) > R * R) return "taken from out of reach";
+            if (InSolid(ev.x, ev.y, ev.z)) return "inside something solid";
+            return null;
+        }
+        /// A sip from a flower: a flower that is there, within reach, a sip's worth, at a rate one wasp can drink
+        string SipCause(NetEv ev)
+        {
+            plausSips++;
+            if (!ParseKey(ev.key, out int cx, out int cz)) return "no such flower";
+            var fl = PlausRec(cx, cz).content.flowers;
+            if (ev.i < 0 || ev.i >= fl.Count) return "no such flower";
+            var f = fl[ev.i];
+            if (!(ev.amount > 0 && ev.amount <= T.plaus.sipMax)) return "sip out of range";
+            if (Sq(ev.x - f.x) + Sq(ev.y - f.y) + Sq(ev.z - f.z) > T.plaus.pickupReach * T.plaus.pickupReach) return "sipped from out of reach";
+            if (InSolid(ev.x, ev.y, ev.z)) return "inside something solid";
+            string k = ev.peer + ":" + ev.waspId;
+            var list = new List<SipRec>();
+            if (plaus.sips.TryGetValue(k, out var old)) foreach (var s in old) if (s.t > ev.tick - T.plaus.rateWindow) list.Add(s);
+            list.Add(new SipRec { t = ev.tick, amount = ev.amount }); plaus.sips[k] = list;
+            Num sum = 0; foreach (var s in list) sum += s.amount;
+            if (sum > T.eco.sipPerSec * T.plaus.rateWindow / 60 + T.plaus.sipMax) return "drinking faster than a wasp can";
             return null;
         }
 
@@ -175,6 +284,8 @@ namespace Sting.Core
                     if (v > T.plaus.maxSpeed && (prev.bad = prev.bad + 1) < 4) { netStats.dropped++; ids.Add(r.id); prev.seen = tick; continue; }
                     prev.bad = 0;
                 }
+                // display only, like speed: a player's own wasp is never inside a wall or the ground (T1-20)
+                if (r.id == m.driven && InSolid(r.x, r.y, r.z)) { netStats.dropped++; ids.Add(r.id); if (prev != null) prev.seen = tick; continue; }
                 ids.Add(r.id);
                 var e = remote.Get(r.id) ?? new RemoteWasp();
                 e.id = r.id; e.caste = r.caste; e.x = r.x; e.y = r.y; e.z = r.z; e.vx = r.vx; e.vy = r.vy; e.vz = r.vz; e.state = r.state;

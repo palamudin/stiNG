@@ -21,7 +21,7 @@ const byHumanId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 // Events that change shared world state. Most commit at the end of the consequence window so every
 // peer applies them on the same tick (GDD 11.5); a few cosmetic or owner-decided ones apply on receipt.
-const IMMEDIATE = new Set(['caught', 'claim', 'denied', 'sip', 'beeAlarm', 'died', 'fight', 'fightReq', 'fightJoin', 'fightRefuse', 'fightEnd', 'raid']); // wasp-level: never touch humans
+const IMMEDIATE = new Set(['caught', 'claim', 'denied', 'drop', 'sip', 'beeAlarm', 'died', 'fight', 'fightReq', 'fightJoin', 'fightRefuse', 'fightEnd', 'raid']); // wasp-level: never touch humans
 
 export class Sim {
   constructor(settings = {}, opts = {}) {
@@ -34,7 +34,7 @@ export class Sim {
     this.evSeq = 0;
     this.remote = new Map();
     this.netStats = { sent: 0, recv: 0, late: 0, lateMax: 0, rejected: 0, dropped: 0 };
-    this.plaus = { strikes: {}, quarantined: [], lastSeq: {}, stingTicks: {} };
+    this.plaus = { strikes: {}, quarantined: [], lastSeq: {}, stingTicks: {}, held: {}, sips: {} };
     this.claims = new Map(); // pickups waiting for the chunk authority (T1-19), by wasp id
     // relevance tiers (T1-21): each peer's driven wasp, the far traffic each peer reports, the wasps last sent
     this.remoteDriven = new Map(); this.remoteTraffic = new Map(); this.lastIds = [];
@@ -324,7 +324,7 @@ export class Sim {
     // 5. respawn of the driven wasp
     if (!this._driven() && !this.extinct && !this.winter && this.tick >= this.respawnAt) this._respawn();
     this._updateChunks();
-    if (this.net) this._sendState();
+    if (this.net) { this._dropSweep(); this._sendState(); }
     if (this.claims.size && this.tick % 60 === 0) this._expireClaims();
   }
 
@@ -438,6 +438,17 @@ export class Sim {
         if (ts.length > P.rateMax) return 'stinging faster than venom allows';
       }
     }
+    // T1-20: what a wasp takes must be where it says, it must not be inside anything solid, and it carries one load
+    const held = this.plaus.held;
+    if (ev.type === 'claim' || (ev.type === 'caught' && !(ev.claimPeer >= 0))) {
+      const why = this._pickupCause(ev);
+      if (why) return why;
+      const k = ev.peer + ':' + ev.waspId;
+      if (held[k]) return 'already carrying';
+      held[k] = 1;
+    } else if (ev.type === 'sip') return this._sipCause(ev);
+    else if (ev.type === 'drop' || ev.type === 'died') delete held[ev.peer + ':' + ev.waspId];
+    else if (ev.type === 'denied') delete held[ev.claimPeer + ':' + ev.claimWasp];
     return null;
   }
 
@@ -475,6 +486,9 @@ export class Sim {
         if (v > T.plaus.maxSpeed && (prev.bad = (prev.bad || 0) + 1) < 4) { this.netStats.dropped++; ids.add(r.id); prev.seen = this.tick; continue; }
         prev.bad = 0;
       }
+      // display only, like speed: a player's own wasp is never inside a wall or the ground (T1-20). Its AI wasps can be,
+      // far from that player, where it does not collide them.
+      if (r.id === m.driven && this._inSolid(r)) { this.netStats.dropped++; ids.add(r.id); if (prev) prev.seen = this.tick; continue; }
       ids.add(r.id);
       const e = this.remote.get(r.id) || {};
       Object.assign(e, r, { peer: m.peer, stamp: m.tick, px: r.x, py: r.y, pz: r.z, seen: this.tick, ttl: T.net.remoteTimeout });
@@ -1208,7 +1222,7 @@ export class Sim {
     const c = w.contact;
     if (c && c.opening >= 0 && !w.carry) { this._enterUnder(w, c); return; }
     if (c && w.state === 'fly') { this._perch(w, c); return; }
-    const prey = this._preyNear(w);
+    const prey = !w.carry ? this._preyNear(w) : null; // one load at a time (T1-20)
     if (prey) { this._catch(w, prey); return; }
     if (!w.carry && this._baitNear(w)) { this._takeBait(w); return; }
     const wood = !w.carry && this._woodNear(w);
@@ -1254,10 +1268,13 @@ export class Sim {
   // taken at once; off the chunk authority's peer it is also a claim, and the authority grants it (publishing the
   // pickup for everyone) or denies it (the item goes back to whoever got there first).
   _pickup(w, ev) {
+    // where the wasp took it, and which wasp: every peer checks both (T1-20)
+    ev.waspId = w.id; ev.x = w.x; ev.y = w.y; ev.z = w.z;
+    if (this.net) { if (w.pubLoad) this._publish({ type: 'drop', waspId: w.id }); w.pubLoad = true; }
     const auth = this.net ? this.chunkAuthority(ev.key) : this.peer;
     if (auth === this.peer) { this._publish(ev); return; }
     this.claims.set(w.id, { auth, key: ev.key, what: ev.what, i: ev.i, hive: ev.hive, carry: w.carry && w.carry.what, tick: this.tick });
-    this._publish({ ...ev, type: 'claim', waspId: w.id, auth });
+    this._publish({ ...ev, type: 'claim', auth });
   }
   // Is it still there, by this peer's state?
   _available(ev) {
@@ -1306,6 +1323,86 @@ export class Sim {
   // a claim nobody answered (the authority left) stands
   _expireClaims() {
     for (const [id, c] of this.claims) if (this.tick - c.tick > T.net.claimTicks) this.claims.delete(id);
+  }
+  // A wasp carries one load (GDD 11.8, T1-20). Every peer keeps a ledger of which of another peer's wasps hold a load
+  // they picked up in view of everyone; when one of ours lets go of such a load (delivered, denied, lost) we say so,
+  // so a second pickup without letting go is a lie every peer catches alike.
+  _dropSweep() {
+    for (const w of this.wasps) if (w.pubLoad && !w.carry) { w.pubLoad = false; this._publish({ type: 'drop', waspId: w.id }); }
+  }
+  // The world as frozen chunks hold it, for checks on events from chunks this peer may not have discovered: the same
+  // content (generation is a pure function), never cached state
+  _plausRec(cx, cz) {
+    const key = chunkKey(cx, cz), rec = this.records.get(key);
+    if (rec) return rec;
+    const cache = this._plausCache || (this._plausCache = new Map());
+    let r = cache.get(key);
+    if (!r) { if (cache.size > 32) cache.clear(); r = { cx, cz, content: this._content(cx, cz) }; cache.set(key, r); }
+    return r;
+  }
+  // A position deep inside something solid (a house, shed, table, trunk, grill) or under the ground
+  _inSolid(p) {
+    const D = T.plaus.solidDepth;
+    if (!(typeof p.x === 'number' && typeof p.y === 'number' && typeof p.z === 'number')) return true;
+    if (p.y < -D) return true;
+    const rec = this._plausRec(chunkOf(p.x), chunkOf(p.z));
+    for (const b of rec.content.boxes) {
+      if (b.hive) continue; // a wasp robs a bee box from its entrance
+      if (p.x > b.minx + D && p.x < b.maxx - D && p.y > b.miny + D && p.y < b.maxy - D && p.z > b.minz + D && p.z < b.maxz - D) return true;
+    }
+    for (const cy of this._cylsOf(rec)) if (cy.r > D && p.y < cy.h - D && sq(p.x - cy.x) + sq(p.z - cy.z) < sq(cy.r - D)) return true;
+    return false;
+  }
+  // Was the thing taken there, at that tick, within reach of where the wasp says it was? Null if so, else why not.
+  _pickupCause(ev) {
+    const parts = typeof ev.key === 'string' ? ev.key.split(',') : [];
+    const cx = Number(parts[0]), cz = Number(parts[1]);
+    if (parts.length !== 2 || !Number.isInteger(cx) || !Number.isInteger(cz) || !Number.isInteger(ev.i)) return 'no such thing';
+    const rec = this._plausRec(cx, cz), c = rec.content, R = T.plaus.pickupReach, i = ev.i;
+    const near = (q) => q && sq(ev.x - q.x) + sq(ev.y - q.y) + sq(ev.z - q.z) <= R * R;
+    let at = null;
+    switch (ev.what) {
+      case 'fly': at = i >= 0 && i < c.flies.length ? flyPos(c.flies[i], ev.tick) : null; break;
+      case 'caterpillar': at = i >= 0 && i < c.caterpillars.length ? c.caterpillars[i] : null; break;
+      case 'carrion': if (i <= this.day && i >= this.day - T.eco.carrionDays) at = this.carrionSpot(cx, cz, i); break;
+      case 'meat': {
+        const g = this.grillsIn(rec).find((q) => q.ti === Math.floor(i / 2));
+        if (g && i >= 0) at = i % 2 ? { x: g.px, y: 0.77, z: g.pz } : { x: g.x, y: T.bbq.grateY + 0.025, z: g.z };
+        break;
+      }
+      case 'bee': {
+        const hv = Number.isInteger(ev.hive) ? this.hivesIn(rec)[ev.hive] : null;
+        if (hv && i >= 0 && i < hv.bees.length) at = beePos(hv, i, ev.tick);
+        break;
+      }
+      case 'honey': { const hv = this.hivesIn(rec)[i]; if (hv) at = { x: hv.ex, y: hv.ey, z: hv.ez }; break; }
+      case 'pulp': {
+        const b = i >= 0 && i < c.boxes.length ? c.boxes[i] : null;
+        if (b && b.wood && !b.hive) at = { x: clamp(ev.x, b.minx, b.maxx), y: clamp(ev.y, b.miny, b.maxy), z: clamp(ev.z, b.minz, b.maxz) };
+        break;
+      }
+      default: return 'no such thing';
+    }
+    if (!at) return 'no such thing';
+    if (!near(at)) return 'taken from out of reach';
+    if (this._inSolid(ev)) return 'inside something solid';
+    return null;
+  }
+  // A sip from a flower: a flower that is there, within reach, a sip's worth, at a rate one wasp can drink
+  _sipCause(ev) {
+    const P = T.plaus, parts = typeof ev.key === 'string' ? ev.key.split(',') : [];
+    const cx = Number(parts[0]), cz = Number(parts[1]);
+    if (parts.length !== 2 || !Number.isInteger(cx) || !Number.isInteger(cz) || !Number.isInteger(ev.i)) return 'no such flower';
+    const fl = this._plausRec(cx, cz).content.flowers, f = ev.i >= 0 && ev.i < fl.length ? fl[ev.i] : null;
+    if (!f) return 'no such flower';
+    if (!(ev.amount > 0 && ev.amount <= P.sipMax)) return 'sip out of range';
+    if (sq(ev.x - f.x) + sq(ev.y - f.y) + sq(ev.z - f.z) > P.pickupReach * P.pickupReach) return 'sipped from out of reach';
+    if (this._inSolid(ev)) return 'inside something solid';
+    const k = ev.peer + ':' + ev.waspId, list = (this.plaus.sips[k] || []).filter((s) => s[0] > ev.tick - P.rateWindow);
+    list.push([ev.tick, ev.amount]); this.plaus.sips[k] = list;
+    let sum = 0; for (const s of list) sum += s[1];
+    if (sum > T.eco.sipPerSec * P.rateWindow / 60 + P.sipMax) return 'drinking faster than a wasp can';
+    return null;
   }
 
   _preyNear(w) {
@@ -1447,10 +1544,11 @@ export class Sim {
         this._sip(key, i, take);
         if (this.net) { // tell the other peers in sips of a tenth (T1-8)
           let sp = w.sipPend;
-          if (sp && (sp.key !== key || sp.i !== i)) { this._publish({ type: 'sip', key: sp.key, i: sp.i, amount: sp.amount }); sp = null; }
+          const out = (q) => this._publish({ type: 'sip', key: q.key, i: q.i, amount: q.amount, waspId: w.id, x: q.x, y: q.y, z: q.z });
+          if (sp && (sp.key !== key || sp.i !== i)) { out(sp); sp = null; }
           if (!sp) sp = w.sipPend = { key, i, amount: 0 };
-          sp.amount += take;
-          if (sp.amount >= 0.1) { this._publish({ type: 'sip', key, i, amount: sp.amount }); w.sipPend = null; }
+          sp.amount += take; sp.x = w.x; sp.y = w.y; sp.z = w.z; // where it last drank, for the check (T1-20)
+          if (sp.amount >= 0.1) { out(sp); w.sipPend = null; }
         }
         return;
       }
@@ -2638,12 +2736,19 @@ export class Sim {
     const E = T.eco, sd = Number(this.seed & 0xffffffffn), CS = T.chunk.size, out = [];
     const st = this.chunkState.get(chunkKey(rec.cx, rec.cz)), taken = (st && st.carrion) || {};
     for (let d = this.day - E.carrionDays + 1; d <= this.day; d++) {
-      if (d < 0 || hseq(sd, rec.cx, rec.cz, d, 974) >= E.carrionChance) continue;
+      const p = this.carrionSpot(rec.cx, rec.cz, d);
+      if (!p) continue;
       const left = E.carrionLoads - (taken[d] || 0);
       if (left <= 0) continue;
-      out.push({ x: (rec.cx + (hseq(sd, rec.cx, rec.cz, d, 975) - 0.5) * 0.8) * CS, y: 0.03, z: (rec.cz + (hseq(sd, rec.cx, rec.cz, d, 976) - 0.5) * 0.8) * CS, d, left });
+      out.push({ x: p.x, y: p.y, z: p.z, d, left });
     }
     return out;
+  }
+  // where the carrion of day d lies in a chunk, if that day has any: a pure function of the seed
+  carrionSpot(cx, cz, d) {
+    const E = T.eco, sd = Number(this.seed & 0xffffffffn), CS = T.chunk.size;
+    if (d < 0 || hseq(sd, cx, cz, d, 974) >= E.carrionChance) return null;
+    return { x: (cx + (hseq(sd, cx, cz, d, 975) - 0.5) * 0.8) * CS, y: 0.03, z: (cz + (hseq(sd, cx, cz, d, 976) - 0.5) * 0.8) * CS };
   }
   // ---------------- barbecues (GDD 4.3, 6.2, T1-10)
 
@@ -3253,7 +3358,7 @@ export class Sim {
       this._steer(w, tp, cmd);
       if (ai.mode === 'outbound' && dist2(w, tp) < T.ai.arrive * T.ai.arrive) { ai.mode = 'collect'; ai.timer = this.tick + T.ai.collectTicks; }
       if (ai.mode === 'collect') {
-        if (ai.target.kind === 'prey') { const p = this._preyNear(w); if (p) { this._catch(w, p); ai.mode = 'return'; } else if (this.tick > ai.timer) ai.mode = 'pick'; }
+        if (ai.target.kind === 'prey') { const p = !w.carry ? this._preyNear(w) : null; if (p) { this._catch(w, p); ai.mode = 'return'; } else if (this.tick > ai.timer) ai.mode = 'pick'; }
         else if (ai.target.kind === 'bait') { if (!w.carry) this._takeBait(w); ai.mode = 'return'; ai.target = null; }
         else if ((ai.cargo || 0) >= 0.95 || this.tick > ai.timer + 300) ai.mode = 'return';
       }
@@ -3445,7 +3550,7 @@ export class Sim {
         this._steer(w, tp, cmd);
         const t = ai.target;
         if (t.kind === 'prey') {
-          const p = this._preyNear(w);
+          const p = !w.carry ? this._preyNear(w) : null;
           if (p) { this._catch(w, p); ai.mode = 'return'; ai.target = null; }
           else if (this.tick > ai.timer) ai.mode = 'pick';
         } else if (t.kind === 'hive') {

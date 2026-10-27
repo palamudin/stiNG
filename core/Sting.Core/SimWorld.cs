@@ -1310,7 +1310,7 @@ namespace Sting.Core
                 if (ai.mode == "outbound" && D2(w, tp.Value) < T.ai.arrive * T.ai.arrive) { ai.mode = "collect"; ai.timer = tick + T.ai.collectTicks; }
                 if (ai.mode == "collect")
                 {
-                    if (ai.target.kind == "prey") { var p = PreyNear(w); if (p != null) { Catch(w, p); ai.mode = "return"; } else if (tick > ai.timer) ai.mode = "pick"; }
+                    if (ai.target.kind == "prey") { var p = w.carry == null ? PreyNear(w) : null; if (p != null) { Catch(w, p); ai.mode = "return"; } else if (tick > ai.timer) ai.mode = "pick"; }
                     else if (ai.target.kind == "bait") { if (w.carry == null) TakeBait(w); ai.mode = "return"; ai.target = null; }
                     else if (ai.cargo >= 0.95 || tick > ai.timer + 300) ai.mode = "return";
                 }

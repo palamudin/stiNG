@@ -650,3 +650,6 @@ rateWindow = 120
 rateMax = 6
 maxSpeed = 12
 strikes = 3
+pickupReach = 0.3
+solidDepth = 0.08
+sipMax = 0.12

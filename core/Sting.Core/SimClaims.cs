@@ -28,10 +28,13 @@ namespace Sting.Core
         /// A wasp takes something only one can have: at once, and off the authority's peer also as a claim
         void Pickup(Wasp w, NetEv ev)
         {
+            // where the wasp took it, and which wasp: every peer checks both (T1-20)
+            ev.waspId = w.id; ev.x = w.x; ev.y = w.y; ev.z = w.z;
+            if (net) { if (w.pubLoad) Publish(new NetEv { type = "drop", waspId = w.id }); w.pubLoad = true; }
             int auth = net ? ChunkAuthority(ev.key) : peer;
             if (auth == peer) { Publish(ev); return; }
             claims.Set(w.id, new Claim { auth = auth, key = ev.key, what = ev.what, i = ev.i, hive = ev.hive, carry = w.carry?.what, tick = tick });
-            var c = ev.Copy(); c.type = "claim"; c.waspId = w.id; c.auth = auth;
+            var c = ev.Copy(); c.type = "claim"; c.auth = auth;
             Publish(c);
         }
         bool Available(NetEv ev)
