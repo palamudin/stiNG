@@ -1740,7 +1740,9 @@ export class Sim {
       // flowers in bloom with nectar left (T1-8): a sip draws the flower down
       for (let i = 0; i < c.flowers.length; i++) {
         const f = c.flowers[i];
-        if (sq(w.x - f.x) + sq(w.y - f.y - 0.02) + sq(w.z - f.z) > d2max || !this.inBloom(rec, i)) continue;
+        // over the flower, or standing anywhere on its head (landed under it too)
+        const onHead = w.state === 'landed' && sq(w.x - f.x) + sq(w.y - f.y) + sq(w.z - f.z) <= sq(T.land.headR + T.wasp.radius + 0.006);
+        if ((!onHead && sq(w.x - f.x) + sq(w.y - f.y - 0.02) + sq(w.z - f.z) > d2max) || !this.inBloom(rec, i)) continue;
         if (this.nectarAt(rec, i) <= 0) continue;
         const add = T.energy.refuelPerSec * T.eco.flowerRate * DT;
         if (w.energy < 1) w.energy = Math.min(1, w.energy + add);
@@ -3421,6 +3423,7 @@ export class Sim {
     if (w.contact && !w.contact.blockedPerch) { this._perch(w, w.contact); return; }
     const s = this._staticSurface(w, T.land.reach);
     if (!s) return;
+    if (this.feeding && s.kind !== 'flower' && s.kind !== 'cup') return; // hovering to feed is not settling on a stalk or the grass
     w.state = 'landed'; w.vx = w.vy = w.vz = 0;
     w.land = null;
     this._settle(w, s, cmd);

@@ -5,7 +5,7 @@ import {
   Sim, Act, T, DT, ZONES, ZoneName, SwatKind, SwatKindName, StyleName, TopName, BottomName, Top, Bottom,
   toWorld, toLocal, dirToWorld, chunkKey, chunkOf, hash, Domain, rangeInt, resolveSting, zoneCover, segClosest, classify, predictedKind,
   NEST, NEST_ENTRANCE, flyPos, beePos, fmtClock, minuteOfDay, isLowerZone, broodTotal, sugarCap, proteinCap, waterCap, garmentGraph, dayWeather,
-  NetLab, LINKS, birdPos, dragonPos, shedSites, shedRoof, groundAt, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE,
+  NetLab, LINKS, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetLabel, assistPilot, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE,
 } from './sim/index.js';
 
 // Tuning as data (GDD 13, T1-22): read tuning/sting.tune, served next to the page, before anything uses T. Without it
@@ -184,7 +184,8 @@ function pick(seed, id, k, arr) { return arr[rangeInt(hash(seed, Domain.Cosmetic
 let lab = null; // two-peer network lab when a second player is on
 let sim = null, settings = { seed: 1234, dayMinutes: 2, humanDensity: 1, beeAggression: 1, seasonDays: 40 };
 let running = false, paused = false;
-const input = { pick: 0, keys: new Set(), lmb: false, yaw: 0, pitch: 0, alloc: 1, autopilot: null, free: { yaw: 0, pitch: 0, held: false } };
+const input = { pick: 0, keys: new Set(), lmb: false, yaw: 0, pitch: 0, alloc: 1, autopilot: null, free: { yaw: 0, pitch: 0, held: false },
+  lock: null, pilot: null, autoTurn: false, turning: false, gazeOff: 0, gDown: 0, gLong: false }; // lock-on, assisted flight, eye turn (GDD 7.9)
 // Player options from the Esc menu, kept per browser
 const opts = { volume: 0.7, sens: 1, invert: false, reflex: true };
 try { Object.assign(opts, JSON.parse(localStorage.getItem('sting.options') || '{}')); } catch { /* optional */ }
@@ -1437,6 +1438,8 @@ function readPad() {
   const edge = (i) => b(i) && !pad.prev[i];
   const out = { lx: dz(gp.axes[0] || 0), ly: dz(gp.axes[1] || 0), rx: dz(gp.axes[2] || 0), ry: dz(gp.axes[3] || 0), b, edge };
   if (edge(8)) toggleNest();
+  if (edge(11)) toggleLock(); // R3: lock on
+  if (edge(10)) eyeTurnDown(); else if (pad.prev[10] && !b(10)) eyeTurnUp(); // L3: turn to where you look
   pad.prev = gp.buttons.map((x) => !!(x && (x.pressed || x.value > 0.5)));
   return out;
 }
@@ -1455,7 +1458,7 @@ function buildCmd() {
   if (k.has('ArrowUp')) input.pitch = Math.min(1.45, input.pitch + look * 0.8);
   if (k.has('ArrowDown')) input.pitch = Math.max(-1.45, input.pitch - look * 0.8);
   const clamp100 = (v) => Math.max(-100, Math.min(100, Math.round(v)));
-  return {
+  const cmd = {
     mx: clamp100(a('KeyD', 'KeyA') + (gp ? gp.lx * 100 : 0)),
     mz: clamp100(a('KeyW', 'KeyS') - (gp ? gp.ly * 100 : 0)),
     my: clamp100(a('Space', 'KeyC') + (gp ? ((gp.b(5) ? 100 : 0) - (gp.b(4) || gp.b(1) ? 100 : 0)) : 0)),
@@ -1466,6 +1469,99 @@ function buildCmd() {
     alloc: input.alloc,
     pick: input.pick ? (input.pick = 0, pickOnce) : 0,
   };
+  // locked on: closing in slows near the target, so W brings you up to it rather than past it
+  if (input.lock && !input.pilot && cmd.mz > 0) {
+    const w = sim._driven(), p = w && targetPos(sim, input.lock);
+    if (p) cmd.mz = Math.max(1, Math.round(cmd.mz * Math.max(0.12, Math.min(1, Math.hypot(p.x - w.x, p.y - w.y, p.z - w.z) / 0.6))));
+  }
+  // assisted flight: the wasp flies itself to the locked target until you touch the controls (GDD 7.9)
+  if (input.pilot) {
+    const w = sim._driven();
+    if (!w || cmd.mx || cmd.my || cmd.mz || cmd.burst || cmd.sting) { input.pilot = null; if (w) toast('You have it', 'var(--muted)', 0.8); return cmd; }
+    const r = assistPilot(sim, w, input.pilot, cmd);
+    if (r.done) {
+      input.pilot = null;
+      const say = { landed: 'Landed', perched: 'On them', caught: 'Got it', gone: 'It is gone' }[r.done];
+      if (say) toast(say, 'var(--yellow)', 1);
+      return cmd;
+    }
+    return r.cmd; // the camera keeps watching the target meanwhile (updateAssist)
+  }
+  return cmd;
+}
+
+// ------------------------------------------------------------------ lock-on, assisted flight and the eye turn (GDD 7.9)
+
+const wrapA = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+function aimDir() { const y = input.yaw + input.free.yaw, p = input.pitch + input.free.pitch; return { x: Math.sin(y) * Math.cos(p), y: Math.sin(p), z: Math.cos(y) * Math.cos(p) }; }
+function toggleLock() {
+  const w = sim && sim._driven();
+  if (!w || !running || paused) return;
+  if (input.lock) { input.lock = null; input.pilot = null; toast('Lock released', 'var(--muted)', 0.9); return; }
+  const t = pickTarget(sim, w, aimDir());
+  if (!t) { toast('Nothing to lock on to', 'var(--muted)', 1.1); return; }
+  input.lock = t;
+  toast(`Locked on: ${targetLabel(sim, t)}`, 'var(--yellow)', 1.2);
+}
+// E with a lock on something the wasp can go to, and nothing to act on right here: fly there
+function interactNear() { const h = sim.hint || {}; return !!(h.prey || h.bait || h.wood || h.water || h.site || h.rival || h.hive || h.hiber || h.opening || (h.raid !== null && h.raid !== undefined)); }
+function startPilot() {
+  if (!input.lock || !TARGET_KIND[input.lock.kind].go || interactNear()) return false;
+  input.pilot = input.lock;
+  toast(`Flying to the ${targetLabel(sim, input.lock)}`, 'var(--yellow)', 1);
+  return true;
+}
+// G (or L3): a tap turns the wasp to where you are looking; held a second it switches the auto turn on or off, which
+// turns the wasp after your gaze once you have looked away for a second
+function eyeTurnDown() { input.gDown = performance.now(); input.gLong = false; }
+function eyeTurnUp() {
+  if (!input.gDown) return;
+  if (!input.gLong) input.turning = true;
+  input.gDown = 0;
+}
+function updateAssist(dt) {
+  const w = sim && sim._driven(), f = input.free;
+  if (input.gDown && !input.gLong && performance.now() - input.gDown >= 1000) {
+    input.gLong = true; input.autoTurn = !input.autoTurn;
+    toast(input.autoTurn ? 'Auto turn on · the wasp follows your gaze' : 'Auto turn off', 'var(--muted)', 1.4);
+  }
+  if (input.lock) {
+    const p = targetPos(sim, input.lock);
+    if (!w || !p || (p.x - w.x) ** 2 + (p.y - w.y) ** 2 + (p.z - w.z) ** 2 > LOCK.lostRange ** 2) {
+      if (input.lock) toast(input.pilot ? 'It is gone' : 'Lost the lock', 'var(--muted)', 1);
+      input.lock = null; input.pilot = null;
+    } else if (w.state === 'fly') {
+      // face the target: W closes in, S backs off, A and D circle it; on an assisted flight the camera just watches it
+      const dx = p.x - w.x, dy = p.y - w.y, dz = p.z - w.z, k = Math.min(1, dt * 8), pl = input.pilot ? 0.7 : 1.45;
+      input.yaw += wrapA(Math.atan2(dx, dz) - input.yaw) * k;
+      input.pitch += (Math.max(-pl, Math.min(pl, Math.atan2(dy, Math.hypot(dx, dz)))) - input.pitch) * k;
+    }
+  }
+  // the eye turn: the body comes round to the gaze and the gaze stays where it was
+  const off = Math.abs(f.yaw) + Math.abs(f.pitch);
+  input.gazeOff = input.autoTurn && f.held && off > 0.06 ? input.gazeOff + dt : 0;
+  if (input.gazeOff >= 1 && !input.lock && !input.pilot) input.turning = true;
+  if (input.turning) {
+    if (input.lock || input.pilot || off < 0.01) { input.turning = false; return; }
+    const k = Math.min(1, dt * 7), dy = f.yaw * k;
+    let dp = f.pitch * k;
+    dp = Math.max(-1.45 - input.pitch, Math.min(1.45 - input.pitch, dp));
+    input.yaw += dy; f.yaw -= dy; input.pitch += dp; f.pitch -= dp;
+    if (Math.abs(f.yaw) + Math.abs(f.pitch) < 0.01 || Math.abs(dp) + Math.abs(dy) < 1e-4) input.turning = false;
+  }
+}
+const lockMark = document.getElementById('lockMark');
+function drawLock() {
+  if (!lockMark) return;
+  const t = input.lock, p = t && targetPos(sim, t);
+  if (!p) { lockMark.hidden = true; return; }
+  const v = new THREE.Vector3(p.x, p.y + terrAt(p.x, p.z), p.z).project(camera);
+  if (v.z > 1 || v.z < -1) { lockMark.hidden = true; return; }
+  lockMark.hidden = false;
+  lockMark.style.left = `${(v.x + 1) / 2 * innerWidth}px`; lockMark.style.top = `${(1 - v.y) / 2 * innerHeight}px`;
+  const K = TARGET_KIND[t.kind];
+  lockMark.dataset.hazard = K.hazard ? '1' : '';
+  lockMark.querySelector('span').textContent = targetLabel(sim, t) + (input.pilot ? ' · flying there' : K.go ? ` · E ${K.go}` : K.hazard ? ' · keep clear' : '');
 }
 let pickOnce = 0; // a colony-view pick goes out in exactly one command
 
@@ -1474,11 +1570,14 @@ addEventListener('keydown', (e) => {
   if (e.code === 'Tab') { e.preventDefault(); toggleLab(); return; }
   if (e.code === 'KeyN' && !e.repeat) { toggleNest(); return; }
   if (e.code === 'KeyT' && !e.repeat && ui.nest && solo()) { setSpeed(SPEEDS[(SPEEDS.indexOf(ui.speed) + 1) % SPEEDS.length]); return; }
+  if (e.code === 'KeyV' && !e.repeat && running && !paused) { toggleLock(); return; }
+  if (e.code === 'KeyG' && !e.repeat && running && !paused) { eyeTurnDown(); return; }
+  if (e.code === 'KeyE' && !e.repeat && running && !paused && startPilot()) return;
   if (e.code === 'KeyM' && !e.repeat) { audio.on = !audio.on; toast(audio.on ? 'Sound on' : 'Sound off', 'var(--muted)', 1.2); return; }
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
   input.keys.add(e.code);
 });
-addEventListener('keyup', (e) => input.keys.delete(e.code));
+addEventListener('keyup', (e) => { input.keys.delete(e.code); if (e.code === 'KeyG') eyeTurnUp(); });
 addEventListener('blur', () => { input.keys.clear(); input.lmb = false; input.free.held = false; });
 let lockFailed = false, pointerLockWorked = false;
 document.addEventListener('pointerlockerror', () => { lockFailed = true; toast('Mouse capture unavailable · drag with right button to look', 'var(--muted)', 3); });
@@ -1487,6 +1586,7 @@ canvas.addEventListener('mousedown', (e) => {
   if (!running || paused) return;
   if (document.pointerLockElement !== canvas && !lockFailed && !pointerLockWorked) { lock(); return; }
   if (e.button === 0) input.lmb = true;
+  if (e.button === 1) { e.preventDefault(); toggleLock(); } // middle button: lock on
   if (e.button === 2 && document.pointerLockElement === canvas) input.free.held = true; // free look
 });
 addEventListener('mouseup', (e) => { if (e.button === 0) input.lmb = false; if (e.button === 2) input.free.held = false; });
@@ -1752,7 +1852,7 @@ function updateHud() {
   else if (w.state === 'chewing') status = w.chewAt && w.chewAt.water ? `Drinking water ${Math.round(w.chew / T.water.fillTicks * 100)}%` : `Chewing pulp ${Math.round(w.chew / T.pulp.chewTicks * 100)}%`;
   else if (w.state === 'trapped') status = 'Stuck in the trap';
   else if (w.state === 'webbed') status = `Stuck in a web · spider in ${Math.max(0, (w.web.spiderAt - sim.tick) / 60).toFixed(1)} s`;
-  else if (w.state === 'landed') status = sim.feeding ? 'Feeding' : 'Resting';
+  else if (w.state === 'landed') status = sim.feeding ? 'Feeding' : w.land && w.land.kind === 'flower' ? 'Flower drained · try the next' : 'Resting';
   else if (w.state === 'perched') status = `On #${w.perch.hex.slice(0, 4)} · ${zoneLabel(w.perch.zone)}`;
   else if (w.state === 'fighting') status = 'Fighting a rival wasp';
   else if (w.state === 'robbing') status = `Inside the hive · ${Math.round(Math.min(1, w.rob.progress) * 100)}% · mash LMB · Space bails out`;
@@ -1774,6 +1874,8 @@ function updateHud() {
   else if (w.state === 'fighting') hint = `Mash ${kbd('LMB')} to sting it first`;
   else if (w.state === 'landed') hint = w.walking ? 'Walking · it follows the surface round edges, up trunks and under tables · look where you want to go' : `Resting costs no sugar in the warmth · mouse turns · ${kbd('W')}${kbd('A')}${kbd('S')}${kbd('D')} walk on any surface · ${kbd('LMB')} sting someone within reach · ${kbd('Space')} or ${kbd('Shift')} take off`;
   else if (w.state === 'perched') hint = `${kbd('W')}${kbd('A')}${kbd('S')}${kbd('D')} crawl (look up or down to climb) · ${kbd('LMB')} sting · ${kbd('Space')} take off · ${kbd('E')} crawl under at an opening`;
+  else if (input.pilot) hint = `Flying to the ${targetLabel(sim, input.pilot)} · any move key takes over`;
+  else if (input.lock && !h.prey && !h.opening && !h.water && !h.wood) hint = `Locked on the ${targetLabel(sim, input.lock)} · ${kbd('W')} close in · ${kbd('S')} back off · ${kbd('A')}${kbd('D')} circle${TARGET_KIND[input.lock.kind].go ? ` · ${kbd('E')} ${TARGET_KIND[input.lock.kind].go}` : ''} · ${kbd('V')} release`;
   else if (h.rival) hint = `${kbd('E')} steal a larva from the rival nest`;
   else if (h.raid !== null && h.raid !== undefined) hint = `${kbd('E')} steal a larva from player ${h.raid + 1}'s nest · their guards will come after you`;
   else if (h.hive) hint = `${kbd('E')} get into the hive for honey and brood · the bees inside fight back`;
@@ -2265,6 +2367,7 @@ function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
   if (running && !paused) {
+    if (sim) updateAssist(dt);
     const scale = timeScale(), cap = Math.max(8, Math.ceil(8 * scale));
     acc += dt * scale;
     let n = 0;
@@ -2288,6 +2391,7 @@ function frame(now) {
     const p = renderWasps(alpha, t, dt);
     if (sim) terrFrame(p || V(sim.nest.spawn));
     const focus = updateCamera(p, dt);
+    drawLock();
     updateStare(dt);
     updateScents(dt);
     if (tm) { tm('wasps+cam', t0); t0 = performance.now(); }
@@ -2336,6 +2440,7 @@ function newWorld(s, restored = null) {
   for (const o of oldNestViews) if (o) scene.remove(o);
   nestView = null; nestSig = ''; oldNestViews.length = 0;
   TERR.ox = TERR.oz = 1e9; // a new world: build its height map afresh
+  input.lock = input.pilot = null; input.turning = false;
   for (const v of lineViews.values()) scene.remove(v); lineViews.clear();
   if (restored) { sim = restored.sim; loadSnap = restored.json; lab = null; settings = sim.settings; }
   else {

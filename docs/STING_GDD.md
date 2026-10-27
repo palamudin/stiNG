@@ -457,6 +457,17 @@ The determinism and netcode rules decide how it can work:
 - **Tuning.** A skill tree can scale the cue (earlier warning, longer slow-motion in solo, the predicted swat volume shown), never the outcome. The consequence window (7.4, minimum 11 ticks) stays as it is.
 
 
+### 7.9 Lock-on and assisted flight **[T1]** (built, 18.45)
+
+The player directs the wasp; the wasp flies. A wasp is a few centimetres long and a flower head two, and landing on one by hand is a test of input precision the animal itself never faces, so the assistance stands in for what the wasp has by instinct.
+
+- **Lock on** (V, the middle mouse button, R3). On a person it takes the spot on the body the aim passes nearest, as a part, a place along it and its outward side, so it follows the person as they move, sit or stand. Otherwise it takes whatever lies closest to the aim within a narrow cone (prey, a flower, a drink, water, the nest, a hazard); with nothing under the aim, the nearest prey or hazard. Locked, the camera faces the target: W closes in (slowing as it gets near), S backs off, A and D circle it.
+- **Assisted flight** (E while locked on something the wasp can go to, with nothing to act on right here). The wasp flies itself there: in from above to a flower, a drink or water, along the outward side to a spot on a person. It lands, perches, or catches its prey. Standing somewhere else, it takes off first. Any move key takes the controls back.
+- **Turn to the gaze** (G, L3). In the eye view (hold RMB) a tap turns the wasp to where the player is looking, and the gaze stays where it was. Held for a second it toggles auto turn, which brings the wasp round after the gaze once the player has looked away for a second.
+- **Later: automatic focus.** With the Reflex slowdown (7.8), a perilous moment (a swat about to land, a bird diving) can lock on to the danger by itself.
+
+All of it only builds the driven wasp's commands from the sim's state, so an assisted flight is recorded and replayed like any other input, and peers see only the wasp's flight.
+
 ## 8. Humans
 
 Humans are the most important system in the game, and they are the most deterministic one.
@@ -1339,6 +1350,17 @@ Agreed 2026-10-27: the PoC's known limits are worked through before terrain is t
 
 **Limits.** Flight does not feel the slope: a wasp flying level stays at the same height above the ground and climbs a hill without effort. Hills are not solid to sight lines between a wasp and a person, only between people. A building does not sit level on a slope; it leans with the ground.
 
+
+### 18.45 Lock-on, assisted flight and feeding as built (7.9)
+
+**Feeding no longer stops for resting.** A wasp hovering to feed at a flower used to settle, when it stopped moving, on whatever was nearest, often the stalk, the grass or the underside of the head, where it could no longer feed. Now a wasp standing anywhere on a flower head feeds from it, and a feeding wasp only settles on the flower or the drink it feeds from. What remains is the flower itself: a full flower is drunk dry in about four seconds and refills over the day (T1-8), so the HUD says "Flower drained · try the next" instead of "Resting".
+
+**Lock-on and the pilot.** `sim/assist.js` (and `Assist.cs`): `pickTarget` (a spot on a person by the aim line against the body capsules; else the nearest to the aim within about 8°; else the nearest prey or hazard within 8 m), `targetPos` (where a target is now, or null when it is caught, drained, gone), and `assistPilot` (one tick of commands: heading and pitch to the next waypoint, a speed falling with distance, from above for landables and along the outward side for a person; still at the goal so the wasp settles or perches; pressing E in pulses on prey; a take-off first when standing elsewhere). The game wires the keys, faces the camera to the target, draws a ring and a label on it, and hands control back on any move key.
+
+**Checks.** JS and C# agree: the lock picks the aimed flower; aimed at the sky it takes the nearest danger (a bee); the pilot lands the wasp on a flower from 1.6 m in 3.5 s and it feeds; from that flower it takes off and lands on the next in 4.0 s; aimed at a seated person it locks the torso and perches on that spot in 3.2 s; locked on a caterpillar it catches it in 1.3 s; a wasp landed under a flower head feeds; a wasp hovering to feed never settles on the stalk or the grass.
+
+**Limits.** The pilot flies straight at its waypoints and slides off whatever is in the way; it does not plan round trees or houses. It does not dodge: a swat or a bird during an assisted flight is the player's to answer with a move key.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1347,7 +1369,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (95 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), and terrain (18.44). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (96 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), and lock-on with assisted flight (18.45). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 

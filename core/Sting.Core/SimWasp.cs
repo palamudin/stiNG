@@ -746,7 +746,9 @@ namespace Sting.Core
                 for (int i = 0; i < c.flowers.Count; i++)
                 {
                     var f = c.flowers[i];
-                    if (Sq(w.x - f.x) + Sq(w.y - f.y - 0.02) + Sq(w.z - f.z) > d2max || !InBloom(rec, i)) continue;
+                    // over the flower, or standing anywhere on its head (landed under it too)
+                    bool onHead = w.state == "landed" && Sq(w.x - f.x) + Sq(w.y - f.y) + Sq(w.z - f.z) <= Sq(T.land.headR + T.wasp.radius + 0.006);
+                    if ((!onHead && Sq(w.x - f.x) + Sq(w.y - f.y - 0.02) + Sq(w.z - f.z) > d2max) || !InBloom(rec, i)) continue;
                     if (NectarAt(rec, i) <= 0) continue;
                     Num add = T.energy.refuelPerSec * T.eco.flowerRate * T.DT;
                     if (w.energy < 1) w.energy = Min(1, w.energy + add);

@@ -1119,6 +1119,7 @@ namespace Sting.Core
             if (w.contact != null) { var c = w.contact; PerchOn(w, c.humanHex, c.zone, c.surf, c.n, c.part); return; }
             var s = StaticSurface(w.P, T.land.reach);
             if (s == null) return;
+            if (feeding && s.kind != "flower" && s.kind != "cup") return; // hovering to feed is not settling on a stalk or the grass
             w.state = "landed"; w.vx = w.vy = w.vz = 0;
             w.land = null;
             Settle(w, s, cmd);

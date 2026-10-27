@@ -983,6 +983,48 @@ namespace Sting.Core.Tests
                 Ok(ps.Count > 0 && ps.All(p => p.x >= pl.minx && p.x <= pl.maxx && p.z >= pl.minz && p.z <= pl.maxz && !rec.content.boxes.Any(b => p.x > b.minx && p.x < b.maxx && p.z > b.minz && p.z < b.maxz)),
                     $"after rain puddles lie on the square ({ps.Count}), never in a shop");
             }
+            // 48. lock-on and assisted flight (GDD 7.9); feeding on a flower is not cut short
+            {
+                var s = new Sim(new Settings { seed = 1234, birds = false }, new SimOpts { noAI = true }); RunS(s, 1);
+                var rec = s.records.Get("0,0"); var w = s.wasp; int fi = -1;
+                for (int k = 0; k < rec.content.flowers.Count && fi < 0; k++) if (s.InBloom(rec, k) && s.NectarAt(rec, k) > 0) fi = k;
+                var f = rec.content.flowers[fi];
+                V3 AimAt(Num px, Num py, Num pz) { Num l = Sqrt(Sq(px - w.x) + Sq(py - w.y) + Sq(pz - w.z)); return new V3((px - w.x) / l, (py - w.y) / l, (pz - w.z) / l); }
+                (string done, int ticks) Fly(LockTarget t, int n = 1500) { string done = null; int k = 0; for (; k < n && done == null; k++) { var r = Assist.Pilot(s, w, t, Idle()); done = r.done; s.Step(r.cmd); s.DrainEvents(); } return (done, k); }
+                Place(w, P(f.x, f.y - 0.01, f.z)); w.state = "fly"; w.energy = 0.3;
+                RunS(s, 30);
+                Ok(w.state == "landed" && w.land.kind == "flower" && s.feeding, "landed anywhere on a flower head, even under it, the wasp feeds");
+                Place(w, P(f.x, f.y, f.z)); w.state = "fly"; w.land = null; w.energy = 0.3;
+                var sts = new HashSet<string>(); for (int i = 0; i < 30; i++) { s.Step(Idle()); s.DrainEvents(); sts.Add(w.state + (w.land != null ? w.land.kind : "")); }
+                Ok(!sts.Contains("landedstalk") && !sts.Contains("landedground"), $"feeding at a flower it does not settle on the stalk or the grass ({string.Join(", ", sts)})");
+                Place(w, P(f.x + 1.2, f.y + 0.6, f.z - 0.9)); w.state = "fly"; w.land = null; w.energy = 0.4;
+                var tf = Assist.PickTarget(s, w, AimAt(f.x, f.y, f.z));
+                Ok(tf != null && tf.kind == "flower" && tf.i == fi && Assist.Label(tf) == "flower", "locking on picks the flower under the aim");
+                var up = Assist.PickTarget(s, w, new V3(0, 1, 0));
+                Ok(up == null || new[] { "fly", "caterpillar", "bee", "bird", "dragonfly", "web", "wasp" }.Contains(up.kind), $"aiming at the sky it picks the nearest prey or danger ({(up == null ? "nothing near" : up.kind)})");
+                var fl = Fly(tf);
+                RunS(s, 30);
+                Ok(fl.done == "landed" && w.land != null && w.land.kind == "flower" && s.feeding, $"assisted, it flies in and lands on the flower in {fl.ticks / 60.0:0.0} s and feeds");
+                int fj = -1;
+                for (int k = 0; k < rec.content.flowers.Count && fj < 0; k++) { var g0 = rec.content.flowers[k]; if (k != fi && s.InBloom(rec, k) && s.NectarAt(rec, k) > 0 && D(Sqrt(Sq(g0.x - f.x) + Sq(g0.z - f.z))) > 0.3) fj = k; }
+                var g2 = rec.content.flowers[fj]; var fl2 = Fly(new LockTarget { kind = "flower", key = "0,0", i = fj });
+                Ok(fl2.done == "landed" && w.land.kind == "flower" && D(Sqrt(Sq(w.x - g2.x) + Sq(w.z - g2.z))) < 0.04, $"standing on one flower, it takes off and lands on the next in {fl2.ticks / 60.0:0.0} s");
+                var hm = s.active.First(h => h.state == "idle" && h.posture == "sit");
+                Place(w, P(hm.x + 2, 1.2, hm.z + 1)); w.state = "fly"; w.land = null; w.energy = 1;
+                var th = Assist.PickTarget(s, w, AimAt(hm.x, 1.0, hm.z));
+                var hp = Assist.TargetPos(s, th).Value; var fh = Fly(th);
+                Ok(th != null && th.kind == "human" && th.hex == hm.hex && fh.done == "perched" && w.state == "perched" && D(Sqrt(Sq(w.x - hp.x) + Sq(w.y - hp.y) + Sq(w.z - hp.z))) < 0.06,
+                    $"aimed at a person it locks on to the {Assist.Label(th)}, and the pilot sets the wasp down on that spot in {fh.ticks / 60.0:0.0} s");
+                w.state = "fly"; w.carry = null;
+                LockTarget cat = null;
+                foreach (var r in s.activeChunks) { for (int k = 0; k < r.content.caterpillars.Count; k++) if (s.CatActive(r, k) && !(s.CS(r.key).caughtCat.TryGetValue(k, out var cc) && cc != 0)) { cat = new LockTarget { kind = "caterpillar", key = r.key, i = k }; break; } if (cat != null) break; }
+                if (cat != null)
+                {
+                    var cp = Assist.TargetPos(s, cat).Value; Place(w, P(cp.x + 0.8, cp.y + 0.5, cp.z)); w.state = "fly"; w.land = null; w.energy = 1;
+                    var fc = Fly(cat);
+                    Ok(fc.done == "caught" && w.carry != null && w.carry.what == "caterpillar", $"locked on a caterpillar, the pilot catches it ({fc.done} in {fc.ticks / 60.0:0.0} s)");
+                }
+            }
             // 47. terrain (T2-6): a height field the sim works above; hills block sight, gather puddles, catch the wind
             {
                 var S1 = new Settings { terrain = 1 }; var S2 = new Settings { terrain = 2 };

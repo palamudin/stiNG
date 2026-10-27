@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, humanParts, malesAbout, chunkOf, toLocal, dirToWorld, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, CMD_FIELDS,
+  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, pickTarget, assistPilot, targetPos, targetLabel, CMD_FIELDS,
 } from '../sim/index.js';
 import { applyTuning, parseTuning, tuningHash, tuningLeaves, TUNE } from '../sim/tunefile.js';
 
@@ -1692,6 +1692,52 @@ function seated(sim, pred) {
   const rec = s.records.get('0,1');
   const wet = new Sim({ seed: 1234, birds: false }, { noAI: true }); run(wet, 2);
   ok(s.puddlesIn(rec, rd).length <= Math.floor(T.water.puddles / 2) && wet.puddlesIn(wet.records.get('0,1'), rd).length > s.puddlesIn(rec, rd).length, `a dry world leaves fewer puddles (${s.puddlesIn(rec, rd).length} vs ${wet.puddlesIn(wet.records.get('0,1'), rd).length})`);
+}
+
+// Lock-on and assisted flight (GDD 7.9): the player directs, the wasp flies; and feeding on a flower is not cut short
+{
+  const s = new Sim({ seed: 1234, birds: false }, { noAI: true }); run(s, 1);
+  const rec = s.records.get('0,0'), w = s.wasp;
+  const fi = rec.content.flowers.findIndex((f, k) => s.inBloom(rec, k) && s.nectarAt(rec, k) > 0), f = rec.content.flowers[fi];
+  const aimAt = (p) => { const l = Math.hypot(p.x - w.x, p.y - w.y, p.z - w.z); return { x: (p.x - w.x) / l, y: (p.y - w.y) / l, z: (p.z - w.z) / l }; };
+  const fly = (t, n = 1500) => { let done = null, k = 0; for (; k < n && !done; k++) { const r = assistPilot(s, w, t, idle()); done = r.done; s.step(r.cmd); s.drainEvents(); } return { done, ticks: k }; };
+  // feeding under a flower head, and hovering to feed never settles on the stalk instead
+  place(w, { x: f.x, y: f.y - 0.01, z: f.z }); w.state = 'fly'; w.energy = 0.3;
+  run(s, 30);
+  ok(w.state === 'landed' && w.land.kind === 'flower' && s.feeding, 'landed anywhere on a flower head, even under it, the wasp feeds');
+  place(w, { x: f.x, y: f.y, z: f.z }); w.state = 'fly'; w.land = null; w.energy = 0.3;
+  const sts = new Set(); for (let i = 0; i < 30; i++) { s.step(idle()); s.drainEvents(); sts.add(w.state + (w.land ? w.land.kind : '')); }
+  ok(!sts.has('landedstalk') && !sts.has('landedground'), `feeding at a flower it does not settle on the stalk or the grass (${[...sts].join(', ')})`);
+  // lock on: the flower under the aim; with nothing under it, the nearest prey or hazard
+  place(w, { x: f.x + 1.2, y: f.y + 0.6, z: f.z - 0.9 }); w.state = 'fly'; w.land = null; w.energy = 0.4;
+  const tf = pickTarget(s, w, aimAt(f));
+  ok(tf && tf.kind === 'flower' && tf.i === fi && targetLabel(s, tf) === 'flower', 'locking on picks the flower under the aim');
+  const up = pickTarget(s, w, { x: 0, y: 1, z: 0 });
+  ok(!up || ['fly', 'caterpillar', 'bee', 'bird', 'dragonfly', 'web', 'wasp'].includes(up.kind), `aiming at the sky it picks the nearest prey or danger (${up ? up.kind : 'nothing near'})`);
+  // the pilot flies it in from above, lands it on the flower and it feeds
+  const fl = fly(tf);
+  run(s, 30);
+  ok(fl.done === 'landed' && w.land && w.land.kind === 'flower' && s.feeding, `assisted, it flies in and lands on the flower in ${(fl.ticks / 60).toFixed(1)} s and feeds`);
+  // from there to the next flower: it takes off by itself
+  const fj = rec.content.flowers.findIndex((g, k) => k !== fi && s.inBloom(rec, k) && s.nectarAt(rec, k) > 0 && Math.hypot(g.x - f.x, g.z - f.z) > 0.3), g2 = rec.content.flowers[fj];
+  const fl2 = fly({ kind: 'flower', key: '0,0', i: fj });
+  ok(fl2.done === 'landed' && w.land.kind === 'flower' && Math.hypot(w.x - g2.x, w.z - g2.z) < 0.04, `standing on one flower, it takes off and lands on the next in ${(fl2.ticks / 60).toFixed(1)} s`);
+  // a person: lock on the spot under the aim and the pilot settles the wasp there
+  const hm = s.active.find((h) => h.state === 'idle' && h.posture === 'sit');
+  place(w, { x: hm.x + 2, y: 1.2, z: hm.z + 1 }); w.state = 'fly'; w.land = null; w.energy = 1;
+  const th = pickTarget(s, w, aimAt({ x: hm.x, y: 1.0, z: hm.z }));
+  const hp = targetPos(s, th), fh = fly(th);
+  ok(th && th.kind === 'human' && th.hex === hm.hex && fh.done === 'perched' && w.state === 'perched' && Math.hypot(w.x - hp.x, w.y - hp.y, w.z - hp.z) < 0.06,
+    `aimed at a person it locks on to the ${targetLabel(s, th)}, and the pilot sets the wasp down on that spot in ${(fh.ticks / 60).toFixed(1)} s`);
+  // prey: it catches a caterpillar it is locked on to
+  w.state = 'fly'; w.carry = null; w.perch = null;
+  let cat = null;
+  for (const r of s.activeChunks) { const i = r.content.caterpillars.findIndex((c, k) => s.catActive(r, k) && !s.cs(chunkKey(r.cx, r.cz)).caughtCat[k]); if (i >= 0) { cat = { kind: 'caterpillar', key: chunkKey(r.cx, r.cz), i }; break; } }
+  if (cat) {
+    const cp = targetPos(s, cat); place(w, { x: cp.x + 0.8, y: cp.y + 0.5, z: cp.z }); w.state = 'fly'; w.land = null; w.energy = 1;
+    const fc = fly(cat);
+    ok(fc.done === 'caught' && w.carry && w.carry.what === 'caterpillar', `locked on a caterpillar, the pilot catches it (${fc.done} in ${(fc.ticks / 60).toFixed(1)} s)`);
+  }
 }
 
 // Terrain (GDD 4.8, T2-6): a height field the sim works above; hills block sight, gather puddles, catch the wind
