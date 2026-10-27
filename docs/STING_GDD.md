@@ -1292,6 +1292,17 @@ These complete 11.8. Like the earlier checks, each reads only the event and the 
 
 **Limits.** Shops are closed boxes: there is no going inside, and no shop sells anything to wasps. The beer garden's drinkers keep the ordinary park hours rather than staying into the evening.
 
+
+### 18.42 Feature modifiers as built (T2-6)
+
+**The modifiers.** Four feature modifiers are chosen on the start screen with the other world settings. *Woods*: no forest, one 2x2 forest corner per region (the standard), or wooded, two 3x3 corners diagonally across. *Towns*: none, one town centre per region (the standard), or two, which never touch. *Water*: dry (half the birdbaths and puddles), normal, or wet (twice as many birdbaths and puddles). *Beehives*: none, few, normal or many (x0, x0.5, x1, x2 the chance of a hive in a park or a backyard; with none, the hive by the home park is gone too).
+
+**How they act.** They act at generation: the region layout and every chunk are generated with the world's modifiers, so the defaults produce exactly the standard world. They are rules, so they go into the rules hash peers compare, into the world tag ("wooded · no towns · dry · hives ×2"), and into saves; a restored world regenerates its chunks with them. They are set when a world is made and do not change during play, so the question of live changes to undiscovered land (4.8) does not come up yet.
+
+**Checks.** JS and C# count over 9 regions with seed 1234: forest chunks 0, 35 and 136 for no woods, normal and wooded; town chunks 0, 36 and 72 for none, one and two a region, and two towns never touch; birdbaths in the home region 23, 49 and 73 for dry, normal and wet; beehives 0, 10 and 12 for none, normal and many. Identical in both. A world made with modifiers generates every chunk with them and keeps them through a save; a dry world leaves 2 puddles in a chunk where a normal one leaves 5. The C# save format is 21.
+
+**Not built: terrain.** Terrain roughness is the one feature modifier left. Everything on this stack stands on flat ground at height 0: collision, landing, walking, humans, sting reach, puddles and every placed object. A heightfield would touch all of it twice, in the JS reference and in the C# core. Once the game moves to Unity the C# core is the only sim, so terrain is planned for after the move, built once there.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1300,7 +1311,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (92 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (93 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -1343,7 +1354,7 @@ Agreed 2026-10-27: Tier 2 is built on the current stack in the order that surviv
 | T2-3 | **Built (18.39).** Males as wasps: drones fly physically late in the season, no sting, mating flights with gynes | 6.5, 6.7 | M | sim |
 | T2-4 | **Built (18.40).** Lineage colonies as real AI colonies: the queens the player did not wake found colonies of the line, run by AI | 6.7 | L | sim |
 | T2-5 | **Built (18.41).** Town centers and beer gardens: a new land use with dense outdoor seating and drinks | 4.1, 4.3 | M | generator and sim; new art |
-| T2-6 | Feature modifiers that need the bigger generator: biome mix, town density, terrain | 4.8 | L | terrain touches all collision |
+| T2-6 | **Built (18.42), except terrain.** Feature modifiers that need the bigger generator: biome mix, town density, terrain | 4.8 | L | terrain touches all collision |
 | T2-7 | The Reflex skill tree | 7.8 | M | mostly UI and progression: after the Unity move |
 | T2-8 | Colonies of thousands of wasps out at once | 11.12 | L | engine performance: after the Unity move |
 

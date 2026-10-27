@@ -380,7 +380,7 @@ namespace Sting.Core
         {
             string key = ChunkKey(cx, cz);
             if (records.Has(key)) return;
-            var content = GenerateChunk(seed, cx, cz);
+            var content = GenerateChunk(seed, cx, cz, settings);
             records.Set(key, new ChunkRec { cx = cx, cz = cz, genVersion = T.GEN_VERSION, discoveredTick = tick, contentHash = ContentHash(content), content = content });
             Emit("chunkDiscovered", ("cx", cx), ("cz", cz));
         }

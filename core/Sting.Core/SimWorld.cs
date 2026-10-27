@@ -216,7 +216,7 @@ namespace Sting.Core
         {
             string k = KeyOf(cx, cz);
             if (records.TryGet(k, out var rec)) return rec.content;
-            if (!genCache.TryGetValue(k, out var c)) { if (genCache.Count > 32) genCache.Clear(); genCache[k] = c = GenerateChunk(seed, cx, cz); }
+            if (!genCache.TryGetValue(k, out var c)) { if (genCache.Count > 32) genCache.Clear(); genCache[k] = c = GenerateChunk(seed, cx, cz, settings); }
             return c;
         }
 

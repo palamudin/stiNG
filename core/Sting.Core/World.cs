@@ -35,9 +35,11 @@ namespace Sting.Core
     /// a town centre's shop (T2-5); a beer garden's footprint
     public sealed class Shop { public Num x, z, hw, hd, h; public int color; }
     public sealed class Garden { public Num x, z, hw, hd; }
-    /// tx, tz: the town centre's 2x2 block (-1: none); garden: which quarter of it is the beer garden
-    public sealed class RegionLayout { public int strip, mallSide, mallFrom, forest, tx = -1, tz = -1, garden; }
-    public sealed class TownQ { public int qx, qz; public bool garden; }
+    /// a forest corner (x, z, n chunks square); a town centre's 2x2 block and which quarter of it is the beer garden
+    public sealed class ForestBlock { public int x, z, n; }
+    public sealed class Town { public int tx, tz, garden; }
+    public sealed class RegionLayout { public int strip, mallSide, mallFrom, forest; public List<ForestBlock> forests = new List<ForestBlock>(); public List<Town> towns = new List<Town>(); }
+    public sealed class TownQ { public int qx, qz; public bool garden, fountain; }
     public sealed class Spawn { public Num x, y, z, yaw; }
     public sealed class Nest
     {
@@ -233,72 +235,81 @@ namespace Sting.Core
         public const int REGION = 8;
         static readonly Dictionary<string, RegionLayout> regionCache = new Dictionary<string, RegionLayout>();
         static int FloorDiv(int a, int b) => a >= 0 ? a / b : -((-a + b - 1) / b);
-        public static RegionLayout Region(ulong seed, int rx, int rz)
+        /// Feature modifiers (GDD 4.8, T2-6, see world.js features): woods 0-2, towns 0-2, water x0.5-2, hives x0-2
+        public static Settings Features(Settings st) => st ?? DefaultFeatures;
+        static readonly Settings DefaultFeatures = new Settings();
+        public static RegionLayout Region(ulong seed, int rx, int rz, Settings st = null)
         {
-            string key = seed + ":" + rx + "," + rz;
+            var F = Features(st);
+            string key = seed + ":" + rx + "," + rz + ":" + F.woods + "," + F.towns;
             lock (regionCache)
             {
                 if (regionCache.TryGetValue(key, out var L)) return L;
                 ulong H(long slot) => Hash(seed, Domain.WorldGen, U64(rx), U64(rz), U64(90000 + slot));
                 L = new RegionLayout { strip = rx == 0 && rz == 0 ? REGION / 2 : 2 + RangeInt(H(1), 0, 4), mallSide = RangeInt(H(2), 0, 4), mallFrom = RangeInt(H(3), 0, REGION - 2), forest = RangeInt(H(4), 0, 4) };
-                // a town centre (T2-5): a 2x2 block of yards, scanned for from a hashed start; never beside the home chunk
-                L.garden = RangeInt(H(7), 0, 4);
-                int sx = RangeInt(H(5), 0, REGION - 1), sz = RangeInt(H(6), 0, REGION - 1); bool home = rx == 0 && rz == 0;
-                for (int i = 0; i < (REGION - 1) * (REGION - 1) && L.tx < 0; i++)
+                // forest corners (2x2; a wooded world has two of 3x3, the second diagonally across)
+                int fs = F.woods >= 2 ? 3 : 2;
+                for (int k = 0; k < System.Math.Min(F.woods, 2); k++) { int f = k != 0 ? L.forest ^ 3 : L.forest; L.forests.Add(new ForestBlock { x = (f & 1) != 0 ? REGION - fs : 0, z = (f & 2) != 0 ? REGION - fs : 0, n = fs }); }
+                // town centres (T2-5): a 2x2 block of yards, scanned for from a hashed start; never beside the home chunk, and a
+                // second town never touching the first
+                for (int t = 0; t < F.towns; t++)
                 {
-                    int tx = (sx + i) % (REGION - 1), tz = (sz + i / (REGION - 1)) % (REGION - 1);
-                    bool ok = true;
-                    for (int dz = 0; dz < 2 && ok; dz++) for (int dx = 0; dx < 2 && ok; dx++)
+                    int sx = RangeInt(H(t != 0 ? 8 : 5), 0, REGION - 1), sz = RangeInt(H(t != 0 ? 9 : 6), 0, REGION - 1); bool home = rx == 0 && rz == 0;
+                    for (int i = 0; i < (REGION - 1) * (REGION - 1); i++)
                     {
-                        int lx = tx + dx, lz = tz + dz;
-                        if (BaseUse(L, lx, lz) != "yards" || (home && System.Math.Abs(lx - REGION / 2) <= 1 && System.Math.Abs(lz - REGION / 2) <= 1)) ok = false;
+                        int tx = (sx + i) % (REGION - 1), tz = (sz + i / (REGION - 1)) % (REGION - 1);
+                        bool ok = true;
+                        foreach (var o in L.towns) if (!(tx > o.tx + 2 || tx + 1 < o.tx - 1 || tz > o.tz + 2 || tz + 1 < o.tz - 1)) ok = false;
+                        for (int dz = 0; dz < 2 && ok; dz++) for (int dx = 0; dx < 2 && ok; dx++)
+                        {
+                            int lx = tx + dx, lz = tz + dz;
+                            if (BaseUse(L, lx, lz) != "yards" || (home && System.Math.Abs(lx - REGION / 2) <= 1 && System.Math.Abs(lz - REGION / 2) <= 1)) ok = false;
+                        }
+                        if (ok) { L.towns.Add(new Town { tx = tx, tz = tz, garden = RangeInt(H(t != 0 ? 10 : 7), 0, 4) }); break; }
                     }
-                    if (ok) { L.tx = tx; L.tz = tz; }
                 }
                 if (regionCache.Count > 256) regionCache.Clear();
                 regionCache[key] = L;
                 return L;
             }
         }
-        /// land use before the town centre is laid over it
+        /// land use before the town centres are laid over it
         static string BaseUse(RegionLayout L, int lx, int lz)
         {
             if (lz == L.strip) return "park";
             bool edge = L.mallSide == 0 ? lz == 0 : L.mallSide == 1 ? lx == REGION - 1 : L.mallSide == 2 ? lz == REGION - 1 : lx == 0;
             int along = L.mallSide % 2 != 0 ? lz : lx;
             if (edge && along >= L.mallFrom && along < L.mallFrom + 3) return "mall";
-            int fx = (L.forest & 1) != 0 ? REGION - 2 : 0, fz = (L.forest & 2) != 0 ? REGION - 2 : 0;
-            if (lx >= fx && lx < fx + 2 && lz >= fz && lz < fz + 2) return "forest";
+            foreach (var f in L.forests) if (lx >= f.x && lx < f.x + f.n && lz >= f.z && lz < f.z + f.n) return "forest";
             return "yards";
         }
-        /// which quarter of its region's town centre a chunk is (0 or 1 each way), or null
-        public static TownQ TownQuarter(ulong seed, int cx, int cz)
+        static (int rx, int rz, int lx, int lz) RegionOf(int cx, int cz) { int h = REGION / 2, rx = FloorDiv(cx + h, REGION), rz = FloorDiv(cz + h, REGION); return (rx, rz, cx + h - rx * REGION, cz + h - rz * REGION); }
+        /// which quarter of a town centre a chunk is (0 or 1 each way), whether it is the beer garden or has the fountain, or null
+        public static TownQ TownQuarter(ulong seed, int cx, int cz, Settings st = null)
         {
-            int h = REGION / 2, rx = FloorDiv(cx + h, REGION), rz = FloorDiv(cz + h, REGION), lx = cx + h - rx * REGION, lz = cz + h - rz * REGION;
-            var L = Region(seed, rx, rz); int qx = lx - L.tx, qz = lz - L.tz;
-            return L.tx >= 0 && qx >= 0 && qx < 2 && qz >= 0 && qz < 2 ? new TownQ { qx = qx, qz = qz, garden = qx + 2 * qz == L.garden } : null;
+            var R = RegionOf(cx, cz); var L = Region(seed, R.rx, R.rz, st);
+            foreach (var t in L.towns)
+            {
+                int qx = R.lx - t.tx, qz = R.lz - t.tz, k = qx + 2 * qz;
+                if (qx >= 0 && qx < 2 && qz >= 0 && qz < 2) return new TownQ { qx = qx, qz = qz, garden = k == t.garden, fountain = k == (t.garden + 2) % 4 };
+            }
+            return null;
         }
-        public static string LandUse(ulong seed, int cx, int cz)
+        public static string LandUse(ulong seed, int cx, int cz, Settings st = null)
         {
             if (cx == 0 && cz == 0) return "park";
-            int h = REGION / 2, rx = FloorDiv(cx + h, REGION), rz = FloorDiv(cz + h, REGION), lx = cx + h - rx * REGION, lz = cz + h - rz * REGION;
-            var L = Region(seed, rx, rz);
-            if (TownQuarter(seed, cx, cz) != null) return "town";
-            if (lz == L.strip) return "park";
-            bool edge = L.mallSide == 0 ? lz == 0 : L.mallSide == 1 ? lx == REGION - 1 : L.mallSide == 2 ? lz == REGION - 1 : lx == 0;
-            int along = L.mallSide % 2 != 0 ? lz : lx;
-            if (edge && along >= L.mallFrom && along < L.mallFrom + 3) return "mall";
-            int fx = (L.forest & 1) != 0 ? REGION - 2 : 0, fz = (L.forest & 2) != 0 ? REGION - 2 : 0;
-            if (lx >= fx && lx < fx + 2 && lz >= fz && lz < fz + 2) return "forest";
-            return "yards";
+            var R = RegionOf(cx, cz);
+            if (TownQuarter(seed, cx, cz, st) != null) return "town";
+            return BaseUse(Region(seed, R.rx, R.rz, st), R.lx, R.lz);
         }
-        public static int MallSide(ulong seed, int cx, int cz) { int h = REGION / 2; return Region(seed, FloorDiv(cx + h, REGION), FloorDiv(cz + h, REGION)).mallSide; }
+        public static int MallSide(ulong seed, int cx, int cz, Settings st = null) { var R = RegionOf(cx, cz); return Region(seed, R.rx, R.rz, st).mallSide; }
 
         // ---------------------------------------------------------------- chunk generation (GDD 4.3)
         struct Occ { public Num x, z, r; }
 
-        public static ChunkContent GenerateChunk(ulong seed, int cx, int cz)
+        public static ChunkContent GenerateChunk(ulong seed, int cx, int cz, Settings st = null)
         {
+            var F = Features(st);
             ulong H(long slot) => Hash(seed, Domain.WorldGen, U64(cx), U64(cz), U64(slot));
             Num ox = cx * CS, oz = cz * CS;
             var c = new ChunkContent { cx = cx, cz = cz, tint = Unit(H(0)) };
@@ -432,7 +443,7 @@ namespace Sting.Core
             // suburban yards (see world.js addYards)
             void AddYards()
             {
-                bool endW = LandUse(seed, cx - 1, cz) != "yards", endE = LandUse(seed, cx + 1, cz) != "yards";
+                bool endW = LandUse(seed, cx - 1, cz, st) != "yards", endE = LandUse(seed, cx + 1, cz, st) != "yards";
                 c.roads.Add(new Rect { minx = ox + (endW ? -22 : -32), maxx = ox + (endE ? 22 : 32), minz = oz - 4, maxz = oz + 4 });
                 if (endW) c.loops.Add(new Loop { x = ox - 22, z = oz, r = 11 });
                 if (endE) c.loops.Add(new Loop { x = ox + 22, z = oz, r = 11 });
@@ -447,7 +458,7 @@ namespace Sting.Core
                     if (Unit(H(b + 10)) < 0.55) AddPicnic(lx + Range(H(b + 11), -6, 6), oz + s * 24.5, true, RangeInt(H(b + 12), 1, 64) | 1, b + 20);
                     if (Unit(H(b + 300)) < 0.75) AddFlowers(lx + Range(H(b + 301), -11, 11), oz + s * 29.5, b + 310);
                     if (Unit(H(b + 500)) < 0.3) { Num sx = lx + (Unit(H(b + 501)) < 0.5 ? -12.5 : 12.5), sz = oz + s * 28.7; if (Free(sx, sz, 2)) AddShed(sx, sz, true, b + 502, false); }
-                    if (Unit(H(b + 510)) < 0.08) { Num hx = lx + Range(H(b + 511), -10, 10), hz = oz + s * 22; if (Free(hx, hz, 2)) AddHive(hx, hz, b + 600); }
+                    if (Unit(H(b + 510)) < 0.08 * F.hives) { Num hx = lx + Range(H(b + 511), -10, 10), hz = oz + s * 22; if (Free(hx, hz, 2)) AddHive(hx, hz, b + 600); }
                     if (Unit(H(b + 800)) < 0.2) { Num gx = lx + Range(H(b + 801), -8, 8), gz = oz + s * 7; if (Free(gx, gz, 2)) AddGroup(gx, gz, RangeInt(H(b + 802), 2, 4), b + 1000); }
                     // a gardener working the beds along the back fence and the lawn; someone sunbathing in the backyard (T1-11)
                     if (Unit(H(b + 1400)) < 0.3)
@@ -469,7 +480,7 @@ namespace Sting.Core
             // a strip mall on the region's edge (see world.js addMall)
             void AddMall()
             {
-                int side = MallSide(seed, cx, cz);
+                int side = MallSide(seed, cx, cz, st);
                 int o0 = side == 1 ? 1 : side == 3 ? -1 : 0, o1 = side == 0 ? -1 : side == 2 ? 1 : 0, a0 = o0 != 0 ? 0 : 1, a1 = o0 != 0 ? 1 : 0;
                 (Num x, Num z) At(Num u, Num v) => (ox + a0 * u + o0 * v, oz + a1 * u + o1 * v);
                 var bp = At(0, 21); Num hu = 27, hv = 8, hx = o0 != 0 ? hv : hu, hz = o0 != 0 ? hu : hv;
@@ -494,7 +505,7 @@ namespace Sting.Core
             // one quarter of each block is a beer garden, the one across from it has the fountain
             void AddTown()
             {
-                var q = TownQuarter(seed, cx, cz); int ix = q.qx != 0 ? -1 : 1, iz = q.qz != 0 ? -1 : 1;
+                var q = TownQuarter(seed, cx, cz, st); int ix = q.qx != 0 ? -1 : 1, iz = q.qz != 0 ? -1 : 1;
                 c.plazas.Add(new Rect { minx = ox - 32, maxx = ox + 32, minz = oz - 32, maxz = oz + 32 });
                 void AddShop(Num x, Num z, Num hw, Num hd, long slot)
                 {
@@ -526,8 +537,7 @@ namespace Sting.Core
                     int ng = RangeInt(H(7050), 1, 3);
                     for (int k = 0; k < ng; k++) { Num gx = ox + ix * Range(H(7051 + k * 3), 4, 22), gz = oz + iz * Range(H(7052 + k * 3), 4, 22); if (Free(gx, gz, 2)) AddGroup(gx, gz, RangeInt(H(7053 + k * 3), 2, 4), 7060 + k * 400); }
                     for (int k = 0; k < 2; k++) { Num fx = ox + ix * Range(H(7070 + k * 2), 2, 24), fz = oz + iz * Range(H(7071 + k * 2), 2, 24); if (Free(fx, fz, 1.5)) AddFlowers(fx, fz, 7080 + k * 80); }
-                    int hr = REGION / 2;
-                    if (q.qx + 2 * q.qz == (Region(seed, FloorDiv(cx + hr, REGION), FloorDiv(cz + hr, REGION)).garden + 2) % 4)
+                    if (q.fountain)
                     {
                         // a fountain at the middle of the block: water (T2-1)
                         Num fx = ox + ix * 27, fz = oz + iz * 27;
@@ -550,7 +560,7 @@ namespace Sting.Core
                 AddFlowers(-6, 2, 400);
                 AddFlowers(3, -5, 480);
             }
-            else if ((c.use = LandUse(seed, cx, cz)) == "yards") AddYards();
+            else if ((c.use = LandUse(seed, cx, cz, st)) == "yards") AddYards();
             else if (c.use == "mall") AddMall();
             else if (c.use == "town") AddTown();
             else if (c.use == "forest")
@@ -570,8 +580,8 @@ namespace Sting.Core
                     Num gx = ox + Range(H(7), -24, 24), gz = oz + Range(H(8), -24, 24);
                     if (Free(gx, gz, 2)) AddGroup(gx, gz, RangeInt(H(9), 2, 5), 1100);
                 }
-                bool forcedHive = cx == 1 && cz == 0;
-                if (forcedHive || Unit(H(12)) < 0.3)
+                bool forcedHive = cx == 1 && cz == 0 && F.hives > 0;
+                if (forcedHive || Unit(H(12)) < 0.3 * F.hives)
                 {
                     Num hx = forcedHive ? ox - 18 : ox + Range(H(13), -22, 22), hz = forcedHive ? oz + 6 : oz + Range(H(14), -22, 22);
                     if (Free(hx, hz, 3)) AddHive(hx, hz, 1500);
@@ -622,14 +632,14 @@ namespace Sting.Core
                 for (int li = 0; li < 4; li++)
                 {
                     int s = li < 2 ? -1 : 1; Num lx = ox + (li % 2 != 0 ? 16 : -16); long b = 3000 + li * 2000;
-                    if (Unit(H(b + 1500)) >= T.water.bathShare) continue;
+                    if (Unit(H(b + 1500)) >= T.water.bathShare * F.water) continue;
                     Num x = lx + Range(H(b + 1501), -9, 9), z = oz + s * 24.5;
                     if (Free(x, z, 0.6)) AddBath(x, z);
                 }
             }
             else if (c.use == "park")
             {
-                int n = isOrigin ? 6 : Unit(H(6500)) < T.water.bathPark ? 4 : 0; // tries
+                int n = isOrigin ? 6 : Unit(H(6500)) < T.water.bathPark * F.water ? 4 : 0; // tries
                 for (int k = 0; k < n; k++)
                 {
                     Num x = ox + Range(H(6501 + k * 2), -18, 18), z = oz + Range(H(6502 + k * 2), -18, 18);

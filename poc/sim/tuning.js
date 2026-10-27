@@ -278,10 +278,12 @@ export const DEFAULT_SETTINGS = {
   dayMinutes: 2, humanDensity: 1, beeAggression: 1, seasonDays: 40,
   // World modifiers (GDD 4.8): data, not code
   reaction: 1, escalation: 1, exterminator: true, birds: true, rivals: true, pestControl: true,
+  // feature modifiers (T2-6): act at generation; see world.js features()
+  woods: 1, towns: 1, water: 1, hives: 1,
 };
 
 // The settings that change the rules, in a fixed order. Their hash is the world's rules hash: peers compare it.
-const RULE_KEYS = ['dayMinutes', 'humanDensity', 'beeAggression', 'seasonDays', 'reaction', 'escalation', 'exterminator', 'birds', 'rivals', 'pestControl'];
+const RULE_KEYS = ['dayMinutes', 'humanDensity', 'beeAggression', 'seasonDays', 'reaction', 'escalation', 'exterminator', 'birds', 'rivals', 'pestControl', 'woods', 'towns', 'water', 'hives'];
 export function rulesHash(settings) {
   const s = { ...DEFAULT_SETTINGS, ...settings };
   let h = 0x811c9dc5;
@@ -304,5 +306,9 @@ export function worldTag(settings) {
   if (!s.pestControl) t.push('no pest control');
   if (!s.birds) t.push('no birds');
   if (!s.rivals) t.push('no rival colonies');
+  if (s.woods !== d.woods) t.push(s.woods > d.woods ? 'wooded' : 'no woods');
+  if (s.towns !== d.towns) t.push(s.towns > d.towns ? `${s.towns} towns a region` : 'no towns');
+  if (s.water !== d.water) t.push(s.water > d.water ? 'wet' : 'dry');
+  if (s.hives !== d.hives) t.push(s.hives ? `hives ${x(s.hives)}` : 'no hives');
   return t.join(' · ');
 }

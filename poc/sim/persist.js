@@ -52,7 +52,7 @@ export function restore(json) {
   // frozen chunks: regenerate and verify (GDD 4.4)
   sim.records = new Map();
   for (const r of d.records) {
-    const content = generateChunk(sim.seed, r.cx, r.cz);
+    const content = generateChunk(sim.seed, r.cx, r.cz, sim.settings);
     const h = fnv32(JSON.stringify(content));
     if (h !== r.contentHash) throw new Error(`chunk ${r.cx},${r.cz} does not match its stored hash`);
     sim.records.set(r.cx + ',' + r.cz, { ...r, content });

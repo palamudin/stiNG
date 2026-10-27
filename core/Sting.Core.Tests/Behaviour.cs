@@ -899,13 +899,13 @@ namespace Sting.Core.Tests
                 foreach (ulong seed in new ulong[] { 1234, 7 }) for (int rz = -2; rz <= 2; rz++) for (int rx = -2; rx <= 2; rx++)
                 {
                     regions++;
-                    var L = World.Region(seed, rx, rz); if (L.tx < 0) continue;
-                    var cs = new List<(int x, int z)>(); for (int dz = 0; dz < 2; dz++) for (int dx = 0; dx < 2; dx++) cs.Add((rx * 8 - 4 + L.tx + dx, rz * 8 - 4 + L.tz + dz));
+                    var L = World.Region(seed, rx, rz); if (L.towns.Count != 1) continue;
+                    var tw = L.towns[0]; var cs = new List<(int x, int z)>(); for (int dz = 0; dz < 2; dz++) for (int dx = 0; dx < 2; dx++) cs.Add((rx * 8 - 4 + tw.tx + dx, rz * 8 - 4 + tw.tz + dz));
                     if (cs.All(t => World.LandUse(seed, t.x, t.z) == "town" && World.TownQuarter(seed, t.x, t.z) != null)) towns++;
                     if (rx == 0 && rz == 0 && cs.Any(t => System.Math.Abs(t.x) <= 1 && System.Math.Abs(t.z) <= 1)) apart = false;
                 }
                 Ok(towns == regions && apart, $"every region has one 2x2 town centre ({towns} of {regions}); the home region's is never beside the nest");
-                var HL = World.Region(1234, 0, 0); var q = new List<ChunkContent>();
+                var HL = World.Region(1234, 0, 0).towns[0]; var q = new List<ChunkContent>();
                 for (int dz = 0; dz < 2; dz++) for (int dx = 0; dx < 2; dx++) q.Add(World.GenerateChunk(1234, HL.tx - 4 + dx, HL.tz - 4 + dz));
                 var garden = q.Where(c => c.gardens.Count > 0).ToList(); var g = garden[0]; var fountains = q.SelectMany(c => c.baths.Where(b => b.fountain)).ToList();
                 int beers = g.cans.Count(k => k.color == 4), seated = g.humans.Count(h => h.posture == "sit");
@@ -924,6 +924,43 @@ namespace Sting.Core.Tests
                 var rec = s.records.Get(World.ChunkKey(q[0].cx, q[0].cz)); var ps = s.PuddlesIn(rec, rd); var pl = rec.content.plazas[0];
                 Ok(ps.Count > 0 && ps.All(p => p.x >= pl.minx && p.x <= pl.maxx && p.z >= pl.minz && p.z <= pl.maxz && !rec.content.boxes.Any(b => p.x > b.minx && p.x < b.maxx && p.z > b.minz && p.z < b.maxz)),
                     $"after rain puddles lie on the square ({ps.Count}), never in a shop");
+            }
+            // 46. feature modifiers (T2-6): woods, towns, water and hives set at world creation act on generation
+            {
+                (int forest, int town, int baths, int hives, bool apart) Census(Settings st)
+                {
+                    int forest = 0, town = 0, baths = 0, hives = 0; bool apart = true;
+                    for (int rz = -1; rz <= 1; rz++) for (int rx = -1; rx <= 1; rx++)
+                    {
+                        var L = World.Region(1234, rx, rz, st);
+                        if (L.towns.Count == 2) { var a = L.towns[0]; var b = L.towns[1]; if (!(b.tx > a.tx + 2 || b.tx + 1 < a.tx - 1 || b.tz > a.tz + 2 || b.tz + 1 < a.tz - 1)) apart = false; }
+                        for (int lz = 0; lz < 8; lz++) for (int lx = 0; lx < 8; lx++)
+                        {
+                            int cx = rx * 8 - 4 + lx, cz = rz * 8 - 4 + lz; string u = World.LandUse(1234, cx, cz, st);
+                            if (u == "forest") forest++; if (u == "town") town++;
+                            if (rx == 0 && rz == 0) { var c = World.GenerateChunk(1234, cx, cz, st); baths += c.baths.Count(b => !b.fountain); hives += c.hives.Count; }
+                        }
+                    }
+                    return (forest, town, baths, hives, apart);
+                }
+                var cb = Census(null); var cd = Census(new Settings { woods = 1, towns = 1, water = 1, hives = 1 });
+                var wild = Census(new Settings { woods = 2, towns = 0, water = 2, hives = 2 }); var tame = Census(new Settings { woods = 0, towns = 2, water = 0.5, hives = 0 });
+                Ok(cb == cd && World.GenerateChunk(1234, 3, 2).flowers.Count == World.GenerateChunk(1234, 3, 2, new Settings()).flowers.Count, "the default modifiers generate exactly the standard world");
+                Ok(cb.forest >= 34 && wild.forest > cb.forest * 3 && tame.forest == 0, $"woods: {tame.forest} / {cb.forest} / {wild.forest} forest chunks in 9 regions (none, normal, wooded)");
+                Ok(cb.town == 36 && wild.town == 0 && tame.town == 72 && tame.apart, $"towns: {wild.town} / {cb.town} / {tame.town} town chunks (none, one, two a region, never touching)");
+                Ok(tame.baths < cb.baths && wild.baths > cb.baths * 1.3, $"water: {tame.baths} / {cb.baths} / {wild.baths} birdbaths in the home region (dry, normal, wet)");
+                Ok(tame.hives == 0 && wild.hives > cb.hives, $"hives: {tame.hives} / {cb.hives} / {wild.hives} beehives in the home region (none, normal, x2)");
+                var s = new Sim(new Settings { seed = 1234, birds = false, woods = 0, towns = 2, water = 0.5, hives = 0 }, new SimOpts { noAI = true });
+                RunS(s, 2);
+                var r = Persist.Restore(Persist.Snapshot(s));
+                Ok(s.records.Values.All(c => c.content.use != "forest" && c.content.hives.Count == 0) && r.settings.towns == 2 && r.settings.RulesHash() == s.settings.RulesHash(),
+                    $"a world made with modifiers is generated by them and keeps them through a save ({s.records.Count} chunks)");
+                var tag = new Settings { woods = 2, towns = 0, water = 0.5, hives = 2 }.WorldTag();
+                Ok(new Settings { water = 2 }.RulesHash() != new Settings().RulesHash() && tag == "wooded · no towns · dry · hives ×2", $"peers with different modifiers do not match rules; the tag reads \"{tag}\"");
+                long rd = 1; while (!World.Weather(s.seed, rd).rain || World.Weather(s.seed, rd).pour > 1) rd++;
+                var wet = new Sim(new Settings { seed = 1234, birds = false }, new SimOpts { noAI = true }); RunS(wet, 2);
+                int dryN = s.PuddlesIn(s.records.Get("0,1"), rd).Count, wetN = wet.PuddlesIn(wet.records.Get("0,1"), rd).Count;
+                Ok(dryN <= T.water.puddles / 2 && wetN > dryN, $"a dry world leaves fewer puddles ({dryN} vs {wetN})");
             }
         }
 

@@ -2245,12 +2245,13 @@ function readSettings() {
   return {
     seed, dayMinutes: +$('dayLen').value, humanDensity: +$('density').value, beeAggression: +$('bees').value, seasonDays: +$('seasonLen').value, net: $('netMode').value,
     reaction: +$('reaction').value, escalation: +$('escRate').value,
+    woods: +$('woods').value, towns: +$('towns').value, water: +$('water').value, hives: +$('hives').value, // T2-6
     exterminator: $('sysExt').checked, pestControl: $('sysMuni').checked, birds: $('sysBirds').checked, rivals: $('sysRivals').checked,
   };
 }
 const tagText = (st) => worldTag(st) || 'Standard rules';
 function showTag() { $('worldTag').textContent = 'World: ' + tagText(readSettings()); }
-for (const id of ['dayLen', 'density', 'seasonLen', 'bees', 'reaction', 'escRate', 'sysExt', 'sysMuni', 'sysBirds', 'sysRivals']) $(id).addEventListener('change', showTag);
+for (const id of ['dayLen', 'density', 'seasonLen', 'bees', 'reaction', 'escRate', 'woods', 'towns', 'water', 'hives', 'sysExt', 'sysMuni', 'sysBirds', 'sysRivals']) $(id).addEventListener('change', showTag);
 showTag();
 
 function applyDisplaySettings() {

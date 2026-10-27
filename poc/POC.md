@@ -118,6 +118,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 90 | Males and mating flights (T2-3): in the breeding season males fly out and circle the crown of a tall tree near the nest; young queens fly there and mate with a male of the line (who dies) or one of the neighbourhood's, then leave to winter. A young queen's chance depends on the males about. Males cannot sting or work; the player can fly one and mate. Drawn with long antennae and no stinger | 6.5, 6.7 | 15 |
 | 91 | Lineage colonies (T2-4): in spring the line's other queens found up to five real colonies on trunks near where they wintered, run by the AI like yours; their workers fly near you and never fight yours; their mated queens are offered in the next spring's choice; lose your own colony mid-season and you take over the strongest. Listed in the colony view | 6.7 | 15 |
 | 92 | Town centres and beer gardens (T2-5): every region has a paved 2x2 town block with shops on its edges, groups of people and planters on the square, someone walking across it and a fountain that is water. One quarter is a beer garden: six full tables under string lights, a round of beers on each. Puddles lie on the square after rain | 4.1, 4.3 | 15 |
+| 93 | Feature modifiers (T2-6): woods (none, normal, wooded), towns (none, one or two a region), water (dry, normal, wet) and beehives (none, few, normal, many), chosen on the start screen. They shape the generated world, go into the world tag and the rules peers compare, and are kept in saves | 4.8 | 15 |
 
 ## Verified
 

@@ -86,7 +86,7 @@ namespace Sting.Core
 
     public static class Persist
     {
-        public const int SAVE_VERSION = 20; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home); 14: barbecue meat taken; 15: regions, pulp taken from wood; 16: strolls and garden rounds; 17: the carry ledger and sips (T1-20); 18: water (T2-1); 19: young queens on their mating flight (T2-3); 20: lineage colonies (T2-4)
+        public const int SAVE_VERSION = 21; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home); 14: barbecue meat taken; 15: regions, pulp taken from wood; 16: strolls and garden rounds; 17: the carry ledger and sips (T1-20); 18: water (T2-1); 19: young queens on their mating flight (T2-3); 20: lineage colonies (T2-4); 21: feature modifiers (T2-6)
         const uint MAGIC = 0x474E4953; // "SING"
 
         // ---------------------------------------------------------------- one Io per type
@@ -95,6 +95,7 @@ namespace Sting.Core
         {
             a.U(ref s.seed); a.D(ref s.dayMinutes); a.D(ref s.humanDensity); a.D(ref s.beeAggression); a.D(ref s.seasonDays); a.D(ref s.reaction); a.D(ref s.escalation);
             a.B(ref s.exterminator); a.B(ref s.birds); a.B(ref s.rivals); a.B(ref s.pestControl);
+            a.I(ref s.woods); a.I(ref s.towns); a.D(ref s.water); a.D(ref s.hives); // T2-6
         }
 
         static Swat Io(Archive a, Swat s)
@@ -382,7 +383,7 @@ namespace Sting.Core
             for (int i = 0; i < n; i++)
             {
                 int cx = 0, cz = 0, gv = 0, dt = 0; uint h = 0; a.I(ref cx); a.I(ref cz); a.I(ref gv); a.I(ref dt); a.U(ref h);
-                var content = World.GenerateChunk(sim.seed, cx, cz);
+                var content = World.GenerateChunk(sim.seed, cx, cz, sim.settings);
                 if (Sim.ContentHash(content) != h) throw new InvalidDataException($"chunk {cx},{cz} does not match its stored hash");
                 sim.records.Set(cx + "," + cz, new ChunkRec { cx = cx, cz = cz, genVersion = gv, discoveredTick = dt, contentHash = h, content = content });
             }

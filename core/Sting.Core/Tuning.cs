@@ -244,6 +244,8 @@ namespace Sting.Core
         public ulong seed = 1234;
         public Num dayMinutes = 2, humanDensity = 1, beeAggression = 1, seasonDays = 40, reaction = 1, escalation = 1;
         public bool exterminator = true, birds = true, rivals = true, pestControl = true;
+        /// feature modifiers (T2-6): act at generation; see World.Features
+        public int woods = 1, towns = 1; public Num water = 1, hives = 1;
         public Settings Clone() => (Settings)MemberwiseClone();
 
 #if STING_FIXED
@@ -259,7 +261,8 @@ namespace Sting.Core
         {
             string str = "gen" + T.GEN_VERSION + "|dayMinutes=" + N(dayMinutes) + "|humanDensity=" + N(humanDensity) + "|beeAggression=" + N(beeAggression)
                 + "|seasonDays=" + N(seasonDays) + "|reaction=" + N(reaction) + "|escalation=" + N(escalation)
-                + "|exterminator=" + B(exterminator) + "|birds=" + B(birds) + "|rivals=" + B(rivals) + "|pestControl=" + B(pestControl)
+                + "|exterminator=" + B(exterminator) + "|birds=" + B(birds) + "|rivals=" + B(rivals)  + "|pestControl=" + B(pestControl)
+                + "|woods=" + woods + "|towns=" + towns + "|water=" + N(water) + "|hives=" + N(hives)
                 + "|tune=" + Tune.Hash; // peers must share the tuning file too (T1-22)
             return R.Fnv32(str).ToString("x8");
         }
@@ -279,6 +282,10 @@ namespace Sting.Core
             if (!pestControl) t.Add("no pest control");
             if (!birds) t.Add("no birds");
             if (!rivals) t.Add("no rival colonies");
+            if (woods != d.woods) t.Add(woods > d.woods ? "wooded" : "no woods");
+            if (towns != d.towns) t.Add(towns > d.towns ? $"{towns} towns a region" : "no towns");
+            if (water != d.water) t.Add(water > d.water ? "wet" : "dry");
+            if (hives != d.hives) t.Add(hives != 0 ? $"hives {X(hives)}" : "no hives");
             return string.Join(" · ", t);
         }
     }
