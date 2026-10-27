@@ -25,6 +25,8 @@ namespace Sting.Core
         public Num maxCells = Num.MaxValue;
         /// the colony's species (GDD 6.8), and the season a honeybee colony last swarmed in (T2-11)
         public string species = "wasp"; public int swarmed;
+        /// the hive XP already counted from this colony's work (GDD 6.8)
+        public Num xpSeen;
         public ColonyStats stats = new ColonyStats();
         public ColonyState Clone() { var c = (ColonyState)MemberwiseClone(); c.stats = stats.Clone(); return c; }
         public Num this[string k]
@@ -33,6 +35,9 @@ namespace Sting.Core
             set { switch (k) { case "sugar": sugar = value; break; case "protein": protein = value; break; case "pulp": pulp = value; break; case "water": water = value; break; default: throw new System.ArgumentException(k); } }
         }
     }
+
+    /// the hive skills' multipliers (GDD 6.8)
+    public sealed class Boost { public Num forage = 1, brood = 1, lay = 1, build = 1; public static readonly Boost None = new Boost(); }
 
     public static class Colony
     {
@@ -68,8 +73,11 @@ namespace Sting.Core
         /// avail: what the season offers foragers (T1-8), sugar and protein multipliers
         public static void Step(ColonyState c, Num dtDay, Num physical, bool foraging, Num frac, Num bio, Num thermal, (Num sugar, Num protein)? avail) => Step(c, dtDay, physical, foraging, frac, bio, thermal, avail, null);
         /// hot: the nest's heat (T2-1), heat 0..1 through the site's insulation and cook 0..1 past the brood's lethal temperature
-        public static void Step(ColonyState c, Num dtDay, Num physical, bool foraging, Num frac, Num bio, Num thermal, (Num sugar, Num protein)? avail, (Num heat, Num cook)? hot)
+        public static void Step(ColonyState c, Num dtDay, Num physical, bool foraging, Num frac, Num bio, Num thermal, (Num sugar, Num protein)? avail, (Num heat, Num cook)? hot) => Step(c, dtDay, physical, foraging, frac, bio, thermal, avail, hot, null);
+        /// boost: the hive skills' multipliers (GDD 6.8), the player's colony only; null is 1 for all
+        public static void Step(ColonyState c, Num dtDay, Num physical, bool foraging, Num frac, Num bio, Num thermal, (Num sugar, Num protein)? avail, (Num heat, Num cook)? hot, Boost boost)
         {
+            var K = boost ?? Boost.None;
             if (!c.nestAlive) return;
             var SP = Sp(c);
             Num inside = Max(0, c.adults - physical);
@@ -82,10 +90,10 @@ namespace Sting.Core
                 var a = T.alloc[c.alloc]; Num wsum = (a.sugar + a.protein + a.pulp) / 3;
                 Num f = Max(0, inside - c.young) * T.colony.forageShare * a.traffic * dtDay; // 'Lie low' sends fewer out (T1-7); the young stay in (T1-13)
                 Num food = f * (1 - divert);
-                c.sugar += food * T.colony.income.sugar * a.sugar / wsum * (avail.HasValue ? avail.Value.sugar : 1) * SP.sugarIn;
-                c.protein += food * T.colony.income.protein * a.protein / wsum * (avail.HasValue ? avail.Value.protein : 1) * SP.proteinIn;
-                if (SP.wood != 0) c.pulp += food * T.colony.income.pulp * a.pulp / wsum; // bees build wax from sugar instead (T2-11)
-                else c.sugar += food * T.colony.income.pulp * a.pulp / wsum * SP.sugarIn;
+                c.sugar += food * T.colony.income.sugar * a.sugar / wsum * (avail.HasValue ? avail.Value.sugar : 1) * SP.sugarIn * K.forage;
+                c.protein += food * T.colony.income.protein * a.protein / wsum * (avail.HasValue ? avail.Value.protein : 1) * SP.proteinIn * K.forage;
+                if (SP.wood != 0) c.pulp += food * T.colony.income.pulp * a.pulp / wsum * K.forage; // bees build wax from sugar instead (T2-11)
+                else c.sugar += food * T.colony.income.pulp * a.pulp / wsum * SP.sugarIn * K.forage;
                 c.water += f * divert * T.water.income;
             }
             if (c.water > wcap) c.water = wcap;
@@ -132,10 +140,10 @@ namespace Sting.Core
             }
             else c.sugarlessDays = 0;
 
-            Num eD = T.colony.eggDays * bio, lD = T.colony.larvaDays * bio, pD = T.colony.pupaDays * bio;
+            Num eD = T.colony.eggDays * bio, lD = T.colony.larvaDays * bio, pD = T.colony.pupaDays * bio, th = thermal * K.brood;
             Num Pipe(ref Num eggs, ref Num larvae, ref Num pupae)
             {
-                Num e2l = eggs / eD * dtDay * thermal, l2p = larvae / lD * dtDay * fed * thermal, p2a = pupae / pD * dtDay * thermal;
+                Num e2l = eggs / eD * dtDay * th, l2p = larvae / lD * dtDay * fed * th, p2a = pupae / pD * dtDay * th;
                 Num ls = larvae * (1 - fed) * T.colony.larvaStarve * dtDay;
                 eggs -= e2l; larvae += e2l - l2p - ls; pupae += l2p - p2a;
                 c.stats.starvedLarvae += ls;
@@ -164,12 +172,12 @@ namespace Sting.Core
                 if (c.cells >= (c.maxCells != 0 ? c.maxCells : Num.MaxValue)) use = 0;
                 c.sugar -= use * T.hive.waxSugar;
             }
-            c.cells = Min(c.cells + use * T.colony.cellsPerPulp, c.maxCells != 0 ? c.maxCells : Num.MaxValue);
+            c.cells = Min(c.cells + use * T.colony.cellsPerPulp * K.build, c.maxCells != 0 ? c.maxCells : Num.MaxValue);
 
             if (c.queenAlive && c.protein > 0)
             {
                 Num free = Max(0, c.cells - BroodTotal(c));
-                Num lay = Min(free, Min(T.colony.layMax * SP.lay, (T.colony.layBase + c.adults * T.colony.layPerAdult) * SP.lay) * dtDay);
+                Num lay = Min(free, Min(T.colony.layMax * SP.lay * K.lay, (T.colony.layBase + c.adults * T.colony.layPerAdult) * SP.lay * K.lay) * dtDay);
                 Num r = SP.perennial != 0 ? BeeRepro(c, frac) : ReproShare(frac);
                 c.eggs += lay * (1 - r); c.rEggs += lay * r; c.stats.laid += lay;
             }

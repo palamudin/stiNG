@@ -1,7 +1,7 @@
 // STING simulation core (iteration 2). Mirrors Sting.Core: no rendering, no wall clock.
 // Every wasp, driven or AI, goes through the same flight, contact, sting and swat code.
 import { Domain, hash, unit, rangeInt, u64, h32, hseq, dsin, dcos, clamp, clamp01, fnv32, hex64, rnd, sq, datan2, TAU } from './rng.js';
-import { T, DT, GEN_VERSION, DEFAULT_SETTINGS } from './tuning.js';
+import { T, DT, GEN_VERSION, DEFAULT_SETTINGS, SKILLS, SKILL_UNLOCKS, skillCost } from './tuning.js';
 import {
   Zone, ZONES, SwatKind, SwatKindName, Style, humanTraits, humanClothing, suitClothing, zoneCover, bodyParts, humanParts,
   segClosest, classify, toWorld, toLocal, dirToWorld, resolveSting, windowFor, selfReach, garmentGraph, Top,
@@ -70,6 +70,7 @@ export class Sim {
     this.dragonState = new Map();
     this.species = opts.species || this.settings.species || 'wasp'; // the player's line (GDD 6.8)
     this.colony = newColony(false, this.species);
+    this.prog = this._newProg(); // the line's XP and skills (GDD 6.8)
     this.nest = makeNest(NEST.treeX, NEST.treeZ, NEST.x, NEST.y, NEST.z);
     this.colony.maxCells = this._maxCells('trunk');
     this.oldNests = [];
@@ -334,6 +335,7 @@ export class Sim {
     this.prevAct = act;
     if (cmd.alloc > 0 && cmd.alloc <= T.alloc.length && this.colony.alloc !== cmd.alloc - 1) { this.colony.alloc = cmd.alloc - 1; this.emit('alloc', { preset: this.colony.alloc }); }
     let pick = cmd.pick | 0;
+    if (pick < 0) { this._learn(-pick - 1); pick = 0; } // a negative pick learns a skill (GDD 6.8)
     if (this.winter) { this._winterStep(pick); pick = 0; } // in winter a pick chooses the queen (T1-15)
     if (edge & Act.Switch) this._possessNearest();
     else if (pick > 0 && pick !== this.drivenId) this._possessNearest(pick);
@@ -350,6 +352,7 @@ export class Sim {
       else this._stepWasp(w, this._think(w), 0, false);
     }
     // 2. swats, sprays, bees: every tick
+    this._quickRelease();
     this._swats();
     this._sprays();
     this._bees();
@@ -771,6 +774,10 @@ export class Sim {
         const first = !this.stung.has(hm.hex);
         this.stung.add(hm.hex);
         if (!mine) this.stats.remoteStings++; else if (ev.driven) this.stats.stings++; else this.stats.aiStings++;
+        if (mine) { // the line's XP and stabs (GDD 6.8): a sting that moves the counter is a stab
+          if (first) this.prog.stabs++;
+          if (ev.driven) this._gain('unit', T.xp.sting + (first ? T.xp.firstHuman : 0));
+        }
         this.addEsc(hm.x, hm.z, T.esc.sting * (ev.pain ?? 1));
         this.cs(hm.chunk).lastSting = { x: ev.sx, z: ev.sz };
         // at level 3 a person with it in them goes for a can once things calm down (T1-6)
@@ -1084,7 +1091,7 @@ export class Sim {
       if (w.caste === 'queen') top *= T.queen.speedMul;
       else if (w.caste === 'male') top *= T.males.speedMul;
       if (rain) top *= T.weather.rainSpeedMul;
-      top *= spw(w).speed; // a hornet is quicker, a bee slower (GDD 6.8)
+      top *= spw(w).speed * this._mul(w, 'speed'); // a hornet is quicker, a bee slower (GDD 6.8); the speed skill
       // The wasp flies in moving air (GDD 5.3): its airspeed is capped at its top speed and the wind adds to it, so it
       // is faster downwind and slower upwind. With no input it leans into the wind and holds its place, which is flying
       // all the same; with full input it flies its course at top airspeed. A wind stronger than it can fly carries it off.
@@ -1243,6 +1250,7 @@ export class Sim {
   // ---------------- the swoop (GDD 7.9): a short dash; whatever it reaches, it slams onto
 
   _startSwoop(w, cmd) {
+    if (!this.hasSkill(w, 'swoop')) return; // the dash is a skill (GDD 6.8)
     const S = T.swoop;
     if (this.tick < (w.swoopReady || 0) || w.energy <= S.energy || w.bodyT < T.cold.flyBody) return;
     w.yaw = cmd.yawQ * 1e-4; w.pitch = clamp(cmd.pitchQ * 1e-4, -1.45, 1.45);
@@ -1398,6 +1406,7 @@ export class Sim {
     const extra = (T.resolve.fullPain - T.resolve.jabPain) * ZONES[a.zone].sens * hm.tr.panicSusceptibility * pain;
     w.venom = Math.max(0, w.venom - T.venom.deepen);
     this.stats.full++;
+    this._xp(w, 'full');
     this._publish({ type: 'deepen', humanHex: hm.hex, zone: a.zone, extra, pain, sx: w.x, sz: w.z });
   }
 
@@ -1644,7 +1653,7 @@ export class Sim {
     return null;
   }
 
-  _preyNear(w, reach = T.prey.catchDist) {
+  _preyNear(w, reach = T.prey.catchDist * this._mul(w, 'grabR')) { // the grab reach skill (GDD 6.8)
     const r2 = reach * reach, SP = spw(w);
     if (!SP.hunts) return null; // bees take no prey (T2-11)
     // a hornet takes another colony's wasp on the wing (T2-10)
@@ -1681,6 +1690,7 @@ export class Sim {
       if (x) this._die(x, 'taken by a hornet', null);
       w.carry = { kind: 'protein', amount: p.protein, what: 'wasp' };
       this.stats.caught++;
+      this._xp(w, 'catch');
       this.emit('caught', { id: w.id, kind: 'wasp' });
       return;
     }
@@ -1697,6 +1707,7 @@ export class Sim {
     w.carry = { kind: 'protein', amount: p.protein, what: p.kind };
     this._pickup(w, { type: 'caught', key: p.key, what: p.kind, i: p.i, hive: p.hive });
     this.stats.caught++;
+    this._xp(w, 'catch');
     this.emit('caught', { id: w.id, kind: p.kind });
   }
 
@@ -1818,7 +1829,7 @@ export class Sim {
   }
 
   _feed(w, driven) {
-    const d2max = T.energy.feedDist * T.energy.feedDist;
+    const fr = T.energy.feedDist * this._mul(w, 'feedR'), d2max = fr * fr; // the feeding reach skill (GDD 6.8)
     if (driven) this.feeding = false;
     if (spw(w).pollen && !w.carry && w.caste === 'worker') this._pollen(w, driven, d2max);
     for (const rec of this.activeChunks) {
@@ -2002,7 +2013,7 @@ export class Sim {
       const take = Math.min(col.sugar, (T.energy.nestRefill - w.energy) * 0.6);
       col.sugar -= take; w.energy += take / 0.6;
     }
-    if (deposited) this.stats.deposits++;
+    if (deposited) { this.stats.deposits++; this._xp(w, 'deposit'); }
     // a forager home with food remembers where it was (site fidelity), and its load carries the scent of the source
     // to nestmates leaving soon after (GDD 7.3, T1-16)
     const from = w.ai && w.ai.from;
@@ -2292,7 +2303,8 @@ export class Sim {
     if (!sites.length) sites.push({ kind: 'sister', x: this.nest.spawn.x, y: this.nest.spawn.y, z: this.nest.spawn.z, q: H.q.sister, n: 0, scouted: false });
     for (const w of this.wasps.slice()) this._despawn(w);
     this.ghost = null;
-    this.winter = { why, sites, survivors, lineage, until: this.tick + H.chooseTicks };
+    this.winter = { why, sites, survivors, lineage, until: this.tick + H.chooseTicks, offer: this._offer() };
+    if (this.winter.offer) this.emit('offer', { species: this.winter.offer });
   }
 
   // A honeybee colony's winter (T2-11): no queens to choose. Each colony of the line, yours and its swarms, clusters on
@@ -2325,6 +2337,7 @@ export class Sim {
       this.line = this.line.filter((x) => x !== best);
       const alloc = this.colony.alloc;
       this.oldNests.push(this.nest); this.nest = best.nest; this.colony = best.colony; this.colony.alloc = alloc;
+      this.colony.xpSeen = this._hiveScore(this.colony);
     }
     for (const s of this.chunkState.values()) s.esc = 0;
     this.swats = []; this.sprays = []; this.alarms = []; this.hiveAlarms.clear(); this.homeScent = null; this.hiberPick = null;
@@ -2357,15 +2370,18 @@ export class Sim {
     this.emit('swarm', { x: nn.x, z: nn.z, adults: moved, id: this.lineSeq, from: nest === this.nest ? 'own' : 'line' });
   }
 
+  // A pick of 1..n wakes that queen; 1001..1000+n wakes her as the species the year's turn offers (GDD 6.8)
   _winterStep(k) {
-    const W = this.winter;
+    const W = this.winter, morph = k > 1000 && !!W.offer;
+    if (morph) k -= 1000;
     const ok = k >= 1 && k <= W.sites.length;
-    if (ok || this.tick >= W.until) this._spring(ok ? k - 1 : 0);
+    if (ok || this.tick >= W.until) this._spring(ok ? k - 1 : 0, ok && morph);
   }
 
-  _spring(choice) {
-    const W = this.winter, site = W.sites[choice], survivors = W.survivors, lineage = W.lineage;
+  _spring(choice, morph = false) {
+    const W = this.winter, site = W.sites[choice], survivors = W.survivors, lineage = W.lineage, was = this.species;
     this.winter = null;
+    if (morph) { this.species = W.offer; this.settings.species = W.offer; } // the line changes species with this queen
     // the queen that continues is yours; the rest found lineage colonies (Q-10), real ones first (T2-4)
     const winterDays = rnd(this.settings.seasonDays * T.season.winterShare);
     const target = (this.day + 1 + winterDays) * 1440 + T.time.dawn;
@@ -2377,6 +2393,7 @@ export class Sim {
     this.colony.alloc = alloc;
     this.colony.sited = false;
     this.colony.sugar *= 0.5 + site.q; // a queen who wintered well wakes with more in reserve
+    if (spOf(this.colony).perennial) { this.colony.adults = T.xp.beeSwarm; this.colony.stats.emerged = 0; } // a honeybee queen comes with a swarm
     this.springAt = { x: site.x, z: site.z };
     this.hiberPick = null;
     this.oldNests.push(this.nest);
@@ -2388,10 +2405,71 @@ export class Sim {
     const q = this._spawnWasp(true, 'queen');
     q.x = site.x; q.y = site.y + 0.05; q.z = site.z;
     this.drivenId = q.id;
-    this.lineage = this._foundLine(W.sites, choice, survivors + lineage - 1);
+    this.lineage = this._foundLine(W.sites, choice, survivors + lineage - 1, was); // the other queens wake as they were
     for (const hm of this.active) this._catchUpHuman(hm);
     this._updateChunks(true);
-    this.emit('spring', { season: this.season.n, lineage: this.lineage, id: q.id, kind: site.kind });
+    this.emit('spring', { season: this.season.n, lineage: this.lineage, id: q.id, kind: site.kind, species: morph ? this.species : undefined });
+  }
+
+  // ---------------- progression (GDD 6.8): XP, skills, the year's turn
+
+  _newProg() { return { unit: 0, unitTotal: 0, hive: 0, hiveTotal: 0, stabs: 0, ranks: SKILLS.map(() => 0) }; }
+  rank(id) { return this.prog.ranks[SKILLS.indexOf(id)] | 0; }
+  // An insect of the player's line has a skill once the line learned it ('all': every unlock from the start)
+  hasSkill(w, id) {
+    if (w && w.colony !== 'own') return false;
+    return (this.settings.skills === 'all' && SKILL_UNLOCKS.includes(id)) || this.rank(id) > 0;
+  }
+  // a ranked skill's multiplier for this insect (1 exactly when unlearned)
+  _mul(w, id) { return w && w.colony === 'own' ? 1 + T.skills[id] * this.rank(id) : 1; }
+  // the hive skills' multipliers for the player's colony
+  boost() { const K = T.skills; return { forage: 1 + K.forage * this.rank('forage'), brood: 1 + K.brood * this.rank('brood'), lay: 1 + K.lay * this.rank('lay'), build: 1 + K.build * this.rank('build') }; }
+  _gain(pool, v) { const P = this.prog; P[pool] += v; P[pool + 'Total'] += v; }
+  // unit XP for what the insect the player flies does
+  _xp(w, k) { if (w.id === this.drivenId && w.colony === 'own') this._gain('unit', T.xp[k]); }
+  _hiveScore(c) { const X = T.xp, d = c.stats.deposited; return c.stats.emerged * X.emerged + (d.sugar + d.protein + d.pulp + d.water) * X.load + c.stats.gynesRaised * X.raised; }
+  // hive XP: what the colony did since the last colony tick
+  _hiveXp(c) {
+    const v = this._hiveScore(c);
+    if (c.xpSeen === undefined) c.xpSeen = v; // a save from before XP
+    if (v > c.xpSeen) this._gain('hive', v - c.xpSeen);
+    c.xpSeen = v;
+  }
+  _learn(i) {
+    const id = SKILLS[i], c = skillCost(i, this.prog.ranks);
+    if (!c || (this.settings.skills === 'all' && SKILL_UNLOCKS.includes(id)) || this.prog[c.pool] < c.cost) { this.emit('learnDenied', { id: id || null }); return; }
+    this.prog[c.pool] -= c.cost; this.prog.ranks[i]++;
+    this.emit('learned', { id, rank: this.prog.ranks[i], pool: c.pool, cost: c.cost });
+  }
+  // The year's turn: a wasp line strong enough may wake as hornets; one that is not is offered honeybees
+  _offer() {
+    const P = this.prog, X = T.xp, xp = P.unitTotal + P.hiveTotal, prog = this.settings.progression || 'open';
+    if (this.species !== 'wasp' || prog.startsWith('fixed:')) return null;
+    if (xp >= X.hornetXp && P.stabs >= X.hornetStabs) return 'hornet';
+    if (xp < X.beeXp && P.stabs < X.beeStabs) return 'bee';
+    return null;
+  }
+  // Quick release: an insect of the line stinging a person pulls out and away when a hand is about to land on it
+  _quickRelease() {
+    if (!this.swats.length) return;
+    const K = T.skills;
+    for (const w of this.wasps.slice()) {
+      if (w.state !== 'attached' || !this.hasSkill(w, 'release')) continue;
+      for (const s of this.swats) {
+        if (s.underOnly || this.tick >= s.start || s.start - this.tick > K.releaseLead) continue;
+        const hm = this.humanByHex(s.frameHex);
+        if (!hm) continue;
+        const c = toWorld(hm, s.center), r = s.radius + T.wasp.radius + spw(w).swatR + K.releaseMargin;
+        if (dist2(w, c) > r * r) continue;
+        this._detach(w, 'released');
+        let dx = w.x - c.x, dy = w.y - c.y, dz = w.z - c.z; const d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+        w.vx += dx / d * K.releaseKick; w.vy += dy / d * K.releaseKick + 0.3; w.vz += dz / d * K.releaseKick;
+        w.noLandUntil = this.tick + T.land.afterTakeoff;
+        this._xp(w, 'release');
+        this.emit('quickRelease', { id: w.id, driven: w.id === this.drivenId });
+        break;
+      }
+    }
   }
 
   // ---------------- humans (GDD 8.2, 8.9, 8.10)
@@ -2909,7 +2987,7 @@ export class Sim {
   }
 
   // A hornet that wins a wrestle with another colony's wasp keeps it (T2-10)
-  _spoils(w) { if (spw(w).fight > 0 && !w.carry && w.caste === 'worker') { w.carry = { kind: 'protein', amount: T.moths.waspProtein, what: 'wasp' }; this.stats.caught++; this.emit('caught', { id: w.id, kind: 'wasp' }); } }
+  _spoils(w) { if (spw(w).fight > 0 && !w.carry && w.caste === 'worker') { w.carry = { kind: 'protein', amount: T.moths.waspProtein, what: 'wasp' }; this.stats.caught++; this._xp(w, 'catch'); this.emit('caught', { id: w.id, kind: 'wasp' }); } }
 
   // The bees of the line ball another colony's wasp that touches one of them (T2-11)
   _ownBall(t) {
@@ -3151,6 +3229,7 @@ export class Sim {
     if (spw(w).hunts) w.carry = { kind: 'protein', amount: F.broodProtein, what: 'bee brood' }; // a robbing bee takes only honey (T2-11)
     this._pickup(w, { type: 'caught', key: r.key, what: 'honey', i: r.h });
     this.stats.caught++;
+    this._xp(w, 'rob');
     this.emit('robbed', { id: w.id, driven, key: r.key, h: r.h });
     if (!driven) { w.ai.mode = 'return'; w.ai.target = null; }
   }
@@ -3667,7 +3746,7 @@ export class Sim {
     if (cmd.mx || cmd.my || cmd.mz || cmd.burst || cmd.sting || this.tick < (w.noLandUntil || 0)) return;
     if (w.vx * w.vx + w.vy * w.vy + w.vz * w.vz > T.land.maxSpeed * T.land.maxSpeed) return;
     if (w.contact && !w.contact.blockedPerch) { this._perch(w, w.contact); return; }
-    const s = this._staticSurface(w, T.land.reach);
+    const s = this._staticSurface(w, T.land.reach * this._mul(w, 'landR')); // the landing reach skill (GDD 6.8)
     if (!s) return;
     if (this.feeding && s.kind !== 'flower' && s.kind !== 'cup') return; // hovering to feed is not settling on a stalk or the grass
     w.state = 'landed'; w.vx = w.vy = w.vz = 0;
@@ -4048,7 +4127,8 @@ export class Sim {
       this.colony.maxCells = this._maxCells(this.nest.site);
       this.emit('nestFounded', { x: this.nest.x, y: this.nest.y, z: this.nest.z, key: this.nest.key, auto: true });
     }
-    colonyStep(col, 60 / this.dayTicks, this._own().filter((w) => w.caste === 'worker').length, daylight, frac, this.bio, this.broodSpeed(), this.ecoAvail(), this.nestHeat());
+    colonyStep(col, 60 / this.dayTicks, this._own().filter((w) => w.caste === 'worker').length, daylight, frac, this.bio, this.broodSpeed(), this.ecoAvail(), this.nestHeat(), this.boost());
+    this._hiveXp(col);
     if (this.raining && col.nestAlive && col.sited) {
       // the site decides what rain costs: burrows flood, open nests chill (GDD 6.6)
       const st = T.sites[this.nest.site || 'trunk'], dt = 60 / this.dayTicks;
@@ -4096,7 +4176,7 @@ export class Sim {
   // ---------------------------------------------------------------- lineage colonies (GDD 6.7, T2-4)
 
   // In spring, the line's other queens found colonies on trunks near where they wintered
-  _foundLine(sites, choice, queens) {
+  _foundLine(sites, choice, queens, sp = this.species) {
     const L = T.line, n = this.season.n, used = [{ x: sites[choice].x, z: sites[choice].z }];
     this.line = [];
     let left = queens;
@@ -4107,7 +4187,7 @@ export class Sim {
         if (!t) break;
         let dx = sites[si].x - t.x, dz = sites[si].z - t.z; const d = Math.sqrt(dx * dx + dz * dz) || 1; dx /= d; dz /= d;
         const nest = makeNest(t.x, t.z, t.x + dx * (t.r + 0.2), clamp(1.6, 1.2, Math.max(1.2, t.h - 0.6)), t.z + dz * (t.r + 0.2), NEST.r, 'trunk');
-        const colony = newColony(true, this.species); colony.sited = true; colony.maxCells = this._maxCells('trunk'); colony.alloc = 0;
+        const colony = newColony(true, sp); colony.sited = true; colony.maxCells = this._maxCells('trunk', sp); colony.alloc = 0;
         this.line.push({ id: ++this.lineSeq, nest, colony, season: n });
         used.push({ x: t.x, z: t.z }); left--;
         this.emit('sisterFounded', { id: this.lineSeq, x: nest.x, z: nest.z });
@@ -4206,6 +4286,7 @@ export class Sim {
     const alloc = this.colony.alloc;
     this.oldNests.push(this.nest);
     this.nest = best.nest; this.colony = best.colony; this.colony.alloc = alloc;
+    this.colony.xpSeen = this._hiveScore(this.colony); // a sister's past is not the line's new XP
     const d = this._driven();
     for (const w of this.wasps.slice()) if (w.colony === 'own' && w !== d) this._despawn(w);
     if (d) { d.x = this.nest.spawn.x; d.y = this.nest.spawn.y; d.z = this.nest.spawn.z; d.vx = d.vy = d.vz = 0; d.carry = null; }

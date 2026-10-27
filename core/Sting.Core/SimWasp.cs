@@ -155,7 +155,7 @@ namespace Sting.Core
                 if (w.caste == "queen") top *= T.queen.speedMul;
                 else if (w.caste == "male") top *= T.males.speedMul;
                 if (rain) top *= T.weather.rainSpeedMul;
-                top *= Spw(w).speed; // a hornet is quicker, a bee slower (GDD 6.8)
+                top *= Spw(w).speed * Mul(w, "speed"); // a hornet is quicker, a bee slower (GDD 6.8); the speed skill
                 // the wasp flies in moving air (GDD 5.3): airspeed capped at its top speed plus the wind; no input leans into the
                 // wind and holds its place, full input flies the course at top airspeed (see sim.js)
                 var wd = Drift(w); Num thr = Min(1, Sqrt(dx * dx + dy * dy + dz * dz));
@@ -463,6 +463,7 @@ namespace Sting.Core
             Num extra = (T.resolve.fullPain - T.resolve.jabPain) * Body.ZONES[a.zone].sens * hm.tr.panicSusceptibility * pain;
             w.venom = Max(0, w.venom - T.venom.deepen);
             stats.full++;
+            Xp(w, "full");
             Publish(new NetEv { type = "deepen", humanHex = hm.hex, zone = a.zone, extra = extra, pain = pain, sx = w.x, sz = w.z });
         }
 
@@ -537,6 +538,7 @@ namespace Sting.Core
 
         void StartSwoop(Wasp w, Cmd cmd)
         {
+            if (!HasSkill(w, "swoop")) return; // the dash is a skill (GDD 6.8)
             if (tick < w.swoopReady || w.energy <= T.swoop.energy || w.bodyT < T.cold.flyBody) return;
             w.yaw = cmd.yawQ * 1e-4; w.pitch = Clamp(cmd.pitchQ * 1e-4, -1.45, 1.45);
             w.swoopUntil = tick + T.swoop.ticks; w.swoopReady = tick + T.swoop.cooldown; w.energy -= T.swoop.energy;
@@ -591,7 +593,7 @@ namespace Sting.Core
             return true;
         }
 
-        PreyHit PreyNear(Wasp w) => PreyNear(w, T.prey.catchDist);
+        internal PreyHit PreyNear(Wasp w) => PreyNear(w, T.prey.catchDist * Mul(w, "grabR")); // the grab reach skill (GDD 6.8)
         PreyHit PreyNear(Wasp w, Num reach)
         {
             Num r2 = reach * reach; var SP = Spw(w);
@@ -638,6 +640,7 @@ namespace Sting.Core
                 if (x != null) Die(x, "taken by a hornet", null);
                 w.carry = new Carry { kind = "protein", amount = p.protein, what = "wasp" };
                 stats.caught++;
+                Xp(w, "catch");
                 Emit("caught", ("id", w.id), ("kind", "wasp"));
                 return;
             }
@@ -656,6 +659,7 @@ namespace Sting.Core
             w.carry = new Carry { kind = "protein", amount = p.protein, what = p.kind };
             Pickup(w, new NetEv { type = "caught", key = p.key, what = p.kind, i = p.i, hive = p.hive });
             stats.caught++;
+            Xp(w, "catch");
             Emit("caught", ("id", w.id), ("kind", p.kind));
         }
 
@@ -800,7 +804,7 @@ namespace Sting.Core
 
         void Feed(Wasp w, bool driven)
         {
-            Num d2max = T.energy.feedDist * T.energy.feedDist;
+            Num fr = T.energy.feedDist * Mul(w, "feedR"), d2max = fr * fr; // the feeding reach skill (GDD 6.8)
             if (driven) feeding = false;
             if (Spw(w).pollen != 0 && w.carry == null && w.caste == "worker") Pollen(w, driven, d2max);
             foreach (var rec in activeChunks)
@@ -984,6 +988,7 @@ namespace Sting.Core
             if (Spw(w).hunts != 0) w.carry = new Carry { kind = "protein", amount = T.feral.broodProtein, what = "bee brood" }; // a robbing bee takes only honey (T2-11)
             Pickup(w, new NetEv { type = "caught", key = r.key, what = "honey", i = r.h });
             stats.caught++;
+            Xp(w, "rob");
             Emit("robbed", ("id", w.id), ("driven", driven), ("key", r.key), ("h", r.h));
             if (!driven) { w.ai.mode = "return"; w.ai.target = null; }
         }
@@ -1236,7 +1241,7 @@ namespace Sting.Core
                 Num take = Min(col.sugar, (T.energy.nestRefill - w.energy) * 0.6);
                 col.sugar -= take; w.energy += take / 0.6;
             }
-            if (deposited) stats.deposits++;
+            if (deposited) { stats.deposits++; Xp(w, "deposit"); }
             // a forager home with food remembers where it was (site fidelity), and its load carries the scent of the
             // source to nestmates leaving soon after (GDD 7.3, T1-16)
             var from = w.ai.from;
@@ -1595,7 +1600,8 @@ namespace Sting.Core
             if (sites.Count == 0) sites.Add(new HiberSite { kind = "sister", x = nest.spawn.x, y = nest.spawn.y, z = nest.spawn.z, q = T.hiber.Q("sister"), n = 0 });
             foreach (var w in new List<Wasp>(wasps)) Despawn(w);
             ghost = null;
-            winter = new Winter { why = why, sites = sites, survivors = survivors, lineage = lin, until = tick + T.hiber.chooseTicks };
+            winter = new Winter { why = why, sites = sites, survivors = survivors, lineage = lin, until = tick + T.hiber.chooseTicks, offer = Offer() };
+            if (winter.offer != null) Emit("offer", ("species", winter.offer));
         }
 
         /// A honeybee colony's winter (T2-11): no queens to choose. Each colony of the line, yours and its swarms, clusters
@@ -1631,6 +1637,7 @@ namespace Sting.Core
                 line.Remove(best);
                 int alloc = colony.alloc;
                 oldNests.Add(nest); nest = best.nest; colony = best.colony; colony.alloc = alloc;
+                colony.xpSeen = HiveScore(colony);
             }
             foreach (var st in chunkState.Values) st.esc = 0;
             swats = new List<Swat>(); sprays = new List<Spray>(); alarms = new List<Alarm>(); hiveAlarms.Clear(); homeScent = null; hiberPick = null;
@@ -1664,17 +1671,20 @@ namespace Sting.Core
             Emit("swarm", ("x", nn.x), ("z", nn.z), ("adults", moved), ("id", lineSeq), ("from", from == nest ? "own" : "line"));
         }
 
+        /// a pick of 1..n wakes that queen; 1001..1000+n wakes her as the species the year's turn offers (GDD 6.8)
         void WinterStep(int k)
         {
-            var W = winter;
+            var W = winter; bool morph = k > 1000 && W.offer != null;
+            if (morph) k -= 1000;
             bool ok = k >= 1 && k <= W.sites.Count;
-            if (ok || tick >= W.until) Spring(ok ? k - 1 : 0);
+            if (ok || tick >= W.until) Spring(ok ? k - 1 : 0, ok && morph);
         }
 
-        void Spring(int choice)
+        void Spring(int choice, bool morph = false)
         {
-            var W = winter; var site = W.sites[choice]; Num survivors = W.survivors, lin = W.lineage;
+            var W = winter; var site = W.sites[choice]; Num survivors = W.survivors, lin = W.lineage; string was = species;
             winter = null;
+            if (morph) { species = W.offer; settings.species = W.offer; } // the line changes species with this queen
             // the queen that continues is yours; the rest found lineage colonies (Q-10), real ones first (T2-4)
             Num winterDays = Rnd(settings.seasonDays * T.season.winterShare);
             Num target = (day + 1 + winterDays) * 1440 + T.time.dawn;
@@ -1686,6 +1696,7 @@ namespace Sting.Core
             colony.alloc = alloc;
             colony.sited = false;
             colony.sugar *= 0.5 + site.q; // a queen who wintered well wakes with more in reserve
+            if (Colony.Sp(colony).perennial != 0) { colony.adults = T.xp.beeSwarm; colony.stats.emerged = 0; } // a honeybee queen comes with a swarm
             springAt = new Spot { x = site.x, z = site.z };
             hiberPick = null;
             oldNests.Add(nest);
@@ -1697,10 +1708,10 @@ namespace Sting.Core
             var q = SpawnWasp(true, "queen");
             q.x = site.x; q.y = site.y + 0.05; q.z = site.z;
             drivenId = q.id;
-            lineage = FoundLine(W.sites, choice, survivors + lin - 1);
+            lineage = FoundLine(W.sites, choice, survivors + lin - 1, was); // the other queens wake as they were
             foreach (var hm in active) CatchUpHuman(hm);
             UpdateChunks(true);
-            Emit("spring", ("season", season.n), ("lineage", lineage), ("id", q.id), ("kind", site.kind));
+            Emit("spring", ("season", season.n), ("lineage", lineage), ("id", q.id), ("kind", site.kind), ("species", morph ? species : null));
         }
     }
 }

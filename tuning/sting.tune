@@ -612,6 +612,46 @@ out = 1.2
 guards = 5
 perennial = 1
 
+[xp]
+sting = 4
+firstHuman = 6
+full = 2
+catch = 3
+deposit = 1
+rob = 4
+release = 2
+emerged = 0.1
+load = 0.05
+raised = 2
+hornetXp = 600
+hornetStabs = 25
+beeXp = 150
+beeStabs = 5
+beeSwarm = 60
+
+[skills]
+swoop = 40
+assist = 40
+reflex = 30
+focus = 50
+release = 60
+ranks = 3
+rankCost = 30
+landR = 0.4
+feedR = 0.2
+grabR = 0.2
+speed = 0.05
+hiveCost = 40
+forage = 0.08
+brood = 0.08
+lay = 0.1
+build = 0.1
+releaseLead = 8
+releaseMargin = 0.03
+releaseKick = 2.5
+focusMs = 3000
+focusCooldownMs = 15000
+
 [moths]
 perLight = 3
 orbit = 0.3

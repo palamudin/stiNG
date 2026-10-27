@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, humanParts, malesAbout, chunkOf, toLocal, dirToWorld, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, pickTarget, assistPilot, swoopPilot, targetPos, targetLabel, speciesAllowed, isDaylight, CMD_FIELDS,
+  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, pickTarget, assistPilot, swoopPilot, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, CMD_FIELDS,
 } from '../sim/index.js';
 import { applyTuning, parseTuning, tuningHash, tuningLeaves, TUNE } from '../sim/tunefile.js';
 
@@ -1696,7 +1696,7 @@ function seated(sim, pred) {
 
 // Lock-on and assisted flight (GDD 7.9): the player directs, the wasp flies; and feeding on a flower is not cut short
 {
-  const s = new Sim({ seed: 1234, birds: false }, { noAI: true }); run(s, 1);
+  const s = new Sim({ seed: 1234, birds: false, skills: "all" }, { noAI: true }); run(s, 1); // the dash is a skill (GDD 6.8)
   const rec = s.records.get('0,0'), w = s.wasp;
   const fi = rec.content.flowers.findIndex((f, k) => s.inBloom(rec, k) && s.nectarAt(rec, k) > 0), f = rec.content.flowers[fi];
   const aimAt = (p) => { const l = Math.hypot(p.x - w.x, p.y - w.y, p.z - w.z); return { x: (p.x - w.x) / l, y: (p.y - w.y) / l, z: (p.z - w.z) / l }; };
@@ -1871,6 +1871,79 @@ function seated(sim, pred) {
     ok(count(ev, 'swarm') >= 1 && count(ev, 'winter') >= 1 && count(ev, 'spring') >= 1 && !s.extinct && s.season.n >= 2 && s.nest.entrance.x === n0.x && s.nest.entrance.z === n0.z && s.colony.queenAlive,
       `a bee colony swarms in early summer (${count(ev, 'swarm')}), winters as a cluster on its honey and goes on in the same hive (season ${s.season.n}, ${s.colony.adults.toFixed(0)} bees)`); }
   { const s = mk('hornet'); run(s, 100); const r = restore(snapshot(s)); ok(r.species === 'hornet' && r.colony.species === 'hornet' && r.wasp.sp === 'hornet', 'a save keeps the line\'s species'); }
+}
+
+// 50. Progression (GDD 6.8): XP, skills learned with it, and the year's turn
+{
+  const mk = (o = {}) => new Sim({ seed: 1234, birds: false, ...o });
+  const learn = (s, id) => run(s, 1, () => idle({ pick: -(SKILLS.indexOf(id) + 1) }));
+  { const s = mk(); place(s.wasp, { x: 5, y: 2, z: 5 }); run(s, 1, () => idle({ act: Act.Swoop, yawQ: 0 }));
+    const a = mk({ skills: 'all' }); place(a.wasp, { x: 5, y: 2, z: 5 }); run(a, 1, () => idle({ act: Act.Swoop, yawQ: 0 }));
+    ok(!s.hasSkill(s.wasp, 'swoop') && !s.hasSkill(s.wasp, 'assist') && !(s.wasp.swoopUntil > 0) && a.wasp.swoopUntil > 0 && worldTag({ skills: 'all' }) === 'all skills' && rulesHash({ skills: 'all' }) !== rulesHash({}),
+      'a new line has no skills: the dash does nothing until learned; "all skills" unlocks them for testing and is a world rule'); }
+  // unit XP from a sting
+  const stingOnce = (s) => {
+    const hm = seated(s, () => true), fa = hm.parts.sit.find((q) => q.name === 'ForearmR');
+    place(s.wasp, toWorld(hm, { x: (fa.a.x + fa.b.x) / 2, y: (fa.a.y + fa.b.y) / 2 + fa.r + 0.008, z: (fa.a.z + fa.b.z) / 2 }));
+    run(s, 10, () => idle({ sting: 1 })); run(s, 60);
+  };
+  { const s = mk(); for (const h of s.active) h.tr = { ...h.tr, style: Style.Freezer }; stingOnce(s);
+    ok(s.prog.unit === T.xp.sting + T.xp.firstHuman && s.prog.stabs === 1, `a sting on someone nobody had stung earns ${s.prog.unit} unit XP and a stab`); }
+  // learning
+  { const s = mk(); s.prog.unit = 45;
+    let ev = learn(s, 'focus');
+    ok(count(ev, 'learnDenied') === 1 && !s.hasSkill(s.wasp, 'focus'), 'focus cannot be learned before reflex');
+    ev = learn(s, 'swoop');
+    ok(count(ev, 'learned') === 1 && s.hasSkill(s.wasp, 'swoop') && s.prog.unit === 45 - T.skills.swoop, `the dash is learned for ${T.skills.swoop} unit XP (${s.prog.unit} left)`);
+    ev = learn(s, 'assist');
+    ok(count(ev, 'learnDenied') === 1 && !s.hasSkill(s.wasp, 'assist'), 'without the XP a skill is not learned');
+    place(s.wasp, { x: 5, y: 2, z: 5 }); run(s, 1, () => idle({ act: Act.Swoop, yawQ: 0 }));
+    ok(s.wasp.swoopUntil > 0, 'once learned, X dashes'); }
+  // ranks: speed and grab reach
+  { const cruise = (r) => { const s = mk(); s.prog.ranks[SKILLS.indexOf('speed')] = r; place(s.wasp, { x: 5, y: 2, z: 5 }); let v = 0; run(s, 120, (sim) => { v = Math.hypot(sim.wasp.vx, sim.wasp.vz); return idle({ mz: 100, yawQ: 0 }); }); return v; };
+    const v0 = cruise(0), v3 = cruise(3);
+    ok(v3 > v0 * 1.1, `flight speed at rank 3 is ${((v3 / v0 - 1) * 100).toFixed(0)}% faster (${v0.toFixed(2)} -> ${v3.toFixed(2)} m/s)`);
+    const s = mk(); const cat = s.records.get('0,0').content.caterpillars.find((c, i) => s.catActive(s.records.get('0,0'), i));
+    const d = T.prey.catchDist * Math.SQRT2 * 1.25; place(s.wasp, { x: cat.x + d, y: cat.y, z: cat.z });
+    const before = s._preyNear(s.wasp); s.prog.ranks[SKILLS.indexOf('grabR')] = 2; const after = s._preyNear(s.wasp);
+    ok(!before && after && after.kind === 'caterpillar', 'grab reach at rank 2 catches a caterpillar a quarter further off'); }
+  // hive skills: more from every load, faster brood
+  { const a = newColony(), b = newColony(), K = T.skills;
+    for (let i = 0; i < 20; i++) { colonyStep(a, 0.1, 0, true, 0.3, 0.2); colonyStep(b, 0.1, 0, true, 0.3, 0.2, 1, null, null, { forage: 1 + 3 * K.forage, brood: 1 + 3 * K.brood, lay: 1, build: 1 }); }
+    ok(b.stats.emerged > a.stats.emerged && b.cells > a.cells, `foraging yield and brood growth at rank 3: ${b.stats.emerged.toFixed(1)} against ${a.stats.emerged.toFixed(1)} adults emerged in two days`); }
+  { const s = mk(); run(s, 3600);
+    ok(s.prog.hive > 1 && s.prog.hiveTotal === s.prog.hive, `the colony earns hive XP as it works (${s.prog.hive.toFixed(1)} in a minute)`); }
+  // quick release
+  { const trial = (skill) => {
+      const s = mk(); if (skill) s.prog.ranks[SKILLS.indexOf('release')] = 1;
+      for (const h of s.active) h.tr = { ...h.tr, style: Style.Precise, reactionTicks: 14 };
+      const hm = seated(s, () => true), fa = hm.parts.sit.find((q) => q.name === 'ForearmR'), id = s.wasp.id;
+      place(s.wasp, toWorld(hm, { x: (fa.a.x + fa.b.x) / 2, y: (fa.a.y + fa.b.y) / 2 + fa.r + 0.008, z: (fa.a.z + fa.b.z) / 2 }));
+      const ev = run(s, 90, () => idle({ sting: 1 }));
+      return { rel: count(ev, 'quickRelease'), hit: ev.some((e) => e.type === 'swatHit' && e.waspId === id), dead: ev.some((e) => e.type === 'waspDied' && e.id === id) };
+    };
+    const off = trial(false), on = trial(true);
+    ok(off.hit && on.rel === 1 && !on.hit && !on.dead, `quick release: holding a sting, the hand lands (${off.dead ? 'dead' : 'hit'}); with the skill the wasp pulls out first and gets away`); }
+  // the year's turn
+  { const s = mk(), P = s.prog, X = T.xp;
+    P.unitTotal = X.hornetXp; P.stabs = X.hornetStabs; const hi = s._offer();
+    P.unitTotal = 0; P.stabs = 0; const lo = s._offer();
+    P.unitTotal = X.beeXp; const mid = s._offer();
+    const f = mk({ progression: 'fixed:wasp' }); const fx = f._offer();
+    ok(hi === 'hornet' && lo === 'bee' && mid === null && fx === null, 'the year\'s turn: a strong line may wake as hornets, a weak one is offered bees, one between goes on as wasps; a fixed world offers nothing'); }
+  const yearEnd = (unit, stabs) => {
+    const t = mk(); t.prog.unitTotal = unit; t.prog.stabs = stabs; t.colony.mated = 200; t.season.startMinute -= 0.71 * t.settings.seasonDays * 1440;
+    const ev = run(t, 120); return { t, ev };
+  };
+  { const { t, ev } = yearEnd(T.xp.hornetXp, T.xp.hornetStabs);
+    const e = ev.find((x) => x.type === 'offer'); run(t, 1, () => idle({ pick: 1001 }));
+    ok(e && e.species === 'hornet' && t.species === 'hornet' && t.colony.species === 'hornet' && t.wasp.sp === 'hornet' && t.wasp.caste === 'queen' && t.line.every((x) => x.colony.species === 'wasp') && t.settings.species === 'hornet',
+      `a strong line wakes as a hornet queen; the other queens found wasp colonies (${t.line.length})`);
+    const r = restore(snapshot(t)); ok(r.species === 'hornet' && r.prog.stabs === T.xp.hornetStabs && r.prog.ranks.length === SKILLS.length, 'a save keeps the species the line turned into and its XP'); }
+  { const { t } = yearEnd(0, 0); run(t, 1, () => idle({ pick: 1001 }));
+    ok(t.species === 'bee' && t.colony.adults === T.xp.beeSwarm && !t.colony.sited, `a weak line can try a honeybee colony: a queen with a swarm of ${t.colony.adults}`); }
+  { const { t } = yearEnd(0, 0); run(t, 1, () => idle({ pick: 1 }));
+    ok(t.species === 'wasp' && t.colony.species === 'wasp', 'declining the offer, the line goes on as wasps'); }
 }
 
 // Tuning as data (GDD 13, T1-22): one plain-text file feeds both sims

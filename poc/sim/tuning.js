@@ -227,6 +227,23 @@ export const T = {
     bee: { size: 0.85, swatR: -0.001, speed: 0.9, drain: 0.8, felt: 1.15, pain: 0.9, annoy: 0.6, night: 0, barbed: 1, hunts: 0, pollen: 1, wood: 0, fight: 0,
       start: 2.5, lay: 1.5, store: 10, sugarIn: 1.3, proteinIn: 1, out: 1.2, guards: 5, perennial: 1 },
   },
+  // Progression (GDD 6.8, T0 of the growth tree). Unit XP comes from what the insect you fly does (sting a person,
+  // more for one nobody had stung; drive a sting home; catch prey; bring a load home; rob a hive; get out from under a
+  // hand); hive XP from what the colony does (adults emerged, loads home, young queens raised). Stabs: stings that move
+  // the counter (a person nobody had stung). At the year's end a wasp line with hornetXp in all and hornetStabs may wake
+  // as hornets; one under beeXp and beeStabs is offered a honeybee colony, which starts as a swarm of beeSwarm.
+  xp: { sting: 4, firstHuman: 6, full: 2, catch: 3, deposit: 1, rob: 4, release: 2, emerged: 0.1, load: 0.05, raised: 2,
+    hornetXp: 600, hornetStabs: 25, beeXp: 150, beeStabs: 5, beeSwarm: 60 },
+  // Skills: what the line's insects can do beyond the start, learned with XP. Unit skills (unit XP) are the line's
+  // know-how, so every insect of it has them: unlocks cost what is listed; ranked ones (up to ranks) cost rankCost times
+  // the rank and add their figure per rank (landR: landing reach and lock-on range, feedR: feeding reach, grabR: grab
+  // reach, speed: flight speed). Hive skills (hive XP) cost hiveCost times the rank and add per rank to the colony's
+  // foraging yield, brood development, laying and comb built per load. Quick release: an insect stinging a person pulls
+  // out and away when a hand will land within releaseLead ticks and reach it (releaseMargin m), at releaseKick m/s.
+  // Focus (an activated slowdown, solo) lasts focusMs and is ready again after focusCooldownMs.
+  skills: { swoop: 40, assist: 40, reflex: 30, focus: 50, release: 60, ranks: 3, rankCost: 30, landR: 0.4, feedR: 0.2, grabR: 0.2, speed: 0.05,
+    hiveCost: 40, forage: 0.08, brood: 0.08, lay: 0.1, build: 0.1, releaseLead: 8, releaseMargin: 0.03, releaseKick: 2.5, focusMs: 3000, focusCooldownMs: 15000 },
+
   // Hornets at night (T2-10): a porch light on each house burns from dusk to dawn and draws moths, perLight of them
   // circling it at orbit m; a hornet takes one as protein. bio: European hornets hunt at night and come to lights.
   // A hornet that wins a wrestle with another colony's wasp keeps it as prey (waspProtein).
@@ -336,10 +353,25 @@ export const DEFAULT_SETTINGS = {
   // Which species a line may play (GDD 6.8): 'earned' (wasps first, the rest through the year's turn), 'open' (all
   // three from the start: test builds and personal worlds), or 'fixed:<species>'. The PoC runs open.
   progression: 'open',
+  // skills (GDD 6.8): 'earned' (learned with XP) or 'all' (every unlock from the start, for testing)
+  skills: 'earned',
   // the species the player's line starts as (a player's choice within the world's progression, not a world rule)
   species: 'wasp',
 };
 export const SPECIES = ['wasp', 'hornet', 'bee'];
+// The skills (GDD 6.8), in the order the learn command numbers them: unlocks and ranked unit skills, then hive skills
+export const SKILL_UNLOCKS = ['swoop', 'assist', 'reflex', 'focus', 'release'];
+export const SKILL_RANKED = ['landR', 'feedR', 'grabR', 'speed'];
+export const SKILL_HIVE = ['forage', 'brood', 'lay', 'build'];
+export const SKILLS = [...SKILL_UNLOCKS, ...SKILL_RANKED, ...SKILL_HIVE];
+// What the next rank of skill i costs, from which pool, or null when it cannot be learned (maxed, or focus before reflex)
+export function skillCost(i, ranks) {
+  const id = SKILLS[i], K = T.skills, r = ranks[i] | 0;
+  if (i < 0 || i >= SKILLS.length) return null;
+  if (SKILL_UNLOCKS.includes(id)) return r ? null : id === 'focus' && !ranks[SKILLS.indexOf('reflex')] ? null : { pool: 'unit', cost: K[id] };
+  if (r >= K.ranks) return null;
+  return SKILL_RANKED.includes(id) ? { pool: 'unit', cost: K.rankCost * (r + 1) } : { pool: 'hive', cost: K.hiveCost * (r + 1) };
+}
 // The species a world lets a new line start as
 export function speciesAllowed(settings) {
   const p = (settings && settings.progression) || DEFAULT_SETTINGS.progression;
@@ -349,7 +381,7 @@ export function speciesAllowed(settings) {
 }
 
 // The settings that change the rules, in a fixed order. Their hash is the world's rules hash: peers compare it.
-const RULE_KEYS = ['dayMinutes', 'humanDensity', 'beeAggression', 'seasonDays', 'reaction', 'escalation', 'exterminator', 'birds', 'rivals', 'pestControl', 'woods', 'towns', 'water', 'hives', 'terrain', 'progression'];
+const RULE_KEYS = ['dayMinutes', 'humanDensity', 'beeAggression', 'seasonDays', 'reaction', 'escalation', 'exterminator', 'birds', 'rivals', 'pestControl', 'woods', 'towns', 'water', 'hives', 'terrain', 'progression', 'skills'];
 export function rulesHash(settings) {
   const s = { ...DEFAULT_SETTINGS, ...settings };
   let h = 0x811c9dc5;
@@ -377,6 +409,7 @@ export function worldTag(settings) {
   if (s.water !== d.water) t.push(s.water > d.water ? 'wet' : 'dry');
   if (s.hives !== d.hives) t.push(s.hives ? `hives ${x(s.hives)}` : 'no hives');
   if (s.terrain !== d.terrain) t.push(s.terrain > 1 ? 'hilly' : 'rolling');
+  if (s.skills !== d.skills) t.push(s.skills === 'all' ? 'all skills' : s.skills);
   if (s.progression !== d.progression) t.push(s.progression === 'earned' ? 'species earned' : s.progression.startsWith('fixed:') ? s.progression.slice(6) + 's only' : s.progression);
   return t.join(' · ');
 }

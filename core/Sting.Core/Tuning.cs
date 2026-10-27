@@ -12,6 +12,26 @@ namespace Sting.Core
         public int night, barbed, hunts, pollen, wood, guards, perennial;
     }
 
+    /// The skills (GDD 6.8), in the order the learn command numbers them; see tuning.js
+    public static class Skills
+    {
+        public static readonly string[] UNLOCKS = { "swoop", "assist", "reflex", "focus", "release" };
+        public static readonly string[] RANKED = { "landR", "feedR", "grabR", "speed" };
+        public static readonly string[] HIVE = { "forage", "brood", "lay", "build" };
+        public static readonly string[] ALL = { "swoop", "assist", "reflex", "focus", "release", "landR", "feedR", "grabR", "speed", "forage", "brood", "lay", "build" };
+        public static int Index(string id) => System.Array.IndexOf(ALL, id);
+        public static bool IsUnlock(string id) => System.Array.IndexOf(UNLOCKS, id) >= 0;
+        /// what the next rank of skill i costs, from which pool ("unit" or "hive"), or null when it cannot be learned
+        public static (string pool, Num cost)? Cost(int i, int[] ranks)
+        {
+            if (i < 0 || i >= ALL.Length) return null;
+            string id = ALL[i]; int r = ranks[i];
+            if (IsUnlock(id)) return r != 0 ? null : id == "focus" && ranks[Index("reflex")] == 0 ? ((string, Num)?)null : ("unit", T.skills.Of(id));
+            if (r >= T.skills.ranks) return null;
+            return System.Array.IndexOf(RANKED, id) >= 0 ? ("unit", T.skills.rankCost * (r + 1)) : ("hive", T.skills.hiveCost * (r + 1));
+        }
+    }
+
     public static class T
     {
         public const int TICK_RATE = 60;
@@ -208,6 +228,21 @@ namespace Sting.Core
                 start = 2.5, lay = 1.5, store = 10, sugarIn = 1.3, proteinIn = 1, @out = 1.2, guards = 5, perennial = 1 };
             public static SpeciesRow Of(string sp) => sp switch { "hornet" => hornet, "bee" => bee, _ => wasp };
         }
+        /// Progression (GDD 6.8): XP for deeds, the year's turn; see tuning.js
+        public static class xp
+        {
+            public static Num sting = 4, firstHuman = 6, full = 2, @catch = 3, deposit = 1, rob = 4, release = 2, emerged = 0.1, load = 0.05, raised = 2,
+                hornetXp = 600, hornetStabs = 25, beeXp = 150, beeStabs = 5, beeSwarm = 60;
+            public static Num Of(string k) => k switch { "sting" => sting, "firstHuman" => firstHuman, "full" => full, "catch" => @catch, "deposit" => deposit, "rob" => rob, "release" => release, _ => 0 };
+        }
+        /// Skills (GDD 6.8): costs and what a rank adds; see tuning.js
+        public static class skills
+        {
+            public static Num swoop = 40, assist = 40, reflex = 30, focus = 50, release = 60, rankCost = 30, landR = 0.4, feedR = 0.2, grabR = 0.2, speed = 0.05,
+                hiveCost = 40, forage = 0.08, brood = 0.08, lay = 0.1, build = 0.1, releaseMargin = 0.03, releaseKick = 2.5;
+            public static int ranks = 3, releaseLead = 8, focusMs = 3000, focusCooldownMs = 15000;
+            public static Num Of(string k) => k switch { "swoop" => swoop, "assist" => assist, "reflex" => reflex, "focus" => focus, "release" => release, "landR" => landR, "feedR" => feedR, "grabR" => grabR, "speed" => speed, "forage" => forage, "brood" => brood, "lay" => lay, "build" => build, _ => 0 };
+        }
         /// Hornets at night (T2-10): porch lights and moths; see tuning.js
         public static class moths { public static int perLight = 3, respawnTicks = 2400; public static Num orbit = 0.3, height = 2.3, @out = 0.25, protein = 1, strength = 5, waspProtein = 2; }
         /// The honeybee colony (T2-11): see tuning.js
@@ -286,6 +321,8 @@ namespace Sting.Core
         public int woods = 1, towns = 1, terrain; public Num water = 1, hives = 1;
         /// which species a line may play (GDD 6.8): "earned", "open" or "fixed:&lt;species&gt;"; the PoC runs open
         public string progression = "open";
+        /// skills (GDD 6.8): "earned" (learned with XP) or "all" (every unlock from the start, for testing)
+        public string skills = "earned";
         /// the species the player's line starts as: a player's choice within the world's progression, not a rule
         public string species = "wasp";
         public static readonly string[] SPECIES = { "wasp", "hornet", "bee" };
@@ -307,7 +344,7 @@ namespace Sting.Core
             string str = "gen" + T.GEN_VERSION + "|dayMinutes=" + N(dayMinutes) + "|humanDensity=" + N(humanDensity) + "|beeAggression=" + N(beeAggression)
                 + "|seasonDays=" + N(seasonDays) + "|reaction=" + N(reaction) + "|escalation=" + N(escalation)
                 + "|exterminator=" + B(exterminator) + "|birds=" + B(birds) + "|rivals=" + B(rivals)  + "|pestControl=" + B(pestControl)
-                + "|woods=" + woods + "|towns=" + towns + "|water=" + N(water) + "|hives=" + N(hives) + "|terrain=" + terrain + "|progression=" + progression
+                + "|woods=" + woods + "|towns=" + towns + "|water=" + N(water) + "|hives=" + N(hives) + "|terrain=" + terrain + "|progression=" + progression + "|skills=" + skills
                 + "|tune=" + Tune.Hash; // peers must share the tuning file too (T1-22)
             return R.Fnv32(str).ToString("x8");
         }
@@ -332,6 +369,7 @@ namespace Sting.Core
             if (water != d.water) t.Add(water > d.water ? "wet" : "dry");
             if (hives != d.hives) t.Add(hives != 0 ? $"hives {X(hives)}" : "no hives");
             if (terrain != d.terrain) t.Add(terrain > 1 ? "hilly" : "rolling");
+            if (skills != d.skills) t.Add(skills == "all" ? "all skills" : skills);
             if (progression != d.progression) t.Add(progression == "earned" ? "species earned" : progression.StartsWith("fixed:") ? progression.Substring(6) + "s only" : progression);
             return string.Join(" · ", t);
         }

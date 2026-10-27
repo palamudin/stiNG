@@ -243,6 +243,8 @@ namespace Sting.Core
         public bool CanFly() => Temperature >= T.weather.flyMinTemp;
         /// the player's line's species (GDD 6.8)
         public string species = "wasp";
+        /// the line's XP and skills (GDD 6.8)
+        public Prog prog = new Prog();
         /// a wasp's species row: its line's, or a rival's (the neighbourhood's yellowjackets)
         internal static SpeciesRow Spw(Wasp w) => T.species.Of(w.sp);
         /// a site's room for comb, for the line's species: a bee colony builds a bigger nest (T2-11)
@@ -411,6 +413,7 @@ namespace Sting.Core
             prevAct = act;
             if (cmd.alloc > 0 && cmd.alloc <= T.alloc.Length && colony.alloc != cmd.alloc - 1) { colony.alloc = cmd.alloc - 1; Emit("alloc", ("preset", colony.alloc)); }
             int pick = cmd.pick;
+            if (pick < 0) { Learn(-pick - 1); pick = 0; } // a negative pick learns a skill (GDD 6.8)
             if (winter != null) { WinterStep(pick); pick = 0; } // in winter a pick chooses the queen (T1-15)
             if ((edge & Act.Switch) != 0) PossessNearest();
             else if (pick > 0 && pick != drivenId) PossessNearest(pick);
@@ -428,6 +431,7 @@ namespace Sting.Core
                 else StepWasp(w, Think(w), 0, false);
             }
             // 2. swats, sprays, bees: every tick
+            QuickRelease();
             Swats();
             Sprays();
             Bees();

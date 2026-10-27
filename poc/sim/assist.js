@@ -65,7 +65,7 @@ export function targetPos(sim, t) {
 
 // Everything the wasp could lock on to round it, with where it is
 function candidates(sim, w) {
-  const out = [], R = LOCK.range;
+  const out = [], R = LOCK.range * sim._mul(w, 'landR'); // the landing reach skill reaches further (GDD 6.8)
   const add = (t, p) => { if (p && d2(w, p) <= R * R) out.push({ t, p }); };
   for (const rec of sim.activeChunks) {
     if (Math.abs(rec.cx * T.chunk.size - w.x) > T.chunk.size / 2 + R || Math.abs(rec.cz * T.chunk.size - w.z) > T.chunk.size / 2 + R) continue;
@@ -90,7 +90,7 @@ function candidates(sim, w) {
 function aimAtHuman(sim, w, aim) {
   let best = null, bestMiss = Infinity;
   for (const hm of sim.active) {
-    if (hm.state === 'away' || hm.special || sq(hm.x - w.x) + sq(hm.z - w.z) > LOCK.humanRange * LOCK.humanRange) continue;
+    if (hm.state === 'away' || hm.special || sq(hm.x - w.x) + sq(hm.z - w.z) > sq(LOCK.humanRange * sim._mul(w, 'landR'))) continue;
     const o = toLocal(hm, w), e = toLocal(hm, { x: w.x + aim.x, y: w.y + aim.y, z: w.z + aim.z }), dv = { x: e.x - o.x, y: e.y - o.y, z: e.z - o.z };
     for (const part of hm.parts[hm.posture] || hm.parts.stand) {
       // the point along the part nearest the aim line, by a few refinements from the middle
@@ -131,7 +131,7 @@ export function pickTarget(sim, w, aim) {
     if (cos > bc) { bc = cos; best = c.t; }
   }
   if (best) return best;
-  let nd = LOCK.nearRange * LOCK.nearRange;
+  let nd = sq(LOCK.nearRange * sim._mul(w, 'landR'));
   for (const c of cands) {
     const K = TARGET_KIND[c.t.kind];
     if (!K.prey && !K.hazard) continue;

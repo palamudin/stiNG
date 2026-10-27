@@ -259,7 +259,8 @@ namespace Sting.Core
 
         // ---------------- lineage colonies (GDD 6.7, T2-4); see sim.js
 
-        internal Num FoundLine(List<HiberSite> sites, int choice, Num queens)
+        internal Num FoundLine(List<HiberSite> sites, int choice, Num queens) => FoundLine(sites, choice, queens, species);
+        internal Num FoundLine(List<HiberSite> sites, int choice, Num queens, string sp)
         {
             int sn = season.n; var used = new List<(Num x, Num z)> { (sites[choice].x, sites[choice].z) };
             line = new List<LineColony>();
@@ -273,7 +274,7 @@ namespace Sting.Core
                     if (t == null) break;
                     Num dx = sites[si].x - t.x, dz = sites[si].z - t.z, dd = Sqrt(dx * dx + dz * dz); if (dd == 0) dd = 1; dx /= dd; dz /= dd;
                     var n = World.MakeNest(t.x, t.z, t.x + dx * (t.r + 0.2), Clamp(1.6, 1.2, Max(1.2, t.h - 0.6)), t.z + dz * (t.r + 0.2), World.NEST.r, "trunk");
-                    var c = Colony.New(true, species); c.sited = true; c.maxCells = MaxCells("trunk"); c.alloc = 0;
+                    var c = Colony.New(true, sp); c.sited = true; c.maxCells = MaxCells("trunk", sp); c.alloc = 0;
                     line.Add(new LineColony { id = ++lineSeq, nest = n, colony = c, season = sn });
                     used.Add((t.x, t.z)); left--;
                     Emit("sisterFounded", ("id", lineSeq), ("x", n.x), ("z", n.z));
@@ -378,6 +379,7 @@ namespace Sting.Core
             int alloc = colony.alloc;
             oldNests.Add(nest);
             nest = best.nest; colony = best.colony; colony.alloc = alloc;
+            colony.xpSeen = HiveScore(colony); // a sister's past is not the line's new XP
             var d = Driven();
             foreach (var w in new List<Wasp>(wasps)) if (w.colony == "own" && w != d) Despawn(w);
             if (d != null) { d.x = nest.spawn.x; d.y = nest.spawn.y; d.z = nest.spawn.z; d.vx = d.vy = d.vz = 0; d.carry = null; }

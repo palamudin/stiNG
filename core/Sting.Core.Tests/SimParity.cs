@@ -58,6 +58,12 @@ namespace Sting.Core.Tests
             Run("hornet", new Settings { seed = 1234, species = "hornet" }, 9000, () => Bots.StingBot("full", null, 60));
             Run("bee", new Settings { seed = 99, dayMinutes = 0.4, seasonDays = 10, species = "bee" }, 30000, () => sim => Bots.IdleCmd());
             Run("beesting", new Settings { seed = 1234, species = "bee" }, 7200, () => Bots.StingBot("jab"));
+            // progression (GDD 6.8): every unlock on, a sting bot that lingers (quick release fires), learning a ranked skill every 25 s
+            Run("skills", new Settings { seed = 1234, skills = "all" }, 12000, () =>
+            {
+                var b = Bots.StingBot("full", null, 60); var order = new[] { "speed", "grabR", "forage", "landR", "feedR", "brood", "lay", "build" };
+                return sim => { var c = b(sim); if (sim.tick % 1500 == 1499) c.pick = -(Skills.Index(order[sim.tick / 1500 % order.Length]) + 1); return c; };
+            }, true);
             // a save restored mid-run must carry on exactly like the run that was never saved
             {
                 string Go(bool save)
@@ -75,7 +81,7 @@ namespace Sting.Core.Tests
             }
         }
 
-        static void Run(string name, Settings settings, int ticks, Func<Func<Sim, Cmd>> makeBot)
+        static void Run(string name, Settings settings, int ticks, Func<Func<Sim, Cmd>> makeBot, bool prog = false)
         {
             var d = new Digest(); var sim = new Sim(settings); var bot = makeBot();
             uint kinds = 0x811c9dc5; var trace = new List<string>(); // what happened (event types and ticks only) and where, once a second
@@ -89,6 +95,7 @@ namespace Sting.Core.Tests
                     var w = sim.wasp; double x = w != null ? (double)w.x : 0, y = w != null ? (double)w.y : 0, z = w != null ? (double)w.z : 0;
                     trace.Add(string.Join(" ", sim.tick, kinds.ToString("x8"), x.ToString("R", CultureInfo.InvariantCulture), y.ToString("R", CultureInfo.InvariantCulture), z.ToString("R", CultureInfo.InvariantCulture), ((double)sim.colony.adults).ToString("R", CultureInfo.InvariantCulture)));
                 }
+                if (prog && sim.tick % 60 == 0) { var P = sim.prog; d.F(P.unit); d.F(P.unitTotal); d.F(P.hive); d.F(P.hiveTotal); d.F(P.stabs); foreach (int r in P.ranks) d.F(r); }
             }
             traces[name] = trace;
             d.S(sim.StateHash()); d.S(sim.HumanHash());

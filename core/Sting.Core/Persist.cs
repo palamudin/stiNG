@@ -86,7 +86,7 @@ namespace Sting.Core
 
     public static class Persist
     {
-        public const int SAVE_VERSION = 25; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home); 14: barbecue meat taken; 15: regions, pulp taken from wood; 16: strolls and garden rounds; 17: the carry ledger and sips (T1-20); 18: water (T2-1); 19: young queens on their mating flight (T2-3); 20: lineage colonies (T2-4); 21: feature modifiers (T2-6); 22: the exterminator called to a sister colony; 23: terrain; 24: the swoop; 25: species (wasps, hornets, honeybees)
+        public const int SAVE_VERSION = 26; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home); 14: barbecue meat taken; 15: regions, pulp taken from wood; 16: strolls and garden rounds; 17: the carry ledger and sips (T1-20); 18: water (T2-1); 19: young queens on their mating flight (T2-3); 20: lineage colonies (T2-4); 21: feature modifiers (T2-6); 22: the exterminator called to a sister colony; 23: terrain; 24: the swoop; 25: species (wasps, hornets, honeybees); 26: XP and skills
         const uint MAGIC = 0x474E4953; // "SING"
 
         // ---------------------------------------------------------------- one Io per type
@@ -96,7 +96,7 @@ namespace Sting.Core
             a.U(ref s.seed); a.D(ref s.dayMinutes); a.D(ref s.humanDensity); a.D(ref s.beeAggression); a.D(ref s.seasonDays); a.D(ref s.reaction); a.D(ref s.escalation);
             a.B(ref s.exterminator); a.B(ref s.birds); a.B(ref s.rivals); a.B(ref s.pestControl);
             a.I(ref s.woods); a.I(ref s.towns); a.D(ref s.water); a.D(ref s.hives); a.I(ref s.terrain); // T2-6
-            a.S(ref s.progression); a.S(ref s.species); // GDD 6.8
+            a.S(ref s.progression); a.S(ref s.species); a.S(ref s.skills); // GDD 6.8
         }
 
         static Swat Io(Archive a, Swat s)
@@ -219,7 +219,7 @@ namespace Sting.Core
             a.D(ref s.emerged); a.D(ref s.laid); a.D(ref s.starvedLarvae); a.D(ref s.died); a.D(ref s.gynesRaised); a.D(ref s.sugarSpilled); a.D(ref s.proteinSpilled); a.D(ref s.poisoned);
             a.D(ref s.depSugar); a.D(ref s.depProtein); a.D(ref s.depPulp);
             a.D(ref c.water); a.D(ref c.cool); a.D(ref c.thirst); a.D(ref s.depWater); a.D(ref s.cooked); // T2-1
-            a.S(ref c.species); a.I(ref c.swarmed); // GDD 6.8
+            a.S(ref c.species); a.I(ref c.swarmed); a.D(ref c.xpSeen); // GDD 6.8
         }
 
         static ChunkState IoChunkState(Archive a, ChunkState s)
@@ -322,12 +322,13 @@ namespace Sting.Core
             a.List(ref s.line, () => new LineColony(), x => { a.I(ref x.id); a.I(ref x.season); if (a.Reading) { x.nest = new Nest(); x.colony = new ColonyState(); } IoNest(a, x.nest); IoColony(a, x.colony); a.L(ref x.ext); }); a.I(ref s.lineSeq); // T2-4
             if (a.Opt(ref s.winter))
             {
-                var W = s.winter; a.S(ref W.why); a.D(ref W.survivors); a.D(ref W.lineage); a.I(ref W.until);
+                var W = s.winter; a.S(ref W.why); a.D(ref W.survivors); a.D(ref W.lineage); a.I(ref W.until); a.S(ref W.offer);
                 a.List(ref W.sites, () => new HiberSite(), h => { a.S(ref h.kind); a.D(ref h.x); a.D(ref h.y); a.D(ref h.z); a.D(ref h.q); a.I(ref h.n); a.B(ref h.scouted); });
             }
             if (a.Opt(ref s.hiberPick)) { a.I(ref s.hiberPick.season); a.D(ref s.hiberPick.x); a.D(ref s.hiberPick.z); a.S(ref s.hiberPick.kind); }
             if (a.Opt(ref s.springAt)) { a.D(ref s.springAt.x); a.D(ref s.springAt.z); }
             if (a.Opt(ref s.homeScent)) IoKnown(a, s.homeScent);
+            { var P = s.prog; a.D(ref P.unit); a.D(ref P.unitTotal); a.D(ref P.hive); a.D(ref P.hiveTotal); a.I(ref P.stabs); for (int k = 0; k < P.ranks.Length; k++) a.I(ref P.ranks[k]); } // GDD 6.8
             if (a.Opt(ref s.pendingSwitch)) { a.I(ref s.pendingSwitch.at); a.I(ref s.pendingSwitch.target); }
             if (a.Opt(ref s.muni))
             {
@@ -460,7 +461,7 @@ namespace Sting.Core
             sim.noAI = noAI;
             sim.nextWaspId = peer * 1000000 + 1;
             sim.wasps = new List<Wasp>(); sim.remote = new OrderedMap<int, RemoteWasp>(); sim.outbox = new List<Msg>();
-            sim.colony = Colony.New(false, sim.species); sim.nest = World.MakeNest(World.NEST.treeX, World.NEST.treeZ, World.NEST.x, World.NEST.y, World.NEST.z); sim.colony.maxCells = sim.MaxCells("trunk"); sim.oldNests = new List<Nest>();
+            sim.prog = new Prog(); sim.colony = Colony.New(false, sim.species); sim.nest = World.MakeNest(World.NEST.treeX, World.NEST.treeZ, World.NEST.x, World.NEST.y, World.NEST.z); sim.colony.maxCells = sim.MaxCells("trunk"); sim.oldNests = new List<Nest>(); // a joining player's line starts with no XP (GDD 6.8)
             sim.stats = new SimStats();
             sim.netStats = new NetStats();
             sim.ghost = null; sim.extinct = false; sim.lineage = 0; sim.evSeq = 0; sim.prevAct = 0; sim.pressUsed = false;

@@ -17,6 +17,7 @@ sim.hot 2dae5e8f
 sim.hornet b24e136a
 sim.bee 3b77fb45
 sim.beesting e110b53b
+sim.skills c55d3d2a
 sim.restored 239290a5
 net.good c63c88c8
 net.awful 85bd23df

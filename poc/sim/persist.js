@@ -117,7 +117,7 @@ export function joinFrom(json, peer, opts = {}) {
   sim.noAI = !!opts.noAI;
   sim.nextWaspId = peer * 1000000 + 1;
   sim.wasps = []; sim.remote = new Map(); sim.outbox = [];
-  sim.colony = newColony(false, sim.species); sim.nest = makeNest(NEST.treeX, NEST.treeZ, NEST.x, NEST.y, NEST.z); sim.colony.maxCells = sim._maxCells('trunk'); sim.oldNests = [];
+  sim.prog = sim._newProg(); sim.colony = newColony(false, sim.species); sim.nest = makeNest(NEST.treeX, NEST.treeZ, NEST.x, NEST.y, NEST.z); sim.colony.maxCells = sim._maxCells('trunk'); sim.oldNests = []; // a joining player's line starts with no XP (GDD 6.8)
   sim.stats = { stings: 0, aiStings: 0, remoteStings: 0, full: 0, deaths: 0, causes: {}, caught: 0, deposits: 0 };
   sim.netStats = { sent: 0, recv: 0, late: 0, lateMax: 0 };
   sim.ghost = null; sim.extinct = false; sim.lineage = 0; sim.evSeq = 0; sim.prevAct = 0; sim.pressUsed = false;

@@ -985,7 +985,7 @@ namespace Sting.Core.Tests
             }
             // 48. lock-on and assisted flight (GDD 7.9); feeding on a flower is not cut short
             {
-                var s = new Sim(new Settings { seed = 1234, birds = false }, new SimOpts { noAI = true }); RunS(s, 1);
+                var s = new Sim(new Settings { seed = 1234, birds = false, skills = "all" }, new SimOpts { noAI = true }); RunS(s, 1); // the dash is a skill (GDD 6.8)
                 var rec = s.records.Get("0,0"); var w = s.wasp; int fi = -1;
                 for (int k = 0; k < rec.content.flowers.Count && fi < 0; k++) if (s.InBloom(rec, k) && s.NectarAt(rec, k) > 0) fi = k;
                 var f = rec.content.flowers[fi];
@@ -1172,6 +1172,86 @@ namespace Sting.Core.Tests
                         $"a bee colony swarms in early summer ({Count(ev, "swarm")}), winters as a cluster on its honey and goes on in the same hive (season {s.season.n}, {D(s.colony.adults):0} bees)");
                 }
                 { var s = Mk("hornet"); RunS(s, 100); var r = Persist.Restore(Persist.Snapshot(s)); Ok(r.species == "hornet" && r.colony.species == "hornet" && r.wasp.sp == "hornet", "a save keeps the line's species"); }
+            }
+            // 50. progression (GDD 6.8): XP, skills learned with it, and the year's turn
+            {
+                Sim Mk(Settings st = null) { st ??= new Settings(); st.seed = 1234; st.birds = false; return new Sim(st); }
+                List<SimEvent> Learn(Sim s, string id) => RunS(s, 1, (sim, i) => Idle(c => c.pick = -(Skills.Index(id) + 1)));
+                {
+                    var s = Mk(); Place(s.wasp, P(5, 2, 5)); RunS(s, 1, (sim, i) => Idle(c => { c.act = Act.Swoop; c.yawQ = 0; }));
+                    var a = Mk(new Settings { skills = "all" }); Place(a.wasp, P(5, 2, 5)); RunS(a, 1, (sim, i) => Idle(c => { c.act = Act.Swoop; c.yawQ = 0; }));
+                    Ok(!s.HasSkill(s.wasp, "swoop") && !s.HasSkill(s.wasp, "assist") && !(s.wasp.swoopUntil > 0) && a.wasp.swoopUntil > 0 && new Settings { skills = "all" }.WorldTag() == "all skills" && new Settings { skills = "all" }.RulesHash() != new Settings().RulesHash(),
+                        "a new line has no skills: the dash does nothing until learned; \"all skills\" unlocks them for testing and is a world rule");
+                }
+                void StingOnce(Sim s)
+                {
+                    var hm = Seated(s, h => true); var fa = hm.sit.First(p => p.name == "ForearmR");
+                    Place(s.wasp, Body.ToWorld(hm.F, P((fa.a.x + fa.b.x) / 2, (fa.a.y + fa.b.y) / 2 + fa.r + 0.008, (fa.a.z + fa.b.z) / 2)));
+                    RunS(s, 10, (sim, i) => Idle(c => c.sting = 1)); RunS(s, 60);
+                }
+                { var s = Calm(Mk()); StingOnce(s); Ok(s.prog.unit == T.xp.sting + T.xp.firstHuman && s.prog.stabs == 1, $"a sting on someone nobody had stung earns {D(s.prog.unit)} unit XP and a stab"); }
+                {
+                    var s = Mk(); s.prog.unit = 45;
+                    var ev = Learn(s, "focus");
+                    Ok(Count(ev, "learnDenied") == 1 && !s.HasSkill(s.wasp, "focus"), "focus cannot be learned before reflex");
+                    ev = Learn(s, "swoop");
+                    Ok(Count(ev, "learned") == 1 && s.HasSkill(s.wasp, "swoop") && s.prog.unit == 45 - T.skills.swoop, $"the dash is learned for {D(T.skills.swoop)} unit XP ({D(s.prog.unit)} left)");
+                    ev = Learn(s, "assist");
+                    Ok(Count(ev, "learnDenied") == 1 && !s.HasSkill(s.wasp, "assist"), "without the XP a skill is not learned");
+                    Place(s.wasp, P(5, 2, 5)); RunS(s, 1, (sim, i) => Idle(c => { c.act = Act.Swoop; c.yawQ = 0; }));
+                    Ok(s.wasp.swoopUntil > 0, "once learned, X dashes");
+                }
+                {
+                    double Cruise(int r) { var s = Mk(); s.prog.ranks[Skills.Index("speed")] = r; Place(s.wasp, P(5, 2, 5)); double v = 0; RunS(s, 120, (sim, i) => { v = Hypot(sim.wasp.vx, sim.wasp.vz); return Idle(c => { c.mz = 100; c.yawQ = 0; }); }); return v; }
+                    double v0 = Cruise(0), v3 = Cruise(3);
+                    Ok(v3 > v0 * 1.1, $"flight speed at rank 3 is {(v3 / v0 - 1) * 100:0}% faster ({v0:0.00} -> {v3:0.00} m/s)");
+                    var s = Mk(); var rec = s.records.Get("0,0"); Caterpillar cat = null; for (int k = 0; k < rec.content.caterpillars.Count; k++) if (s.CatActive(rec, k)) { cat = rec.content.caterpillars[k]; break; }
+                    Num d = T.prey.catchDist * Sqrt(2) * 1.25; Place(s.wasp, P(cat.x + d, cat.y, cat.z));
+                    var before = s.PreyNear(s.wasp); s.prog.ranks[Skills.Index("grabR")] = 2; var after = s.PreyNear(s.wasp);
+                    Ok(before == null && after != null && after.kind == "caterpillar", "grab reach at rank 2 catches a caterpillar a quarter further off");
+                }
+                {
+                    var a = Colony.New(); var b = Colony.New();
+                    var bst = new Boost { forage = 1 + 3 * T.skills.forage, brood = 1 + 3 * T.skills.brood, lay = 1, build = 1 };
+                    for (int i = 0; i < 20; i++) { Colony.Step(a, 0.1, 0, true, 0.3, 0.2); Colony.Step(b, 0.1, 0, true, 0.3, 0.2, 1, null, null, bst); }
+                    Ok(b.stats.emerged > a.stats.emerged && b.cells > a.cells, $"foraging yield and brood growth at rank 3: {D(b.stats.emerged):0.0} against {D(a.stats.emerged):0.0} adults emerged in two days");
+                }
+                { var s = Mk(); RunS(s, 3600); Ok(s.prog.hive > 1 && s.prog.hiveTotal == s.prog.hive, $"the colony earns hive XP as it works ({D(s.prog.hive):0.0} in a minute)"); }
+                {
+                    (int rel, bool hit, bool dead) Trial(bool skill)
+                    {
+                        var s = Mk(); if (skill) s.prog.ranks[Skills.Index("release")] = 1;
+                        foreach (var h in s.active) { var c = h.tr.Clone(); c.style = Style.Precise; c.reactionTicks = 14; h.tr = c; }
+                        var hm = Seated(s, h => true); var fa = hm.sit.First(p => p.name == "ForearmR"); int id = s.wasp.id;
+                        Place(s.wasp, Body.ToWorld(hm.F, P((fa.a.x + fa.b.x) / 2, (fa.a.y + fa.b.y) / 2 + fa.r + 0.008, (fa.a.z + fa.b.z) / 2)));
+                        var ev = RunS(s, 90, (sim, i) => Idle(c => c.sting = 1));
+                        return (Count(ev, "quickRelease"), ev.Any(e => e.type == "swatHit" && (int)e["waspId"] == id), ev.Any(e => e.type == "waspDied" && (int)e["id"] == id));
+                    }
+                    var off = Trial(false); var on = Trial(true);
+                    Ok(off.hit && on.rel == 1 && !on.hit && !on.dead, $"quick release: holding a sting, the hand lands ({(off.dead ? "dead" : "hit")}); with the skill the wasp pulls out first and gets away");
+                }
+                {
+                    var s = Mk(); var Pg = s.prog;
+                    Pg.unitTotal = T.xp.hornetXp; Pg.stabs = (int)T.xp.hornetStabs; var hi = s.Offer();
+                    Pg.unitTotal = 0; Pg.stabs = 0; var lo = s.Offer();
+                    Pg.unitTotal = T.xp.beeXp; var mid = s.Offer();
+                    var f = Mk(new Settings { progression = "fixed:wasp" }); var fx = f.Offer();
+                    Ok(hi == "hornet" && lo == "bee" && mid == null && fx == null, "the year's turn: a strong line may wake as hornets, a weak one is offered bees, one between goes on as wasps; a fixed world offers nothing");
+                }
+                (Sim t, List<SimEvent> ev) YearEnd(Num unit, int stabs)
+                {
+                    var t = Mk(); t.prog.unitTotal = unit; t.prog.stabs = stabs; t.colony.mated = 200; t.season.startMinute -= 0.71 * t.settings.seasonDays * 1440;
+                    return (t, RunS(t, 120));
+                }
+                {
+                    var (t, ev) = YearEnd(T.xp.hornetXp, (int)T.xp.hornetStabs);
+                    var e = ev.FirstOrDefault(x => x.type == "offer"); RunS(t, 1, (sim, i) => Idle(c => c.pick = 1001));
+                    Ok(e != null && (string)e["species"] == "hornet" && t.species == "hornet" && t.colony.species == "hornet" && t.wasp.sp == "hornet" && t.wasp.caste == "queen" && t.line.All(x => x.colony.species == "wasp") && t.settings.species == "hornet",
+                        $"a strong line wakes as a hornet queen; the other queens found wasp colonies ({t.line.Count})");
+                    var r = Persist.Restore(Persist.Snapshot(t)); Ok(r.species == "hornet" && r.prog.stabs == (int)T.xp.hornetStabs && r.prog.ranks.Length == Skills.ALL.Length, "a save keeps the species the line turned into and its XP");
+                }
+                { var (t, _) = YearEnd(0, 0); RunS(t, 1, (sim, i) => Idle(c => c.pick = 1001)); Ok(t.species == "bee" && t.colony.adults == T.xp.beeSwarm && !t.colony.sited, $"a weak line can try a honeybee colony: a queen with a swarm of {D(t.colony.adults)}"); }
+                { var (t, _) = YearEnd(0, 0); RunS(t, 1, (sim, i) => Idle(c => c.pick = 1)); Ok(t.species == "wasp" && t.colony.species == "wasp", "declining the offer, the line goes on as wasps"); }
             }
             // 46. feature modifiers (T2-6): woods, towns, water and hives set at world creation act on generation
             {

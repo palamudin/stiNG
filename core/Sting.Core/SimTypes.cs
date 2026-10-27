@@ -256,7 +256,9 @@ namespace Sting.Core
     /// a colony of the line run by the AI (T2-4)
     public sealed class LineColony { public int id, season; public Nest nest; public ColonyState colony; /** when the exterminator comes for it (0: not called) */ public long ext; }
     public sealed class HiberSite { public string kind; public Num x, y, z, q; public int n; public bool scouted; }
-    public sealed class Winter { public string why; public List<HiberSite> sites = new List<HiberSite>(); public Num survivors, lineage; public int until; }
+    public sealed class Winter { public string why; public List<HiberSite> sites = new List<HiberSite>(); public Num survivors, lineage; public int until; /** the year's turn (GDD 6.8): "hornet", "bee" or null */ public string offer; }
+    /// the line's XP and skills (GDD 6.8)
+    public sealed class Prog { public Num unit, unitTotal, hive, hiveTotal; public int stabs; public int[] ranks = new int[Skills.ALL.Length]; }
     public sealed class HiberPick { public int season; public Num x, z; public string kind; }
     public sealed class Spot { public Num x, z; }
     public sealed class SiteHit { public string type; public Num x, y, z, ix, iz, nx, nz; public Tree t; }

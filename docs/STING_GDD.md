@@ -386,7 +386,7 @@ Economy step in Appendix A.4.
 - In spring the player picks which surviving queen continues as the controlled colony. The other surviving queens found **lineage colonies** run by AI. **[Q] Q-10** As built (18.40): up to five are real colonies on trunks near where they wintered.
 - **The line** is the player's founding queen and all colonies descended from her. Game over when the line is extinct.
 
-### 6.8 The growth tree and the three species **[P] D-23** **[T0] [T2]** (the species built, 18.47; the tree, the year's turn and the gauge not yet)
+### 6.8 The growth tree and the three species **[P] D-23** **[T0] [T2]** (the species built, 18.47; XP, skills and the year's turn built at T0, 18.48; multi-colony play and the player gauge not yet)
 
 The line earns experience, and experience grows a tree. A line that runs a whole year reaches a turning point in spring. With enough experience, the queen it wakes is a hornet queen, and the player plays hornets from then on. With too few stings and too little experience, the game offers the line a try at a honeybee colony. Both are expansion by reuse: a hornet and a honeybee run on the systems already built for wasps and bees, with their own tables.
 
@@ -546,6 +546,7 @@ The determinism and netcode rules decide how it can work:
 
 - **Personal instances, solo.** Real slowdown. The sim keeps its 60 Hz tick but the wall clock advances it at a fraction of real time (for example 0.25× for one real second). Outcomes are unchanged because the sim never sees wall time; only the player gets more real time to act per tick.
 - **Shared worlds (personal with friends, offshoot, Main).** No sim slowdown. Peers run free against the wall clock and events commit 30 ticks after they happen (18.2); a peer that slowed itself would fall behind and its events would arrive past their commit tick. Reflex is presentation-only here: a short slow-motion of the *render* of the incoming hand while input stays live, plus the swat's known landing point and tick drawn as a warning. The sim's swat start and volume are already known when the swat is scheduled, so the cue is exact, not a guess.
+- **A skill.** As built (18.48), Reflex is a unit skill the line learns; Focus, an activated slowdown on Z, follows it.
 - **Tuning.** The Flight branch of the growth tree (6.8) can scale the cue (earlier warning, longer slow-motion in solo, the predicted swat volume shown), never the outcome. The consequence window (7.4, minimum 11 ticks) stays as it is.
 
 
@@ -1116,7 +1117,7 @@ A dragonfly patrols a low loop (0.6–1.4 m) in about half the chunks. It darts 
 
 ### 18.18 The C# core, ported (D-11, R-04)
 
-`core/Sting.Core` is the whole PoC simulation in C#: world generation, weather, bodies and the sting resolver, colony economy, the `Sim` itself (wasps, humans, bees, hunters, rivals, the exterminator, pest control, the yearly cycle, the AI), the network lab with its wire format and plausibility checks, and saves. It is bit-identical to the JS reference: `core/fixtures/parity.txt` holds 26 digests written by `poc/test/parity.mjs` (world, bodies, colony, eight whole-game scenarios (three of them the species of 18.47), a save and restore mid-run, two-peer labs on good and awful links and one well past the window with late-event corrections, a late joiner, a cheater, and a three-peer mesh where the host rules), and the C# runner reproduces every one. The scenario digests cover every sim event and the state and human hashes once a second, so a single differing bit anywhere fails the run.
+`core/Sting.Core` is the whole PoC simulation in C#: world generation, weather, bodies and the sting resolver, colony economy, the `Sim` itself (wasps, humans, bees, hunters, rivals, the exterminator, pest control, the yearly cycle, the AI), the network lab with its wire format and plausibility checks, and saves. It is bit-identical to the JS reference: `core/fixtures/parity.txt` holds 27 digests written by `poc/test/parity.mjs` (world, bodies, colony, nine whole-game scenarios (three of them the species of 18.47, one the skills of 18.48), a save and restore mid-run, two-peer labs on good and awful links and one well past the window with late-event corrections, a late joiner, a cheater, and a three-peer mesh where the host rules), and the C# runner reproduces every one. The scenario digests cover every sim event and the state and human hashes once a second, so a single differing bit anywhere fails the run.
 
 Two rules made the port mechanical: the JS sim may use only operations that are exact in IEEE doubles (its own sine, arctangent and rounding, no `Math.round`, `hypot` or `atan2`), and every map whose order can change a result is an insertion-ordered map in C# (`OrderedMap`), every sort is stable, every string sort is ordinal.
 
@@ -1517,6 +1518,52 @@ Any slam startles the people within `scareR` (1.5 m) by `nearPanic`. A `startle`
   - A save keeps the species.
 - **Parity:** three new digests (a hornet night, a bee season, bee stings) match bit for bit: 26 in all. 346 properties hold in both builds, and the wasp digests did not move.
 
+### 18.48 Progression as built: XP, skills, the year's turn (6.8, T0 of T2-12 and T2-13)
+
+**Two pools of XP** (`T.xp`), kept per line in `sim.prog` and in saves (C# save version 26). A player who joins a world starts at zero.
+- **Unit XP** comes from what the insect the player flies does: a sting on a person (4, plus 6 when nobody had stung them), a sting driven home (2), prey caught (3), a load brought home (1), a hive robbed (4), a quick release (2).
+- **Hive XP** comes from what the colony does, counted each colony tick: 0.1 per adult emerged, 0.05 per load unit brought home by anyone, 2 per young queen raised. A colony taken over from the line counts only what it does after.
+- **Stabs** are the line's stings on people nobody had stung: the stings that move the counter.
+
+**Skills** (`T.skills`) are the line's know-how, so every insect of it has them. The insect does the work, assisted or on its own; the player directs. They are learned in the colony view (N, Skills). Learning travels as input, a negative `pick` in the command, so it replays and peers see the same line.
+- **Unlocks** (unit XP):
+  - Dash, the swoop of 18.46 (40).
+  - Assisted flight: E with a lock flies there and lands, perches or grabs (40).
+  - Reflex: time slows when a hand comes for you, solo only (30).
+  - Focus: Z slows time for 3 s and is ready again after 15 s, solo only; it needs Reflex (50).
+  - Quick release (60): an insect of the line stinging a person pulls out and away, at 2.5 m/s off the hand, when a swat is due to land within 8 ticks and would reach it. A bee still dies of its barb.
+- **Ranked unit skills** (three ranks; 30, 60, 90 unit XP):
+  - Landing reach: +40% a rank to the distance a still wasp settles from, and to the lock-on ranges.
+  - Feeding reach: +20% a rank.
+  - Grab reach: +20% a rank.
+  - Flight speed: +5% a rank.
+- **Hive skills** (three ranks; 40, 80, 120 hive XP), multipliers on the player's colony only:
+  - Foraging yield: +8% a rank to every load.
+  - Brood growth: +8% a rank to development.
+  - Population: +10% a rank to laying.
+  - Comb building: +10% a rank to cells per load.
+- A new line has none of them. The world setting `skills: 'all'` unlocks every unlock from the start for testing; it is a world rule, in the rules hash and the tag. Lock-on (V) and the eye turn (G) stay free.
+
+**The year's turn.** At the end of a wasp line's season the sim makes an offer:
+- 600 XP in all and 25 stabs: wake as hornets.
+- Under 150 XP and under 5 stabs: try honeybees.
+- Anything between: no offer.
+- A `fixed:` world never offers.
+
+The winter screen shows the offer as a box to tick. A pick of 1001 and up wakes the chosen queen as the offered species. A hornet queen founds alone, as a wasp queen does. A honeybee queen comes with a swarm of 60. The line's other queens wake as they were and found colonies of the old species. Declining goes on as wasps. XP and skills carry over.
+
+**Checks.** JS and C# agree on every figure:
+- **XP and learning:** the dash does nothing until learned. A first sting earns 10 unit XP and a stab. Focus needs Reflex. Learning costs what it says and is refused without the XP.
+- **Ranked skills:** speed rank 3 is 13% faster (3.37 to 3.81 m/s). Grab rank 2 catches a caterpillar a quarter further off.
+- **Hive skills:** foraging and brood at rank 3 raise 39.1 adults against 30.4 in two days. A colony earns about 1.6 hive XP a minute of play.
+- **Quick release:** a lingering sting is swatted dead without it; with it the wasp pulls out first.
+- **The year's turn:**
+  - The offers fall where they should.
+  - A strong line wakes as a hornet queen, with three wasp colonies of the line beside it, and a save keeps it.
+  - A weak line can take a bee swarm of 60.
+  - Declining stays wasp.
+- **Parity:** a new digest (all unlocks, a lingering sting bot that fires 18 quick releases, ranked skills learned every 25 s with the XP the bot earns, and the XP pools and ranks digested once a second) matches bit for bit: 27 digests. 362 properties hold in both builds.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1525,7 +1572,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (98 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), and the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony. In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (99 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony; and the T0 of progression (18.48): XP, unit and hive skills, the year's turn. In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -1574,8 +1621,8 @@ Agreed 2026-10-27: Tier 2 is built on the current stack in the order that surviv
 | T2-9 | **Built (18.47).** Species as data: a species table over the one wasp code path, species in the colony record and saves, the `progression` world setting with `open` in test builds and a species pick on the start screen | 6.8 | M | sim; first, everything below needs it |
 | T2-10 | **Built (18.47).** The hornet line: a heavier body, a small colony, yellowjackets and bees as prey, night flight with porch lights | 6.8 | L | sim and generator |
 | T2-11 | **Built (18.47).** The honeybee colony: a perennial colony, honey stores and the winter cluster, swarming, the barbed sting, balling as the player's defence | 6.8, 9.1, 9.2 | L | sim; reuses hives and balling |
-| T2-12 | Experience and the year's turn: experience and stabs from sim events, the bars, the spring offer; multi-colony play (several colonies held, the rest on AI, switching in the colony view) with the player gauge: the player's measured rates set how AI colonies earn and play, capped at the player's level | 6.8 | L | sim; lineage-colony AI does the managing |
-| T2-13 | The growth tree: branches, node effects as colony parameters, the colony-view screen (takes in T2-7) | 6.8, 7.8 | M | node effects sim; the screen after the Unity move |
+| T2-12 | **T0 built (18.48): XP, stabs, the bars and the spring offer; multi-colony play and the gauge not yet.** Experience and the year's turn: experience and stabs from sim events, the bars, the spring offer; multi-colony play (several colonies held, the rest on AI, switching in the colony view) with the player gauge: the player's measured rates set how AI colonies earn and play, capped at the player's level | 6.8 | L | sim; lineage-colony AI does the managing |
+| T2-13 | **T0 built (18.48): unit and hive skills learned in the colony view.** The growth tree: branches, node effects as colony parameters, the colony-view screen (takes in T2-7) | 6.8, 7.8 | M | node effects sim; the screen after the Unity move |
 
 ### 19.4 Not on the current stack
 

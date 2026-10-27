@@ -1,7 +1,7 @@
 // Writes core/fixtures/parity.txt: digests of the JS reference that the C# port (core/) must reproduce bit for bit.
 // Each digest is FNV-1a over the IEEE-754 bytes of numbers in a fixed order. Run: node test/parity.mjs
 import { writeFileSync, readFileSync } from 'node:fs';
-import { T } from '../sim/tuning.js';
+import { T, SKILLS } from '../sim/tuning.js';
 import { applyTuning } from '../sim/tunefile.js';
 applyTuning(T, readFileSync(new URL('../../tuning/sting.tune', import.meta.url), 'utf8')); // T1-22: the shipped tuning
 import { generateChunk, dayWeather, windAt, humanWindow, flyPos, beePos, birdPos, dragonPos, makeNest, shedSites, shedRoof, groundAt } from '../sim/world.js';
@@ -174,6 +174,12 @@ export const SIM_SCENARIOS = [
   { name: 'hornet', settings: { seed: 1234, species: 'hornet' }, ticks: 9000, bot: () => stingBot({ plan: 'full', rest: 60 }) },
   { name: 'bee', settings: { seed: 99, dayMinutes: 0.4, seasonDays: 10, species: 'bee' }, ticks: 30000, bot: () => () => idleCmd() },
   { name: 'beesting', settings: { seed: 1234, species: 'bee' }, ticks: 7200, bot: () => stingBot({ plan: 'jab' }) },
+  // progression (GDD 6.8): every unlock on, a sting bot that lingers (so quick release fires), learning a ranked skill
+  // every 25 s with the XP it earns; the digest also takes the XP pools, the stabs and the ranks once a second
+  { name: 'skills', settings: { seed: 1234, skills: 'all' }, ticks: 12000, prog: true, bot: () => {
+    const b = stingBot({ plan: 'full', rest: 60 }), order = ['speed', 'grabR', 'forage', 'landR', 'feedR', 'brood', 'lay', 'build'];
+    return (sim) => { const c = b(sim); if (sim.tick % 1500 === 1499) c.pick = -(SKILLS.indexOf(order[Math.floor(sim.tick / 1500) % order.length]) + 1); return c; };
+  } },
 ];
 for (const sc of SIM_SCENARIOS) {
   const d = Digest(), sim = new Sim(sc.settings), bot = sc.bot();
@@ -181,6 +187,7 @@ for (const sc of SIM_SCENARIOS) {
     sim.step(bot(sim));
     for (const e of sim.drainEvents()) { d.s(e.type); d.f(e.t); }
     if (sim.tick % 60 === 0) { d.s(sim.stateHash()); d.s(sim.humanHash()); }
+    if (sc.prog && sim.tick % 60 === 0) { const P = sim.prog; d.f(P.unit); d.f(P.unitTotal); d.f(P.hive); d.f(P.hiveTotal); d.f(P.stabs); for (const r of P.ranks) d.f(r); }
   }
   d.s(sim.stateHash()); d.s(sim.humanHash());
   out(`sim.${sc.name}`, d.hex());

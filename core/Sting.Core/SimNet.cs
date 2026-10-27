@@ -618,6 +618,11 @@ namespace Sting.Core
                     bool first = !stung.Has(hm.hex);
                     stung.Set(hm.hex, true);
                     if (!mine) stats.remoteStings++; else if (ev.driven) stats.stings++; else stats.aiStings++;
+                    if (mine)
+                    { // the line's XP and stabs (GDD 6.8): a sting that moves the counter is a stab
+                        if (first) prog.stabs++;
+                        if (ev.driven) Gain(true, T.xp.sting + (first ? T.xp.firstHuman : 0));
+                    }
                     AddEsc(hm.x, hm.z, T.esc.sting * (ev.pain ?? 1));
                     CS(hm.chunk).lastSting = new LastSting { x = ev.sx, z = ev.sz };
                     // at level 3 a person with it in them goes for a can once things calm down (T1-6)

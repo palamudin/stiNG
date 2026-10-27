@@ -16,7 +16,7 @@ export function newColony(founding = false, species = 'wasp') {
     cells: founding ? 0 : s.cells * k, protein: founding ? 0 : s.protein, sugar: founding ? 0.5 : s.sugar, pulp: founding ? 0 : s.pulp,
     water: founding ? 0 : s.water, cool: 1, thirst: 0, // T2-1
     rEggs: 0, rLarvae: 0, rPupae: 0, gynes: 0, males: 0, mated: 0, young: 0,
-    deficit: 0, fed: 1, alloc: 0, sugarlessDays: 0,
+    deficit: 0, fed: 1, alloc: 0, sugarlessDays: 0, xpSeen: 0,
     stats: { emerged: 0, laid: 0, starvedLarvae: 0, died: 0, gynesRaised: 0, deposited: { sugar: 0, protein: 0, pulp: 0, water: 0 }, cooked: 0 },
   };
   return c;
@@ -46,8 +46,10 @@ export function beeRepro(c, frac) { const H = T.hive; return frac >= H.swarmFrom
 // thermal: brood development speed from the nest's temperature (T1-14), 1 when comfortable
 // avail: what the season offers foragers (T1-8), { sugar, protein } multipliers, 1 when absent
 // hot: the nest's heat (T2-1), { heat: 0..1 through the site's insulation, cook: 0..1 past the brood's lethal temperature }
-export function colonyStep(c, dtDay, physical, foraging, frac = 0.3, bio = 1, thermal = 1, avail = null, hot = null) {
-  const C = T.colony, S = T.season, W = T.water, SP = spOf(c);
+// boost: the hive skills' multipliers (GDD 6.8), { forage, brood, lay, build }; the player's colony only
+export const NO_BOOST = Object.freeze({ forage: 1, brood: 1, lay: 1, build: 1 });
+export function colonyStep(c, dtDay, physical, foraging, frac = 0.3, bio = 1, thermal = 1, avail = null, hot = null, boost = null) {
+  const C = T.colony, S = T.season, W = T.water, SP = spOf(c), K = boost || NO_BOOST;
   if (!c.nestAlive) return;
   const inside = Math.max(0, c.adults - physical);
   if (c.water === undefined) { c.water = 0; c.cool = 1; c.thirst = 0; } // saves from before water (T2-1)
@@ -60,10 +62,10 @@ export function colonyStep(c, dtDay, physical, foraging, frac = 0.3, bio = 1, th
     const a = T.alloc[c.alloc], wsum = (a.sugar + a.protein + a.pulp) / 3;
     const f = Math.max(0, inside - c.young) * C.forageShare * a.traffic * dtDay; // 'Lie low' sends fewer out (T1-7); the young stay in (T1-13)
     const food = f * (1 - divert);
-    c.sugar += food * C.income.sugar * a.sugar / wsum * (avail ? avail.sugar : 1) * SP.sugarIn;
-    c.protein += food * C.income.protein * a.protein / wsum * (avail ? avail.protein : 1) * SP.proteinIn;
-    if (SP.wood) c.pulp += food * C.income.pulp * a.pulp / wsum; // bees build wax from sugar instead (T2-11)
-    else c.sugar += food * C.income.pulp * a.pulp / wsum * SP.sugarIn;
+    c.sugar += food * C.income.sugar * a.sugar / wsum * (avail ? avail.sugar : 1) * SP.sugarIn * K.forage;
+    c.protein += food * C.income.protein * a.protein / wsum * (avail ? avail.protein : 1) * SP.proteinIn * K.forage;
+    if (SP.wood) c.pulp += food * C.income.pulp * a.pulp / wsum * K.forage; // bees build wax from sugar instead (T2-11)
+    else c.sugar += food * C.income.pulp * a.pulp / wsum * SP.sugarIn * K.forage;
     c.water += f * divert * W.income;
   }
   if (c.water > wcap) c.water = wcap;
@@ -109,9 +111,9 @@ export function colonyStep(c, dtDay, physical, foraging, frac = 0.3, bio = 1, th
   } else c.sugarlessDays = 0;
 
   // Brood pipeline (GDD 6.4); durations scale with the season length
-  const eD = C.eggDays * bio, lD = C.larvaDays * bio, pD = C.pupaDays * bio;
+  const eD = C.eggDays * bio, lD = C.larvaDays * bio, pD = C.pupaDays * bio, th = thermal * K.brood;
   const step = (eggs, larvae, pupae) => {
-    const e2l = c[eggs] / eD * dtDay * thermal, l2p = c[larvae] / lD * dtDay * fed * thermal, p2a = c[pupae] / pD * dtDay * thermal;
+    const e2l = c[eggs] / eD * dtDay * th, l2p = c[larvae] / lD * dtDay * fed * th, p2a = c[pupae] / pD * dtDay * th;
     const ls = c[larvae] * (1 - fed) * C.larvaStarve * dtDay;
     c[eggs] -= e2l; c[larvae] += e2l - l2p - ls; c[pupae] += l2p - p2a;
     c.stats.starvedLarvae += ls;
@@ -141,11 +143,11 @@ export function colonyStep(c, dtDay, physical, foraging, frac = 0.3, bio = 1, th
     if (c.cells >= (c.maxCells || Infinity)) use = 0;
     c.sugar -= use * T.hive.waxSugar;
   }
-  c.cells = Math.min(c.cells + use * C.cellsPerPulp, c.maxCells || Infinity); // the site caps nest size (GDD 6.6)
+  c.cells = Math.min(c.cells + use * C.cellsPerPulp * K.build, c.maxCells || Infinity); // the site caps nest size (GDD 6.6)
 
   if (c.queenAlive && c.protein > 0) {
     const free = Math.max(0, c.cells - broodTotal(c));
-    const lay = Math.min(free, Math.min(C.layMax * SP.lay, (C.layBase + c.adults * C.layPerAdult) * SP.lay) * dtDay);
+    const lay = Math.min(free, Math.min(C.layMax * SP.lay * K.lay, (C.layBase + c.adults * C.layPerAdult) * SP.lay * K.lay) * dtDay);
     const r = SP.perennial ? beeRepro(c, frac) : reproShare(frac);
     c.eggs += lay * (1 - r); c.rEggs += lay * r; c.stats.laid += lay;
   }

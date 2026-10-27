@@ -115,6 +115,12 @@
   .winter-sites { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
   .winter-sites button { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; text-align: left; text-transform: none; letter-spacing: 0; }
   .winter-sites span { font-weight: 400; opacity: .75; }
+  .skills { display: flex; flex-direction: column; gap: 4px; }
+  .skills button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; text-transform: none; letter-spacing: 0; padding: 6px 8px; }
+  .skills button span { font-weight: 400; opacity: .75; font-size: 12px; }
+  .skills button.have { border-color: var(--yellow); }
+  .skills h4 { margin: 8px 0 2px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; opacity: .7; }
+  .offer { border: 1px solid var(--yellow); padding: 8px 10px; margin: 8px 0; }
   button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
 
   .screen { position: fixed; z-index: 7; inset: 0; display: grid; place-items: center; background: rgba(13,12,10,.74); padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); overflow-y: auto; }
@@ -232,6 +238,12 @@
     <div class="row" id="nAlloc"></div>
     <p class="label" style="margin:8px 0 0">Shifts what idle workers bring home.</p>
   </section>
+  <section>
+    <h3>Skills</h3>
+    <dl id="nXp"></dl>
+    <div id="nSkills" class="skills"></div>
+    <p class="label" style="margin:8px 0 0">Unit XP comes from what the insect you fly does; hive XP from what the colony does. Skills are the line's: every insect of it has them.</p>
+  </section>
 </aside>
 
 <aside class="panel" id="lab" hidden>
@@ -298,11 +310,13 @@
       <div><kbd>Tab</kbd>lab overlay</div>
       <div><kbd>M</kbd>sound on / off</div>
       <div><kbd>Arrows</kbd>look without mouse</div>
+      <div><kbd>Z</kbd>focus: slow time (a skill, solo)</div>
       <div><kbd>Esc</kbd>pause</div>
       <div><kbd>Gamepad</kbd>sticks fly and look · RT sting · LT burst · A act · Y switch · X rest · R3 lock · L3 turn to look · d-pad up swoop</div>
     </div>
     <div class="start">
       <label class="label" for="seed">World seed<input id="seed" value="1234" inputmode="numeric" autocomplete="off"></label>
+      <label class="label" for="skillsSet">Skills<select id="skillsSet"><option value="earned" selected>Earned with XP</option><option value="all">All unlocked (test)</option></select></label>
       <label class="label" for="species">Play as<select id="species"><option value="wasp" selected>Wasps (yellowjackets)</option><option value="hornet">Hornets</option><option value="bee">Honeybees</option></select></label>
       <label class="label" for="dayLen">Day length<select id="dayLen"><option value="2" selected>2 min</option><option value="6">6 min</option><option value="12">12 min</option></select></label>
       <label class="label" for="density">People<select id="density"><option value="0.7">Fewer</option><option value="1" selected>Normal</option><option value="1.15">Busy</option></select></label>
@@ -366,6 +380,7 @@
     <div class="stripe"></div>
     <h2 class="title" style="font-size:clamp(48px,10vw,92px)">Winter</h2>
     <p id="winterText"></p>
+    <div id="winterOffer" class="offer" hidden><label><input type="checkbox" id="morph"> <b id="morphLabel"></b></label><div class="label" id="morphNote"></div></div>
     <div id="winterSites" class="winter-sites"></div>
     <div class="row"><button id="bSpring">Wake up as queen</button></div>
   </div>

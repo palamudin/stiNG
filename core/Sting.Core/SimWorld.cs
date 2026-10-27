@@ -1117,7 +1117,7 @@ namespace Sting.Core
             if (cmd.mx != 0 || cmd.my != 0 || cmd.mz != 0 || cmd.burst != 0 || cmd.sting != 0 || tick < w.noLandUntil) return;
             if (w.vx * w.vx + w.vy * w.vy + w.vz * w.vz > T.land.maxSpeed * T.land.maxSpeed) return;
             if (w.contact != null) { var c = w.contact; PerchOn(w, c.humanHex, c.zone, c.surf, c.n, c.part); return; }
-            var s = StaticSurface(w.P, T.land.reach);
+            var s = StaticSurface(w.P, T.land.reach * Mul(w, "landR")); // the landing reach skill (GDD 6.8)
             if (s == null) return;
             if (feeding && s.kind != "flower" && s.kind != "cup") return; // hovering to feed is not settling on a stalk or the grass
             w.state = "landed"; w.vx = w.vy = w.vz = 0;
@@ -1426,7 +1426,7 @@ namespace Sting.Core
         }
 
         /// a hornet that wins a wrestle with another colony's wasp keeps it (T2-10)
-        void Spoils(Wasp w) { if (Spw(w).fight > 0 && w.carry == null && w.caste == "worker") { w.carry = new Carry { kind = "protein", amount = T.moths.waspProtein, what = "wasp" }; stats.caught++; Emit("caught", ("id", w.id), ("kind", "wasp")); } }
+        void Spoils(Wasp w) { if (Spw(w).fight > 0 && w.carry == null && w.caste == "worker") { w.carry = new Carry { kind = "protein", amount = T.moths.waspProtein, what = "wasp" }; stats.caught++; Xp(w, "catch"); Emit("caught", ("id", w.id), ("kind", "wasp")); } }
 
         /// the bees of the line ball another colony's wasp that touches one of them (T2-11)
         void OwnBall(Wasp t)
@@ -1560,7 +1560,8 @@ namespace Sting.Core
                 Emit("nestFounded", ("x", nest.x), ("y", nest.y), ("z", nest.z), ("key", nest.key), ("auto", true));
             }
             var nheat = NestHeat();
-            Colony.Step(col, (Num)60 / dayTicks, OwnWorkers(), daylight, frac, bio, BroodSpeed(), EcoAvail(), (nheat.heat, nheat.cook));
+            Colony.Step(col, (Num)60 / dayTicks, OwnWorkers(), daylight, frac, bio, BroodSpeed(), EcoAvail(), (nheat.heat, nheat.cook), BoostNow());
+            HiveXp(col);
             if (Raining && col.nestAlive && col.sited)
             {
                 // the site decides what rain costs: burrows flood, open nests chill (GDD 6.6)

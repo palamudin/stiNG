@@ -5,7 +5,7 @@ import {
   Sim, Act, T, DT, ZONES, ZoneName, SwatKind, SwatKindName, StyleName, TopName, BottomName, Top, Bottom,
   toWorld, toLocal, dirToWorld, chunkKey, chunkOf, hash, Domain, rangeInt, resolveSting, zoneCover, segClosest, classify, predictedKind,
   NEST, NEST_ENTRANCE, flyPos, beePos, fmtClock, minuteOfDay, isLowerZone, broodTotal, sugarCap, proteinCap, waterCap, garmentGraph, dayWeather,
-  NetLab, LINKS, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetLabel, assistPilot, swoopPilot, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE,
+  NetLab, LINKS, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetLabel, assistPilot, swoopPilot, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE, SKILLS, SKILL_UNLOCKS, SKILL_RANKED, SKILL_HIVE, skillCost,
 } from './sim/index.js';
 
 // Tuning as data (GDD 13, T1-22): read tuning/sting.tune, served next to the page, before anything uses T. Without it
@@ -194,19 +194,27 @@ const ySign = () => (opts.invert ? -1 : 1);
 const chunkViews = new Map(), humanViews = new Map(), waspViews = new Map();
 const pos = new Map(); // wasp id -> {p: prev, c: current}
 const anims = [];
-const ui = { lab: false, nest: false, zones: false, swats: true, log: [], speed: 1, reflexUntil: 0 };
+const ui = { lab: false, nest: false, zones: false, swats: true, log: [], speed: 1, reflexUntil: 0, focusUntil: 0, focusReady: 0 };
 // Solo time (GDD 5.1, 7.8, T1-23). Both only change how fast the wall clock feeds ticks to the sim, never the sim:
 // replays and saves are unaffected. A shared world's clock never changes speed.
 const SPEEDS = [1, 4, 16];
 const solo = () => !lab && sim && !sim.net;
 const timeScale = () => {
   if (!solo()) return 1;
-  const reflex = opts.reflex && performance.now() < ui.reflexUntil ? 0.25 : 1;
+  const reflex = opts.reflex && performance.now() < ui.reflexUntil ? 0.25 : performance.now() < ui.focusUntil ? 0.35 : 1;
   return (ui.nest ? ui.speed : 1) * reflex;
 };
 function setSpeed(s) { ui.speed = s; SPEEDS.forEach((v) => { const b = $('speed' + v); if (b) b.setAttribute('aria-pressed', v === s); }); }
 function calmTime(why) { if (ui.speed !== 1) { setSpeed(1); toast(why + ' · back to normal time', 'var(--yellow)', 1.6); } }
-function reflex() { if (solo() && opts.reflex) ui.reflexUntil = performance.now() + 900; }
+function reflex() { if (solo() && opts.reflex && sim.hasSkill(null, 'reflex')) ui.reflexUntil = performance.now() + 900; } // a skill (GDD 6.8)
+// Focus (a skill, solo): Z slows time for a few seconds, then needs a rest
+function focus() {
+  if (!solo() || !sim.hasSkill(null, 'focus')) { toast(solo() ? 'Focus is a skill: learn it in the colony view (N)' : 'Focus works in solo worlds only', 'var(--muted)', 1.4); return; }
+  const now = performance.now();
+  if (now < ui.focusReady) { toast(`Focus is ready again in ${Math.ceil((ui.focusReady - now) / 1000)} s`, 'var(--muted)', 1); return; }
+  ui.focusUntil = now + T.skills.focusMs; ui.focusReady = now + T.skills.focusCooldownMs;
+  toast('Focus', 'var(--yellow)', 0.8);
+}
 let deathSpot = null, deadUntil = 0, toastTimer = 0, bumpTimer = 0;
 const camPos = new THREE.Vector3();
 let camDist = 0.1, eyeBlend = 0;
@@ -1563,7 +1571,7 @@ function buildCmd() {
     yawQ: Math.round(input.yaw * 1e4), pitchQ: Math.round(input.pitch * 1e4),
     act: (k.has('KeyE') || (gp && gp.b(0)) ? Act.Interact : 0) | (k.has('KeyQ') || (gp && gp.b(3)) ? Act.Switch : 0) | (k.has('KeyR') || (gp && gp.b(2)) ? Act.Rest : 0) | (input.swoopOnce ? (input.swoopOnce = false, Act.Swoop) : 0),
     alloc: input.alloc,
-    pick: input.pick ? (input.pick = 0, pickOnce) : 0,
+    pick: input.learn ? (input.learn = 0, -(learnOnce + 1)) : input.pick ? (input.pick = 0, pickOnce) : 0, // a negative pick learns a skill (GDD 6.8)
   };
   // locked on: closing in slows near the target, so W brings you up to it rather than past it
   if (input.lock && !input.pilot && cmd.mz > 0) {
@@ -1611,6 +1619,7 @@ function toggleLock() {
 function swoop() {
   const w = sim && sim._driven();
   if (!w || !running || paused || w.state !== 'fly') return;
+  if (!sim.hasSkill(w, 'swoop')) { toast('The dash is a skill: learn it in the colony view (N)', 'var(--muted)', 1.6); return; }
   input.pilot = null;
   if (input.lock) input.swoopLock = { ...input.lock, sent: false };
   else input.swoopOnce = true;
@@ -1619,6 +1628,7 @@ function swoop() {
 function interactNear() { const h = sim.hint || {}; return !!(h.prey || h.bait || h.wood || h.water || h.site || h.rival || h.hive || h.hiber || h.opening || (h.raid !== null && h.raid !== undefined)); }
 function startPilot() {
   if (!input.lock || !TARGET_KIND[input.lock.kind].go || interactNear()) return false;
+  if (!sim.hasSkill(sim._driven(), 'assist')) { toast('Assisted flight is a skill: learn it in the colony view (N)', 'var(--muted)', 1.6); return false; }
   input.pilot = input.lock;
   toast(`Flying to the ${targetLabel(sim, input.lock)}`, 'var(--yellow)', 1);
   return true;
@@ -1684,6 +1694,7 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyT' && !e.repeat && ui.nest && solo()) { setSpeed(SPEEDS[(SPEEDS.indexOf(ui.speed) + 1) % SPEEDS.length]); return; }
   if (e.code === 'KeyV' && !e.repeat && running && !paused) { toggleLock(); return; }
   if (e.code === 'KeyX' && !e.repeat && running && !paused) { swoop(); return; }
+  if (e.code === 'KeyZ' && !e.repeat && running && !paused) { focus(); return; }
   if (e.code === 'KeyG' && !e.repeat && running && !paused) { eyeTurnDown(); return; }
   if (e.code === 'KeyE' && !e.repeat && running && !paused && startPilot()) return;
   if (e.code === 'KeyM' && !e.repeat) { audio.on = !audio.on; toast(audio.on ? 'Sound on' : 'Sound off', 'var(--muted)', 1.2); return; }
@@ -1818,8 +1829,38 @@ function updateWorkers() {
   }).join('') : '<p class="label">Nobody is out. Workers leave the nest when you are near it in daylight.</p>';
 }
 
+// Skills (GDD 6.8): learned with the line's XP from the colony view; a learn goes out in the next command
+const SKILL_INFO = {
+  swoop: ['Dash', 'X: a short burst that slams onto what it reaches'], assist: ['Assisted flight', 'E with a lock: fly there and land, perch or grab'],
+  reflex: ['Reflex', 'time slows when a hand comes for you (solo)'], focus: ['Focus', 'Z: slow time for 3 s (solo; needs Reflex)'],
+  release: ['Quick release', 'pull out and away when a hand is about to land'], landR: ['Landing reach', 'settle and lock on from further off'],
+  feedR: ['Feeding reach', 'feed from further off'], grabR: ['Grab reach', 'catch prey from further off'], speed: ['Flight speed', 'faster in the air'],
+  forage: ['Foraging yield', 'more from every load'], brood: ['Brood growth', 'brood develops faster'], lay: ['Population', 'the queen lays more'], build: ['Comb building', 'more cells from each load'],
+};
+let learnOnce = 0, skillSig = '';
+function updateSkills() {
+  const P = sim.prog, X = T.xp, all = sim.settings.skills === 'all', xp = P.unitTotal + P.hiveTotal;
+  $('nXp').innerHTML = [
+    ['Unit XP', `${Math.floor(P.unit)} to spend · ${Math.floor(P.unitTotal)} earned`], ['Hive XP', `${Math.floor(P.hive)} to spend · ${Math.floor(P.hiveTotal)} earned`],
+    ['Stabs', `${P.stabs} people nobody had stung`],
+    ...(sim.species === 'wasp' && !String(sim.settings.progression || 'open').startsWith('fixed:') ? [['Year\'s turn', xp >= X.hornetXp && P.stabs >= X.hornetStabs ? 'strong enough to wake as hornets' : xp < X.beeXp && P.stabs < X.beeStabs ? `bees will be offered unless the line reaches ${X.beeXp} XP or ${X.beeStabs} stabs` : `hornets at ${X.hornetXp} XP and ${X.hornetStabs} stabs (${Math.floor(xp)}, ${P.stabs})`]] : []),
+  ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+  const sig = JSON.stringify([P.ranks, Math.floor(P.unit), Math.floor(P.hive), all]);
+  if (sig === skillSig) return;
+  skillSig = sig;
+  const btn = (id) => {
+    const i = SKILLS.indexOf(id), r = P.ranks[i], unlock = SKILL_UNLOCKS.includes(id), have = unlock ? r > 0 || all : r > 0;
+    const c = unlock && all ? null : skillCost(i, P.ranks), can = !!c && P[c.pool] >= c.cost, [name, desc] = SKILL_INFO[id];
+    const tag = unlock ? (have ? ' ✓' : '') : ` ${r}/${T.skills.ranks}`, cost = c ? ` · ${c.cost} ${c.pool} XP` : unlock && !have ? ' · needs Reflex' : '';
+    return `<button class="ghost${have ? ' have' : ''}" data-i="${i}"${can ? '' : ' disabled'}><b>${name}${tag}</b><span>${desc}${cost}</span></button>`;
+  };
+  $('nSkills').innerHTML = `<h4>Unit</h4>${[...SKILL_UNLOCKS, ...SKILL_RANKED].map(btn).join('')}<h4>Hive</h4>${SKILL_HIVE.map(btn).join('')}`;
+}
+$('nSkills').addEventListener('click', (e) => { const b = e.target.closest('button[data-i]'); if (b && !b.disabled) { learnOnce = +b.dataset.i; input.learn = 1; } });
+
 function updateNest() {
   updateWorkers();
+  updateSkills();
   const c = sim.colony, out = sim.wasps.length;
   $('nStores').innerHTML = [
     ['Queen', c.queenAlive ? 'laying' : c.nestAlive ? 'dead' : 'nest destroyed'],
@@ -2309,12 +2350,16 @@ function handleEvents(events) {
           if (!lab && sim.winter) showWinter(`${e.why === 'autumn' ? 'The colony died with the autumn, as colonies do.' : 'Your colony did not make it through the season.'} ${fmt(e.mated)} young queen${Math.round(e.mated) === 1 ? '' : 's'} mated and went into hibernation; ${e.survivors} survived the cold.${e.lineage ? ` ${e.lineage} older sister nest${e.lineage === 1 ? '' : 's'} of your line also made it.` : ''} ${total > 1 ? 'Choose which queen you wake as; the others found sister nests.' : 'You wake as the last queen of the line.'}`);
         }
         break;
+      case 'learned': toast(`Learned: ${SKILL_INFO[e.id][0]}${SKILL_RANKED.includes(e.id) || SKILL_HIVE.includes(e.id) ? ` (rank ${e.rank})` : ''}`, 'var(--yellow)', 1.6); logEvent(`learned ${SKILL_INFO[e.id][0].toLowerCase()}`); skillSig = ''; break; // GDD 6.8
+      case 'learnDenied': toast('Not enough XP', 'var(--muted)', 1); break;
+      case 'quickRelease': if (e.driven) toast('Pulled out just in time', 'var(--yellow)', 1); break;
       case 'sisterFounded': logEvent(`a sister colony of the line was founded ${Math.round(Math.hypot(e.x - sim.nest.x, e.z - sim.nest.z))} m away`); break; // T2-4
       case 'sisterLost': toast('A sister colony of the line has died out', 'var(--red)', 2); break;
       case 'sisterTakeover': toast(`Your colony is gone. The line goes on: you are now a worker of a sister colony (${e.adults} adults).`, 'var(--yellow)', 4); syncNests(); break;
       case 'hiberScouted': toast(`Winter site scouted: ${T.hiber.name[e.kind]}. Most of the young queens will winter here.`, 'var(--yellow)', 3); break;
       case 'spring':
         logEvent(e.bee ? `season ${e.season} · spring in the hive` : `season ${e.season} · you are the queen, waking ${T.hiber.name[e.kind] || ''}`);
+        if (e.species) toast(e.species === 'hornet' ? 'The line wakes as hornets' : 'A honeybee queen and her swarm: find a tree to settle', 'var(--yellow)', 4); // GDD 6.8
         if (e.bee) syncNests();
         waspSwitched(e.id, 0.98);
         syncChunks();
@@ -2596,7 +2641,7 @@ function readSettings() {
     seed, dayMinutes: +$('dayLen').value, humanDensity: +$('density').value, beeAggression: +$('bees').value, seasonDays: +$('seasonLen').value, net: $('netMode').value,
     reaction: +$('reaction').value, escalation: +$('escRate').value,
     woods: +$('woods').value, towns: +$('towns').value, water: +$('water').value, hives: +$('hives').value, terrain: +$('terrain').value, // T2-6
-    species: $('species').value, progression: 'open', // GDD 6.8: test builds open all three
+    species: $('species').value, progression: 'open', skills: $('skillsSet').value, // GDD 6.8: test builds open all three species
     exterminator: $('sysExt').checked, pestControl: $('sysMuni').checked, birds: $('sysBirds').checked, rivals: $('sysRivals').checked,
   };
 }
@@ -2654,6 +2699,10 @@ $('bStart').addEventListener('click', () => { initAudio(); applyDisplaySettings(
 // Winter (T1-15): one button per wintering site; where she wakes is where the next season starts
 function showWinter(text) {
   $('winterText').textContent = text;
+  const offer = sim.winter.offer; // the year's turn (GDD 6.8)
+  $('winterOffer').hidden = !offer; $('morph').checked = false;
+  if (offer === 'hornet') { $('morphLabel').textContent = 'Wake as a hornet queen'; $('morphNote').textContent = 'The line has done enough this year: the queen you wake founds a hornet colony. The other queens stay wasps.'; }
+  if (offer === 'bee') { $('morphLabel').textContent = 'Try a honeybee colony'; $('morphNote').textContent = 'The line did little this year. The queen you wake can lead a swarm of honeybees instead; the other queens stay wasps.'; }
   $('winterSites').innerHTML = sim.winter.sites.map((s, i) => {
     const d = Math.round(Math.hypot(s.x - sim.nest.x, s.z - sim.nest.z));
     return `<button class="ghost" data-i="${i + 1}"><b>${s.n || 1} queen${(s.n || 1) === 1 ? '' : 's'} ${T.hiber.name[s.kind]}</b><span>${d} m from the old nest · shelter ${Math.round(s.q * 100)}%${s.scouted ? ' · the site you scouted' : ''}</span></button>`;
@@ -2665,7 +2714,7 @@ function showWinter(text) {
 }
 // Waking: a pick goes out in the next command, and the sim wakes that queen
 function wake(i) {
-  pickOnce = i; input.pick = 1;
+  pickOnce = i + (sim.winter && sim.winter.offer && $('morph').checked ? 1000 : 0); input.pick = 1;
   $('winterScreen').hidden = true; setPaused(false); lock();
   toast('Spring. Find a nest site and press E: a trunk, a burrow, under a branch, a gap in a shed or a hollow tree.', 'var(--yellow)', 4);
 }
