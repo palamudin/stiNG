@@ -34,7 +34,7 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
-const SKY_DAY = new THREE.Color('#a9cfe3'), SKY_DUSK = new THREE.Color('#e3a271'), SKY_NIGHT = new THREE.Color('#0e1626'), SKY_RAIN = new THREE.Color('#7d8792');
+const SKY_FLASH = new THREE.Color('#e8ecff'), SKY_DAY = new THREE.Color('#a9cfe3'), SKY_DUSK = new THREE.Color('#e3a271'), SKY_NIGHT = new THREE.Color('#0e1626'), SKY_RAIN = new THREE.Color('#7d8792');
 const sky = SKY_DAY.clone();
 const scene = new THREE.Scene();
 scene.background = sky;
@@ -1193,16 +1193,22 @@ rainGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(RAIN
 const rain = new THREE.LineSegments(rainGeo, new THREE.LineBasicMaterial({ color: '#c9d6e3', transparent: true, opacity: 0.45 }));
 rain.frustumCulled = false; rain.visible = false; scene.add(rain);
 const rainDrops = Array.from({ length: RAIN }, () => [Math.random() * 24 - 12, Math.random() * 12, Math.random() * 24 - 12]);
+let flash = 0;
 function renderRain(center, dt) {
   rain.visible = sim.raining;
-  if (!rain.visible) return;
-  const a = rainGeo.attributes.position.array;
+  if (!rain.visible) { flash = 0; return; }
+  const pour = sim.weatherToday.pour, w = sim.wind, a = rainGeo.attributes.position.array;
+  // a downpour falls faster and slants with the gale (T2-2)
+  const fall = 9 * (pour > 1 ? 1.6 : 1), sx = pour > 1 ? w.x * 0.05 : 0.02, sz = pour > 1 ? w.z * 0.05 : 0;
   rainDrops.forEach((d, i) => {
-    d[1] -= dt * 9; if (d[1] < 0) d[1] += 12;
+    d[1] -= dt * fall; if (d[1] < 0) d[1] += 12;
     const x = center.x + d[0], y = d[1], z = center.z + d[2];
-    a.set([x, y, z, x + 0.02, y + 0.25, z], i * 6);
+    a.set([x, y, z, x + sx, y + 0.25 * (pour > 1 ? 1.5 : 1), z + sz], i * 6);
   });
   rainGeo.attributes.position.needsUpdate = true;
+  // lightning now and then in a storm (presentation only)
+  if (pour > 1 && Math.random() < dt * 0.12) { flash = 1; setTimeout(() => blip(60, 35, 0.9, 0.25, 'sawtooth'), 300 + Math.random() * 1500); }
+  flash = Math.max(0, flash - dt * 5);
 }
 
 function lighting() {
@@ -1212,11 +1218,14 @@ function lighting() {
   const dayAmt = Math.min(1, Math.max(0, elev * 2.2));
   const duskAmt = Math.max(0, 1 - Math.abs(elev - 0.12) / 0.18) * (f > 0 && f < 1 ? 1 : 0);
   sky.copy(SKY_NIGHT).lerp(SKY_DAY, dayAmt).lerp(SKY_DUSK, duskAmt * 0.6);
+  const storm = sim.raining && sim.weatherToday.pour > 1;
   if (sim.raining) sky.lerp(SKY_RAIN, 0.7 * dayAmt + 0.2);
+  if (storm) sky.multiplyScalar(0.6);
+  if (flash > 0) sky.lerp(SKY_FLASH, flash * 0.8);
   scene.fog.color.copy(sky);
   sunDir.set(Math.cos(Math.PI * f) * 0.8, Math.max(0.08, elev), 0.35).normalize();
-  sun.intensity = (sim.raining ? 0.5 : 2.1) * dayAmt;
-  hemi.intensity = 0.18 + 0.97 * dayAmt;
+  sun.intensity = (sim.raining ? (storm ? 0.25 : 0.5) : 2.1) * dayAmt;
+  hemi.intensity = 0.18 + 0.97 * dayAmt * (storm ? 0.6 : 1) + flash * 1.5;
 }
 
 // ------------------------------------------------------------------ sound (procedural, presentation only)
@@ -1490,6 +1499,10 @@ function updateNest() {
     ['Cells used', `${fmt(broodTotal(c))} / ${fmt(c.cells)}`], ['Larvae fed', Math.round(c.fed * 100) + '%'],
     ['Forage this season', (() => { const a = sim.ecoAvail(); return `sugar ${Math.round(a.sugar * 100)}% · protein ${Math.round(a.protein * 100)}%`; })()], // T1-8
     ...(c.sited !== false ? [['Brood speed', (() => { const v = sim.broodSpeed(); return `${Math.round(v * 100)}%${v < 0.98 ? (sim.temperature < T.thermal.coldFrom ? ' · too cold' : ' · too hot') : ''}`; })()]] : []),
+    ['Weather', (() => { // today and tomorrow (T2-2): a heatwave coming is the time to bring water in
+      const name = (w) => (w.kind === 'heat' ? 'heatwave' : w.kind === 'cold' ? 'cold snap' : w.kind === 'storm' ? 'storm in the afternoon' : w.rain ? 'showers' : 'fair') + ` (${Math.round(w.base)} °C)`;
+      return `today ${name(sim.weatherToday)} · tomorrow ${name(dayWeather(sim.seed, sim.day + 1))}`;
+    })()],
     ['Emerged · laid', `${fmt(c.stats.emerged)} · ${fmt(c.stats.laid)}`],
     ...(sim.muni && sim.muni.active ? [['Pest control', `${sim.muni.active.keys.includes(sim.nest.key) ? 'baits around the nest' : 'baits nearby'} · until ${dayLabel(sim.muni.active.until)}`]] : []),
     ...(c.stats.poisoned ? [['Lost to poison', fmt(c.stats.poisoned)]] : []),
@@ -1591,7 +1604,8 @@ function updateHud() {
   const md = minuteOfDay(sim.minute);
   { const sc = timeScale(); $('clockT').textContent = `Day ${sim.day + 1} · ${fmtClock(sim.minute)}${sc > 1 ? ` · ${sc}×` : sc < 1 ? ' · REFLEX' : ''}`; }
   const wnd = sim.wind, ws = Math.hypot(wnd.x, wnd.z);
-  $('clockW').textContent = `${Math.round(sim.temperature)} °C · ${sim.raining ? 'rain' : md < T.time.dawn || md >= T.time.dusk ? 'night' : 'clear'} · ${ws < 0.5 ? 'calm' : `wind ${ws.toFixed(1)} m/s`}`;
+  const wxk = sim.weatherToday, spell = wxk.kind === 'heat' ? `heatwave ${wxk.spellDay}/${wxk.spellLen} · ` : wxk.kind === 'cold' ? `cold snap ${wxk.spellDay}/${wxk.spellLen} · ` : wxk.kind === 'storm' ? 'storm · ' : ''; // T2-2
+  $('clockW').textContent = `${spell}${Math.round(sim.temperature)} °C · ${sim.raining ? (wxk.pour > 1 ? 'downpour' : 'rain') : md < T.time.dawn || md >= T.time.dusk ? 'night' : 'clear'} · ${ws < 0.5 ? 'calm' : `wind ${ws.toFixed(1)} m/s`}`;
   const frac = Math.min(1, Math.max(0, sim.seasonFrac));
   $('seasonBar').style.width = (frac * 100).toFixed(1) + '%';
   $('seasonT').textContent = `Season ${sim.season.n} · ${sim.season.phase}${sim.lineage > 0 ? ` · ${sim.lineage} sister nest${sim.lineage === 1 ? '' : 's'}` : ''}`;
@@ -1827,6 +1841,7 @@ function handleEvents(events) {
       case 'swatHit': if (e.waspId === sim.drivenId) logEvent(`${SwatKindName[e.kind].toLowerCase()} by #${e.actorHex.slice(0, 4)} at ${ms(e.delayTicks)} ms`); break;
       case 'stunned': if (e.driven) toast('Knocked away · stunned', 'var(--yellow)', 1.6); break;
       case 'flee': logEvent(`#${e.humanHex.slice(0, 4)} runs`); break;
+      case 'knockedDown': if (e.driven) toast('Knocked down by the rain · get under a table, a roof or a tree', 'var(--red)', 2.4); break; // T2-2
       case 'exhausted': if (e.id === sim.drivenId) toast('Crop empty · feed on flowers or soda', 'var(--red)', 2.6); break;
       case 'caught': if (e.id === sim.drivenId) { toast(`Caught a ${e.kind}`, 'var(--yellow)', 1.4); blip(900, 600, 0.08, 0.05, 'square'); } break;
       case 'chewed': if (e.id === sim.drivenId) toast('Pulp ready · bring it home', 'var(--yellow)', 1.4); break;

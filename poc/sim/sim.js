@@ -160,6 +160,16 @@ export class Sim {
     return v;
   }
   get raining() { return isRaining(this.seed, this.minute); }
+  get weatherToday() { return dayWeather(this.seed, this.day); }
+  // Under something that keeps the rain off (T2-2): a box overhead (a table top, a roof, a shed), or a tree crown
+  _sheltered(w) {
+    for (const rec of this.activeChunks) {
+      const c = rec.content;
+      for (const b of c.boxes) if (w.x > b.minx && w.x < b.maxx && w.z > b.minz && w.z < b.maxz && b.miny >= w.y) return true;
+      for (const t of c.trees) if (w.y < t.h && sq(w.x - t.x) + sq(w.z - t.z) < t.cr * t.cr) return true;
+    }
+    return false;
+  }
   get physicalCount() { return this._own().length; }
   _own() { return this.wasps.filter((w) => w.colony === 'own'); }
   get seasonFrac() { return (this.minute - this.season.startMinute) / (this.settings.seasonDays * 1440); }
@@ -994,8 +1004,15 @@ export class Sim {
       let drain = E.cruisePerSec * DT * (E.hoverShare + (1 - E.hoverShare) * Math.min(air / W.cruise, 2)) * (burst ? E.burstMul : 1);
       if (rain) drain *= T.weather.rainDrainMul;
       if (this._nearCitronella(w)) drain *= T.esc.citronellaDrain;
+      const X = T.extreme, air0 = this.temperature;
+      if (air0 > X.heatFrom) drain *= 1 + X.heatDrain * (air0 - X.heatFrom); // flying in heat costs more (T2-2)
       w.energy -= drain;
       if (w.energy < 0) { w.energy = 0; this.emit('exhausted', { id: w.id }); }
+      // a downpour knocks a wasp in the open out of the air (T2-2)
+      if (rain && this.weatherToday.pour > 1 && !this._sheltered(w) && h32(w.id, this.tick, 71) < X.knockPerSec * DT) {
+        w.state = 'stunned'; w.stateTicks = X.knockTicks; w.vy = -1.2; w.land = null;
+        this.emit('knockedDown', { id: w.id, driven: w.id === this.drivenId });
+      }
     } else {
       w.vy -= W.gravity * DT;
       if (w.vy < -W.maxFall) w.vy = -W.maxFall;
@@ -1016,11 +1033,11 @@ export class Sim {
     } else w.groundTicks = 0;
   }
 
-  // The air where a wasp is: the day's wind, gusting, falling off toward the ground (felt: the share of it in the air
-  // a wasp's size flies in, among the grass and leaves)
+  // The air where a wasp is: the day's wind, gusting (hard in a storm, T2-2), falling off toward the ground (felt: the
+  // share of it in the air a wasp's size flies in, among the grass and leaves)
   _drift(w) {
     const W = T.wind, wind = this.wind, t = this.tick;
-    const gust = 1 + W.gust * dsin(t * 0.031) * dsin(t * 0.0137 + 1);
+    const gust = 1 + this.weatherToday.gust * dsin(t * 0.031) * dsin(t * 0.0137 + 1);
     const k = W.felt * gust * clamp01(w.y / W.refHeight);
     return { x: wind.x * k, z: wind.z * k };
   }
@@ -1510,8 +1527,8 @@ export class Sim {
     const cache = rec._puddles || (rec._puddles = {});
     if (cache.d === d) return cache.list;
     const W = T.water, c = rec.content, sd = Number(this.seed & 0xffffffffn), CS = T.chunk.size, list = [];
-    const paved = c.roads.concat(c.lots);
-    for (let k = 0; k < W.puddles; k++) {
+    const paved = c.roads.concat(c.lots), n = W.puddles * (dayWeather(this.seed, d).pour > 1 ? 2 : 1); // a storm leaves twice as many (T2-2)
+    for (let k = 0; k < n; k++) {
       const u = (j) => hseq(sd, rec.cx, rec.cz, d, k, 990 + j);
       let x, z;
       if (paved.length) { const p = paved[Math.floor(u(0) * paved.length)]; x = p.minx + (p.maxx - p.minx) * u(1); z = p.minz + (p.maxz - p.minz) * u(2); }
@@ -3551,7 +3568,7 @@ export class Sim {
     if (this.raining && col.nestAlive && col.sited) {
       // the site decides what rain costs: burrows flood, open nests chill (GDD 6.6)
       const st = T.sites[this.nest.site || 'trunk'], dt = 60 / this.dayTicks;
-      const fl = st.flood * dt, inside = Math.max(0, col.adults - this._own().length);
+      const fl = st.flood * dt * this.weatherToday.pour, inside = Math.max(0, col.adults - this._own().length); // a downpour floods more (T2-2)
       col.eggs -= col.eggs * fl; col.larvae -= col.larvae * fl; col.pupae -= col.pupae * fl;
       col.rEggs -= col.rEggs * fl; col.rLarvae -= col.rLarvae * fl; col.rPupae -= col.rPupae * fl;
       const cold = Math.min(inside, inside * T.sites.rainMortality * st.exposure * dt);

@@ -1447,7 +1447,7 @@ namespace Sting.Core
             {
                 // the site decides what rain costs: burrows flood, open nests chill (GDD 6.6)
                 var st = T.sites.Of(nest.site); Num dt = (Num)60 / dayTicks;
-                Num fl = st.flood * dt, inside = Max(0, col.adults - Own().Count);
+                Num fl = st.flood * dt * WeatherToday.pour, inside = Max(0, col.adults - Own().Count); // a downpour floods more (T2-2)
                 col.eggs -= col.eggs * fl; col.larvae -= col.larvae * fl; col.pupae -= col.pupae * fl;
                 col.rEggs -= col.rEggs * fl; col.rLarvae -= col.rLarvae * fl; col.rPupae -= col.rPupae * fl;
                 Num cold = Min(inside, inside * T.sites.rainMortality * st.exposure * dt);

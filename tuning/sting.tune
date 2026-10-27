@@ -38,6 +38,23 @@ felt = 0.7
 refHeight = 3
 gust = 0.4
 
+[extreme]
+heatChance = 0.025
+heatLen = [3, 6]
+heatBoost = 7
+heatWind = 0.6
+coldChance = 0.03
+coldLen = [2, 4]
+coldDrop = 9
+stormChance = 0.05
+stormWind = [6, 9]
+stormGust = 0.9
+pour = 3
+knockPerSec = 0.4
+knockTicks = 45
+heatFrom = 32
+heatDrain = 0.05
+
 [cold]
 flightHeat = 12
 shiverHeat = 8

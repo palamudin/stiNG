@@ -22,6 +22,17 @@ export const T = {
   // A wasp flies in the moving air: airspeed capped at its top speed, plus the wind, which falls off toward the ground
   // below refHeight. felt scales the day's wind to the air a wasp's size flies in.
   wind: { min: 0, max: 3, rainMul: 1.4, felt: 0.7, refHeight: 3, gust: 0.4 },
+  // Extreme weather (GDD 5.3, T2-2). Spells start on a day by hash and run a few days: a heatwave adds heatBoost to
+  // the day's base temperature, keeps the rain off and the wind down; a cold snap takes coldDrop off. A storm is one
+  // afternoon of downpour and gale: rain `pour` times as heavy (floods burrows that much more, more puddles), wind
+  // between stormWind[0] and [1] m/s, gusting hard. In a downpour a wasp flying in the open is knocked down now and
+  // then (knockPerSec); under a table, a roof or a tree crown it is sheltered. Flying in heat costs more sugar.
+  extreme: {
+    heatChance: 0.025, heatLen: [3, 6], heatBoost: 7, heatWind: 0.6,
+    coldChance: 0.03, coldLen: [2, 4], coldDrop: 9,
+    stormChance: 0.05, stormWind: [6, 9], stormGust: 0.9, pour: 3, knockPerSec: 0.4, knockTicks: 45,
+    heatFrom: 32, heatDrain: 0.05,
+  },
   // Body temperature (GDD 7.1, 10.2, T1-2). bio: Vespula warm their flight muscles before take-off and fly from
   // about 18-20 °C thorax temperature; on human skin they sit near 31 °C; cold torpor below about 8 °C.
   cold: { flightHeat: 12, shiverHeat: 8, shiverMinAir: 8, skinTemp: 31, nestTemp: 30, flyBody: 18, torpor: 8, rate: 1 / 300, lethalTicks: 5400, shiverCost: 0.5 },

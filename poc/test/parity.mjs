@@ -67,7 +67,7 @@ for (const seed of seeds) {
 // weather and schedules
 for (const seed of seeds) {
   const d = Digest();
-  for (let day = 0; day < 60; day++) { const w = dayWeather(seed, day); d.f(w.rain); d.f(w.rainStart); d.f(w.rainEnd); d.f(w.base); d.f(w.wind); d.f(w.windDir); }
+  for (let day = 0; day < 240; day++) { const w = dayWeather(seed, day); d.f(w.rain); d.f(w.rainStart); d.f(w.rainEnd); d.f(w.base); d.f(w.wind); d.f(w.windDir); d.s(w.kind); d.f(w.pour); d.f(w.gust); d.f(w.spellDay); d.f(w.spellLen); } // T2-2: 240 days to see spells
   for (let m = 0; m < 1440 * 4; m += 37) { const v = windAt(seed, m); d.f(v.x); d.f(v.z); }
   for (let i = 0; i < 40; i++) {
     const id = hash(seed, Domain.WorldGen, u64(i), 3n, 1000n);

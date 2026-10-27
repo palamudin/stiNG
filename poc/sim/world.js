@@ -40,9 +40,41 @@ export function dayWeather(seed, day) {
   w = {
     day, rain, rainStart, rainEnd: rainStart + 60 + rangeInt(H(2), 0, 120), base: range(H(3), T.weather.baseMin, T.weather.baseMax),
     wind: range(H(4), T.wind.min, T.wind.max) * (rain ? T.wind.rainMul : 1), windDir: range(H(5), 0, TAU),
+    kind: 'normal', pour: 1, gust: T.wind.gust, spellDay: 0, spellLen: 0,
   };
+  // extreme weather (T2-2): the latest spell that started on or before this day and still runs, else a storm roll
+  const X = T.extreme, sp = weatherSpell(seed, day);
+  if (sp) { w.kind = sp.kind; w.spellDay = day - sp.start + 1; w.spellLen = sp.len; }
+  if (w.kind === 'heat') { w.base += X.heatBoost; w.rain = false; w.wind *= X.heatWind; }
+  else if (w.kind === 'cold') w.base -= X.coldDrop;
+  else if (day > 0 && unit(H(24)) < X.stormChance) {
+    w.kind = 'storm'; w.rain = true; w.pour = X.pour; w.gust = X.stormGust;
+    w.rainStart = 13 * 60 + rangeInt(H(25), 0, 240); w.rainEnd = w.rainStart + 45 + rangeInt(H(26), 0, 90);
+    w.wind = range(H(27), X.stormWind[0], X.stormWind[1]);
+  }
   weatherCache.set(key, w);
   return w;
+}
+// A heatwave or a cold snap running on a day (T2-2). A spell runs its length; a new one can only start on a day no
+// spell covers. Day by day from the first, memoized per seed; spells start on day 1 at the earliest, so a world always
+// opens on ordinary weather.
+const spellMemo = new Map();
+export function weatherSpell(seed, day) {
+  if (day < 1) return null;
+  const key = String(seed);
+  let memo = spellMemo.get(key);
+  if (!memo) { memo = [null]; spellMemo.set(key, memo); }
+  const X = T.extreme;
+  for (let d = memo.length; d <= day; d++) {
+    const prev = memo[d - 1];
+    if (prev && d < prev.start + prev.len) { memo.push(prev); continue; }
+    const H = (i) => hash(seed, Domain.Weather, BigInt(d), BigInt(i));
+    let sp = null;
+    if (unit(H(20)) < X.heatChance) sp = { kind: 'heat', start: d, len: rangeInt(H(21), X.heatLen[0], X.heatLen[1] + 1) };
+    else if (unit(H(22)) < X.coldChance) sp = { kind: 'cold', start: d, len: rangeInt(H(23), X.coldLen[0], X.coldLen[1] + 1) };
+    memo.push(sp);
+  }
+  return memo[day];
 }
 export function isRaining(seed, m) {
   const w = dayWeather(seed, dayOf(m)), d = minuteOfDay(m);

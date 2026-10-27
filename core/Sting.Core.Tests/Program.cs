@@ -121,7 +121,7 @@ namespace Sting.Core.Tests
             foreach (var seed in Seeds)
             {
                 var d = new Digest();
-                for (int day = 0; day < 60; day++) { var w = World.Weather(seed, day); d.F(w.rain); d.F(w.rainStart); d.F(w.rainEnd); d.F(w.@base); d.F(w.wind); d.F(w.windDir); }
+                for (int day = 0; day < 240; day++) { var w = World.Weather(seed, day); d.F(w.rain); d.F(w.rainStart); d.F(w.rainEnd); d.F(w.@base); d.F(w.wind); d.F(w.windDir); d.S(w.kind); d.F(w.pour); d.F(w.gust); d.F(w.spellDay); d.F(w.spellLen); }
                 for (int m = 0; m < 1440 * 4; m += 37) { var v = World.WindAt(seed, m); d.F(v.x); d.F(v.z); }
                 for (int i = 0; i < 40; i++)
                 {

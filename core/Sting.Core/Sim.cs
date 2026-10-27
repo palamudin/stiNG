@@ -216,6 +216,18 @@ namespace Sting.Core
         /// Debug and test hook: force rain on (true) or off (false); null follows the weather
         public bool? rainOverride;
         public bool Raining => rainOverride ?? IsRaining(seed, minute);
+        public DayWeather WeatherToday => World.Weather(seed, day);
+        /// under something that keeps the rain off (T2-2): a box overhead, or a tree crown
+        internal bool Sheltered(Wasp w)
+        {
+            foreach (var rec in activeChunks)
+            {
+                var c = rec.content;
+                foreach (var b in c.boxes) if (w.x > b.minx && w.x < b.maxx && w.z > b.minz && w.z < b.maxz && b.miny >= w.y) return true;
+                foreach (var t in c.trees) if (w.y < t.h && Sq(w.x - t.x) + Sq(w.z - t.z) < t.cr * t.cr) return true;
+            }
+            return false;
+        }
         public int PhysicalCount => Own().Count;
         List<Wasp> Own() { var l = new List<Wasp>(); foreach (var w in wasps) if (w.colony == "own") l.Add(w); return l; }
         int OwnWorkers() { int n = 0; foreach (var w in wasps) if (w.colony == "own" && w.caste != "queen") n++; return n; }

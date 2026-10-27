@@ -308,6 +308,7 @@ Rules:
 - Temperature affects: whether wasps can fly and forage, human outdoor density (picnics need warm dry days), resource availability and nest thermals.
 - Rain grounds flight. Wind is a force field in flight (Section 7.2).
 - Day and night: wasps are diurnal and return to the nest at dusk. Humans follow routines (Section 8.2).
+- Extreme weather (built, 18.38): heatwaves and cold snaps run for days; storms are afternoon downpours in a gale.
 
 ---
 
@@ -1237,6 +1238,18 @@ These complete 11.8. Like the earlier checks, each reads only the event and the 
 
 **Limits.** In ordinary summer weather the abstract foragers keep up, so water matters mostly in attics and on the hottest afternoons; heatwaves (T2-2) are where it decides things.
 
+### 18.38 Extreme weather as built (T2-2)
+
+**Spells.** The day's weather (still a pure function of seed and day) can belong to a spell. A heatwave starts on a day with a 2.5% chance and runs 3 to 6 days: 7 °C on the day's base temperature, no rain, the wind down to 60%. A cold snap starts with a 3% chance and runs 2 to 4 days, 9 °C colder. A spell runs its length and a new one can start only on a day no spell covers, so they never cut each other short; they are computed day by day from day 1 and memoized per seed, and day 0 is always ordinary. In 600 days of the reference world there are 11 heatwaves and 12 cold snaps. Spells ignore the season, so a heatwave can come in spring; the season's own chill still applies on top.
+
+**Storms.** On a day outside a spell, a storm comes with a 5% chance: an afternoon downpour (from between 13:00 and 17:00, for 45 minutes to two and a quarter hours) in a 6 to 9 m/s gale that gusts more than twice as hard as ordinary wind. A storm's rain is three times as heavy: it floods a burrow nest three times as fast and leaves twice as many puddles (T2-1). In the downpour a wasp flying in the open is knocked out of the air now and then (0.4 times a second, stunned for three quarters of a second); under a table, a roof or a tree crown it is sheltered. The gale is stronger than a wasp flies, so a wasp that tries to hold its place in the open is carried off (15 m in three seconds in the test).
+
+**Heat.** Flying above 32 °C costs 5% more sugar per degree, so a heatwave afternoon at 37 °C costs a quarter more. On a heatwave afternoon an attic comb goes past the lethal 34 °C and its brood cooks unless the colony has water (18.37); a hollow tree stays cool.
+
+**Shown.** The HUD's weather line names the spell and its day ("heatwave 2/4"), and a downpour; the colony view forecasts today and tomorrow, so a heatwave coming is the time to bring water in. A storm darkens the sky, slants the rain with the wind, and flashes lightning with thunder (presentation only).
+
+**Checks.** JS and C# check that spells run their length and day 0 is ordinary, that heatwaves are dry and storms are afternoon gales, a downpour knocking a wasp down in the open but not under a table, the gale carrying off a hovering wasp, the extra cost of flying in heat, and an attic against a hollow tree on a heatwave afternoon. The weather digest now covers 240 days so it sees spells.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1245,7 +1258,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (88 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (89 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -1284,7 +1297,7 @@ Agreed 2026-10-27: Tier 2 is built on the current stack in the order that surviv
 | # | Feature | GDD | Size | Notes |
 |---|---|---|---|---|
 | T2-1 | **Built (18.37).** Water as a resource: birdbaths and rain puddles, water loads carried home, a hot nest cooled by water, brood that cooks without it | 6.2, 6.6 | M | sim and generator |
-| T2-2 | Extreme weather: heatwaves, storms (gusts and downpours), cold snaps | 5.3 | M | sim; makes T2-1 matter |
+| T2-2 | **Built (18.38).** Extreme weather: heatwaves, storms (gusts and downpours), cold snaps | 5.3 | M | sim; makes T2-1 matter |
 | T2-3 | Males as wasps: drones fly physically late in the season, no sting, mating flights with gynes | 6.5, 6.7 | M | sim |
 | T2-4 | Lineage colonies as real AI colonies: the queens the player did not wake found colonies of the line, run by AI | 6.7 | L | sim |
 | T2-5 | Town centers and beer gardens: a new land use with dense outdoor seating and drinks | 4.1, 4.3 | M | generator and sim; new art |

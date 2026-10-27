@@ -56,7 +56,13 @@ namespace Sting.Core
     }
 
     public sealed class ShedSite { public Num x, y, z, ix, iz, nx, nz; }
-    public sealed class DayWeather { public long day; public bool rain; public Num rainStart, rainEnd, @base, wind, windDir; }
+    public sealed class DayWeather
+    {
+        public long day; public bool rain; public Num rainStart, rainEnd, @base, wind, windDir;
+        /// extreme weather (T2-2): normal, heat, cold or storm; how heavy the rain is; how hard the wind gusts; which day of how long a spell
+        public string kind = "normal"; public Num pour = 1, gust = T.wind.gust; public int spellDay, spellLen;
+    }
+    public sealed class Spell { public string kind; public long start; public int len; }
     public sealed class HumanWin { public Num arrive, leave; }
 
     public static class World
@@ -100,8 +106,41 @@ namespace Sting.Core
             Num rainStart = 11 * 60 + RangeInt(H(1), 0, 6 * 60);
             var w = new DayWeather { day = day, rain = rain, rainStart = rainStart, rainEnd = rainStart + 60 + RangeInt(H(2), 0, 120), @base = Range(H(3), T.weather.baseMin, T.weather.baseMax),
                 wind = Range(H(4), T.wind.min, T.wind.max) * (rain ? T.wind.rainMul : 1), windDir = Range(H(5), 0, TAU) };
+            // extreme weather (T2-2): a spell running on this day, else a storm roll
+            var sp = WeatherSpell(seed, day);
+            if (sp != null) { w.kind = sp.kind; w.spellDay = (int)(day - sp.start + 1); w.spellLen = sp.len; }
+            if (w.kind == "heat") { w.@base += T.extreme.heatBoost; w.rain = false; w.wind *= T.extreme.heatWind; }
+            else if (w.kind == "cold") w.@base -= T.extreme.coldDrop;
+            else if (day > 0 && Unit(H(24)) < T.extreme.stormChance)
+            {
+                w.kind = "storm"; w.rain = true; w.pour = T.extreme.pour; w.gust = T.extreme.stormGust;
+                w.rainStart = 13 * 60 + RangeInt(H(25), 0, 240); w.rainEnd = w.rainStart + 45 + RangeInt(H(26), 0, 90);
+                w.wind = Range(H(27), T.extreme.stormWind[0], T.extreme.stormWind[1]);
+            }
             lock (weatherCache) weatherCache[key] = w;
             return w;
+        }
+        static readonly Dictionary<ulong, List<Spell>> spellMemo = new Dictionary<ulong, List<Spell>>();
+        /// A heatwave or a cold snap running on a day (T2-2): a spell runs its length, and a new one starts only on a day no
+        /// spell covers; day by day from the first, memoized per seed (see world.js weatherSpell)
+        public static Spell WeatherSpell(ulong seed, long day)
+        {
+            if (day < 1) return null;
+            lock (spellMemo)
+            {
+                if (!spellMemo.TryGetValue(seed, out var memo)) { memo = new List<Spell> { null }; spellMemo[seed] = memo; }
+                for (long d = memo.Count; d <= day; d++)
+                {
+                    var prev = memo[(int)d - 1];
+                    if (prev != null && d < prev.start + prev.len) { memo.Add(prev); continue; }
+                    ulong H(ulong i) => Hash(seed, Domain.Weather, U64(d), i);
+                    Spell sp = null;
+                    if (Unit(H(20)) < T.extreme.heatChance) sp = new Spell { kind = "heat", start = d, len = RangeInt(H(21), T.extreme.heatLen[0], T.extreme.heatLen[1] + 1) };
+                    else if (Unit(H(22)) < T.extreme.coldChance) sp = new Spell { kind = "cold", start = d, len = RangeInt(H(23), T.extreme.coldLen[0], T.extreme.coldLen[1] + 1) };
+                    memo.Add(sp);
+                }
+                return memo[(int)day];
+            }
         }
         public static bool IsRaining(ulong seed, long m) { var w = Weather(seed, DayOf(m)); long d = MinuteOfDay(m); return w.rain && d >= w.rainStart && d < w.rainEnd; }
         public static Num TempAt(ulong seed, long m)

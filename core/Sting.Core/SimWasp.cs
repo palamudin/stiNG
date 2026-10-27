@@ -165,8 +165,16 @@ namespace Sting.Core
                 Num drain = T.energy.cruisePerSec * T.DT * (T.energy.hoverShare + (1 - T.energy.hoverShare) * Min(air / T.wasp.cruise, 2)) * (burst ? T.energy.burstMul : 1);
                 if (rain) drain *= T.weather.rainDrainMul;
                 if (NearCitronella(w)) drain *= T.esc.citronellaDrain;
+                Num air0 = Temperature;
+                if (air0 > T.extreme.heatFrom) drain *= 1 + T.extreme.heatDrain * (air0 - T.extreme.heatFrom); // flying in heat costs more (T2-2)
                 w.energy -= drain;
                 if (w.energy < 0) { w.energy = 0; Emit("exhausted", ("id", w.id)); }
+                // a downpour knocks a wasp in the open out of the air (T2-2)
+                if (rain && WeatherToday.pour > 1 && !Sheltered(w) && H32(w.id, tick, 71) < T.extreme.knockPerSec * T.DT)
+                {
+                    w.state = "stunned"; w.stateTicks = T.extreme.knockTicks; w.vy = -1.2; w.land = null;
+                    Emit("knockedDown", ("id", w.id), ("driven", w.id == drivenId));
+                }
             }
             else
             {
@@ -197,7 +205,7 @@ namespace Sting.Core
         V3 Drift(Wasp w)
         {
             var wind = Wind; int t = tick;
-            Num gust = 1 + T.wind.gust * DSin((Num)t * 0.031) * DSin((Num)t * 0.0137 + 1);
+            Num gust = 1 + WeatherToday.gust * DSin((Num)t * 0.031) * DSin((Num)t * 0.0137 + 1); // hard in a storm (T2-2)
             Num k = T.wind.felt * gust * Clamp01(w.y / T.wind.refHeight);
             return new V3(wind.x * k, 0, wind.z * k);
         }
@@ -583,7 +591,8 @@ namespace Sting.Core
             if (rec.puddles != null && rec.puddleDay == d) return rec.puddles;
             var c = rec.content; long sd = (long)(seed & 0xffffffffUL); Num CSz = T.chunk.size; var list = new List<WaterSrc>();
             var paved = new List<Rect>(c.roads); paved.AddRange(c.lots);
-            for (int k = 0; k < T.water.puddles; k++)
+            int pn = T.water.puddles * (World.Weather(seed, d).pour > 1 ? 2 : 1); // a storm leaves twice as many (T2-2)
+            for (int k = 0; k < pn; k++)
             {
                 Num U(int j) => HSeq(sd, rec.cx, rec.cz, d, k, 990 + j);
                 Num x, z;

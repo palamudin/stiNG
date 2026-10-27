@@ -688,7 +688,9 @@ namespace Sting.Core.Tests
                 var s = new Sim(new Settings { seed = 1234, dayMinutes = 20 }, new SimOpts { noAI = true });
                 var win = new HumanWin { arrive = 480, leave = 1200 };
                 HumanWin At(long d, string a) { s.day = d; return s.ActWindow(a, win); }
-                Ok(new[] { "stroll", "garden", "sun" }.All(a => At(8, a) == null) && At(22, "sun") == null && At(22, "garden") != null, "nobody is out in the rain; a 21 degree day brings gardeners but no sunbathers");
+                long mild = 1;
+                while (World.Weather(s.seed, mild).rain || s.AirAt(mild * 1440 + 780) < T.days.gardenTemp || s.AirAt(mild * 1440 + 780) >= T.days.sunTemp) mild++;
+                Ok(new[] { "stroll", "garden", "sun" }.All(a => At(8, a) == null) && At(mild, "sun") == null && At(mild, "garden") != null, "nobody is out in the rain; a dry, mild day brings gardeners but no sunbathers");
                 var w2 = At(2, "sun");
                 Ok(w2 != null && w2.arrive == T.days.sunFrom && w2.leave == T.days.sunTo, "on a hot day sunbathers lie out through the warm hours");
                 s.day = 0;
@@ -758,6 +760,53 @@ namespace Sting.Core.Tests
                 bool got = false;
                 for (int i = 0; i < 4000 && !got; i++) { foreach (var e in RunS(a, 1)) if (e.type == "deposit" && (int)e["id"] == cw.id && (string)e["what"] == "water") got = true; if (!a.wasps.Contains(cw)) break; }
                 Ok(got, "a water carrier flies to the water, drinks a load and brings it home");
+            }
+            // 42. extreme weather (T2-2): heatwaves, cold snaps, storms
+            {
+                var days = Enumerable.Range(0, 600).Select(d => World.Weather(1234, d)).ToList();
+                List<int> Runs(string kind) { var o = new List<int>(); int n = 0; foreach (var w in days) { if (w.kind == kind) n++; else if (n > 0) { o.Add(n); n = 0; } } return o; }
+                var hr = Runs("heat"); var cr = Runs("cold"); var heat = days.Where(w => w.kind == "heat").ToList(); var storms = days.Where(w => w.kind == "storm").ToList();
+                Ok(days[0].kind == "normal" && hr.Count >= 3 && cr.Count >= 3 && storms.Count >= 10 && hr.All(n => n >= T.extreme.heatLen[0]) && cr.All(n => n >= T.extreme.coldLen[0]),
+                    $"spells run for days: {hr.Count} heatwaves ({string.Join(", ", hr)} days), {cr.Count} cold snaps ({string.Join(", ", cr)}), {storms.Count} storms in {days.Count} days");
+                Ok(heat.All(w => !w.rain && w.@base >= T.weather.baseMin + T.extreme.heatBoost - 1e-9) && storms.All(w => w.rain && w.pour == T.extreme.pour && w.wind >= T.extreme.stormWind[0] && w.rainStart >= 13 * 60),
+                    "a heatwave is dry and hot from the start; a storm is an afternoon downpour in a gale");
+                var sd = storms[0]; var s = new Sim(new Settings { seed = 1234, birds = false, dayMinutes = 20 }, new SimOpts { noAI = true });
+                RunS(s, 2);
+                void Into(Sim x, long m) { var dw = x.Driven(); if (dw != null) dw.born = m; x.clockOffset += (m - x.minute) * x.tpm; RunS(x, 1); }
+                Into(s, sd.day * 1440 + (long)sd.rainStart + 10);
+                var tb = s.records.Get("0,0").content.tables[0];
+                int Knocks(V3 p, int n)
+                {
+                    int k = 0;
+                    foreach (var e in RunS(s, n, (sim, i) => { var w = sim.wasp; if (w == null) return Idle(); if (w.state != "stunned") { Place(w, p); w.state = "fly"; w.energy = 1; w.bodyT = 30; w.born = sim.minute; } return Idle(c => c.mz = 0); }))
+                        if (e.type == "knockedDown") k++;
+                    return k;
+                }
+                int open = Knocks(P(tb.x + 6, 1.5, tb.z + 6), 1200), under = Knocks(P(tb.x, 0.35, tb.z), 1200);
+                Ok(s.Raining && s.WeatherToday.kind == "storm" && open >= 3 && under == 0, $"a downpour knocks a wasp in the open out of the air ({open} times in 20 s); under a table it is sheltered");
+                Num kp = T.extreme.knockPerSec; T.extreme.knockPerSec = 0;
+                Place(s.wasp, P(tb.x + 8, 3, tb.z + 8)); s.wasp.state = "fly";
+                Num px = s.wasp.x, pz = s.wasp.z;
+                RunS(s, 180, (sim, i) => Idle(c => c.mz = 0));
+                T.extreme.knockPerSec = kp;
+                double moved = D(Hypot(s.wasp.x - px, s.wasp.z - pz));
+                Ok(moved > 2, $"the gale carries a hovering wasp off ({moved:0.0} m in 3 s)");
+                ulong hs = 1; DayWeather hd = null;
+                for (; hs < 200 && hd == null; hs++) for (int d = 2; d < 30 && hd == null; d++) { var w = World.Weather(hs, d); if (w.kind == "heat" && w.@base > 31) hd = w; }
+                var h = new Sim(new Settings { seed = hs - 1, birds = false }, new SimOpts { noAI = true });
+                RunS(h, 2);
+                (double used, double air) Burn(long m)
+                {
+                    Into(h, m);
+                    var wv = h.wasp; Place(wv, P(20, 3, 20)); wv.state = "fly"; wv.energy = 1; wv.born = h.minute; wv.bodyT = 30;
+                    RunS(h, 120, (sim, i) => Idle(c => c.mz = 100));
+                    return (D(1 - h.wasp.energy), D(h.Temperature));
+                }
+                var cool = Burn(1440 + 9 * 60); var hot = Burn(hd.day * 1440 + 15 * 60);
+                Ok(hot.air > D(T.extreme.heatFrom) + 4 && hot.used > cool.used * 1.15, $"flying at {hot.air:0} °C in a heatwave burns more sugar than at {cool.air:0} °C ({hot.used * 1000:0.0} vs {cool.used * 1000:0.0})");
+                long hm = hd.day * 1440 + 15 * 60;
+                h.nest.site = "attic"; var att = h.NestHeat(hm); h.nest.site = "hollow"; var hol = h.NestHeat(hm); h.nest.site = "trunk";
+                Ok(att.cook > 0 && hol.cook == 0, $"on a heatwave afternoon an attic comb reaches {D(att.nestT):0.0} °C and its brood cooks without water; in a hollow tree {D(hol.nestT):0.0} °C");
             }
         }
 

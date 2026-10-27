@@ -1317,7 +1317,9 @@ function seated(sim, pred) {
   const s = new Sim({ seed: 1234, dayMinutes: 20 }, { noAI: true });
   const win = { arrive: 480, leave: 1200 }, at = (d, a) => { s.day = d; return s._actWindow(a, win); };
   ok(['stroll', 'garden', 'sun'].every((a) => at(8, a) === null), 'nobody strolls, gardens or sunbathes on a rainy day');
-  ok(at(22, 'sun') === null && at(22, 'garden') !== null, 'a dry 21 degree day brings out gardeners but no sunbathers');
+  let mild = 1;
+  while (dayWeather(s.seed, mild).rain || s.airAt(mild * 1440 + 780) < T.days.gardenTemp || s.airAt(mild * 1440 + 780) >= T.days.sunTemp) mild++;
+  ok(at(mild, 'sun') === null && at(mild, 'garden') !== null, `a dry, mild day (${s.airAt(mild * 1440 + 780).toFixed(1)} °C) brings out gardeners but no sunbathers`);
   const w2 = at(2, 'sun');
   ok(w2 && w2.arrive === T.days.sunFrom && w2.leave === T.days.sunTo, `on a hot day sunbathers lie out through the warm hours (${w2 && w2.arrive}-${w2 && w2.leave})`);
   s.day = 0;
@@ -1404,6 +1406,59 @@ function seated(sim, pred) {
   let got = null;
   for (let i = 0; i < 4000 && !got; i++) { a.step(idle()); for (const e of a.drainEvents()) if (e.type === 'deposit' && e.id === c.id && e.what === 'water') got = e; if (!a.wasps.includes(c)) break; }
   ok(!!got, 'a water carrier flies to the water, drinks a load and brings it home');
+}
+
+// Extreme weather (GDD 5.3, T2-2): heatwaves, cold snaps, storms
+{
+  const X = T.extreme, days = [...Array(600).keys()].map((d) => dayWeather(1234n, d));
+  const kinds = {}; for (const w of days) kinds[w.kind] = (kinds[w.kind] || 0) + 1;
+  const runs = (k) => { const out = []; let n = 0; for (const w of days) { if (w.kind === k) n++; else if (n) { out.push(n); n = 0; } } return out; };
+  const hr = runs('heat'), cr = runs('cold'), heat = days.filter((w) => w.kind === 'heat'), storms = days.filter((w) => w.kind === 'storm');
+  ok(days[0].kind === 'normal' && hr.length >= 3 && cr.length >= 3 && storms.length >= 10 && hr.every((n) => n >= X.heatLen[0]) && cr.every((n) => n >= X.coldLen[0]),
+    `spells run for days: ${hr.length} heatwaves (${hr.join(', ')} days), ${cr.length} cold snaps (${cr.join(', ')}), ${storms.length} storms in ${days.length} days; the first day is always ordinary`);
+  ok(heat.every((w) => !w.rain && w.base >= T.weather.baseMin + X.heatBoost - 1e-9) && storms.every((w) => w.rain && w.pour === X.pour && w.wind >= X.stormWind[0] && w.rainStart >= 13 * 60),
+    'a heatwave is dry and hot from the start; a storm is an afternoon downpour in a gale');
+  // in a storm's downpour a wasp in the open is knocked down; under a table it is not
+  const sd = storms[0], s = new Sim({ seed: 1234, birds: false, dayMinutes: 20 }, { noAI: true }); // long days: the downpour lasts the test
+  run(s, 2);
+  const into = (m) => { const d = s._driven(); if (d) d.born = m; s.clockOffset += (m - s.minute) * s.tpm; run(s, 1); }; // jumped there young
+  into(sd.day * 1440 + sd.rainStart + 10);
+  const tb = s.records.get('0,0').content.tables[0], w = s.wasp;
+  const knocks = (p, n) => {
+    let k = 0;
+    run(s, n, () => { if (!s.wasp) return idle(); if (s.wasp.state !== 'stunned') { place(s.wasp, p); s.wasp.state = 'fly'; s.wasp.energy = 1; s.wasp.bodyT = 30; s.wasp.born = s.minute; } return idle({ mz: 0 }); })
+      .forEach((e) => { if (e.type === 'knockedDown') k++; });
+    return k;
+  };
+  const open = knocks({ x: tb.x + 6, y: 1.5, z: tb.z + 6 }, 1200), under = knocks({ x: tb.x, y: 0.35, z: tb.z }, 1200);
+  ok(s.raining && s.weatherToday.kind === 'storm' && open >= 3 && under === 0, `a downpour knocks a wasp in the open out of the air (${open} times in 20 s); under a table it is sheltered`);
+  // the storm's gale carries off a wasp that would hold its place in a breeze
+  const kp = X.knockPerSec; X.knockPerSec = 0;
+  if (s.wasp) { place(s.wasp, { x: tb.x + 8, y: 3, z: tb.z + 8 }); s.wasp.state = 'fly'; }
+  const p0 = { x: s.wasp.x, z: s.wasp.z };
+  run(s, 180, () => idle({ mz: 0 }));
+  X.knockPerSec = kp;
+  const moved = Math.hypot(s.wasp.x - p0.x, s.wasp.z - p0.z);
+  ok(moved > 2, `the gale carries a hovering wasp off (${moved.toFixed(1)} m in 3 s)`);
+  // flying in a heatwave costs more
+  // a world whose first summer has a hot heatwave
+  let hs = 1n, hd = null;
+  for (; hs < 200n && !hd; hs++) for (let d = 2; d < 30 && !hd; d++) { const w = dayWeather(hs, d); if (w.kind === 'heat' && w.base > 31) hd = w; }
+  const h = new Sim({ seed: hs - 1n, birds: false }, { noAI: true });
+  run(h, 2);
+  const burn = (m) => {
+    const d0 = h._driven(); if (d0) d0.born = m;
+    h.clockOffset += (m - h.minute) * h.tpm; run(h, 1);
+    const wv = h.wasp; place(wv, { x: 20, y: 3, z: 20 }); wv.state = 'fly'; wv.energy = 1; wv.born = h.minute; wv.bodyT = 30;
+    run(h, 120, () => idle({ mz: 100 }));
+    return { used: 1 - h.wasp.energy, air: h.temperature };
+  };
+  const cool = burn(1440 + 9 * 60), hot = burn(hd.day * 1440 + 15 * 60);
+  ok(hot.air > X.heatFrom + 4 && hot.used > cool.used * 1.15, `flying at ${hot.air.toFixed(0)} °C in a heatwave burns more sugar than at ${cool.air.toFixed(0)} °C (${(hot.used * 1000).toFixed(1)} vs ${(cool.used * 1000).toFixed(1)})`);
+  // a heatwave afternoon is where water decides things: an attic comb goes past the lethal heat, a hollow tree does not
+  const m = hd.day * 1440 + 15 * 60;
+  h.nest.site = 'attic'; const att = h.nestHeat(m); h.nest.site = 'hollow'; const hol = h.nestHeat(m); h.nest.site = 'trunk';
+  ok(att.cook > 0 && hol.cook === 0, `on a heatwave afternoon an attic comb reaches ${att.nestT.toFixed(1)} °C and its brood cooks without water; in a hollow tree ${hol.nestT.toFixed(1)} °C`);
 }
 
 // Tuning as data (GDD 13, T1-22): one plain-text file feeds both sims
