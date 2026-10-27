@@ -101,7 +101,7 @@ Even a perfect season ends with the colony dying. "Survival" means passing the l
 
 - **Wasp death:** the wasp is gone. Control returns to colony view; pick another wasp.
 - **Queen death mid-season:** the colony is doomed unless it already has mated gynes. Workers keep working.
-- **Line extinct:** no living queen and no living gyne or hibernating queen in the player's line. Game over. Start a new line, in the same world (if it still exists) or a new one.
+- **Line extinct:** no living queen and no living gyne or hibernating queen in the player's line. With several colonies held (6.8, multi-colony play), the game is over only when every one of the player's lines is extinct; until then control moves to a surviving colony. Game over. Start a new line, in the same world (if it still exists) or a new one.
 
 ---
 
@@ -406,13 +406,28 @@ The line earns experience, and experience grows a tree. A line that runs a whole
 
 **The year's turn**
 - A line has run a year when it has founded in spring, raised gynes, wintered at least one queen and woken her the next spring. The test runs at the spring choice (6.7, 18.24), before the queen is woken.
-- **Hornet bar met** (experience and stabs both over their thresholds): the player may wake the chosen queen as a hornet queen. The line becomes a hornet line. The player can decline and stay wasps.
+- **Hornet bar met** (experience and stabs both over their thresholds): the player may wake the chosen queen as a hornet queen. The line becomes a hornet line. The player can decline and stay wasps. The line's other wintered queens still wake as wasps and found AI-run lineage colonies (18.40), as they would in any spring.
 - **Short of both** (stabs and experience under a lower bar): the game offers the line a try as a honeybee colony.
   - Accepting takes over a feral hive in the world (18.28).
-  - The wasp line's other wintered queens found AI lineage colonies (18.40) instead of ending, so the line is not lost **[Q] Q-20**.
+  - The wasp line's other wintered queens found AI-run lineage colonies (18.40) instead of ending, so the wasp line is not lost (Q-20, settled).
   - Declining continues as wasps.
 - **In between:** the line continues as wasps.
 - The change happens only at a generation boundary: a new queen in spring, never a living wasp mid-season.
+
+**Multi-colony play** (agreed 2026-10-27). Taking a new species never closes the old line: the colonies the player is not driving are managed automatically by the colony AI that already runs lineage and sister colonies (18.40). A player who wants the challenge can run several at once, a wasp line and a bee colony in the same world, or a hornet line beside the wasp line it came from.
+- **One at a time in hand, the rest on AI.** The player drives wasps of one colony and manages one colony view at a time; switching colony is a colony-view choice, with the same relay rules as switching wasps far away (Q-03). Colonies not in hand run on the AI with the player's last role ratios and tree.
+- **Each line keeps its own** experience, stabs, tree and year's turn.
+- **The player gauge** (agreed 2026-10-27). An auto-managed colony progresses on its own, at the player's level and never above it. Good play pays off in every colony the player holds; the AI can neither grow beasts nor be farmed for a hornet queen.
+  - **The gauge is measured, not chosen.** While a colony is in hand, the sim keeps the player's rates per in-game day of play: experience earned, stabs, prey and loads brought home, wasps lost, brood raised. A rolling window over recent in-hand play *(tune)* gives the **player gauge**: numbers, one per rate, not a single rank.
+  - **AI colonies run at the gauge.** A colony on AI earns experience and stabs at no more than the gauge's rates, scaled to its size and the season. Its management follows the same numbers: how hard it forages, how much it risks, how many it loses. A sharp player's colonies prosper while they are away; a careless player's colonies drift along as that player would.
+  - **Level is capped at the player's.** A colony on AI uses its tree only up to the level of the colony the player has in hand, and never past its own. Lineage and sister colonies follow the same cap.
+  - **No gauge, no growth.** Until there is enough in-hand play to measure *(tune)*, AI colonies earn at a low floor. A burst of good play followed by idling does not hold the gauge up, because the window rolls and only in-hand time feeds it. AI colonies never feed the gauge.
+  - **The year's turn** tests every colony the same way. An AI colony that reaches the hornet bar at the gauge's rates got there at the player's pace, which is the reward for playing well.
+  - **Switching does not launder.** Experience belongs to the colony that earned it. Switching moves the player, never experience; the level cap follows the player at once.
+  - The gauge, who is in hand and since which tick are colony state built from events, so every peer computes the same gauge and caps and audits a line's claimed experience against its events (11.8).
+- **They can meet.** The player's own colonies are not friends by default across species: the bees still ball a raiding wasp, and the hornets will hunt the player's own yellowjackets unless the player marks them kin. Same species, same line: never fight, as lineage colonies today.
+- **Load.** Every colony held is a colony the owner's machine simulates in full near its player and at the relevance tiers further out (11.12). The number held is a world setting *(tune)*; on Main, colonies of an offline player run at the abstract tier (Q-15).
+- **Ownership.** Every colony held is owned by the player's peer and published like any other (D-19); peers audit each one separately.
 
 **Pillar P1.** No wasp turns into a hornet. Like balling on *Vespula* (9.2), this is a game license: the change is the player's progression, applied when a new queen is woken. The world itself stays nature as is. Hornets and bees behave as their biology says; none gains a face or a voice.
 
@@ -963,7 +978,7 @@ On Main the entity count is dominated by AI wasps: one player's colony can hold 
 | D-20 | Shared decisions never read live wasp positions; events carry the positions they need | decided (PoC) |
 | D-21 | Biological durations scale with season length (bio = seasonDays / 200) | proposed |
 | D-22 | Every wasp, driven or AI, runs the same flight, contact, sting and swat code | decided (PoC) |
-| D-23 | The line grows a tree from experience; at a year's turn it may wake as hornets (experience and stabs high) or be offered bees (both low); progression is a world setting (earned, open, fixed); all three species are open in test builds | proposed |
+| D-23 | The line grows a tree from experience; at a year's turn it may wake as hornets (experience and stabs high) or be offered bees (both low); progression is a world setting (earned, open, fixed); all three species are open in test builds; colonies not in hand are auto-managed, so a player can hold several at once; auto-managed colonies progress at the player gauge (the player's measured rates) and are capped at the player's level | proposed |
 
 ---
 
@@ -988,9 +1003,9 @@ On Main the entity count is dominated by AI wasps: one player's colony can hold 
 | Q-11 | Art scope for thousands of distinct humans | Open; modular bodies and clothing driven by traits. For the Unity port, consider licensed low-poly modular human packs (assets, not code; check licenses) over the PoC's capsule figures |
 | Q-16 | Humans outside a peer's interest | Settled (18.9): committed interest windows; humans simulated over the union |
 | Q-17 | Should the colony economy balance stores late in the season (sugar piles up)? | Settled (18.11): stores are capped at a few days of need |
-| Q-18 | What earns experience, how events are weighted, and where the hornet and bee bars sit; does a stab count every sting or only unique humans? | Start from events the sim already emits (6.8); stabs follow the counter (unique humans); tune the bars on play data |
+| Q-18 | What earns experience, how events are weighted, and where the hornet and bee bars sit; does a stab count every sting or only unique humans? | Start from events the sim already emits (6.8), earned in hand, and by AI colonies at the player gauge's rates; stabs follow the counter (unique humans); tune the bars, the gauge window and its floor on play data |
 | Q-19 | Is the change of species one-way? Can a hornet line go back, or a bee line earn its way back to wasps or on to hornets? | Proposal: hornets are one-way; a bee line that runs a strong year is offered wasps again |
-| Q-20 | When a line takes the bee offer, what happens to its wasp queens? | Proposal: they found AI lineage colonies (18.40); the player can return to them at the next spring |
+| Q-20 | When a line takes the bee offer, what happens to its wasp queens? | Settled 2026-10-27: they found AI-run lineage colonies (18.40); the player can hold several colonies at once and switch between them, the rest auto-managed (6.8, multi-colony play) |
 
 ---
 
@@ -1500,7 +1515,7 @@ Agreed 2026-10-27: Tier 2 is built on the current stack in the order that surviv
 | T2-9 | Species as data: a species table over the one wasp code path, species in the colony record and saves, the `progression` world setting with `open` in test builds and a species pick on the start screen | 6.8 | M | sim; first, everything below needs it |
 | T2-10 | The hornet line: a heavier body, a small colony, yellowjackets and bees as prey, night flight with porch lights | 6.8 | L | sim and generator |
 | T2-11 | The honeybee colony: a perennial colony, honey stores and the winter cluster, swarming, the barbed sting, balling as the player's defence | 6.8, 9.1, 9.2 | L | sim; reuses hives and balling |
-| T2-12 | Experience and the year's turn: experience and stabs from sim events, the bars, the spring offer | 6.8 | M | sim |
+| T2-12 | Experience and the year's turn: experience and stabs from sim events, the bars, the spring offer; multi-colony play (several colonies held, the rest on AI, switching in the colony view) with the player gauge: the player's measured rates set how AI colonies earn and play, capped at the player's level | 6.8 | L | sim; lineage-colony AI does the managing |
 | T2-13 | The growth tree: branches, node effects as colony parameters, the colony-view screen (takes in T2-7) | 6.8, 7.8 | M | node effects sim; the screen after the Unity move |
 
 ### 19.4 Not on the current stack
@@ -2184,6 +2199,7 @@ namespace Sting.Core
 | Growth tree | The line's progression: Nest, Flight and Line branches |
 | Gyne | An unmated new queen |
 | Line | A founding queen and every colony descended from her |
+| Player gauge | The player's measured rates from in-hand play; sets how auto-managed colonies earn and play |
 | Progression | The world setting for which species a line may play: earned, open or fixed |
 | Reaction plan | The deterministic list of swats and effects produced by a sting |
 | Stab | A sting that moves the counter |
