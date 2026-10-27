@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, humanParts, malesAbout, chunkOf, toLocal, dirToWorld, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, pickTarget, assistPilot, targetPos, targetLabel, CMD_FIELDS,
+  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, pickTarget, assistPilot, swoopPilot, targetPos, targetLabel, CMD_FIELDS,
 } from '../sim/index.js';
 import { applyTuning, parseTuning, tuningHash, tuningLeaves, TUNE } from '../sim/tunefile.js';
 
@@ -1737,6 +1737,41 @@ function seated(sim, pred) {
     const cp = targetPos(s, cat); place(w, { x: cp.x + 0.8, y: cp.y + 0.5, z: cp.z }); w.state = 'fly'; w.land = null; w.energy = 1;
     const fc = fly(cat);
     ok(fc.done === 'caught' && w.carry && w.carry.what === 'caterpillar', `locked on a caterpillar, the pilot catches it (${fc.done} in ${(fc.ticks / 60).toFixed(1)} s)`);
+  }
+  // the swoop: a short dash; whatever it reaches, it slams onto, and a lock makes it home and do what the target calls for
+  const reset = (p) => { place(w, p); w.state = 'fly'; w.land = null; w.perch = null; w.carry = null; w.energy = 1; w.swoopReady = 0; };
+  const swoop = (t, n = 90) => { const ev = []; let r = null, k = 0; for (; k < n; k++) { r = swoopPilot(s, w, t, idle(), k === 0); if (r.done) break; s.step(r.cmd); ev.push(...s.drainEvents()); } return { done: r.done, ticks: k, ev }; };
+  reset({ x: 5, y: 2, z: 5 });
+  s.step(idle({ act: Act.Swoop, yawQ: 0, pitchQ: 0 })); s.drainEvents();
+  let vmax = 0; const at0 = { x: w.x, z: w.z }, sp = [];
+  for (let i = 0; i < 60; i++) { s.step(idle({ yawQ: 0 })); s.drainEvents(); const v = Math.hypot(w.vx, w.vy, w.vz); vmax = Math.max(vmax, v); sp.push(v); }
+  ok(vmax > 8 && sp[59] < T.wasp.cruise + 0.5 && w.state === 'fly', `with nothing locked the swoop is a short dash: ${vmax.toFixed(1)} m/s at its peak, ${Math.hypot(w.x - at0.x, w.z - at0.z).toFixed(1)} m in a second, back to cruising after`);
+  reset({ x: 5, y: 2, z: 5 }); s.step(idle({ act: Act.Swoop, yawQ: 0 })); const firstUntil = w.swoopUntil; s.step(idle({ yawQ: 0 })); s.step(idle({ act: Act.Swoop, yawQ: 0 }));
+  ok(firstUntil > 0 && w.swoopUntil === firstUntil, 'a second swoop waits for the first to recover');
+  reset({ x: 3, y: 0.05, z: 3 }); w.swoopReady = 0; s.step(idle({ act: Act.Swoop, yawQ: 0, pitchQ: 0 })); run(s, 15, () => idle({ yawQ: 0 }));
+  ok(w.state === 'fly', 'skimming the grass, the dash does not land on it: only a surface flown into is slammed onto');
+  const g3 = rec.content.flowers.findIndex((g, k) => s.inBloom(rec, k) && s.nectarAt(rec, k) > 0), f3 = rec.content.flowers[g3];
+  reset({ x: f3.x + 1.0, y: f3.y + 0.5, z: f3.z - 0.6 });
+  const sf = swoop({ kind: 'flower', key: '0,0', i: g3 });
+  ok(sf.done === 'landed' && w.land.kind === 'flower' && sf.ticks < 30, `locked on a flower, the swoop dives in and lands on it in ${(sf.ticks / 60).toFixed(2)} s: an escape from the air`);
+  const hm2 = s.active.find((h) => h.state === 'idle' && h.posture === 'sit' && h.panic < 0.1);
+  reset({ x: hm2.x + 1.5, y: 1.2, z: hm2.z + 1 });
+  const th2 = pickTarget(s, w, aimAt({ x: hm2.x, y: 1.0, z: hm2.z })), p0 = hm2.panic;
+  const sh = swoop(th2); sh.ev.push(...run(s, T.net.commitTicks + 2));
+  ok(sh.done === 'perched' && w.state === 'perched' && hm2.panic > p0 + 0.05 && sh.ev.some((e) => e.type === 'notice' && e.humanHex === hm2.hex),
+    `locked on a person, the swoop slams onto them: they feel it at once and it frightens them (panic ${p0.toFixed(2)} -> ${hm2.panic.toFixed(2)})`);
+  let cat2 = null;
+  for (const r of s.activeChunks) { const i = r.content.caterpillars.findIndex((c, k) => s.catActive(r, k) && !s.cs(chunkKey(r.cx, r.cz)).caughtCat[k]); if (i >= 0) { cat2 = { kind: 'caterpillar', key: chunkKey(r.cx, r.cz), i }; break; } }
+  if (cat2) {
+    const cp = targetPos(s, cat2); reset({ x: cp.x + 0.9, y: cp.y + 0.4, z: cp.z });
+    const sc = swoop(cat2);
+    ok(sc.done === 'caught' || (w.carry && w.carry.what === 'caterpillar'), `locked on a caterpillar, the swoop snatches it (${sc.done} in ${(sc.ticks / 60).toFixed(2)} s)`);
+  }
+  const web = s.activeChunks.flatMap((r) => r.content.webs.map((wb, i) => ({ kind: 'web', key: chunkKey(r.cx, r.cz), i, p: wb }))).find((x) => x.p.y > 0.8);
+  if (web) {
+    reset({ x: web.p.x + 0.8, y: web.p.y + 0.3, z: web.p.z }); const d0 = Math.hypot(w.x - web.p.x, w.z - web.p.z);
+    swoop({ kind: 'web', key: web.key, i: web.i });
+    ok(Math.hypot(w.x - web.p.x, w.z - web.p.z) > d0 + 1, `locked on a danger, the swoop dashes away from it (${d0.toFixed(1)} -> ${Math.hypot(w.x - web.p.x, w.z - web.p.z).toFixed(1)} m from a web)`);
   }
 }
 

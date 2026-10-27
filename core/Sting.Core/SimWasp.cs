@@ -34,6 +34,7 @@ namespace Sting.Core
                     if (driven)
                     {
                         if ((edge & Act.Interact) != 0) Interact(w);
+                        if ((edge & Act.Swoop) != 0 && w.state == "fly") StartSwoop(w, cmd);
                         if (w.state == "fly" && armed && w.contact != null) { pressUsed = true; BeginSting(w, w.contact, "jab"); }
                         if (w.state == "fly") MaybeLand(w, cmd);
                         Hints(w);
@@ -146,7 +147,9 @@ namespace Sting.Core
             }
             if (powered)
             {
-                Num top = burst ? T.wasp.burst : T.wasp.cruise;
+                bool sw = w.swoopUntil > tick; // the swoop: a dash along the heading, steered at speed (GDD 7.9)
+                if (sw && dx == 0 && dy == 0 && dz == 0) { Num sy = DSin(w.yaw), cy = DCos(w.yaw), sp = DSin(w.pitch), cp = DCos(w.pitch); dx = sy * cp; dy = sp; dz = cy * cp; }
+                Num top = sw ? T.swoop.speed : burst ? T.wasp.burst : T.wasp.cruise;
                 if (w.carry != null) top *= T.wasp.carrySpeedMul;
                 if (w.caste == "queen") top *= T.queen.speedMul;
                 else if (w.caste == "male") top *= T.males.speedMul;
@@ -158,7 +161,7 @@ namespace Sting.Core
                 Num am = Sqrt(ax * ax + ay * ay + az * az);
                 if (am > top) { ax *= top / am; ay *= top / am; az *= top / am; }
                 Num ex = ax + wd.x - w.vx, ey = ay - w.vy, ez = az + wd.z - w.vz;
-                Num el = Sqrt(ex * ex + ey * ey + ez * ez), amax = (burst ? T.wasp.burstAccel : T.wasp.accel) * T.DT;
+                Num el = Sqrt(ex * ex + ey * ey + ez * ez), amax = (sw ? T.swoop.accel : burst ? T.wasp.burstAccel : T.wasp.accel) * T.DT;
                 if (el > amax) { ex *= amax / el; ey *= amax / el; ez *= amax / el; }
                 w.vx += ex; w.vy += ey; w.vz += ez;
                 // the work is in the airspeed: holding still in a breeze costs like flying
@@ -187,8 +190,10 @@ namespace Sting.Core
             int n = T.wasp.substeps; Num h = T.DT / n; var p0 = w.P;
             for (int i = 0; i < n; i++)
             {
+                var v0 = new V3(w.vx, w.vy, w.vz); // the speed going in, before a collision stops it
                 w.x += w.vx * h; w.y += w.vy * h; w.z += w.vz * h;
                 Collide(w);
+                if (w.swoopUntil > tick && w.state == "fly" && SwoopHit(w, v0, cmd)) return;
             }
             WebCheck(w, p0);
             CupCheck(w);
@@ -514,9 +519,68 @@ namespace Sting.Core
             };
         }
 
-        PreyHit PreyNear(Wasp w)
+        // ---------------- the swoop (GDD 7.9); see sim.js
+
+        void StartSwoop(Wasp w, Cmd cmd)
         {
-            Num r2 = T.prey.catchDist * T.prey.catchDist;
+            if (tick < w.swoopReady || w.energy <= T.swoop.energy || w.bodyT < T.cold.flyBody) return;
+            w.yaw = cmd.yawQ * 1e-4; w.pitch = Clamp(cmd.pitchQ * 1e-4, -1.45, 1.45);
+            w.swoopUntil = tick + T.swoop.ticks; w.swoopReady = tick + T.swoop.cooldown; w.energy -= T.swoop.energy;
+            w.noLandUntil = tick + T.swoop.ticks; // the dash does not settle the gentle way: the slam does
+            Emit("swoop", ("id", w.id));
+        }
+        /// within reach of something during the swoop: prey is caught, a person is perched on and startled, a surface the
+        /// wasp flies into is landed on; anyone near a slam is startled too
+        bool SwoopHit(Wasp w, V3 v, Cmd cmd)
+        {
+            Num speed = Sqrt(v.x * v.x + v.y * v.y + v.z * v.z); if (speed == 0) speed = 1;
+            string kind = null, personHex = null;
+            var prey = w.carry == null ? PreyNear(w, T.swoop.reach) : null;
+            if (prey != null) { Catch(w, prey); kind = prey.kind; }
+            if (kind == null)
+            {
+                ContactQuery(w, T.swoop.reach);
+                var c = w.contact;
+                if (c != null)
+                {
+                    var hm = HumanByHex(c.humanHex);
+                    PerchOn(w, c.humanHex, c.zone, c.surf, c.n, c.part); kind = "person"; personHex = c.humanHex;
+                    if (hm != null)
+                    {
+                        var comps = Companions(hm);
+                        var plan = Body.ResolveSting(new StingIn { contactTick = tick, contactPointBody = c.surf, mode = "touch" }, hm.tr, Body.ZONES[c.zone],
+                            new StingCtx { clothingStiffness = hm.clothing.stiffness, panic = hm.panic, companions = comps, stung = Wary(hm) });
+                        Publish(new NetEv { type = "notice", humanHex = hm.hex, waspId = w.id, zone = c.zone, swats = SwatsOut(plan, hm, comps) });
+                        Publish(new NetEv { type = "startle", humanHex = hm.hex, waspId = w.id, amount = T.swoop.panic, x = w.x, z = w.z });
+                    }
+                }
+            }
+            if (kind == null)
+            {
+                var s = StaticSurface(w.P, T.swoop.reach);
+                if (s != null && -(v.x * s.nx + v.y * s.ny + v.z * s.nz) >= T.swoop.minInto * speed)
+                {
+                    w.state = "landed"; w.vx = w.vy = w.vz = 0; w.land = null;
+                    Settle(w, s, cmd);
+                    Emit("landed", ("id", w.id), ("surface", s.kind), ("swoop", true));
+                    kind = s.kind;
+                }
+            }
+            if (kind == null) return false;
+            w.swoopUntil = 0;
+            foreach (var hm in active)
+            {
+                if (hm.state == "away" || hm.special || hm.hex == personHex || Sq(hm.x - w.x) + Sq(hm.z - w.z) > T.swoop.scareR * T.swoop.scareR) continue;
+                Publish(new NetEv { type = "startle", humanHex = hm.hex, waspId = w.id, amount = T.swoop.nearPanic, x = w.x, z = w.z });
+            }
+            Emit("slam", ("id", w.id), ("kind", kind), ("driven", w.id == drivenId));
+            return true;
+        }
+
+        PreyHit PreyNear(Wasp w) => PreyNear(w, T.prey.catchDist);
+        PreyHit PreyNear(Wasp w, Num reach)
+        {
+            Num r2 = reach * reach;
             foreach (var rec in activeChunks)
             {
                 if (!Near(rec, w.x, w.z)) { CS(rec.key); continue; } // the JS creates chunk state here, and the state hash sees it
@@ -532,8 +596,8 @@ namespace Sting.Core
                     var cp = c.caterpillars[i];
                     if (D2(w, new V3(cp.x, cp.y, cp.z)) <= r2 * 2) return new PreyHit { kind = "caterpillar", key = key, i = i, protein = T.prey.caterpillarProtein };
                 }
-                foreach (var cr in CarrionIn(rec)) if (D2(w, new V3(cr.x, cr.y, cr.z)) <= T.eco.carrionReach * T.eco.carrionReach) return new PreyHit { kind = "carrion", key = key, i = (int)cr.d, protein = T.eco.carrionProtein };
-                foreach (var mt in MeatIn(rec)) if (D2(w, new V3(mt.x, mt.y, mt.z)) <= T.bbq.reach * T.bbq.reach) return new PreyHit { kind = "meat", key = key, i = mt.i, protein = T.bbq.meatProtein };
+                foreach (var cr in CarrionIn(rec)) if (D2(w, new V3(cr.x, cr.y, cr.z)) <= Sq(Max(reach, T.eco.carrionReach))) return new PreyHit { kind = "carrion", key = key, i = (int)cr.d, protein = T.eco.carrionProtein };
+                foreach (var mt in MeatIn(rec)) if (D2(w, new V3(mt.x, mt.y, mt.z)) <= Sq(Max(reach, T.bbq.reach))) return new PreyHit { kind = "meat", key = key, i = mt.i, protein = T.bbq.meatProtein };
                 var hives = HivesIn(rec);
                 for (int h = 0; h < hives.Count; h++)
                 {

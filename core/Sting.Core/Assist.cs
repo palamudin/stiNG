@@ -227,6 +227,34 @@ namespace Sting.Core
             return (o, null);
         }
 
+        /// the swoop with a lock: the dash homes on the target and the slam does what the target calls for; locked on a
+        /// danger it dashes away instead. first presses the swoop; after that it steers until the dash is spent or hit.
+        public static (Cmd cmd, string done) SwoopPilot(Sim sim, Wasp w, LockTarget t, Cmd cmd, bool first)
+        {
+            var K = Kinds.TryGetValue(t.kind, out var kk) ? kk : new TargetKind();
+            if (w.state != "fly") return (cmd, w.state == "landed" ? "landed" : w.state == "perched" ? "perched" : "gone");
+            if (!first && !(w.swoopUntil > sim.tick)) return (cmd, K.prey && w.carry != null ? "caught" : "spent");
+            var p = TargetPos(sim, t);
+            if (p == null) return (cmd, "gone");
+            var o = new Cmd { mx = 0, my = 0, mz = 100, burst = 1, sting = 0, yawQ = cmd.yawQ, pitchQ = cmd.pitchQ, act = first ? Act.Swoop : 0, alloc = cmd.alloc, pick = cmd.pick };
+            Num dx, dy, dz;
+            if (K.hazard && !K.prey)
+            {
+                dx = w.x - p.Value.x; dz = w.z - p.Value.z; Num l = Sqrt(dx * dx + dz * dz); if (l == 0) l = 1; dx /= l; dz /= l; dy = -0.3;
+            }
+            else
+            {
+                var g = GoalOf(sim, t, p.Value); V3 gp = g != null ? g.p : p.Value;
+                dx = gp.x - w.x; dy = gp.y - w.y; dz = gp.z - w.z;
+                // full speed in, braking over the last half metre so it can turn onto the spot
+                Num d = Sqrt(dx * dx + dy * dy + dz * dz);
+                o.mz = RndI(Clamp(d * 12, 1.5, T.swoop.speed) / T.swoop.speed * 100);
+            }
+            o.yawQ = RndI(DAtan2(dx, dz) * 1e4);
+            o.pitchQ = RndI(Clamp(DAtan2(dy, Sqrt(dx * dx + dz * dz)), -1.45, 1.45) * 1e4);
+            return (o, null);
+        }
+
         public static string Label(LockTarget t)
         {
             if (t == null) return "";

@@ -115,6 +115,7 @@ namespace Sting.Core
             plaus.lastSeq[ev.peer] = ev.seq;
             if (ev.tick > tick + T.plaus.futureTicks) return "from the future";
             if (ev.type == "quarantine" && ev.peer != host) return "only the host rules on peers";
+            if (ev.type == "startle" && !(ev.amount > 0 && ev.amount <= T.swoop.panic)) return "startle out of range";
             if (ev.type == "praid") // from that nest's entrance, as its owner or anyone who has heard where it is knows
             {
                 V3? n = ev.toPeer == peer ? nest.entrance : peerNests.TryGetValue(ev.toPeer, out var pn) ? new V3(pn.x, pn.y, pn.z) : (V3?)null;
@@ -678,6 +679,14 @@ namespace Sting.Core
                     if (hm == null) break;
                     hm.panic = Min(1, hm.panic + T.perch.panic * hm.tr.panicSusceptibility);
                     AddEsc(hm.x, hm.z, T.esc.nuisance);
+                    break;
+                }
+                case "startle": // a wasp slammed down on them or beside them (the swoop, GDD 7.9)
+                {
+                    var hm = HumanByHex(ev.humanHex);
+                    if (hm == null || hm.special) break;
+                    hm.panic = Min(1, hm.panic + ev.amount * hm.tr.panicSusceptibility);
+                    if (hm.panic >= T.resolve.fleePanic && Calm(hm)) StartFlee(hm, new LastSting { x = ev.x, z = ev.z });
                     break;
                 }
             }

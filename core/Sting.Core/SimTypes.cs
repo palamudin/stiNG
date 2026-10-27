@@ -3,7 +3,7 @@ using System.Collections.Generic;
 #pragma warning disable IDE1006
 namespace Sting.Core
 {
-    public static class Act { public const int Interact = 1, Switch = 2, Rest = 4; }
+    public static class Act { public const int Interact = 1, Switch = 2, Rest = 4, Swoop = 8; }
 
     /// One tick of input. Players fill mx..pick; AI brains set hasDir with dirX/Y/Z and throttle instead of yaw and pitch.
     public sealed class Cmd
@@ -73,6 +73,8 @@ namespace Sting.Core
         public bool walking; public Num fightReqUntil;
         /// the surface a landed wasp holds on to, and a short window after takeoff before it can settle again
         public Land land; public int noLandUntil; public string trapCause;
+        /// the swoop (GDD 7.9): the tick its dash ends, and the tick the next one may start
+        public int swoopUntil, swoopReady;
         internal SipPend sipPend; // net only: sips not yet told to the other peers
         /// net only: holds a load the other peers saw it pick up, so letting go of it is told too (T1-20)
         public bool pubLoad;

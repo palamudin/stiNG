@@ -6,6 +6,7 @@ import { T } from './tuning.js';
 import { chunkKey, flyPos, beePos, birdPos, dragonPos } from './world.js';
 import { toWorld, toLocal, segClosest } from './body.js';
 import { datan2, clamp } from './rng.js';
+import { Act } from './sim.js';
 
 const sq = (v) => v * v;
 const d2 = (a, b) => sq(a.x - b.x) + sq(a.y - b.y) + sq(a.z - b.z);
@@ -186,6 +187,31 @@ export function assistPilot(sim, w, t, cmd) {
   out.yawQ = Math.round(datan2(dx, dz) * 1e4);
   out.pitchQ = Math.round(clamp(datan2(dy, Math.sqrt(dx * dx + dz * dz)), -1.45, 1.45) * 1e4);
   out.act = 0;
+  return { cmd: out, done: null };
+}
+
+// The swoop with a lock (GDD 7.9): the dash homes on the target and the slam does what the target calls for (grab the
+// prey, land on the flower, slam down on the person, dive home); locked on a danger, it dashes away from it instead.
+// Tick 0 presses the swoop; after that it steers until the dash is spent or something was hit.
+export function swoopPilot(sim, w, t, cmd, first) {
+  const K = TARGET_KIND[t.kind] || {};
+  if (w.state !== 'fly') return { cmd, done: w.state === 'landed' ? 'landed' : w.state === 'perched' ? 'perched' : 'gone' };
+  if (!first && !(w.swoopUntil > sim.tick)) return { cmd, done: K.prey && w.carry ? 'caught' : 'spent' };
+  const p = targetPos(sim, t);
+  if (!p) return { cmd, done: 'gone' };
+  const out = { ...cmd, mx: 0, my: 0, mz: 100, burst: 1, sting: 0, act: first ? Act.Swoop : 0 };
+  let dx, dy, dz;
+  if (K.hazard && !K.prey) { // away from it, a little down, toward cover
+    dx = w.x - p.x; dz = w.z - p.z; const l = Math.sqrt(dx * dx + dz * dz) || 1; dx /= l; dz /= l; dy = -0.3;
+  } else {
+    const g = goalOf(sim, t, p) || p;
+    dx = g.x - w.x; dy = g.y - w.y; dz = g.z - w.z;
+    // full speed in, braking over the last half metre so it can turn onto the spot
+    const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    out.mz = Math.round(clamp(d * 12, 1.5, T.swoop.speed) / T.swoop.speed * 100);
+  }
+  out.yawQ = Math.round(datan2(dx, dz) * 1e4);
+  out.pitchQ = Math.round(clamp(datan2(dy, Math.sqrt(dx * dx + dz * dz)), -1.45, 1.45) * 1e4);
   return { cmd: out, done: null };
 }
 

@@ -5,7 +5,7 @@ import {
   Sim, Act, T, DT, ZONES, ZoneName, SwatKind, SwatKindName, StyleName, TopName, BottomName, Top, Bottom,
   toWorld, toLocal, dirToWorld, chunkKey, chunkOf, hash, Domain, rangeInt, resolveSting, zoneCover, segClosest, classify, predictedKind,
   NEST, NEST_ENTRANCE, flyPos, beePos, fmtClock, minuteOfDay, isLowerZone, broodTotal, sugarCap, proteinCap, waterCap, garmentGraph, dayWeather,
-  NetLab, LINKS, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetLabel, assistPilot, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE,
+  NetLab, LINKS, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetLabel, assistPilot, swoopPilot, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE,
 } from './sim/index.js';
 
 // Tuning as data (GDD 13, T1-22): read tuning/sting.tune, served next to the page, before anything uses T. Without it
@@ -1439,6 +1439,7 @@ function readPad() {
   const out = { lx: dz(gp.axes[0] || 0), ly: dz(gp.axes[1] || 0), rx: dz(gp.axes[2] || 0), ry: dz(gp.axes[3] || 0), b, edge };
   if (edge(8)) toggleNest();
   if (edge(11)) toggleLock(); // R3: lock on
+  if (edge(12)) swoop(); // d-pad up: swoop
   if (edge(10)) eyeTurnDown(); else if (pad.prev[10] && !b(10)) eyeTurnUp(); // L3: turn to where you look
   pad.prev = gp.buttons.map((x) => !!(x && (x.pressed || x.value > 0.5)));
   return out;
@@ -1465,7 +1466,7 @@ function buildCmd() {
     burst: k.has('ShiftLeft') || k.has('ShiftRight') || (gp && gp.b(6)) ? 1 : 0,
     sting: input.lmb || k.has('KeyF') || (gp && gp.b(7)) ? 1 : 0,
     yawQ: Math.round(input.yaw * 1e4), pitchQ: Math.round(input.pitch * 1e4),
-    act: (k.has('KeyE') || (gp && gp.b(0)) ? Act.Interact : 0) | (k.has('KeyQ') || (gp && gp.b(3)) ? Act.Switch : 0) | (k.has('KeyR') || (gp && gp.b(2)) ? Act.Rest : 0),
+    act: (k.has('KeyE') || (gp && gp.b(0)) ? Act.Interact : 0) | (k.has('KeyQ') || (gp && gp.b(3)) ? Act.Switch : 0) | (k.has('KeyR') || (gp && gp.b(2)) ? Act.Rest : 0) | (input.swoopOnce ? (input.swoopOnce = false, Act.Swoop) : 0),
     alloc: input.alloc,
     pick: input.pick ? (input.pick = 0, pickOnce) : 0,
   };
@@ -1473,6 +1474,14 @@ function buildCmd() {
   if (input.lock && !input.pilot && cmd.mz > 0) {
     const w = sim._driven(), p = w && targetPos(sim, input.lock);
     if (p) cmd.mz = Math.max(1, Math.round(cmd.mz * Math.max(0.12, Math.min(1, Math.hypot(p.x - w.x, p.y - w.y, p.z - w.z) / 0.6))));
+  }
+  // a locked swoop: the dash homes on the target and the slam fits it (GDD 7.9); move keys steer it as any dash
+  if (input.swoopLock) {
+    const w = sim._driven();
+    const r = w ? swoopPilot(sim, w, input.swoopLock, cmd, !input.swoopLock.sent) : { done: 'gone' };
+    if (input.swoopLock) input.swoopLock.sent = true;
+    if (r.done) { input.swoopLock = null; return cmd; }
+    return r.cmd;
   }
   // assisted flight: the wasp flies itself to the locked target until you touch the controls (GDD 7.9)
   if (input.pilot) {
@@ -1502,6 +1511,14 @@ function toggleLock() {
   if (!t) { toast('Nothing to lock on to', 'var(--muted)', 1.1); return; }
   input.lock = t;
   toast(`Locked on: ${targetLabel(sim, t)}`, 'var(--yellow)', 1.2);
+}
+// X (d-pad up): the swoop, a short dash along the heading; locked on, it homes and slams the way the target calls for
+function swoop() {
+  const w = sim && sim._driven();
+  if (!w || !running || paused || w.state !== 'fly') return;
+  input.pilot = null;
+  if (input.lock) input.swoopLock = { ...input.lock, sent: false };
+  else input.swoopOnce = true;
 }
 // E with a lock on something the wasp can go to, and nothing to act on right here: fly there
 function interactNear() { const h = sim.hint || {}; return !!(h.prey || h.bait || h.wood || h.water || h.site || h.rival || h.hive || h.hiber || h.opening || (h.raid !== null && h.raid !== undefined)); }
@@ -1571,6 +1588,7 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyN' && !e.repeat) { toggleNest(); return; }
   if (e.code === 'KeyT' && !e.repeat && ui.nest && solo()) { setSpeed(SPEEDS[(SPEEDS.indexOf(ui.speed) + 1) % SPEEDS.length]); return; }
   if (e.code === 'KeyV' && !e.repeat && running && !paused) { toggleLock(); return; }
+  if (e.code === 'KeyX' && !e.repeat && running && !paused) { swoop(); return; }
   if (e.code === 'KeyG' && !e.repeat && running && !paused) { eyeTurnDown(); return; }
   if (e.code === 'KeyE' && !e.repeat && running && !paused && startPilot()) return;
   if (e.code === 'KeyM' && !e.repeat) { audio.on = !audio.on; toast(audio.on ? 'Sound on' : 'Sound off', 'var(--muted)', 1.2); return; }
@@ -2166,6 +2184,7 @@ function handleEvents(events) {
       case 'fight': if (e.driven) toast('Grappling a rival wasp · mash LMB', 'var(--red)', 1.8); break;
       case 'fightOver': logEvent(`fight: worker ${e.winner} killed worker ${e.loser}`); break;
       case 'raid': toast(e.peer !== undefined ? `Stole a larva from player ${e.peer + 1}'s nest · get it home` : 'Stole a larva · their workers are coming', 'var(--orange)', 2.2); break;
+      case 'slam': if (e.driven) toast(e.kind === 'person' ? 'Slammed onto them' : ['fly', 'caterpillar', 'bee', 'carrion', 'meat'].includes(e.kind) ? 'Snatched' : 'Down', 'var(--yellow)', 0.8); break;
       case 'raided': toast(`Player ${e.by + 1} stole a larva from your nest · your guards are after them`, 'var(--red)', 2.6); logEvent(`player ${e.by + 1} raided the nest`); break;
       case 'notice':
         pushSwatAnims(e.swats, e.humanHex, e.contactTick);
@@ -2440,7 +2459,7 @@ function newWorld(s, restored = null) {
   for (const o of oldNestViews) if (o) scene.remove(o);
   nestView = null; nestSig = ''; oldNestViews.length = 0;
   TERR.ox = TERR.oz = 1e9; // a new world: build its height map afresh
-  input.lock = input.pilot = null; input.turning = false;
+  input.lock = input.pilot = input.swoopLock = null; input.turning = false;
   for (const v of lineViews.values()) scene.remove(v); lineViews.clear();
   if (restored) { sim = restored.sim; loadSnap = restored.json; lab = null; settings = sim.settings; }
   else {

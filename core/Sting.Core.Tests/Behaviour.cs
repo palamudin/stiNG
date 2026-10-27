@@ -1024,6 +1024,45 @@ namespace Sting.Core.Tests
                     var fc = Fly(cat);
                     Ok(fc.done == "caught" && w.carry != null && w.carry.what == "caterpillar", $"locked on a caterpillar, the pilot catches it ({fc.done} in {fc.ticks / 60.0:0.0} s)");
                 }
+                // the swoop: a short dash; whatever it reaches, it slams onto, and a lock makes it home and do what the target calls for
+                void Reset(Num x, Num y, Num z) { Place(w, P(x, y, z)); w.state = "fly"; w.land = null; w.perch = null; w.carry = null; w.energy = 1; w.swoopReady = 0; }
+                (string done, int ticks, List<SimEvent> ev) Swoop(LockTarget t, int n = 90) { var ev = new List<SimEvent>(); (Cmd cmd, string done) r = (null, null); int k = 0; for (; k < n; k++) { r = Assist.SwoopPilot(s, w, t, Idle(), k == 0); if (r.done != null) break; s.Step(r.cmd); ev.AddRange(s.DrainEvents()); } return (r.done, k, ev); }
+                Reset(5, 2, 5);
+                s.Step(Idle(c => { c.act = Act.Swoop; c.yawQ = 0; })); s.DrainEvents();
+                Num vmax = 0, v59 = 0; Num ax0 = w.x, az0 = w.z;
+                for (int i = 0; i < 60; i++) { s.Step(Idle(c => c.yawQ = 0)); s.DrainEvents(); Num v = Sqrt(w.vx * w.vx + w.vy * w.vy + w.vz * w.vz); vmax = Max(vmax, v); v59 = v; }
+                Ok(vmax > 8 && v59 < T.wasp.cruise + 0.5 && w.state == "fly", $"with nothing locked the swoop is a short dash: {D(vmax):0.0} m/s at its peak, {D(Sqrt(Sq(w.x - ax0) + Sq(w.z - az0))):0.0} m in a second, back to cruising after");
+                Reset(5, 2, 5); s.Step(Idle(c => { c.act = Act.Swoop; c.yawQ = 0; })); int firstUntil = w.swoopUntil; s.Step(Idle(c => c.yawQ = 0)); s.Step(Idle(c => { c.act = Act.Swoop; c.yawQ = 0; }));
+                Ok(firstUntil > 0 && w.swoopUntil == firstUntil, "a second swoop waits for the first to recover");
+                Reset(3, 0.05, 3); s.Step(Idle(c => { c.act = Act.Swoop; c.yawQ = 0; c.pitchQ = 0; })); RunS(s, 15, (sim, i) => Idle(c => c.yawQ = 0));
+                Ok(w.state == "fly", "skimming the grass, the dash does not land on it: only a surface flown into is slammed onto");
+                int g3 = -1; for (int k = 0; k < rec.content.flowers.Count && g3 < 0; k++) if (s.InBloom(rec, k) && s.NectarAt(rec, k) > 0) g3 = k;
+                var f3 = rec.content.flowers[g3];
+                Reset(f3.x + 1.0, f3.y + 0.5, f3.z - 0.6);
+                var sf = Swoop(new LockTarget { kind = "flower", key = "0,0", i = g3 });
+                Ok(sf.done == "landed" && w.land.kind == "flower" && sf.ticks < 30, $"locked on a flower, the swoop dives in and lands on it in {sf.ticks / 60.0:0.00} s: an escape from the air");
+                var hm2 = s.active.First(h => h.state == "idle" && h.posture == "sit" && h.panic < 0.1);
+                Reset(hm2.x + 1.5, 1.2, hm2.z + 1);
+                var th2 = Assist.PickTarget(s, w, AimAt(hm2.x, 1.0, hm2.z)); Num pp0 = hm2.panic;
+                var sh = Swoop(th2); sh.ev.AddRange(RunS(s, T.net.commitTicks + 2));
+                Ok(sh.done == "perched" && w.state == "perched" && hm2.panic > pp0 + 0.05 && sh.ev.Any(e => e.type == "notice" && (string)e["humanHex"] == hm2.hex),
+                    $"locked on a person, the swoop slams onto them: they feel it at once and it frightens them (panic {D(pp0):0.00} -> {D(hm2.panic):0.00})");
+                LockTarget cat2 = null;
+                foreach (var r in s.activeChunks) { for (int k = 0; k < r.content.caterpillars.Count; k++) if (s.CatActive(r, k) && !(s.CS(r.key).caughtCat.TryGetValue(k, out var cc2) && cc2 != 0)) { cat2 = new LockTarget { kind = "caterpillar", key = r.key, i = k }; break; } if (cat2 != null) break; }
+                if (cat2 != null)
+                {
+                    var cp2 = Assist.TargetPos(s, cat2).Value; Reset(cp2.x + 0.9, cp2.y + 0.4, cp2.z);
+                    var sc = Swoop(cat2);
+                    Ok(sc.done == "caught" || (w.carry != null && w.carry.what == "caterpillar"), $"locked on a caterpillar, the swoop snatches it ({sc.done} in {sc.ticks / 60.0:0.00} s)");
+                }
+                LockTarget web = null; V3 wp0 = default;
+                foreach (var r in s.activeChunks) { for (int k = 0; k < r.content.webs.Count; k++) if (r.content.webs[k].y > 0.8) { web = new LockTarget { kind = "web", key = r.key, i = k }; wp0 = new V3(r.content.webs[k].x, r.content.webs[k].y, r.content.webs[k].z); break; } if (web != null) break; }
+                if (web != null)
+                {
+                    Reset(wp0.x + 0.8, wp0.y + 0.3, wp0.z); Num dw0 = Sqrt(Sq(w.x - wp0.x) + Sq(w.z - wp0.z));
+                    Swoop(web); Num dw1 = Sqrt(Sq(w.x - wp0.x) + Sq(w.z - wp0.z));
+                    Ok(dw1 > dw0 + 1, $"locked on a danger, the swoop dashes away from it ({D(dw0):0.0} -> {D(dw1):0.0} m from a web)");
+                }
             }
             // 47. terrain (T2-6): a height field the sim works above; hills block sight, gather puddles, catch the wind
             {

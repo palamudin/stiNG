@@ -86,7 +86,7 @@ namespace Sting.Core
 
     public static class Persist
     {
-        public const int SAVE_VERSION = 23; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home); 14: barbecue meat taken; 15: regions, pulp taken from wood; 16: strolls and garden rounds; 17: the carry ledger and sips (T1-20); 18: water (T2-1); 19: young queens on their mating flight (T2-3); 20: lineage colonies (T2-4); 21: feature modifiers (T2-6); 22: the exterminator called to a sister colony; 23: terrain
+        public const int SAVE_VERSION = 24; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home); 14: barbecue meat taken; 15: regions, pulp taken from wood; 16: strolls and garden rounds; 17: the carry ledger and sips (T1-20); 18: water (T2-1); 19: young queens on their mating flight (T2-3); 20: lineage colonies (T2-4); 21: feature modifiers (T2-6); 22: the exterminator called to a sister colony; 23: terrain; 24: the swoop
         const uint MAGIC = 0x474E4953; // "SING"
 
         // ---------------------------------------------------------------- one Io per type
@@ -169,7 +169,7 @@ namespace Sting.Core
             }
             a.B(ref w.walking); a.D(ref w.fightReqUntil);
             if (a.Opt(ref w.land)) { a.D(ref w.land.nx); a.D(ref w.land.ny); a.D(ref w.land.nz); a.S(ref w.land.kind); a.B(ref w.land.hasH); a.D(ref w.land.hx); a.D(ref w.land.hy); a.D(ref w.land.hz); a.I(ref w.land.yawQ); }
-            a.I(ref w.noLandUntil); a.S(ref w.trapCause);
+            a.I(ref w.noLandUntil); a.S(ref w.trapCause); a.I(ref w.swoopUntil); a.I(ref w.swoopReady);
             if (a.Opt(ref w.rob)) { a.S(ref w.rob.key); a.I(ref w.rob.h); a.D(ref w.rob.progress); a.D(ref w.rob.prevSting); }
             return w;
         }

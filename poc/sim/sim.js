@@ -13,7 +13,7 @@ import {
 import { newColony, colonyStep, destroyNest, colonyFinished, seasonPhase, reproShare, broodTotal } from './colony.js';
 
 export const CMD_FIELDS = 10; // mx, my, mz, burst, sting, yawQ, pitchQ, act, alloc, pick (a wasp id to switch to, from the colony view)
-export const Act = { Interact: 1, Switch: 2, Rest: 4 };
+export const Act = { Interact: 1, Switch: 2, Rest: 4, Swoop: 8 };
 
 const dist2 = (a, b) => { const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z; return dx * dx + dy * dy + dz * dz; };
 const byId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
@@ -456,6 +456,7 @@ export class Sim {
     this.plaus.lastSeq[ev.peer] = ev.seq;
     if (ev.tick > this.tick + P.futureTicks) return 'from the future';
     if (ev.type === 'quarantine' && ev.peer !== this.host) return 'only the host rules on peers';
+    if (ev.type === 'startle' && !(ev.amount > 0 && ev.amount <= T.swoop.panic)) return 'startle out of range';
     if (ev.type === 'praid') { // from that nest's entrance, as its owner or anyone who has heard where it is knows
       const n = ev.toPeer === this.peer ? this.nest.entrance : this.peerNests.get(ev.toPeer);
       if (n && sq(ev.x - n.x) + sq(ev.y - n.y) + sq(ev.z - n.z) > P.pickupReach * P.pickupReach) return 'raided from out of reach';
@@ -816,6 +817,13 @@ export class Sim {
         this.addEsc(hm.x, hm.z, T.esc.nuisance);
         break;
       }
+      case 'startle': { // a wasp slammed down on them or beside them (the swoop, GDD 7.9)
+        const hm = this.humanByHex(ev.humanHex);
+        if (!hm || hm.special) break;
+        hm.panic = Math.min(1, hm.panic + ev.amount * hm.tr.panicSusceptibility);
+        if (hm.panic >= T.resolve.fleePanic && this._calm(hm)) this._startFlee(hm, { x: ev.x, z: ev.z });
+        break;
+      }
     }
   }
 
@@ -955,6 +963,7 @@ export class Sim {
         this._nestTouch(w);
         if (driven) {
           if (edge & Act.Interact) this._interact(w);
+          if ((edge & Act.Swoop) && w.state === 'fly') this._startSwoop(w, cmd);
           if (w.state === 'fly' && armed && w.contact) { this.pressUsed = true; this._beginSting(w, w.contact, 'jab'); }
           if (w.state === 'fly') this._maybeLand(w, cmd);
           this._hints(w);
@@ -1054,7 +1063,9 @@ export class Sim {
       if (m > 1) { dx /= m; dy /= m; dz /= m; }
     }
     if (powered) {
-      let top = burst ? W.burst : W.cruise;
+      const sw = w.swoopUntil > this.tick; // the swoop: a dash along the heading, steered at speed (GDD 7.9)
+      if (sw && dx === 0 && dy === 0 && dz === 0) { const sy = dsin(w.yaw), cy = dcos(w.yaw), sp = dsin(w.pitch), cp = dcos(w.pitch); dx = sy * cp; dy = sp; dz = cy * cp; }
+      let top = sw ? T.swoop.speed : burst ? W.burst : W.cruise;
       if (w.carry) top *= W.carrySpeedMul;
       if (w.caste === 'queen') top *= T.queen.speedMul;
       else if (w.caste === 'male') top *= T.males.speedMul;
@@ -1067,7 +1078,7 @@ export class Sim {
       const am = Math.sqrt(ax * ax + ay * ay + az * az);
       if (am > top) { ax *= top / am; ay *= top / am; az *= top / am; }
       let ex = ax + wd.x - w.vx, ey = ay - w.vy, ez = az + wd.z - w.vz;
-      const el = Math.sqrt(ex * ex + ey * ey + ez * ez), amax = (burst ? W.burstAccel : W.accel) * DT;
+      const el = Math.sqrt(ex * ex + ey * ey + ez * ez), amax = (sw ? T.swoop.accel : burst ? W.burstAccel : W.accel) * DT;
       if (el > amax) { ex *= amax / el; ey *= amax / el; ez *= amax / el; }
       w.vx += ex; w.vy += ey; w.vz += ez;
       // the work is in the airspeed, not the ground speed: holding still in a breeze costs like flying
@@ -1093,8 +1104,10 @@ export class Sim {
     }
     const n = W.substeps, h = DT / n, p0 = { x: w.x, y: w.y, z: w.z };
     for (let i = 0; i < n; i++) {
+      const v0 = { x: w.vx, y: w.vy, z: w.vz }; // the speed going in, before a collision stops it
       w.x += w.vx * h; w.y += w.vy * h; w.z += w.vz * h;
       this._collide(w);
+      if (w.swoopUntil > this.tick && w.state === 'fly' && this._swoopHit(w, v0, cmd)) return;
     }
     this._webCheck(w, p0);
     this._cupCheck(w);
@@ -1210,6 +1223,59 @@ export class Sim {
   }
 
   // ---------------- contact (GDD 7.4)
+
+  // ---------------- the swoop (GDD 7.9): a short dash; whatever it reaches, it slams onto
+
+  _startSwoop(w, cmd) {
+    const S = T.swoop;
+    if (this.tick < (w.swoopReady || 0) || w.energy <= S.energy || w.bodyT < T.cold.flyBody) return;
+    w.yaw = cmd.yawQ * 1e-4; w.pitch = clamp(cmd.pitchQ * 1e-4, -1.45, 1.45);
+    w.swoopUntil = this.tick + S.ticks; w.swoopReady = this.tick + S.cooldown; w.energy -= S.energy;
+    w.noLandUntil = this.tick + S.ticks; // the dash does not settle the gentle way: the slam does
+    this.emit('swoop', { id: w.id });
+  }
+  // Within reach of something during the swoop: prey is caught, a person is perched on and startled, a surface the wasp
+  // flies into is landed on. Anyone near a slam is startled too.
+  _swoopHit(w, v, cmd) {
+    const S = T.swoop, speed = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z) || 1;
+    let hit = null;
+    const prey = !w.carry ? this._preyNear(w, S.reach) : null;
+    if (prey) { this._catch(w, prey); hit = { kind: prey.kind }; }
+    if (!hit) {
+      this._contactQuery(w, S.reach);
+      const c = w.contact;
+      if (c && !c.blockedPerch) {
+        const hm = this.humanByHex(c.humanHex);
+        this._perch(w, c); hit = { kind: 'person', humanHex: c.humanHex };
+        // they feel it at once, and it frightens them
+        if (hm) {
+          const comps = this._companions(hm);
+          const plan = resolveSting({ contactTick: this.tick, zone: c.zone, contactPointBody: c.surf, mode: 'touch' }, hm.tr, ZONES[c.zone], { clothingStiffness: hm.clothing.stiffness, panic: hm.panic, companions: comps, stung: this.wary(hm) });
+          const actorHex = (id) => (id === hm.id ? hm.hex : comps.find((x) => x.id === id).hex);
+          const swats = plan.swats.map((s) => ({ actorHex: actorHex(s.actorId), kind: s.kind, start: s.start, window: s.window, radius: s.radius, kills: s.kills, center: { ...s.center } }));
+          this._publish({ type: 'notice', humanHex: hm.hex, waspId: w.id, zone: c.zone, swats });
+          this._publish({ type: 'startle', humanHex: hm.hex, waspId: w.id, amount: S.panic, x: w.x, z: w.z });
+        }
+      }
+    }
+    if (!hit) {
+      const s = this._staticSurface(w, S.reach);
+      if (s && -(v.x * s.nx + v.y * s.ny + v.z * s.nz) >= S.minInto * speed) {
+        w.state = 'landed'; w.vx = w.vy = w.vz = 0; w.land = null;
+        this._settle(w, s, cmd);
+        this.emit('landed', { id: w.id, surface: s.kind, swoop: true });
+        hit = { kind: s.kind };
+      }
+    }
+    if (!hit) return false;
+    w.swoopUntil = 0;
+    for (const hm of this.active) {
+      if (hm.state === 'away' || hm.special || hm.hex === hit.humanHex || sq(hm.x - w.x) + sq(hm.z - w.z) > S.scareR * S.scareR) continue;
+      this._publish({ type: 'startle', humanHex: hm.hex, waspId: w.id, amount: S.nearPanic, x: w.x, z: w.z });
+    }
+    this.emit('slam', { id: w.id, kind: hit.kind, driven: w.id === this.drivenId });
+    return true;
+  }
 
   _contactQuery(w, reach = T.wasp.contactGap) {
     const R = T.wasp.radius;
@@ -1549,8 +1615,8 @@ export class Sim {
     return null;
   }
 
-  _preyNear(w) {
-    const r2 = T.prey.catchDist * T.prey.catchDist;
+  _preyNear(w, reach = T.prey.catchDist) {
+    const r2 = reach * reach;
     for (const rec of this.activeChunks) {
       const c = rec.content, key = chunkKey(rec.cx, rec.cz), st = this.cs(key);
       for (let i = 0; i < c.flies.length; i++) {
@@ -1561,8 +1627,8 @@ export class Sim {
         if (st.caughtCat[i] || !this.catActive(rec, i)) continue;
         if (dist2(w, c.caterpillars[i]) <= r2 * 2) return { kind: 'caterpillar', key, i, protein: T.prey.caterpillarProtein };
       }
-      for (const cr of this.carrionIn(rec)) if (dist2(w, cr) <= T.eco.carrionReach * T.eco.carrionReach) return { kind: 'carrion', key, i: cr.d, protein: T.eco.carrionProtein };
-      for (const mt of this.meatIn(rec)) if (dist2(w, mt) <= T.bbq.reach * T.bbq.reach) return { kind: 'meat', key, i: mt.i, protein: T.bbq.meatProtein };
+      for (const cr of this.carrionIn(rec)) if (dist2(w, cr) <= sq(Math.max(reach, T.eco.carrionReach))) return { kind: 'carrion', key, i: cr.d, protein: T.eco.carrionProtein };
+      for (const mt of this.meatIn(rec)) if (dist2(w, mt) <= sq(Math.max(reach, T.bbq.reach))) return { kind: 'meat', key, i: mt.i, protein: T.bbq.meatProtein };
       const hives = this.hivesIn(rec);
       for (let h = 0; h < hives.length; h++) {
         const hv = hives[h], lost = st.beeLost[h] || {}, al = this.hiveAlarms.get(key + '#' + h);

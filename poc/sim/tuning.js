@@ -255,6 +255,11 @@ export const T = {
   // bio: Vespula walk a few cm/s and hold on at any angle. A slow wasp with no input settles on the nearest surface
   // within reach (any face, trunk, stalk, underside); walking follows the surface round edges; only Space or Shift
   // take off. A sting lands on a person within stingReach.
+  // The swoop (GDD 7.9): a short dash at speed m/s, held for ticks and steered with accel m/s², costing energy, once every
+  // cooldown ticks. Anything to grab, land on or perch on within reach during it is slammed onto: prey is caught, a
+  // surface flown into (not grazed: minInto of the speed toward it) is landed on, a person is perched on and panics by
+  // panic (and anyone within scareR of a slam by nearPanic).
+  swoop: { speed: 9, ticks: 18, accel: 60, energy: 0.012, cooldown: 40, reach: 0.05, minInto: 0.35, panic: 0.3, nearPanic: 0.12, scareR: 1.5 },
   land: { maxSpeed: 0.25, walkSpeed: 0.05, afterTakeoff: 30, reach: 0.012, stick: 0.03, stingReach: 0.04, stalkR: 0.0035, headR: 0.022 },
   // Perching and crawling on people (GDD 7.2, 8.3): how long until they feel you
   perch: { crawlSpeed: 0.06, tickleBase: 4, bareMul: 1, thinMul: 2, backMul: 1.5, faceMul: 0.4, movingMul: 2, cooldown: 90, panic: 0.05 },
