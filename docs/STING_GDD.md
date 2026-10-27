@@ -549,12 +549,13 @@ The determinism and netcode rules decide how it can work:
 - **Tuning.** The Flight branch of the growth tree (6.8) can scale the cue (earlier warning, longer slow-motion in solo, the predicted swat volume shown), never the outcome. The consequence window (7.4, minimum 11 ticks) stays as it is.
 
 
-### 7.9 Lock-on and assisted flight **[T1]** (built, 18.45)
+### 7.9 Lock-on, assisted flight and the swoop **[T1]** (built, 18.45, 18.46)
 
 The player directs the wasp; the wasp flies. A wasp is a few centimetres long and a flower head two, and landing on one by hand is a test of input precision the animal itself never faces, so the assistance stands in for what the wasp has by instinct.
 
 - **Lock on** (V, the middle mouse button, R3). On a person it takes the spot on the body the aim passes nearest, as a part, a place along it and its outward side, so it follows the person as they move, sit or stand. Otherwise it takes whatever lies closest to the aim within a narrow cone (prey, a flower, a drink, water, the nest, a hazard); with nothing under the aim, the nearest prey or hazard. Locked, the camera faces the target: W closes in (slowing as it gets near), S backs off, A and D circle it.
 - **Assisted flight** (E while locked on something the wasp can go to, with nothing to act on right here). The wasp flies itself there: in from above to a flower, a drink or water, along the outward side to a spot on a person. It lands, perches, or catches its prey. Standing somewhere else, it takes off first. Any move key takes the controls back.
+- **The swoop** (X, d-pad up). A movement move, not a lock-on feature: a short dash of about 9 m/s for a third of a second, steered at speed, costing a little energy, once every two thirds of a second. Whatever the dash reaches, it slams onto. Prey is caught, a surface flown into (not grazed) is landed on, a person is perched on and feels it at once (a notice, a startle that can send them running). Anyone close to a slam is startled too. With a lock it is dynamic: it homes on the target and does what the target calls for. It snatches prey, dives onto a flower, a drink or water (an escape from the air), slams onto the locked spot on a person, makes for the nest, and dashes away from a danger.
 - **Turn to the gaze** (G, L3). In the eye view (hold RMB) a tap turns the wasp to where the player is looking, and the gaze stays where it was. Held for a second it toggles auto turn, which brings the wasp round after the gaze once the player has looked away for a second.
 - **Later: automatic focus.** With the Reflex slowdown (7.8), a perilous moment (a swat about to land, a bird diving) can lock on to the danger by itself.
 
@@ -1458,6 +1459,19 @@ Agreed 2026-10-27: the PoC's known limits are worked through before terrain is t
 
 **Limits.** The pilot flies straight at its waypoints and slides off whatever is in the way; it does not plan round trees or houses. It does not dodge: a swat or a bird during an assisted flight is the player's to answer with a move key.
 
+### 18.46 The swoop as built (7.9)
+
+**The move.** `Act.Swoop` (X, d-pad up) starts a dash: `T.swoop` speed 9 m/s held for 18 ticks with 60 m/s² of steering, 0.012 energy, ready again after 40 ticks. With no input the dash runs along the heading; with input it goes where it is steered. The wasp cannot settle gently during the dash. Each substep checks what it has reached within `reach` (5 cm):
+- prey, which is caught;
+- a person, who is perched on, given a `notice` (the swat a touch earns) and a `startle` of `panic` 0.3;
+- a surface met head on (at least `minInto` of the speed toward it), which is landed on.
+
+Any slam startles the people within `scareR` (1.5 m) by `nearPanic`. A `startle` is a committed event like a notice, checked for its range (11.8), so peers agree on the panic.
+
+**Dynamic with a lock.** `swoopPilot` (`assist.js`, `Assist.cs`) builds the commands. It homes on the target's goal (the flower top, the outward side of the body spot), easing off as it closes so it does not overshoot, and it turns away from a hazard. It reports how the swoop ended (caught, landed, perched, spent) so the game can toast it.
+
+**Checks.** JS and C# agree: with nothing locked, the dash peaks at 9.5 m/s, covers 5.1 m in a second and is back to cruising after; a second swoop waits for the first to recover; skimming the grass does not land; locked on a flower it lands in 0.28 s; locked on a seated person it slams on and their panic goes 0.00 to 0.27 with a notice; locked on a caterpillar it catches it in 0.27 s; locked on a web it dashes from 0.8 to 2.8 m away.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1466,7 +1480,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (96 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), and lock-on with assisted flight (18.45). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (97 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), and the swoop (18.46). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 

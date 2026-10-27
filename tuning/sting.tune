@@ -658,6 +658,18 @@ catch = 0.06
 diveTicks = 150
 coolTicks = 600
 
+[swoop]
+speed = 9
+ticks = 18
+accel = 60
+energy = 0.012
+cooldown = 40
+reach = 0.05
+minInto = 0.35
+panic = 0.3
+nearPanic = 0.12
+scareR = 1.5
+
 [land]
 maxSpeed = 0.25
 walkSpeed = 0.05
