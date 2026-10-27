@@ -120,6 +120,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 92 | Town centres and beer gardens (T2-5): every region has a paved 2x2 town block with shops on its edges, groups of people and planters on the square, someone walking across it and a fountain that is water. One quarter is a beer garden: six full tables under string lights, a round of beers on each. Puddles lie on the square after rain | 4.1, 4.3 | 15 |
 | 93 | Feature modifiers (T2-6): woods (none, normal, wooded), towns (none, one or two a region), water (dry, normal, wet) and beehives (none, few, normal, many), chosen on the start screen. They shape the generated world, go into the world tag and the rules peers compare, and are kept in saves | 4.8 | 15 |
 | 94 | Polish of known limits: roofs collide and land as pitched, as drawn, and keep the rain off under the eaves; a stung stroller or gardener walks back to the nearest point of their round; beer garden drinkers stay into the night; the landed eye view turns with the wasp; other players' wasps and their far traffic show on the minimap; a player's wasp reported going straight through a fence or a table top is not drawn there; sister colonies post guards, fly their own males and young queens to their own mating spot, and are hit by pest control and the exterminator; after a late event the chunk authority sends a correction that sets every peer's humans right (Second player: Bot well past the window); players know each other's nests (blue rings on the minimap) and can steal a larva from one, whose owner's guards come after the thief | 6.7, 7.2, 8.2, 8.10, 11.6, 11.8, 11.12 | 16 |
+| 95 | Terrain (T2-6): Ground flat, rolling or hilly on the start screen. Rolling hills in parks and woods, gently graded yards, level town squares and malls; the home tree stands on level ground. Hills block sight lines between people, puddles gather in hollows, the wind is stronger on a rise. The sim works in height above the ground; everything drawn is lifted onto it | 4.8 | 16 |
 
 ## Verified
 
@@ -143,6 +144,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 - The colony economy is tuned against one simulated season with an idle player; it needs real play data.
 - After a late event the peers' humans differ until the chunk authority's correction commits (two seconds); what happened to those humans in between is lost on every peer alike.
 - AI wasps in state packets are not checked against solid geometry (their owner does not collide them far from its player).
+- With terrain on, flight does not feel the slope (the sim works in height above the ground), hills block sight lines between people only, and buildings lean slightly with the ground they stand on.
 - A raid on another player's nest takes one larva at a time, by the player's own wasp; AI workers do not raid other players' nests, as they do not raid rival nests.
 
 ## Controls

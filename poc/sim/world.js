@@ -1,5 +1,5 @@
 // World generation, clock, weather and schedules (GDD 4, 5, 8.2). All pure functions of seed and time.
-import { Domain, hash, unit, range, rangeInt, u64, dsin, dcos, TAU, rnd, datan2 } from './rng.js';
+import { Domain, hash, unit, range, rangeInt, u64, dsin, dcos, TAU, rnd, datan2, clamp01 } from './rng.js';
 import { T } from './tuning.js';
 
 const CS = T.chunk.size;
@@ -182,6 +182,50 @@ export const REGION = 8;
 // The defaults generate exactly the standard world.
 export function features(s) {
   return { woods: s?.woods ?? 1, towns: s?.towns ?? 1, water: s?.water ?? 1, hives: s?.hives ?? 1 };
+}
+
+// Terrain (GDD 4.8, T2-6): rolling ground as a height field of smooth value noise, two octaves; flat when the terrain
+// modifier is 0 and round the home tree. The sim works in height above the ground, so nothing collides with it: the
+// ground's height is drawn, blocks sight lines, gathers puddles in hollows and catches the wind on rises.
+const groundCache = { seed: null, maps: [new Map(), new Map()] };
+const cellKey = (ix, iz) => (ix + 1048576) * 2097152 + (iz + 1048576); // exact in a double for |i| < 2^20
+function lattice(seed, ix, iz, oct) {
+  if (groundCache.seed !== seed) { groundCache.seed = seed; for (const m of groundCache.maps) m.clear(); }
+  const m = groundCache.maps[oct], k = cellKey(ix, iz);
+  let v = m.get(k);
+  if (v === undefined) {
+    if (m.size > 50000) m.clear();
+    v = unit(hash(seed, Domain.WorldGen, u64(ix), u64(iz), BigInt(0x7E44 + oct))) * 2 - 1;
+    m.set(k, v);
+  }
+  return v;
+}
+const smooth = (t) => t * t * (3 - 2 * t);
+function valueNoise(seed, x, z, cell, oct) {
+  const fx = x / cell, fz = z / cell, ix = Math.floor(fx), iz = Math.floor(fz), tx = smooth(fx - ix), tz = smooth(fz - iz);
+  const a = lattice(seed, ix, iz, oct), b = lattice(seed, ix + 1, iz, oct), c = lattice(seed, ix, iz + 1, oct), d = lattice(seed, ix + 1, iz + 1, oct);
+  return a + (b - a) * tx + (c - a) * tz + (a - b - c + d) * tx * tz;
+}
+// How much a chunk's land use lets the ground roll: a town square or a mall lot is near level, yards are graded
+// gently, parks and woods roll freely. Blended smoothly between chunk centres.
+const flatCache = { tag: null, map: new Map() };
+function chunkRoll(seed, cx, cz, settings) {
+  const F = features(settings), tag = seed + ':' + F.woods + ',' + F.towns;
+  if (flatCache.tag !== tag) { flatCache.tag = tag; flatCache.map.clear(); }
+  const k = cellKey(cx, cz);
+  let v = flatCache.map.get(k);
+  if (v === undefined) { if (flatCache.map.size > 4096) flatCache.map.clear(); v = T.terrain.roll[landUse(seed, cx, cz, settings)] ?? 1; flatCache.map.set(k, v); }
+  return v;
+}
+export function groundAt(seed, x, z, settings) {
+  const terrain = settings ? settings.terrain || 0 : 0;
+  if (!terrain) return 0;
+  const G = T.terrain, f = smooth(clamp01((Math.sqrt(x * x + z * z) - G.flatR) / G.rise));
+  if (f === 0) return 0;
+  const u = x / CS, v = z / CS, i = Math.floor(u), j = Math.floor(v), tu = smooth(u - i), tv = smooth(v - j);
+  const a = chunkRoll(seed, i, j, settings), b = chunkRoll(seed, i + 1, j, settings), c = chunkRoll(seed, i, j + 1, settings), d = chunkRoll(seed, i + 1, j + 1, settings);
+  const roll = a + (b - a) * tu + (c - a) * tv + (a - b - c + d) * tu * tv;
+  return terrain * G.amp * f * roll * (valueNoise(seed, x, z, G.cell, 0) + G.detail * valueNoise(seed, x, z, G.cell2, 1));
 }
 const regionCache = new Map();
 export function regionLayout(seed, rx, rz, settings) {

@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, humanParts, malesAbout, chunkOf, toLocal, dirToWorld, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, CMD_FIELDS,
+  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, CMD_FIELDS,
 } from '../sim/index.js';
 import { applyTuning, parseTuning, tuningHash, tuningLeaves, TUNE } from '../sim/tunefile.js';
 
@@ -1692,6 +1692,46 @@ function seated(sim, pred) {
   const rec = s.records.get('0,1');
   const wet = new Sim({ seed: 1234, birds: false }, { noAI: true }); run(wet, 2);
   ok(s.puddlesIn(rec, rd).length <= Math.floor(T.water.puddles / 2) && wet.puddlesIn(wet.records.get('0,1'), rd).length > s.puddlesIn(rec, rd).length, `a dry world leaves fewer puddles (${s.puddlesIn(rec, rd).length} vs ${wet.puddlesIn(wet.records.get('0,1'), rd).length})`);
+}
+
+// Terrain (GDD 4.8, T2-6): a height field the sim works above; hills block sight, gather puddles, catch the wind
+{
+  const g1 = (x, z) => groundAt(1234n, x, z, { terrain: 1 }), g2 = (x, z) => groundAt(1234n, x, z, { terrain: 2 });
+  let flat = true, home = true, lin = true, hi = -Infinity, lo = Infinity;
+  for (let j = -40; j <= 40; j++) for (let i = -40; i <= 40; i++) {
+    const x = i * 3.7, z = j * 4.1, a = g1(x, z);
+    if (groundAt(1234n, x, z, {}) !== 0) flat = false;
+    if (Math.hypot(x, z) <= T.terrain.flatR && a !== 0) home = false;
+    if (Math.abs(g2(x, z) - 2 * a) > 1e-6) lin = false;
+    hi = Math.max(hi, a); lo = Math.min(lo, a);
+  }
+  ok(flat && home && lin && hi - lo > 2 && hi - lo < 9, `the ground rolls ${(hi - lo).toFixed(1)} m over 300 m on a rolling world, twice that on a hilly one; a flat world and the home tree's ground stay level`);
+  // a town square is graded nearly level, a park rolls
+  // the steepest slope within 20 m of a point
+  const slope = (cx, cz) => { let m = 0; for (let j = -5; j <= 5; j++) for (let i = -5; i <= 5; i++) { const x = cx + i * 4, z = cz + j * 4; m = Math.max(m, Math.abs(g2(x + 2, z) - g2(x - 2, z)) / 4, Math.abs(g2(x, z + 2) - g2(x, z - 2)) / 4); } return m; };
+  const L = regionLayout(1234n, 1, 0).towns[0], tc = [(8 - 4 + L.tx + 0.5) * 64, (L.tz - 4 + 0.5) * 64]; // the middle of the 2x2 block
+  let pk = null; for (let x = 4; x < 12 && !pk; x++) for (let z = -4; z < 4 && !pk; z++) if (landUse(1234n, x, z) === 'park' && landUse(1234n, x + 1, z) === 'park') pk = [x, z];
+  ok(slope(tc[0], tc[1]) < slope(pk[0] * 64 + 32, pk[1] * 64) / 3, `a town square is near level (slope ${slope(tc[0], tc[1]).toFixed(3)}) where a park rolls (${slope(pk[0] * 64 + 32, pk[1] * 64).toFixed(3)})`);
+  // a rise between two people blocks the sight line that a flat world leaves open
+  const sh = new Sim({ seed: 1234, birds: false, terrain: 2 }, { noAI: true }), sf = new Sim({ seed: 1234, birds: false }, { noAI: true });
+  let blocked = 0, pairs = 0;
+  for (let j = 0; j < 12; j++) for (let i = 0; i < 12; i++) {
+    const a = { x: pk[0] * 64 - 30 + i * 5, z: pk[1] * 64 - 30 + j * 5 }, b = { x: a.x + 45, z: a.z + 7 };
+    if (!sf.canSee(a, b)) continue;
+    pairs++; if (!sh.canSee(a, b)) blocked++;
+  }
+  ok(blocked > 0 && blocked < pairs, `a rise between two people hides them from each other (${blocked} of ${pairs} open sight lines on a flat world are blocked on a hilly one)`);
+  // rain settles in hollows; the wind is stronger on a rise
+  let rd = 1; while (!dayWeather(1234n, rd).rain || dayWeather(1234n, rd).pour > 1) rd++;
+  const rh = sh._plausRec(pk[0], pk[1]), rf = sf._plausRec(pk[0], pk[1]);
+  const ph = sh.puddlesIn(rh, rd), pf = sf.puddlesIn(rf, rd), mean = (ps) => ps.reduce((m, p) => m + sh.ground(p.x, p.z), 0) / ps.length;
+  ok(ph.length > 0 && pf.length > 0 && mean(ph) < mean(pf), `puddles gather in hollows (${mean(ph).toFixed(2)} m against ${mean(pf).toFixed(2)} m where they would lie on flat ground)`);
+  let top = null, bottom = null;
+  for (let j = 0; j < 40; j++) for (let i = 0; i < 40; i++) { const p = { x: pk[0] * 64 - 30 + i * 1.5, z: pk[1] * 64 - 30 + j * 1.5 }, g = sh.ground(p.x, p.z); if (!top || g > top.g) top = { ...p, g }; if (!bottom || g < bottom.g) bottom = { ...p, g }; }
+  const wd = (s, p) => { const w = { x: p.x, y: 1, z: p.z }; const d = s._drift(w); return Math.hypot(d.x, d.z); };
+  ok(top.g > 0 && wd(sh, top) > wd(sh, bottom) && wd(sf, top) === wd(sf, bottom), `the wind is stronger on a rise (${wd(sh, top).toFixed(3)} against ${wd(sh, bottom).toFixed(3)} m/s at the foot of it)`);
+  const r = restore(snapshot(sh));
+  ok(r.settings.terrain === 2 && worldTag({ terrain: 2 }) === 'hilly' && worldTag({ terrain: 1 }) === 'rolling' && rulesHash({ terrain: 1 }) !== rulesHash({}), 'terrain is a world setting: kept in saves, in the world tag and in the rules peers compare');
 }
 
 // Tuning as data (GDD 13, T1-22): one plain-text file feeds both sims

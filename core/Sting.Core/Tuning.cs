@@ -169,6 +169,13 @@ namespace Sting.Core
             public static Num nestBase = 30, lethal = 34, lethalSpan = 4, broodCook = 0.6;
             public static Num divert = 0.4, income = 0.5, aiShare = 0.6, range = 45;
         }
+        /// Terrain (GDD 4.8, T2-6): see tuning.js
+        public static class terrain
+        {
+            public static Num amp = 2.5, cell = 36, cell2 = 11, detail = 0.3, flatR = 14, rise = 24, sightStep = 4, exposure = 0.05;
+            public static int poolTries = 3;
+            public static class roll { public static Num park = 1, forest = 1, yards = 0.45, mall = 0.12, town = 0.1; }
+        }
         public static class fruit { public static Num treeShare = 0.3, startFrac = 0.55, rate = 0.8, spread = 1.6; public static int perTree = 6, rotDays = 6; }
         public static class muni
         {
@@ -246,7 +253,7 @@ namespace Sting.Core
         public Num dayMinutes = 2, humanDensity = 1, beeAggression = 1, seasonDays = 40, reaction = 1, escalation = 1;
         public bool exterminator = true, birds = true, rivals = true, pestControl = true;
         /// feature modifiers (T2-6): act at generation; see World.Features
-        public int woods = 1, towns = 1; public Num water = 1, hives = 1;
+        public int woods = 1, towns = 1, terrain; public Num water = 1, hives = 1;
         public Settings Clone() => (Settings)MemberwiseClone();
 
 #if STING_FIXED
@@ -263,7 +270,7 @@ namespace Sting.Core
             string str = "gen" + T.GEN_VERSION + "|dayMinutes=" + N(dayMinutes) + "|humanDensity=" + N(humanDensity) + "|beeAggression=" + N(beeAggression)
                 + "|seasonDays=" + N(seasonDays) + "|reaction=" + N(reaction) + "|escalation=" + N(escalation)
                 + "|exterminator=" + B(exterminator) + "|birds=" + B(birds) + "|rivals=" + B(rivals)  + "|pestControl=" + B(pestControl)
-                + "|woods=" + woods + "|towns=" + towns + "|water=" + N(water) + "|hives=" + N(hives)
+                + "|woods=" + woods + "|towns=" + towns + "|water=" + N(water) + "|hives=" + N(hives) + "|terrain=" + terrain
                 + "|tune=" + Tune.Hash; // peers must share the tuning file too (T1-22)
             return R.Fnv32(str).ToString("x8");
         }
@@ -287,6 +294,7 @@ namespace Sting.Core
             if (towns != d.towns) t.Add(towns > d.towns ? $"{towns} towns a region" : "no towns");
             if (water != d.water) t.Add(water > d.water ? "wet" : "dry");
             if (hives != d.hives) t.Add(hives != 0 ? $"hives {X(hives)}" : "no hives");
+            if (terrain != d.terrain) t.Add(terrain > 1 ? "hilly" : "rolling");
             return string.Join(" · ", t);
         }
     }

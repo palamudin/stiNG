@@ -8,7 +8,7 @@ import {
 } from './body.js';
 import {
   chunkOf, chunkKey, NEST, NEST_ENTRANCE, SPAWN, generateChunk, ticksPerMinute, clockMinutes, dayOf, minuteOfDay,
-  isRaining, dayWeather, tempAt, windAt, isDaylight, humanWindow, flyPos, beePos, birdPos, dragonPos, shedSites, shedRoof, makeNest,
+  isRaining, dayWeather, tempAt, windAt, isDaylight, humanWindow, flyPos, beePos, birdPos, dragonPos, shedSites, shedRoof, groundAt, makeNest,
 } from './world.js';
 import { newColony, colonyStep, destroyNest, colonyFinished, seasonPhase, reproShare, broodTotal } from './colony.js';
 
@@ -1110,7 +1110,8 @@ export class Sim {
   _drift(w) {
     const W = T.wind, wind = this.wind, t = this.tick;
     const gust = 1 + this.weatherToday.gust * dsin(t * 0.031) * dsin(t * 0.0137 + 1);
-    const k = W.felt * gust * clamp01(w.y / W.refHeight);
+    let k = W.felt * gust * clamp01(w.y / W.refHeight);
+    if (this.settings.terrain) k *= 1 + T.terrain.exposure * Math.max(0, this.ground(w.x, w.z)); // windier on a rise (T2-6)
     return { x: wind.x * k, z: wind.z * k };
   }
 
@@ -1643,6 +1644,10 @@ export class Sim {
       let x, z;
       if (paved.length) { const p = paved[Math.floor(u(0) * paved.length)]; x = p.minx + (p.maxx - p.minx) * u(1); z = p.minz + (p.maxz - p.minz) * u(2); }
       else { x = (rec.cx + (u(1) - 0.5) * 0.9) * CS; z = (rec.cz + (u(2) - 0.5) * 0.9) * CS; }
+      if (this.settings.terrain && !paved.length) { // on open ground, rain settles in the lowest of a few spots (T2-6)
+        let lo = this.ground(x, z);
+        for (let j = 1; j < T.terrain.poolTries; j++) { const qx = (rec.cx + (u(10 + j * 2) - 0.5) * 0.9) * CS, qz = (rec.cz + (u(11 + j * 2) - 0.5) * 0.9) * CS, g = this.ground(qx, qz); if (g < lo) { lo = g; x = qx; z = qz; } }
+      }
       const r = W.puddleRMin + (W.puddleRMax - W.puddleRMin) * u(3);
       if (c.boxes.some((b) => x > b.minx - r && x < b.maxx + r && z > b.minz - r && z < b.maxz + r)) continue;
       if (c.cylinders.some((cy) => sq(x - cy.x) + sq(z - cy.z) < sq(cy.r + r))) continue;
@@ -2405,6 +2410,15 @@ export class Sim {
         if (sq(ax + dx * t - cy.x) + sq(az + dz * t - cy.z) < cy.r * cy.r) return false;
       }
     }
+    return !this.settings.terrain || this._overHills(a, b);
+  }
+  // The ground's height here (terrain, T2-6); 0 on flat worlds
+  ground(x, z) { return groundAt(this.seed, x, z, this.settings); }
+  // A sight line between two people's eyes clears every rise between them
+  _overHills(a, b) {
+    const H = T.panic.sightHeight, ya = this.ground(a.x, a.z) + H, yb = this.ground(b.x, b.z) + H;
+    const n = Math.ceil(Math.sqrt(sq(b.x - a.x) + sq(b.z - a.z)) / T.terrain.sightStep);
+    for (let i = 1; i < n; i++) { const t = i / n; if (this.ground(a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t) > ya + (yb - ya) * t) return false; }
     return true;
   }
   _content(cx, cz) {

@@ -716,6 +716,24 @@ midEvery = 20
 farEvery = 60
 midTtl = 75
 
+[terrain]
+amp = 2.5
+cell = 36
+cell2 = 11
+detail = 0.3
+flatR = 14
+rise = 24
+sightStep = 4
+poolTries = 3
+exposure = 0.05
+
+[terrain.roll]
+park = 1
+forest = 1
+yards = 0.45
+mall = 0.12
+town = 0.1
+
 [plaus]
 futureTicks = 120
 stingReach = 1.6

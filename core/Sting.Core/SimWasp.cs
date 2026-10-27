@@ -203,11 +203,12 @@ namespace Sting.Core
         }
 
         /// The wind a wasp feels: the day's wind, gusting, falling off toward the ground, times the share it cannot hold against
-        V3 Drift(Wasp w)
+        internal V3 Drift(Wasp w)
         {
             var wind = Wind; int t = tick;
             Num gust = 1 + WeatherToday.gust * DSin((Num)t * 0.031) * DSin((Num)t * 0.0137 + 1); // hard in a storm (T2-2)
             Num k = T.wind.felt * gust * Clamp01(w.y / T.wind.refHeight);
+            if (settings.terrain != 0) k *= 1 + T.terrain.exposure * Max(0, Ground(w.x, w.z)); // windier on a rise (T2-6)
             return new V3(wind.x * k, 0, wind.z * k);
         }
 
@@ -618,6 +619,11 @@ namespace Sting.Core
                 Num x, z;
                 if (paved.Count > 0) { var p = paved[(int)Floor(U(0) * paved.Count)]; x = p.minx + (p.maxx - p.minx) * U(1); z = p.minz + (p.maxz - p.minz) * U(2); }
                 else { x = (rec.cx + (U(1) - 0.5) * 0.9) * CSz; z = (rec.cz + (U(2) - 0.5) * 0.9) * CSz; }
+                if (settings.terrain != 0 && paved.Count == 0) // on open ground, rain settles in the lowest of a few spots (T2-6)
+                {
+                    Num lo = Ground(x, z);
+                    for (int j = 1; j < T.terrain.poolTries; j++) { Num qx = (rec.cx + (U(10 + j * 2) - 0.5) * 0.9) * CSz, qz = (rec.cz + (U(11 + j * 2) - 0.5) * 0.9) * CSz, g = Ground(qx, qz); if (g < lo) { lo = g; x = qx; z = qz; } }
+                }
                 Num r = T.water.puddleRMin + (T.water.puddleRMax - T.water.puddleRMin) * U(3);
                 bool blocked = false;
                 foreach (var b in c.boxes) if (x > b.minx - r && x < b.maxx + r && z > b.minz - r && z < b.maxz + r) { blocked = true; break; }

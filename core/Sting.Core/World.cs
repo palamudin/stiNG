@@ -312,6 +312,60 @@ namespace Sting.Core
             if (TownQuarter(seed, cx, cz, st) != null) return "town";
             return BaseUse(Region(seed, R.rx, R.rz, st), R.lx, R.lz);
         }
+        // ---------------------------------------------------------------- terrain (T2-6, see world.js groundAt)
+        static readonly Dictionary<long, Num>[] lattices = { new Dictionary<long, Num>(), new Dictionary<long, Num>() };
+        static ulong latticeSeed; static bool latticeSet;
+        static long CellKey(long ix, long iz) => (ix + 1048576) * 2097152 + (iz + 1048576);
+        static Num Lattice(ulong seed, long ix, long iz, int oct)
+        {
+            lock (lattices)
+            {
+                if (!latticeSet || latticeSeed != seed) { latticeSet = true; latticeSeed = seed; foreach (var m in lattices) m.Clear(); }
+                var map = lattices[oct]; long k = CellKey(ix, iz);
+                if (map.TryGetValue(k, out var v)) return v;
+                if (map.Count > 50000) map.Clear();
+                v = Unit(Hash(seed, Domain.WorldGen, U64(ix), U64(iz), U64(0x7E44 + oct))) * 2 - 1;
+                map[k] = v;
+                return v;
+            }
+        }
+        static Num Smooth(Num t) => t * t * (3 - 2 * t);
+        static Num ValueNoise(ulong seed, Num x, Num z, Num cell, int oct)
+        {
+            Num fx = x / cell, fz = z / cell; long ix = (long)Floor(fx), iz = (long)Floor(fz); Num tx = Smooth(fx - ix), tz = Smooth(fz - iz);
+            Num a = Lattice(seed, ix, iz, oct), b = Lattice(seed, ix + 1, iz, oct), c = Lattice(seed, ix, iz + 1, oct), d = Lattice(seed, ix + 1, iz + 1, oct);
+            return a + (b - a) * tx + (c - a) * tz + (a - b - c + d) * tx * tz;
+        }
+        static readonly Dictionary<long, Num> rolls = new Dictionary<long, Num>(); static string rollTag;
+        /// how much a chunk's land use lets the ground roll
+        static Num ChunkRoll(ulong seed, int cx, int cz, Settings st)
+        {
+            var F = Features(st); string tag = seed + ":" + F.woods + "," + F.towns;
+            lock (rolls)
+            {
+                if (rollTag != tag) { rollTag = tag; rolls.Clear(); }
+                long k = CellKey(cx, cz);
+                if (rolls.TryGetValue(k, out var v)) return v;
+                if (rolls.Count > 4096) rolls.Clear();
+                string u = LandUse(seed, cx, cz, st);
+                v = u == "park" ? T.terrain.roll.park : u == "forest" ? T.terrain.roll.forest : u == "yards" ? T.terrain.roll.yards : u == "mall" ? T.terrain.roll.mall : u == "town" ? T.terrain.roll.town : 1;
+                rolls[k] = v;
+                return v;
+            }
+        }
+        /// The ground's height: smooth value noise in two octaves, flat when the terrain modifier is 0 and round the home
+        /// tree, damped under built-up land. The sim works in height above it.
+        public static Num GroundAt(ulong seed, Num x, Num z, Settings st)
+        {
+            int terrain = st?.terrain ?? 0;
+            if (terrain == 0) return 0;
+            Num f = Smooth(Clamp01((Sqrt(x * x + z * z) - T.terrain.flatR) / T.terrain.rise));
+            if (f == 0) return 0;
+            Num u = x / CS, v = z / CS; int i = (int)Floor(u), j = (int)Floor(v); Num tu = Smooth(u - i), tv = Smooth(v - j);
+            Num a = ChunkRoll(seed, i, j, st), b = ChunkRoll(seed, i + 1, j, st), c = ChunkRoll(seed, i, j + 1, st), d = ChunkRoll(seed, i + 1, j + 1, st);
+            Num roll = a + (b - a) * tu + (c - a) * tv + (a - b - c + d) * tu * tv;
+            return terrain * T.terrain.amp * f * roll * (ValueNoise(seed, x, z, T.terrain.cell, 0) + T.terrain.detail * ValueNoise(seed, x, z, T.terrain.cell2, 1));
+        }
         public static int MallSide(ulong seed, int cx, int cz, Settings st = null) { var R = RegionOf(cx, cz); return Region(seed, R.rx, R.rz, st).mallSide; }
 
         // ---------------------------------------------------------------- chunk generation (GDD 4.3)

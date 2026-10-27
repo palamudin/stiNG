@@ -275,6 +275,12 @@ export const T = {
   // only gross violations fail, so honest peers reach the same verdict.
   // T1-20: a pickup or a sip must be within pickupReach of the thing taken, and no wasp position may lie more than
   // solidDepth inside a house, shed, table, trunk or grill, or under the ground; a sip is at most sipMax
+  // Terrain (GDD 4.8, T2-6): ground height amp m per step of the modifier, from noise over cell m and detail times as
+  // much over cell2 m; flat within flatR m of the home tree, rising to full over rise m. Hills block sight lines
+  // (checked every sightStep m); puddles settle at the lowest of poolTries spots; the wind is stronger by exposure
+  // per metre of rise. roll: how much each land use lets the ground roll (blended between chunk centres).
+  terrain: { amp: 2.5, cell: 36, cell2: 11, detail: 0.3, flatR: 14, rise: 24, sightStep: 4, poolTries: 3, exposure: 0.05,
+    roll: { park: 1, forest: 1, yards: 0.45, mall: 0.12, town: 0.1 } },
   plaus: { futureTicks: 120, stingReach: 1.6, humanDrift: 3, maxSwatDelay: 240, maxSwats: 4, rateWindow: 120, rateMax: 6,
     maxSpeed: 12, strikes: 3, pickupReach: 0.3, solidDepth: 0.08, sipMax: 0.12 },
 };
@@ -284,11 +290,11 @@ export const DEFAULT_SETTINGS = {
   // World modifiers (GDD 4.8): data, not code
   reaction: 1, escalation: 1, exterminator: true, birds: true, rivals: true, pestControl: true,
   // feature modifiers (T2-6): act at generation; see world.js features()
-  woods: 1, towns: 1, water: 1, hives: 1,
+  woods: 1, towns: 1, water: 1, hives: 1, terrain: 0,
 };
 
 // The settings that change the rules, in a fixed order. Their hash is the world's rules hash: peers compare it.
-const RULE_KEYS = ['dayMinutes', 'humanDensity', 'beeAggression', 'seasonDays', 'reaction', 'escalation', 'exterminator', 'birds', 'rivals', 'pestControl', 'woods', 'towns', 'water', 'hives'];
+const RULE_KEYS = ['dayMinutes', 'humanDensity', 'beeAggression', 'seasonDays', 'reaction', 'escalation', 'exterminator', 'birds', 'rivals', 'pestControl', 'woods', 'towns', 'water', 'hives', 'terrain'];
 export function rulesHash(settings) {
   const s = { ...DEFAULT_SETTINGS, ...settings };
   let h = 0x811c9dc5;
@@ -315,5 +321,6 @@ export function worldTag(settings) {
   if (s.towns !== d.towns) t.push(s.towns > d.towns ? `${s.towns} towns a region` : 'no towns');
   if (s.water !== d.water) t.push(s.water > d.water ? 'wet' : 'dry');
   if (s.hives !== d.hives) t.push(s.hives ? `hives ${x(s.hives)}` : 'no hives');
+  if (s.terrain !== d.terrain) t.push(s.terrain > 1 ? 'hilly' : 'rolling');
   return t.join(' · ');
 }

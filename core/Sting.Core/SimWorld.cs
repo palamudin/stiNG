@@ -232,6 +232,16 @@ namespace Sting.Core
                         if (Sq(ax + dx * t - cy.x) + Sq(az + dz * t - cy.z) < cy.r * cy.r) return false;
                     }
                 }
+            return settings.terrain == 0 || OverHills(ax, az, bx, bz);
+        }
+        /// the ground's height here (terrain, T2-6); 0 on flat worlds
+        public Num Ground(Num x, Num z) => World.GroundAt(seed, x, z, settings);
+        /// a sight line between two people's eyes clears every rise between them
+        bool OverHills(Num ax, Num az, Num bx, Num bz)
+        {
+            Num H = T.panic.sightHeight, ya = Ground(ax, az) + H, yb = Ground(bx, bz) + H;
+            int n = (int)Ceil(Sqrt(Sq(bx - ax) + Sq(bz - az)) / T.terrain.sightStep);
+            for (int i = 1; i < n; i++) { Num t = (Num)i / n; if (Ground(ax + (bx - ax) * t, az + (bz - az) * t) > ya + (yb - ya) * t) return false; }
             return true;
         }
         readonly Dictionary<string, ChunkContent> genCache = new Dictionary<string, ChunkContent>();

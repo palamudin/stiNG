@@ -4,7 +4,7 @@ import { writeFileSync, readFileSync } from 'node:fs';
 import { T } from '../sim/tuning.js';
 import { applyTuning } from '../sim/tunefile.js';
 applyTuning(T, readFileSync(new URL('../../tuning/sting.tune', import.meta.url), 'utf8')); // T1-22: the shipped tuning
-import { generateChunk, dayWeather, windAt, humanWindow, flyPos, beePos, birdPos, dragonPos, makeNest, shedSites } from '../sim/world.js';
+import { generateChunk, dayWeather, windAt, humanWindow, flyPos, beePos, birdPos, dragonPos, makeNest, shedSites, shedRoof, groundAt } from '../sim/world.js';
 import { hash, Domain, u64, datan2, dsin, h32 } from '../sim/rng.js';
 import { newColony, colonyStep, destroyNest, colonyFinished, seasonPhase, sugarCap, proteinCap, waterCap } from '../sim/colony.js';
 import { Sim } from '../sim/sim.js';
@@ -92,6 +92,9 @@ for (const seed of seeds) {
   for (let i = 0; i < 2000; i++) { const y = dsin(i * 0.37) * (i % 9 - 4), x = dsin(i * 0.91 + 1) * (i % 5 - 2); d.f(datan2(y, x)); d.f(dsin(i * 0.013 - 7)); d.f(h32(i, -i * 3, i * 7 + 0.5, 1e9 + i)); }
   for (const site of ['trunk', 'ground', 'branch', 'wall', 'attic']) { const n = makeNest(-3, -2, 4.5, 2.1, 7.25, 0.14, site); for (const v of [n.x, n.y, n.z, n.entrance.x, n.entrance.y, n.entrance.z, n.spawn.x, n.spawn.y, n.spawn.z, n.spawn.yaw]) d.f(v); d.s(n.key); }
   for (const sh of [...generateChunk(1234n, 2, 0).sheds, ...generateChunk(1234n, -3, 1).sheds, ...generateChunk(7n, 1, 1).sheds]) { const ss = shedSites(sh); for (const p of [ss.wall, ss.attic]) for (const k of ['x', 'y', 'z', 'ix', 'iz', 'nx', 'nz']) d.f(p[k]); }
+  // terrain (T2-6): the height field on hilly worlds; pitched roofs
+  for (const [seed, st] of [[1234n, { terrain: 1 }], [7n, { terrain: 2, towns: 2 }]]) for (let j = -20; j <= 20; j++) for (let i = -20; i <= 20; i++) d.f(groundAt(seed, i * 7.3, j * 6.1, st));
+  for (const sh of generateChunk(1234n, 0, 1).sheds) { const r = shedRoof(sh); for (const k of ['wall', 'wallHalf', 'half', 'S', 'y0', 'rise', 'L']) d.f(r[k]); d.f(r.alongX); }
   out('motion', d.hex());
 }
 

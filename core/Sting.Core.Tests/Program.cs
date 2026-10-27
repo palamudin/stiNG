@@ -149,6 +149,10 @@ namespace Sting.Core.Tests
                 }
                 var sheds = new List<Shed>(); sheds.AddRange(World.GenerateChunk(1234, 2, 0).sheds); sheds.AddRange(World.GenerateChunk(1234, -3, 1).sheds); sheds.AddRange(World.GenerateChunk(7, 1, 1).sheds);
                 foreach (var sh in sheds) { var ss = World.ShedSites(sh); foreach (var p in new[] { ss.wall, ss.attic }) { d.F(p.x); d.F(p.y); d.F(p.z); d.F(p.ix); d.F(p.iz); d.F(p.nx); d.F(p.nz); } }
+                // terrain (T2-6): the height field on hilly worlds; pitched roofs
+                foreach (var (sd, st) in new[] { (1234UL, new Settings { terrain = 1 }), (7UL, new Settings { terrain = 2, towns = 2 }) })
+                    for (int j = -20; j <= 20; j++) for (int i = -20; i <= 20; i++) d.F(World.GroundAt(sd, i * (Num)7.3, j * (Num)6.1, st));
+                foreach (var sh in World.GenerateChunk(1234, 0, 1).sheds) { var r = World.ShedRoof(sh); foreach (var v in new[] { r.wall, r.wallHalf, r.half, r.S, r.y0, r.rise, r.L }) d.F(v); d.F(r.alongX); }
                 Out("motion", d.Hex);
             }
         }

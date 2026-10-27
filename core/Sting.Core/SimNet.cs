@@ -164,7 +164,7 @@ namespace Sting.Core
         }
         // the world as frozen chunks hold it, for chunks this peer may not have discovered (see sim.js _plausRec)
         readonly Dictionary<string, ChunkRec> plausCache = new Dictionary<string, ChunkRec>();
-        ChunkRec PlausRec(int cx, int cz)
+        internal ChunkRec PlausRec(int cx, int cz)
         {
             string key = KeyOf(cx, cz);
             if (records.TryGet(key, out var rec)) return rec;

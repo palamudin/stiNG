@@ -5,7 +5,7 @@ import {
   Sim, Act, T, DT, ZONES, ZoneName, SwatKind, SwatKindName, StyleName, TopName, BottomName, Top, Bottom,
   toWorld, toLocal, dirToWorld, chunkKey, chunkOf, hash, Domain, rangeInt, resolveSting, zoneCover, segClosest, classify, predictedKind,
   NEST, NEST_ENTRANCE, flyPos, beePos, fmtClock, minuteOfDay, isLowerZone, broodTotal, sugarCap, proteinCap, waterCap, garmentGraph, dayWeather,
-  NetLab, LINKS, birdPos, dragonPos, shedSites, shedRoof, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE,
+  NetLab, LINKS, birdPos, dragonPos, shedSites, shedRoof, groundAt, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE,
 } from './sim/index.js';
 
 // Tuning as data (GDD 13, T1-22): read tuning/sting.tune, served next to the page, before anything uses T. Without it
@@ -88,10 +88,85 @@ const paperTex = canvasTex(64, 256, (g) => { for (let y = 0; y < 256; y += 4) { 
 
 const GROUND_TILE = 3;
 grassTex.repeat.set(399 / GROUND_TILE, 399 / GROUND_TILE);
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(399, 399), new THREE.MeshLambertMaterial({ map: grassTex }));
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(399, 399, 133, 133), new THREE.MeshLambertMaterial({ map: grassTex }));
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
+
+// ------------------------------------------------------------------ terrain (T2-6)
+// The sim works in height above the ground. When the world has terrain, every vertex of everything drawn is lifted by
+// the ground's height where it stands, read from a height map round the camera (4 m texels, linear between them), and
+// the camera with it. Flat worlds never patch a material, so they draw exactly as before.
+const TERR = { N: 128, step: 4, on: false, ox: 1e9, oz: 1e9, data: new Float32Array(128 * 128), frame: 0 };
+const terrTex = new THREE.DataTexture(new Uint16Array(TERR.N * TERR.N), TERR.N, TERR.N, THREE.RedFormat, THREE.HalfFloatType);
+terrTex.magFilter = terrTex.minFilter = THREE.LinearFilter; terrTex.needsUpdate = true;
+const terrUniforms = { terrMap: { value: terrTex }, terrOrigin: { value: new THREE.Vector2() }, terrSize: { value: TERR.N * TERR.step } };
+THREE.ShaderChunk.common += `
+#ifdef TERRAIN
+uniform sampler2D terrMap; uniform vec2 terrOrigin; uniform float terrSize;
+#endif
+`;
+THREE.ShaderChunk.begin_vertex += `
+#ifdef TERRAIN
+{
+  mat4 tm = modelMatrix;
+#ifdef USE_INSTANCING
+  tm = modelMatrix * instanceMatrix;
+#endif
+  vec4 tw = tm * vec4(transformed, 1.0);
+  float th = texture2D(terrMap, (tw.xz - terrOrigin) / terrSize).r;
+  transformed += inverse(mat3(tm)) * vec3(0.0, th, 0.0);
+}
+#endif
+`;
+function terrPatch(m) {
+  if (!m || m.userData.terr) return;
+  m.userData.terr = true;
+  m.defines = { ...(m.defines || {}), TERRAIN: '' };
+  const prev = m.onBeforeCompile;
+  m.onBeforeCompile = (sh, r) => { Object.assign(sh.uniforms, terrUniforms); if (prev) prev.call(m, sh, r); };
+  m.needsUpdate = true;
+}
+const terrDepth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+terrPatch(terrDepth);
+function terrApply(root) {
+  root.traverse((o) => {
+    if (!o.material) return;
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) terrPatch(m);
+    if (o.castShadow && !o.customDepthMaterial) o.customDepthMaterial = terrDepth;
+  });
+}
+// the height map round a point, rebuilt when the point has moved a quarter of the way to its edge
+function terrCenter(x, z) {
+  const h = TERR.N * TERR.step / 2;
+  if (Math.abs(x - TERR.ox - h) < h / 4 && Math.abs(z - TERR.oz - h) < h / 4) return;
+  TERR.ox = Math.round((x - h) / 16) * 16; TERR.oz = Math.round((z - h) / 16) * 16;
+  const d = TERR.data, out = terrTex.image.data;
+  for (let j = 0; j < TERR.N; j++) for (let i = 0; i < TERR.N; i++) {
+    const v = groundAt(sim.seed, TERR.ox + i * TERR.step, TERR.oz + j * TERR.step, sim.settings);
+    d[j * TERR.N + i] = v; out[j * TERR.N + i] = THREE.DataUtils.toHalfFloat(v);
+  }
+  terrTex.needsUpdate = true;
+  terrUniforms.terrOrigin.value.set(TERR.ox - TERR.step / 2, TERR.oz - TERR.step / 2);
+}
+// the ground's height as drawn there (the same texels, bilinear), for the camera and the sun
+function terrAt(x, z) {
+  if (!TERR.on) return 0;
+  const N = TERR.N, fx = Math.min(N - 1.001, Math.max(0, (x - TERR.ox) / TERR.step)), fz = Math.min(N - 1.001, Math.max(0, (z - TERR.oz) / TERR.step));
+  const i = Math.floor(fx), j = Math.floor(fz), tx = fx - i, tz = fz - j, d = TERR.data;
+  const a = d[j * N + i], b = d[j * N + i + 1], c = d[(j + 1) * N + i], e = d[(j + 1) * N + i + 1];
+  return a + (b - a) * tx + (c - a) * tz + (a - b - c + e) * tx * tz;
+}
+function terrFrame(focus) {
+  TERR.on = !!(sim && sim.settings.terrain);
+  if (!TERR.on) { // a flat world after a hilly one: materials already patched read a flat map
+    if (TERR.filled) { TERR.data.fill(0); terrTex.image.data.fill(0); terrTex.needsUpdate = true; TERR.filled = false; TERR.ox = 1e9; }
+    return;
+  }
+  TERR.filled = true;
+  terrCenter(focus.x, focus.z);
+  if (TERR.frame++ % 30 === 0) terrApply(scene);
+}
 
 const SKIN = ['#f1c9a8', '#e2b08a', '#c98d66', '#a96e49', '#7f4c2f', '#5b3622'];
 const HAIR = ['#2a1d14', '#4a2f1d', '#8a5a2b', '#c9a15c', '#1b1b1b', '#9a9a9a'];
@@ -178,15 +253,15 @@ function buildChunk(rec) {
   // garden sheds: plank walls, a pitched roof, a crack in one wall and a gap under one eave (nest sites)
   // land use (T1-12): the ground of a yard is a mown lawn, a forest floor is dark; streets, cul-de-sacs, parking lots
   if (c.use === 'yards' || c.use === 'forest' || c.use === 'mall') {
-    const tint = new THREE.Mesh(new THREE.PlaneGeometry(64, 64), new THREE.MeshLambertMaterial({ color: c.use === 'yards' ? '#7fbf4a' : c.use === 'forest' ? '#3d4a22' : '#8f9a6a', transparent: true, opacity: c.use === 'yards' ? 0.28 : 0.45, depthWrite: false }));
+    const tint = new THREE.Mesh(new THREE.PlaneGeometry(64, 64, 16, 16), new THREE.MeshLambertMaterial({ color: c.use === 'yards' ? '#7fbf4a' : c.use === 'forest' ? '#3d4a22' : '#8f9a6a', transparent: true, opacity: c.use === 'yards' ? 0.28 : 0.45, depthWrite: false }));
     tint.rotation.x = -Math.PI / 2; tint.position.set(rec.cx * 64, 0.002, rec.cz * 64); tint.receiveShadow = true; g.add(tint);
   }
-  const flat = (minx, maxx, minz, maxz, color, y) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(maxx - minx, maxz - minz), mat(color)); m.rotation.x = -Math.PI / 2; m.position.set((minx + maxx) / 2, y, (minz + maxz) / 2); m.receiveShadow = true; g.add(m); };
+  const flat = (minx, maxx, minz, maxz, color, y) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(maxx - minx, maxz - minz, Math.max(1, Math.ceil((maxx - minx) / 4)), Math.max(1, Math.ceil((maxz - minz) / 4))), mat(color)); m.rotation.x = -Math.PI / 2; m.position.set((minx + maxx) / 2, y, (minz + maxz) / 2); m.receiveShadow = true; g.add(m); };
   for (const r of c.roads || []) {
     flat(r.minx, r.maxx, r.minz - 1.6, r.minz, '#b9b4a8', 0.004); flat(r.minx, r.maxx, r.maxz, r.maxz + 1.6, '#b9b4a8', 0.004); // sidewalks
     flat(r.minx, r.maxx, r.minz, r.maxz, '#45464a', 0.005);
   }
-  for (const l of c.loops || []) { const m = new THREE.Mesh(new THREE.CircleGeometry(l.r, 40), mat('#45464a')); m.rotation.x = -Math.PI / 2; m.position.set(l.x, 0.006, l.z); m.receiveShadow = true; g.add(m); }
+  for (const l of c.loops || []) { const m = new THREE.Mesh(new THREE.RingGeometry(0, l.r, 40, 4), mat('#45464a')); m.rotation.x = -Math.PI / 2; m.position.set(l.x, 0.006, l.z); m.receiveShadow = true; g.add(m); }
   for (const l of c.lots || []) {
     flat(l.minx, l.maxx, l.minz, l.maxz, '#4b4c50', 0.005);
     const along = l.maxx - l.minx > l.maxz - l.minz;
@@ -2171,11 +2246,16 @@ function updateCamera(p, dt) {
     const d0 = chaseLook.clone().sub(chase).normalize();
     look = pos.clone().add(d0.lerp(dir, k).normalize());
   }
-  camPos.copy(pos);
+  camPos.copy(pos); // in the sim's frame, height above the ground
+  if (TERR.on) { // lift the camera and its target onto the ground as drawn (T2-6)
+    pos = pos.clone(); pos.y += terrAt(pos.x, pos.z);
+    look = look.clone(); look.y += terrAt(look.x, look.z);
+  }
   camera.position.copy(pos);
   camera.lookAt(look);
-  sun.position.copy(focus).addScaledVector(sunDir, 40);
-  sun.target.position.copy(focus);
+  const fy = terrAt(focus.x, focus.z);
+  sun.position.copy(focus).addScaledVector(sunDir, 40); sun.position.y += fy;
+  sun.target.position.copy(focus); sun.target.position.y += fy;
   ground.position.set(Math.round(focus.x / GROUND_TILE) * GROUND_TILE, 0, Math.round(focus.z / GROUND_TILE) * GROUND_TILE);
   return focus;
 }
@@ -2206,6 +2286,7 @@ function frame(now) {
     for (const v of humanViews.values()) poseHuman(v, t, dt);
     if (tm) { tm('humans', t0); t0 = performance.now(); }
     const p = renderWasps(alpha, t, dt);
+    if (sim) terrFrame(p || V(sim.nest.spawn));
     const focus = updateCamera(p, dt);
     updateStare(dt);
     updateScents(dt);
@@ -2254,6 +2335,7 @@ function newWorld(s, restored = null) {
   if (nestView) scene.remove(nestView);
   for (const o of oldNestViews) if (o) scene.remove(o);
   nestView = null; nestSig = ''; oldNestViews.length = 0;
+  TERR.ox = TERR.oz = 1e9; // a new world: build its height map afresh
   for (const v of lineViews.values()) scene.remove(v); lineViews.clear();
   if (restored) { sim = restored.sim; loadSnap = restored.json; lab = null; settings = sim.settings; }
   else {
@@ -2279,13 +2361,13 @@ function readSettings() {
   return {
     seed, dayMinutes: +$('dayLen').value, humanDensity: +$('density').value, beeAggression: +$('bees').value, seasonDays: +$('seasonLen').value, net: $('netMode').value,
     reaction: +$('reaction').value, escalation: +$('escRate').value,
-    woods: +$('woods').value, towns: +$('towns').value, water: +$('water').value, hives: +$('hives').value, // T2-6
+    woods: +$('woods').value, towns: +$('towns').value, water: +$('water').value, hives: +$('hives').value, terrain: +$('terrain').value, // T2-6
     exterminator: $('sysExt').checked, pestControl: $('sysMuni').checked, birds: $('sysBirds').checked, rivals: $('sysRivals').checked,
   };
 }
 const tagText = (st) => worldTag(st) || 'Standard rules';
 function showTag() { $('worldTag').textContent = 'World: ' + tagText(readSettings()); }
-for (const id of ['dayLen', 'density', 'seasonLen', 'bees', 'reaction', 'escRate', 'woods', 'towns', 'water', 'hives', 'sysExt', 'sysMuni', 'sysBirds', 'sysRivals']) $(id).addEventListener('change', showTag);
+for (const id of ['dayLen', 'density', 'seasonLen', 'bees', 'reaction', 'escRate', 'woods', 'towns', 'water', 'hives', 'terrain', 'sysExt', 'sysMuni', 'sysBirds', 'sysRivals']) $(id).addEventListener('change', showTag);
 showTag();
 
 function applyDisplaySettings() {

@@ -1301,7 +1301,7 @@ These complete 11.8. Like the earlier checks, each reads only the event and the 
 
 **Checks.** JS and C# count over 9 regions with seed 1234: forest chunks 0, 35 and 136 for no woods, normal and wooded; town chunks 0, 36 and 72 for none, one and two a region, and two towns never touch; birdbaths in the home region 23, 49 and 73 for dry, normal and wet; beehives 0, 10 and 12 for none, normal and many. Identical in both. A world made with modifiers generates every chunk with them and keeps them through a save; a dry world leaves 2 puddles in a chunk where a normal one leaves 5. The C# save format is 21.
 
-**Not built: terrain.** Terrain roughness is the one feature modifier left. Everything on this stack stands on flat ground at height 0: collision, landing, walking, humans, sting reach, puddles and every placed object. A heightfield would touch all of it twice, in the JS reference and in the C# core. Once the game moves to Unity the C# core is the only sim, so terrain is planned for after the move, built once there.
+**Terrain** came after the known limits were closed (18.44).
 
 
 ### 18.43 Known limits closed (polish before terrain)
@@ -1328,6 +1328,17 @@ Agreed 2026-10-27: the PoC's known limits are worked through before terrain is t
 
 **Checks.** JS and C# agree on all of it: the stroller is back on its round 15.0 m from where it ran (the round starts 46.6 m away); 630 evenings out in 30 days at the beer garden; a wasp pushed out of a house roof ends 1.44 m above the eaves on the slope; a fence crossing in the middle is caught, over the top or round the end is not; a sister colony of 40 posts 2 guards who go for a rival at its entrance; 2 of its males and 1 of its young queens fly to its mating spot and mate; the exterminator destroys a sister nest whose neighbourhood calls him; pest control poisons 0.89 adults of a sister colony in its area over 20 colony ticks; a raid takes a larva from the other player's nest (45 to 44) and one claimed 3 m off it is rejected.
 
+
+### 18.44 Terrain as built (T2-6)
+
+**The choice.** A fifth feature modifier, Ground: flat (the standard), rolling or hilly. The ground's height is a smooth value-noise field in two octaves (36 m and 11 m cells, the second at 0.3 of the first), 2.5 m per step of the modifier. The ground is level within 14 m of the home tree, rising to full height over the next 24 m. Land use damps it, blended smoothly between chunk centres: a town square at 0.1 and a mall at 0.12 are near level, yards at 0.45 are graded gently, parks and woods roll freely. Around a town block's middle the steepest slope is 0.04; in a hilly park it is 0.53. A flat world is height 0 everywhere and generates and plays exactly as before.
+
+**How it is built.** The sim works in height above the ground. Collision, landing, walking, humans, reach and every placed object are unchanged, so the cost in the sim is nothing measurable (0.38–0.41 ms a tick with or without hills). The ground's height is drawn: every vertex of everything is lifted by the height where it stands, read in the vertex shader from a 128 by 128 height map (4 m texels, 512 m across) round the camera, and the camera and the sun go with it. The map takes about 30 ms to rebuild, once the wasp has flown 64 m from its middle. Large buildings lean slightly with the ground they stand on, which is why built-up land is damped. Flat worlds never patch a material.
+
+**What hills do.** A rise between two people blocks their sight line (checked every 4 m along it between their eye heights): on a hilly world 53 of 140 open sight lines across a park are blocked. Rain settles in hollows: on open ground a puddle takes the lowest of three spots (0.30 m against 0.98 m). The wind is stronger on a rise, by 5% a metre (0.516 against 0.429 m/s at the foot). Terrain is in the rules hash, the world tag ("rolling", "hilly") and saves (C# format 23). The height field is part of the `motion` parity digest, and JS and C# agree on every check.
+
+**Limits.** Flight does not feel the slope: a wasp flying level stays at the same height above the ground and climbs a hill without effort. Hills are not solid to sight lines between a wasp and a person, only between people. A building does not sit level on a slope; it leans with the ground.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1336,7 +1347,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (94 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), and the polish of known limits (18.43). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (95 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), and terrain (18.44). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -1379,7 +1390,7 @@ Agreed 2026-10-27: Tier 2 is built on the current stack in the order that surviv
 | T2-3 | **Built (18.39).** Males as wasps: drones fly physically late in the season, no sting, mating flights with gynes | 6.5, 6.7 | M | sim |
 | T2-4 | **Built (18.40).** Lineage colonies as real AI colonies: the queens the player did not wake found colonies of the line, run by AI | 6.7 | L | sim |
 | T2-5 | **Built (18.41).** Town centers and beer gardens: a new land use with dense outdoor seating and drinks | 4.1, 4.3 | M | generator and sim; new art |
-| T2-6 | **Built (18.42), except terrain.** Feature modifiers that need the bigger generator: biome mix, town density, terrain | 4.8 | L | terrain touches all collision |
+| T2-6 | **Built (18.42, 18.44).** Feature modifiers that need the bigger generator: biome mix, town density, terrain | 4.8 | L | terrain touches all collision |
 | T2-7 | The Reflex skill tree | 7.8 | M | mostly UI and progression: after the Unity move |
 | T2-8 | Colonies of thousands of wasps out at once | 11.12 | L | engine performance: after the Unity move |
 

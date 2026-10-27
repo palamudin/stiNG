@@ -983,6 +983,46 @@ namespace Sting.Core.Tests
                 Ok(ps.Count > 0 && ps.All(p => p.x >= pl.minx && p.x <= pl.maxx && p.z >= pl.minz && p.z <= pl.maxz && !rec.content.boxes.Any(b => p.x > b.minx && p.x < b.maxx && p.z > b.minz && p.z < b.maxz)),
                     $"after rain puddles lie on the square ({ps.Count}), never in a shop");
             }
+            // 47. terrain (T2-6): a height field the sim works above; hills block sight, gather puddles, catch the wind
+            {
+                var S1 = new Settings { terrain = 1 }; var S2 = new Settings { terrain = 2 };
+                Num G1(Num x, Num z) => World.GroundAt(1234, x, z, S1); Num G2(Num x, Num z) => World.GroundAt(1234, x, z, S2);
+                bool flat = true, home = true, lin = true; Num hi = Num.MinValue, lo = Num.MaxValue;
+                for (int j = -40; j <= 40; j++) for (int i = -40; i <= 40; i++)
+                {
+                    Num x = i * (Num)3.7, z = j * (Num)4.1, a = G1(x, z);
+                    if (World.GroundAt(1234, x, z, new Settings()) != 0) flat = false;
+                    if (Sqrt(x * x + z * z) <= T.terrain.flatR && a != 0) home = false;
+                    if (D(Abs(G2(x, z) - 2 * a)) > 1e-6) lin = false;
+                    hi = Max(hi, a); lo = Min(lo, a);
+                }
+                Ok(flat && home && lin && hi - lo > 2 && hi - lo < 9, $"the ground rolls {D(hi - lo):0.0} m over 300 m on a rolling world, twice that on a hilly one; a flat world and the home tree's ground stay level");
+                Num Slope(Num cx, Num cz) { Num m = 0; for (int j = -5; j <= 5; j++) for (int i = -5; i <= 5; i++) { Num x = cx + i * 4, z = cz + j * 4; m = Max(m, Max(Abs(G2(x + 2, z) - G2(x - 2, z)) / 4, Abs(G2(x, z + 2) - G2(x, z - 2)) / 4)); } return m; }
+                var TL = World.Region(1234, 1, 0).towns[0]; Num tcx = (8 - 4 + TL.tx + (Num)0.5) * 64, tcz = (TL.tz - 4 + (Num)0.5) * 64;
+                int pkx = 0, pkz = 0; bool fpk = false;
+                for (int x = 4; x < 12 && !fpk; x++) for (int z = -4; z < 4 && !fpk; z++) if (World.LandUse(1234, x, z) == "park" && World.LandUse(1234, x + 1, z) == "park") { pkx = x; pkz = z; fpk = true; }
+                Ok(Slope(tcx, tcz) < Slope(pkx * 64 + 32, pkz * 64) / 3, $"a town square is near level (slope {D(Slope(tcx, tcz)):0.000}) where a park rolls ({D(Slope(pkx * 64 + 32, pkz * 64)):0.000})");
+                var sh = new Sim(new Settings { seed = 1234, birds = false, terrain = 2 }, new SimOpts { noAI = true }); var sf = new Sim(new Settings { seed = 1234, birds = false }, new SimOpts { noAI = true });
+                int blocked = 0, pairs = 0;
+                for (int j = 0; j < 12; j++) for (int i = 0; i < 12; i++)
+                {
+                    Num ax = pkx * 64 - 30 + i * 5, az = pkz * 64 - 30 + j * 5, bx = ax + 45, bz = az + 7;
+                    if (!sf.CanSee(ax, az, bx, bz)) continue;
+                    pairs++; if (!sh.CanSee(ax, az, bx, bz)) blocked++;
+                }
+                Ok(blocked > 0 && blocked < pairs, $"a rise between two people hides them from each other ({blocked} of {pairs} open sight lines on a flat world are blocked on a hilly one)");
+                long rd = 1; while (!World.Weather(1234, rd).rain || World.Weather(1234, rd).pour > 1) rd++;
+                var ph = sh.PuddlesIn(sh.PlausRec(pkx, pkz), rd); var pf = sf.PuddlesIn(sf.PlausRec(pkx, pkz), rd);
+                Num Mean(List<WaterSrc> ps) { Num m = 0; foreach (var p in ps) m += sh.Ground(p.x, p.z); return m / ps.Count; }
+                Ok(ph.Count > 0 && pf.Count > 0 && Mean(ph) < Mean(pf), $"puddles gather in hollows ({D(Mean(ph)):0.00} m against {D(Mean(pf)):0.00} m where they would lie on flat ground)");
+                (Num x, Num z, Num g) top = (0, 0, Num.MinValue), bottom = (0, 0, Num.MaxValue);
+                for (int j = 0; j < 40; j++) for (int i = 0; i < 40; i++) { Num x = pkx * 64 - 30 + i * (Num)1.5, z = pkz * 64 - 30 + j * (Num)1.5, g = sh.Ground(x, z); if (g > top.g) top = (x, z, g); if (g < bottom.g) bottom = (x, z, g); }
+                Num Wd(Sim s0, Num x, Num z) { var w = s0.wasp; Num ox = w.x, oy = w.y, oz = w.z; w.x = x; w.y = 1; w.z = z; var d = s0.Drift(w); w.x = ox; w.y = oy; w.z = oz; return Sqrt(d.x * d.x + d.z * d.z); }
+                Ok(top.g > 0 && Wd(sh, top.x, top.z) > Wd(sh, bottom.x, bottom.z) && Wd(sf, top.x, top.z) == Wd(sf, bottom.x, bottom.z), $"the wind is stronger on a rise ({D(Wd(sh, top.x, top.z)):0.000} against {D(Wd(sh, bottom.x, bottom.z)):0.000} m/s at the foot of it)");
+                var rs = Persist.Restore(Persist.Snapshot(sh));
+                Ok(rs.settings.terrain == 2 && new Settings { terrain = 2 }.WorldTag() == "hilly" && new Settings { terrain = 1 }.WorldTag() == "rolling" && new Settings { terrain = 1 }.RulesHash() != new Settings().RulesHash(),
+                    "terrain is a world setting: kept in saves, in the world tag and in the rules peers compare");
+            }
             // 46. feature modifiers (T2-6): woods, towns, water and hives set at world creation act on generation
             {
                 (int forest, int town, int baths, int hives, bool apart) Census(Settings st)
