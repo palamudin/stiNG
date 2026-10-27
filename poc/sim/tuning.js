@@ -219,6 +219,12 @@ export const T = {
     winterSurvival: 0.03, lineageSurvival: 0.3, winterShare: 0.5,
   },
   queen: { speedMul: 0.8, venomMul: 1.5 },
+  // Lineage colonies (GDD 6.7, T2-4): in spring the line's other surviving queens found real colonies, up to `max`, on
+  // a trunk near where each wintered (within treeRange of the site, at least minGap from each other and from where your
+  // queen woke). They are run by the AI: stepped like yours, a founding queen bringing in queenForage a day alone, and
+  // up to `physical` of their workers out near the player. Their mated queens winter by their nests and join the
+  // next spring's choice. Lose your own colony mid-season and you take over the strongest of them.
+  line: { max: 5, treeRange: 40, minGap: 8, physical: 3, queenForage: { sugar: 1.5, protein: 2, pulp: 2 } },
   // Males and mating flights (GDD 6.5, 6.7, T2-3). bio: Vespula males have no sting, feed on nectar, and patrol
   // landmarks near nests (often prominent trees) where young queens come to mate; a male mates once and dies. A gyne's
   // chance to mate depends on the males about: her own colony's and the neighbourhood's (area males at full breeding

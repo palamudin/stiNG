@@ -29,7 +29,7 @@ namespace Sting.Core
             ai.mode = "guard";
             Num r2 = T.guard.radius * T.guard.radius;
             int tid = 0; bool found = false, player = false;
-            foreach (var x in wasps) if (x.colony != "own" && Free3(x.state) && D2(x, post) < r2) { tid = x.id; found = true; break; }
+            foreach (var x in wasps) if (IsRival(x) && Free3(x.state) && D2(x, post) < r2) { tid = x.id; found = true; break; }
             if (!found) foreach (var kv in remote) if (Free3(kv.Value.state) && D2(kv.Value, post) < r2) { tid = kv.Key; found = true; player = !kv.Value.rival; break; }
             if (found) { ai.mode = "hunt"; ai.huntId = tid; ai.timer = tick + T.guard.huntTicks; Emit("guardHunt", ("id", w.id), ("target", tid), ("player", player)); return cmd; }
             var xh = ext.hm;
@@ -45,7 +45,7 @@ namespace Sting.Core
             var cmd = new Cmd { hasDir = true };
             if (w.state == "balled") { BallEscape(w, false); return cmd; }
             if (w.state != "fly") return cmd;
-            if (w.colony != "own") return ThinkRival(w, cmd);
+            if (w.colony != "own") return IsRival(w) ? ThinkRival(w, cmd) : ThinkSister(w, cmd);
             if (w.caste == "male") return ThinkMale(w, cmd); // T2-3
             if (w.caste == "gyne") return ThinkGyne(w, cmd);
             // alarm pheromone pulls nearby workers into an attack
@@ -232,6 +232,101 @@ namespace Sting.Core
 
         /// Alarm pheromone is a decaying scent too: strongest when fresh, carried downwind
         internal Num AlarmReach(Wasp w, Alarm a) => T.alarm.radius * (0.5 + 0.5 * Clamp01((a.until - tick) / (Num)T.alarm.ticks)) * ScentRange(w.x, w.z, new V3(a.x, a.y, a.z), 1) / T.sense.smell;
+
+        // ---------------- lineage colonies (GDD 6.7, T2-4); see sim.js
+
+        internal Num FoundLine(List<HiberSite> sites, int choice, Num queens)
+        {
+            int sn = season.n; var used = new List<(Num x, Num z)> { (sites[choice].x, sites[choice].z) };
+            line = new List<LineColony>();
+            Num left = queens;
+            for (int si = 0; si < sites.Count; si++)
+            {
+                int k = sites[si].n - (si == choice ? 1 : 0);
+                for (; k > 0 && line.Count < T.line.max; k--)
+                {
+                    var t = LineTree(sites[si], used);
+                    if (t == null) break;
+                    Num dx = sites[si].x - t.x, dz = sites[si].z - t.z, dd = Sqrt(dx * dx + dz * dz); if (dd == 0) dd = 1; dx /= dd; dz /= dd;
+                    var n = World.MakeNest(t.x, t.z, t.x + dx * (t.r + 0.2), Clamp(1.6, 1.2, Max(1.2, t.h - 0.6)), t.z + dz * (t.r + 0.2), World.NEST.r, "trunk");
+                    var c = Colony.New(true); c.sited = true; c.maxCells = T.sites.trunk.maxCells; c.alloc = 0;
+                    line.Add(new LineColony { id = ++lineSeq, nest = n, colony = c, season = sn });
+                    used.Add((t.x, t.z)); left--;
+                    Emit("sisterFounded", ("id", lineSeq), ("x", n.x), ("z", n.z));
+                }
+            }
+            return left;
+        }
+        Tree LineTree(HiberSite s, List<(Num x, Num z)> used)
+        {
+            int cx = World.ChunkOf(s.x), cz = World.ChunkOf(s.z);
+            Tree best = null; Num bd = T.line.treeRange * T.line.treeRange;
+            for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++) foreach (var t in Content(cx + dx, cz + dz).trees)
+            {
+                Num d = Sq(t.x - s.x) + Sq(t.z - s.z);
+                if (d >= bd) continue;
+                bool near = false; foreach (var u in used) if (Sq(u.x - t.x) + Sq(u.z - t.z) < T.line.minGap * T.line.minGap) { near = true; break; }
+                if (near) continue;
+                bd = d; best = t;
+            }
+            return best;
+        }
+        void LineTick(bool daylight, Num frac)
+        {
+            if (line.Count == 0) return;
+            Num dt = (Num)60 / dayTicks; var av = EcoAvail();
+            foreach (var sc in new List<LineColony>(line))
+            {
+                var c = sc.colony; string key = "line:" + sc.id; int outN = 0; foreach (var w in wasps) if (w.colony == key) outN++;
+                if (c.adults < 1 && c.queenAlive && daylight)
+                {
+                    c.sugar += T.line.queenForage.sugar * dt * av.sugar; c.protein += T.line.queenForage.protein * dt * av.protein; c.pulp += T.line.queenForage.pulp * dt;
+                }
+                var h = NestHeat(minute, sc.nest.site);
+                Colony.Step(c, dt, outN, daylight, frac, bio, BroodSpeed(minute, sc.nest.site, c.cool), av, (h.heat, h.cook));
+                if (Colony.Finished(c, 0))
+                {
+                    line.Remove(sc);
+                    foreach (var w in new List<Wasp>(wasps)) if (w.colony == key) Despawn(w);
+                    Emit("sisterLost", ("id", sc.id));
+                }
+            }
+        }
+        void LineTraffic(bool daylight)
+        {
+            var keys = new HashSet<string>(); foreach (var r in activeChunks) keys.Add(r.key);
+            foreach (var w in new List<Wasp>(wasps))
+            {
+                if (w.colony == "own" || IsRival(w)) continue;
+                LineColony sc = null; foreach (var x in line) if ("line:" + x.id == w.colony) { sc = x; break; }
+                if (sc == null || !keys.Contains(sc.nest.key)) Despawn(w);
+            }
+            if (!daylight || noAI || tick % 180 >= 60) return;
+            foreach (var sc in line)
+            {
+                if (!keys.Contains(sc.nest.key)) continue;
+                string key = "line:" + sc.id; int outN = 0; foreach (var w in wasps) if (w.colony == key) outN++;
+                if (outN >= System.Math.Min(T.line.physical, (int)Floor(sc.colony.adults * 0.2))) continue;
+                var nw = SpawnWasp(false);
+                nw.colony = key; nw.x = sc.nest.entrance.x; nw.y = sc.nest.entrance.y - 0.03; nw.z = sc.nest.entrance.z;
+                nw.role = H32(nw.id, 9) < 0.5 ? "sugar" : "protein"; nw.ai.mode = "pick";
+            }
+        }
+        void TakeOverSister()
+        {
+            Num Size(LineColony x) => x.colony.adults + Colony.BroodTotal(x.colony);
+            var best = line[0];
+            foreach (var x in line) if (Size(x) > Size(best)) best = x;
+            line.Remove(best);
+            foreach (var w in new List<Wasp>(wasps)) if (w.colony == "line:" + best.id) Despawn(w);
+            int alloc = colony.alloc;
+            oldNests.Add(nest);
+            nest = best.nest; colony = best.colony; colony.alloc = alloc;
+            var d = Driven();
+            foreach (var w in new List<Wasp>(wasps)) if (w.colony == "own" && w != d) Despawn(w);
+            if (d != null) { d.x = nest.spawn.x; d.y = nest.spawn.y; d.z = nest.spawn.z; d.vx = d.vy = d.vz = 0; d.carry = null; }
+            Emit("sisterTakeover", ("id", best.id), ("adults", (int)Floor(colony.adults)));
+        }
 
         // ---------------- males and mating flights (GDD 6.5, 6.7, T2-3); see sim.js
 

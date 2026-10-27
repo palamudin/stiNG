@@ -60,6 +60,7 @@ export function restore(json) {
   // plain state
   for (const k of Object.keys(d)) if (!['v', 'gen', 'tune', 'opts', 'records', 'humans', 'active', 'ext'].includes(k)) sim[k] = d[k];
   if (sim.colony.young === undefined) sim.colony.young = 0; // saves from before worker ages (T1-13)
+  if (!sim.line) { sim.line = []; sim.lineSeq = 0; } // saves from before lineage colonies (T2-4)
   if (!sim.plaus.held) { sim.plaus.held = {}; sim.plaus.sips = {}; } // saves from before the carry ledger (T1-20)
   // saves from before body temperature (T1-2): wasps come out warm
   for (const w of [...sim.wasps, ...(sim.ghost ? [sim.ghost] : [])]) if (w.bodyT === undefined) { w.bodyT = T.cold.nestTemp; w.chill = 0; }

@@ -580,6 +580,17 @@ winterShare = 0.5
 speedMul = 0.8
 venomMul = 1.5
 
+[line]
+max = 5
+treeRange = 40
+minGap = 8
+physical = 3
+
+[line.queenForage]
+sugar = 1.5
+protein = 2
+pulp = 2
+
 [males]
 area = 30
 need = 20

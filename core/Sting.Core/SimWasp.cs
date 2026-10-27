@@ -1380,6 +1380,7 @@ namespace Sting.Core
         /// Autumn's end (GDD 6.7, T1-15). The mated gynes spread over a few hibernation sites near the nest, most of
         /// them to the one a worker scouted; each site's quality sets how many wake. The colony sleeps until the
         /// player picks a queen.
+        internal void EndSeasonForTest(string why) => EndSeason(why);
         void EndSeason(string why)
         {
             var col = colony; int sn = season.n;
@@ -1400,8 +1401,16 @@ namespace Sting.Core
                 var s = cands[i]; int k = (int)Floor(col.mated * f * T.hiber.survival * s.q + H32(sn, i, 952));
                 if (k >= 1) { sites.Add(new HiberSite { kind = s.kind, x = s.x, y = s.y, z = s.z, q = s.q, n = k, scouted = i == pk }); survivors += k; }
             }
+            // the sister colonies' mated queens winter by their nests (T2-4)
+            foreach (var sc in line)
+            {
+                int k = (int)Floor(sc.colony.mated * T.hiber.survival * T.hiber.Q("sister") + H32(sn, sc.id, 953));
+                if (k >= 1) { sites.Add(new HiberSite { kind = "sister", x = sc.nest.spawn.x, y = sc.nest.spawn.y, z = sc.nest.spawn.z, q = T.hiber.Q("sister"), n = k }); survivors += k; }
+            }
             sites.Sort((a, b) => a.n != b.n ? b.n.CompareTo(a.n) : a.q != b.q ? (b.q < a.q ? -1 : 1) : a.x != b.x ? (a.x < b.x ? -1 : 1) : a.z != b.z ? (a.z < b.z ? -1 : 1) : 0);
-            Num lin = Floor(lineage * T.season.lineageSurvival + H32(sn, 32));
+            foreach (var w in new List<Wasp>(wasps)) if (w.colony != "own" && !IsRival(w)) Despawn(w);
+            line = new List<LineColony>();
+            Num lin = Floor(lineage * T.season.lineageSurvival + H32(sn, 32)); // queens of the line beyond the colonies that were real
             Emit("winter", ("why", why), ("mated", col.mated), ("survivors", survivors), ("lineage", lin), ("season", sn), ("sites", sites.Count));
             if (survivors + lin < 1) { extinct = true; foreach (var w in new List<Wasp>(wasps)) Despawn(w); Emit("lineExtinct", ("nestAlive", col.nestAlive)); return; }
             // only sister nests made it: you wake in one of them
@@ -1422,8 +1431,7 @@ namespace Sting.Core
         {
             var W = winter; var site = W.sites[choice]; Num survivors = W.survivors, lin = W.lineage;
             winter = null;
-            // the queen that continues is yours; the rest found lineage colonies (Q-10)
-            lineage = survivors + lin - 1;
+            // the queen that continues is yours; the rest found lineage colonies (Q-10), real ones first (T2-4)
             Num winterDays = Rnd(settings.seasonDays * T.season.winterShare);
             Num target = (day + 1 + winterDays) * 1440 + T.time.dawn;
             clockOffset += (long)((target - minute) * tpm);
@@ -1445,6 +1453,7 @@ namespace Sting.Core
             var q = SpawnWasp(true, "queen");
             q.x = site.x; q.y = site.y + 0.05; q.z = site.z;
             drivenId = q.id;
+            lineage = FoundLine(W.sites, choice, survivors + lin - 1);
             foreach (var hm in active) CatchUpHuman(hm);
             UpdateChunks(true);
             Emit("spring", ("season", season.n), ("lineage", lineage), ("id", q.id), ("kind", site.kind));

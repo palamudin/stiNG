@@ -1515,6 +1515,53 @@ function seated(sim, pred) {
   ok(mine && mine.driven && ev.some((e) => e.type === 'waspDied' && e.driven && e.cause === 'mated') && u.colony.mated === mated0 + 1, 'a player flying a male into a young queen mates with her, and his life ends there');
 }
 
+// Lineage colonies (GDD 6.7, T2-4): the line's other queens found real colonies run by the AI
+{
+  const L = T.line, s = new Sim({ seed: 1234, birds: false, dayMinutes: 20 });
+  run(s, 2);
+  // spring: three sites with queens; you take one at the first site
+  const sites = [{ kind: 'bark', x: s.nest.x + 3, y: 1, z: s.nest.z + 3, q: 0.5, n: 3 }, { kind: 'litter', x: s.nest.x - 25, y: 0.1, z: s.nest.z + 10, q: 0.3, n: 2 }];
+  s.line = [];
+  const left = s._foundLine(sites, 0, 4);
+  const gaps = s.line.flatMap((a, i) => s.line.slice(i + 1).map((b) => Math.hypot(a.nest.treeX - b.nest.treeX, a.nest.treeZ - b.nest.treeZ)));
+  ok(s.line.length >= 2 && s.line.length <= L.max && left === 4 - s.line.length && gaps.every((g) => g >= L.minGap) && s.line.every((x) => x.colony.sited && x.colony.queenAlive && x.colony.adults === 0),
+    `four queens besides yours: ${s.line.length} found colonies on trunks near where they wintered, at least ${L.minGap} m apart; ${left} stay a count`);
+  ok(s.isRival({ colony: 'line:1' }) === false && s.isRival({ colony: '3,4' }) === true && s.isRival({ colony: 'own' }) === false, 'a sister colony is not a rival');
+  // a founding sister queen brings in food alone and her colony grows
+  const sc = s.line[0];
+  for (let i = 0; i < 20 * 60 * 50 * 6 && sc.colony.adults < 1; i += 60) { s.step(idle()); s.drainEvents(); if (s.wasp) s.wasp.born = s.minute; for (let k = 0; k < 59; k++) { s.step(idle()); s.drainEvents(); } }
+  ok(sc.colony.adults >= 1 && sc.colony.cells > 0 && s.line.includes(sc), `a sister queen founds alone and raises her first workers (${sc.colony.adults.toFixed(1)} adults, ${sc.colony.cells.toFixed(0)} cells by day ${s.day})`);
+  // near you, its workers fly; they never fight yours, and your guards leave them be
+  sc.colony.adults = 40;
+  { const m = (s.day + 1) * 1440 + 11 * 60, d = s._driven(); if (d) d.born = m; s.clockOffset += (m - s.minute) * s.tpm; run(s, 1); } // a fair morning
+  while (dayWeather(s.seed, s.day).rain) { const m = (s.day + 1) * 1440 + 11 * 60; s.clockOffset += (m - s.minute) * s.tpm; run(s, 1); }
+  if (s.wasp) place(s.wasp, sc.nest.spawn);
+  let out = null;
+  for (let i = 0; i < 1200 && !out; i++) { s.step(idle()); s.drainEvents(); if (s.wasp) { place(s.wasp, { x: sc.nest.x + 1, y: sc.nest.y, z: sc.nest.z + 1 }); s.wasp.born = s.minute; } out = s.wasps.find((w) => w.colony === 'line:' + sc.id); }
+  ok(!!out && out.colony === 'line:' + sc.id, `a sister colony near the player sends workers out (${s.wasps.filter((w) => w.colony === 'line:' + sc.id).length} out)`);
+  if (out && s.wasp) {
+    place(s.wasp, out); out.state = 'fly'; s.wasp.state = 'fly';
+    const ev = run(s, 3, () => { if (s.wasp && out) place(s.wasp, out); return idle(); });
+    ok(count(ev, 'fight') === 0 && out.state !== 'fighting', 'your wasp touching a sister colony\'s worker does not fight it');
+  }
+  // its mated queens winter by its nest and are offered in spring
+  for (const x of s.line) x.colony.mated = 200;
+  s._endSeason('autumn');
+  const sis = s.winter && s.winter.sites.filter((x) => x.kind === 'sister');
+  ok(sis && sis.length >= 1 && s.line.length === 0, `at the end of the season the sister colonies' mated queens winter by their nests and are offered with yours (${sis && sis.map((x) => x.n).join(', ')} queens)`);
+  // losing your colony mid-season: you go on in the strongest sister
+  const u = new Sim({ seed: 1234, birds: false }, { noAI: true });
+  run(u, 2);
+  u._foundLine([{ kind: 'bark', x: u.nest.x + 3, y: 1, z: u.nest.z + 3, q: 0.5, n: 3 }], 0, 2);
+  u.line[0].colony.adults = 12; u.line[1] && (u.line[1].colony.adults = 30);
+  const strong = u.line.reduce((a, b) => (b.colony.adults > a.colony.adults ? b : a));
+  const snap = restore(snapshot(u));
+  ok(snap.line.length === u.line.length && snap.line[0].nest.x === u.line[0].nest.x && snap.line[0].colony.adults === u.line[0].colony.adults, 'sister colonies survive save and restore');
+  u.colony.queenAlive = false; u.colony.adults = 0; u.colony.eggs = u.colony.larvae = u.colony.pupae = 0;
+  const ev2 = run(u, 120);
+  ok(count(ev2, 'sisterTakeover') === 1 && u.nest === strong.nest && u.colony === strong.colony && !u.line.includes(strong) && !u.extinct, `your colony gone, you go on in the strongest sister colony (${Math.floor(u.colony.adults)} adults)`);
+}
+
 // Tuning as data (GDD 13, T1-22): one plain-text file feeds both sims
 {
   const { unknown, missing } = TUNE_RESULT;

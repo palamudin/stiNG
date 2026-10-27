@@ -851,6 +851,48 @@ namespace Sting.Core.Tests
                 var mine = ev.FirstOrDefault(e => e.type == "mated");
                 Ok(mine != null && (bool)mine["driven"] && ev.Any(e => e.type == "waspDied" && (bool)e["driven"] && Cause(e) == "mated") && u.colony.mated == mated0 + 1, "a player flying a male into a young queen mates with her, and his life ends there");
             }
+            // 44. lineage colonies (T2-4): the line's other queens found real colonies run by the AI
+            {
+                var s = new Sim(new Settings { seed = 1234, birds = false, dayMinutes = 20 });
+                RunS(s, 2);
+                var sites = new List<HiberSite> { new HiberSite { kind = "bark", x = s.nest.x + 3, y = 1, z = s.nest.z + 3, q = 0.5, n = 3 }, new HiberSite { kind = "litter", x = s.nest.x - 25, y = 0.1, z = s.nest.z + 10, q = 0.3, n = 2 } };
+                Num left = s.FoundLine(sites, 0, 4);
+                bool gapsOk = true;
+                for (int a = 0; a < s.line.Count; a++) for (int b = a + 1; b < s.line.Count; b++) if (Hypot(s.line[a].nest.treeX - s.line[b].nest.treeX, s.line[a].nest.treeZ - s.line[b].nest.treeZ) < T.line.minGap) gapsOk = false;
+                Ok(s.line.Count >= 2 && s.line.Count <= T.line.max && left == 4 - s.line.Count && gapsOk && s.line.All(x => x.colony.sited && x.colony.queenAlive && x.colony.adults == 0),
+                    $"four queens besides yours: {s.line.Count} found colonies on trunks near where they wintered; {D(left)} stay a count");
+                Ok(!Sim.IsRival(new Wasp { colony = "line:1" }) && Sim.IsRival(new Wasp { colony = "3,4" }) && !Sim.IsRival(new Wasp { colony = "own" }), "a sister colony is not a rival");
+                var sc = s.line[0];
+                for (int i = 0; i < 20 * 60 * 50 * 6 && sc.colony.adults < 1; i += 60) { RunS(s, 1); if (s.wasp != null) s.wasp.born = s.minute; RunS(s, 59); }
+                Ok(sc.colony.adults >= 1 && sc.colony.cells > 0 && s.line.Contains(sc), $"a sister queen founds alone and raises her first workers ({D(sc.colony.adults):0.0} adults, {D(sc.colony.cells):0} cells by day {s.day})");
+                sc.colony.adults = 40;
+                void Jump(long m) { var dw = s.Driven(); if (dw != null) dw.born = m; s.clockOffset += (m - s.minute) * s.tpm; RunS(s, 1); }
+                Jump((s.day + 1) * 1440 + 11 * 60);
+                while (World.Weather(s.seed, s.day).rain) Jump((s.day + 1) * 1440 + 11 * 60);
+                Wasp outW = null;
+                for (int i = 0; i < 1200 && outW == null; i++) { RunS(s, 1); if (s.wasp != null) { Place(s.wasp, P(sc.nest.x + 1, sc.nest.y, sc.nest.z + 1)); s.wasp.born = s.minute; } outW = s.wasps.FirstOrDefault(w => w.colony == "line:" + sc.id); }
+                Ok(outW != null, "a sister colony near the player sends workers out");
+                if (outW != null && s.wasp != null)
+                {
+                    Place(s.wasp, P(outW.x, outW.y, outW.z)); outW.state = "fly"; s.wasp.state = "fly";
+                    var ev = RunS(s, 3, (sim, i) => { if (sim.wasp != null) Place(sim.wasp, P(outW.x, outW.y, outW.z)); return Idle(); });
+                    Ok(Count(ev, "fight") == 0 && outW.state != "fighting", "your wasp touching a sister colony's worker does not fight it");
+                }
+                foreach (var x in s.line) x.colony.mated = 200;
+                s.EndSeasonForTest("autumn");
+                var sis = s.winter?.sites.Where(x => x.kind == "sister").ToList();
+                Ok(sis != null && sis.Count >= 1 && s.line.Count == 0, $"the sister colonies' mated queens winter by their nests and are offered with yours ({string.Join(", ", sis?.Select(x => x.n) ?? new int[0])} queens)");
+                var u = new Sim(new Settings { seed = 1234, birds = false }, new SimOpts { noAI = true });
+                RunS(u, 2);
+                u.FoundLine(new List<HiberSite> { new HiberSite { kind = "bark", x = u.nest.x + 3, y = 1, z = u.nest.z + 3, q = 0.5, n = 3 } }, 0, 2);
+                u.line[0].colony.adults = 12; if (u.line.Count > 1) u.line[1].colony.adults = 30;
+                var strong = u.line.OrderByDescending(x => D(x.colony.adults)).First();
+                var r = Persist.Restore(Persist.Snapshot(u));
+                Ok(r.line.Count == u.line.Count && r.line[0].nest.x == u.line[0].nest.x && r.line[0].colony.adults == u.line[0].colony.adults, "sister colonies survive save and restore");
+                u.colony.queenAlive = false; u.colony.adults = 0; u.colony.eggs = u.colony.larvae = u.colony.pupae = 0;
+                var ev2 = RunS(u, 120);
+                Ok(Count(ev2, "sisterTakeover") == 1 && u.nest == strong.nest && u.colony == strong.colony && !u.line.Contains(strong) && !u.extinct, $"your colony gone, you go on in the strongest sister colony ({D(Floor(u.colony.adults))} adults)");
+            }
         }
 
         // 26. Tier 1, batch 1: wind, cold, drowning, clothes by the weather, shaking and flailing

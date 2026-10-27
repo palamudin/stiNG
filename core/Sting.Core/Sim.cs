@@ -50,6 +50,8 @@ namespace Sting.Core
         public ColonyState colony;
         public Nest nest;
         public List<Nest> oldNests = new List<Nest>();
+        /// lineage colonies run by the AI (T2-4)
+        public List<LineColony> line = new List<LineColony>(); public int lineSeq;
         public OrderedMap<string, bool> stung = new OrderedMap<string, bool>();
         public SimStats stats = new SimStats();
         public List<Wasp> wasps = new List<Wasp>();
@@ -188,23 +190,25 @@ namespace Sting.Core
         /// How fast the brood develops at a minute (GDD 6.6, T1-14): full speed in a comfortable nest; cold snaps and heat
         /// slow it, as much as the site lets the weather in. An attic heats up on sunny afternoons.
         /// Water the colony has fanned over the comb takes the heat's share away (T2-1)
-        public Num BroodSpeed(long m)
+        public Num BroodSpeed(long m) => BroodSpeed(m, nest.site, colony.cool);
+        public Num BroodSpeed(long m, string site, Num cool)
         {
-            var S = T.sites.Of(nest.site); Num air = NestAir(m);
-            Num cold = Clamp01((T.thermal.coldFrom - air) / T.thermal.coldSpan), hot = Clamp01((air - T.thermal.hotFrom) / T.thermal.hotSpan) * T.thermal.hotWeight * (1 - Clamp01(colony.cool));
+            var S = T.sites.Of(site); Num air = NestAir(m, site);
+            Num cold = Clamp01((T.thermal.coldFrom - air) / T.thermal.coldSpan), hot = Clamp01((air - T.thermal.hotFrom) / T.thermal.hotSpan) * T.thermal.hotWeight * (1 - Clamp01(cool));
             return Max(T.thermal.minSpeed, 1 - (1 - S.insulation) * (cold + hot));
         }
-        /// the air at the nest: the weather, plus the sun on an attic roof
-        Num NestAir(long m)
+        /// the air at a nest: the weather, plus the sun on an attic roof
+        Num NestAir(long m, string site)
         {
-            var S = T.sites.Of(nest.site); long d = MinuteOfDay(m);
+            var S = T.sites.Of(site); long d = MinuteOfDay(m);
             return AirAt(m) + S.heat * Max(0, DSin(TAU * (d - 540) / 1440)) * (IsRaining(seed, m) ? 0 : 1);
         }
         /// The nest's heat (GDD 6.6, T2-1): past comfort through the site's insulation (0..1), and how far the comb is past
         /// the temperature that kills brood (0..1)
-        public (Num heat, Num cook, Num nestT) NestHeat(long m)
+        public (Num heat, Num cook, Num nestT) NestHeat(long m) => NestHeat(m, nest.site);
+        public (Num heat, Num cook, Num nestT) NestHeat(long m, string site)
         {
-            var S = T.sites.Of(nest.site); Num air = NestAir(m), keep = 1 - S.insulation;
+            var S = T.sites.Of(site); Num air = NestAir(m, site), keep = 1 - S.insulation;
             Num nestT = T.water.nestBase + Max(0, air - T.water.nestBase) * keep;
             return (keep * Clamp01((air - T.thermal.hotFrom) / T.thermal.hotSpan), Clamp01((nestT - T.water.lethal) / T.water.lethalSpan), nestT);
         }
@@ -230,6 +234,8 @@ namespace Sting.Core
         }
         public int PhysicalCount => Own().Count;
         List<Wasp> Own() { var l = new List<Wasp>(); foreach (var w in wasps) if (w.colony == "own") l.Add(w); return l; }
+        /// another colony's wasp that fights the line: a rival, not one of the line's sister colonies (T2-4)
+        public static bool IsRival(Wasp w) => w.colony != "own" && !(w.colony != null && w.colony.StartsWith("line:", System.StringComparison.Ordinal));
         int OwnWorkers() { int n = 0; foreach (var w in wasps) if (w.colony == "own" && w.caste == "worker") n++; return n; } // males and gynes out are not workers (T2-3)
         public Num SeasonFrac => (minute - season.startMinute) / (settings.seasonDays * 1440);
         public bool CanFly() => Temperature >= T.weather.flyMinTemp;

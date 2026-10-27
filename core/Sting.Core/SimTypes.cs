@@ -232,6 +232,8 @@ namespace Sting.Core
     public sealed class SipRec { public int t; public Num amount; }
     public sealed class Hint { public string opening, prey, site, hiber; public bool bait, wood, nest, rival, hive, water; }
     /// A hibernation site and the queens waking there (T1-15)
+    /// a colony of the line run by the AI (T2-4)
+    public sealed class LineColony { public int id, season; public Nest nest; public ColonyState colony; }
     public sealed class HiberSite { public string kind; public Num x, y, z, q; public int n; public bool scouted; }
     public sealed class Winter { public string why; public List<HiberSite> sites = new List<HiberSite>(); public Num survivors, lineage; public int until; }
     public sealed class HiberPick { public int season; public Num x, z; public string kind; }

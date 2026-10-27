@@ -1245,10 +1245,10 @@ namespace Sting.Core
         void Rivals(bool daylight)
         {
             if (net && peer != 0) return;
-            if (!settings.rivals) { foreach (var w in new List<Wasp>(wasps)) if (w.colony != "own") Despawn(w); return; }
+            if (!settings.rivals) { foreach (var w in new List<Wasp>(wasps)) if (IsRival(w)) Despawn(w); return; }
             var activeKeys = new HashSet<string>();
             foreach (var r in activeChunks) activeKeys.Add(r.key);
-            foreach (var w in new List<Wasp>(wasps)) if (w.colony != "own" && !activeKeys.Contains(w.colony)) Despawn(w);
+            foreach (var w in new List<Wasp>(wasps)) if (IsRival(w) && !activeKeys.Contains(w.colony)) Despawn(w);
             if (!daylight) return;
             foreach (var rec in activeChunks)
             {
@@ -1288,6 +1288,20 @@ namespace Sting.Core
                 Steer(w, t.P, cmd); cmd.throttle = 1; cmd.burst = 1;
                 return cmd;
             }
+            return ThinkForager(w, cmd, home);
+        }
+        /// a sister colony's worker (T2-4): forages from its own nest and never fights the line
+        Cmd ThinkSister(Wasp w, Cmd cmd)
+        {
+            LineColony sc = null; foreach (var x in line) if ("line:" + x.id == w.colony) { sc = x; break; }
+            if (sc == null) { Despawn(w); return cmd; }
+            if (!IsDaylight(minute) || Raining) w.ai.mode = "home";
+            return ThinkForager(w, cmd, sc.nest.entrance);
+        }
+        /// another colony's forager: out to food from its home and back (a rival's or a sister colony's)
+        Cmd ThinkForager(Wasp w, Cmd cmd, V3 home)
+        {
+            var ai = w.ai;
             if (ai.mode == "home" || ai.mode == "return")
             {
                 Steer(w, home, cmd);
@@ -1360,14 +1374,14 @@ namespace Sting.Core
                 Num Score(Wasp x) => x.venom + (x.caste == "queen" ? 1 : 0) + x.fight.mash + H32(x.id, tick, 61) * 1.2;
                 var (win, lose) = Score(w) >= Score(o) ? (w, o) : (o, w);
                 win.state = "stunned"; win.stateTicks = 20; win.fight = null;
-                Die(lose, lose.colony == "own" ? "killed by a rival wasp" : "killed by your worker", null);
+                Die(lose, !IsRival(lose) ? "killed by a rival wasp" : "killed by your worker", null);
                 Emit("fightOver", ("winner", win.id), ("loser", lose.id));
             }
             var free = wasps.FindAll(w => Free3(w.state));
             for (int i = 0; i < free.Count; i++) for (int j = i + 1; j < free.Count; j++)
                 {
                     var a = free[i]; var b = free[j];
-                    if (a.colony == b.colony || a.state == "fighting" || b.state == "fighting") continue;
+                    if (a.colony == b.colony || (!IsRival(a) && !IsRival(b)) || a.state == "fighting" || b.state == "fighting") continue; // the line's colonies are sisters
                     if (D2(a, b) > T.rival.fightRange * T.rival.fightRange) continue;
                     foreach (var (x, y) in new[] { (a, b), (b, a) }) { x.state = "fighting"; x.vx = x.vy = x.vz = 0; x.fight = new Fight { other = y.id, until = tick + T.rival.fightTicks, mash = 0 }; }
                     Emit("fight", ("a", a.id), ("b", b.id), ("driven", a.id == drivenId || b.id == drivenId));
@@ -1404,7 +1418,7 @@ namespace Sting.Core
             Num rr = T.rival.remoteFightRange * T.rival.remoteFightRange;
             foreach (var a in free)
             {
-                if (a.colony == "own" || a.state == "fighting") continue;
+                if (!IsRival(a) || a.state == "fighting") continue;
                 foreach (var kv in remote)
                 {
                     var r = kv.Value;
@@ -1456,10 +1470,14 @@ namespace Sting.Core
             string ph = Colony.SeasonPhase(frac);
             if (ph != season.phase) { season.phase = ph; Emit("season", ("phase", ph)); }
             if (frac >= 1) { EndSeason("autumn"); return; }
+            LineTick(daylight, frac);
+            // lose your colony and the line goes on in the strongest of its sister colonies (T2-4)
+            if (line.Count > 0 && Colony.Finished(col, 0)) { TakeOverSister(); return; }
             if (Colony.Finished(col, Own().Count) && Own().Count == 0) { EndSeason("colony lost"); return; }
             ExtCheck();
             // launch physical AI foragers while the player is near the nest (GDD 11.12: far colonies stay abstract)
             Rivals(daylight);
+            LineTraffic(daylight);
             bool nearNest = false;
             if (colony.sited) foreach (var r in activeChunks) if (r.key == nest.key) { nearNest = true; break; }
             if (!nearNest)

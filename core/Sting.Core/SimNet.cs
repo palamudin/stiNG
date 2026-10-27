@@ -66,7 +66,7 @@ namespace Sting.Core
             RemoteWasp Pack(Wasp w) => new RemoteWasp
             {
                 id = w.id, caste = w.caste, x = w.x, y = w.y, z = w.z, vx = w.vx, vy = w.vy, vz = w.vz, state = w.state,
-                carry = w.carry?.what, under = w.under?.hex, rival = w.colony != "own",
+                carry = w.carry?.what, under = w.under?.hex, rival = IsRival(w),
             };
             // wasps gone since the last state packets, so receivers drop them at once
             var gone = new List<int>();
@@ -416,7 +416,7 @@ namespace Sting.Core
                     // another peer's wasp touched one of my rivals on its own screen: start the fight if the rival is free
                     if (mine || ev.toPeer != peer) break;
                     var a = WaspById(ev.a);
-                    if (a != null && a.colony != "own" && (a.state == "fly" || a.state == "landed" || a.state == "chewing")) StartRemoteFight(a, ev.b, ev.peer);
+                    if (a != null && IsRival(a) && (a.state == "fly" || a.state == "landed" || a.state == "chewing")) StartRemoteFight(a, ev.b, ev.peer);
                     break;
                 }
                 case "fightJoin":

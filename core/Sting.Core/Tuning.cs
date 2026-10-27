@@ -196,6 +196,12 @@ namespace Sting.Core
                 collapseFrom = 0.82, collapseMul = 5, queenDiesAt = 0.95, winterSurvival = 0.03, lineageSurvival = 0.3, winterShare = 0.5;
         }
         public static class queen { public static Num speedMul = 0.8, venomMul = 1.5; }
+        /// Lineage colonies (GDD 6.7, T2-4); see tuning.js
+        public static class line
+        {
+            public static int max = 5, physical = 3; public static Num treeRange = 40, minGap = 8;
+            public static class queenForage { public static Num sugar = 1.5, protein = 2, pulp = 2; }
+        }
         /// Males and mating flights (GDD 6.5, 6.7, T2-3); see tuning.js
         public static class males
         {

@@ -10,7 +10,7 @@ import {
   chunkOf, chunkKey, NEST, NEST_ENTRANCE, SPAWN, generateChunk, ticksPerMinute, clockMinutes, dayOf, minuteOfDay,
   isRaining, dayWeather, tempAt, windAt, isDaylight, humanWindow, flyPos, beePos, birdPos, dragonPos, shedSites, makeNest,
 } from './world.js';
-import { newColony, colonyStep, destroyNest, colonyFinished, seasonPhase, reproShare } from './colony.js';
+import { newColony, colonyStep, destroyNest, colonyFinished, seasonPhase, reproShare, broodTotal } from './colony.js';
 
 export const CMD_FIELDS = 10; // mx, my, mz, burst, sting, yawQ, pitchQ, act, alloc, pick (a wasp id to switch to, from the colony view)
 export const Act = { Interact: 1, Switch: 2, Rest: 4 };
@@ -85,6 +85,7 @@ export class Sim {
     this.season = { n: 1, startMinute: this.minute - T.season.startFrac * this.settings.seasonDays * 1440, phase: '' };
     this.season.phase = seasonPhase(this.seasonFrac);
     this.lineage = 0;
+    this.line = []; this.lineSeq = 0; // lineage colonies run by the AI (T2-4)
     const w = this._spawnWasp(true);
     this.drivenId = w.id;
     this._updateChunks(true);
@@ -135,20 +136,20 @@ export class Sim {
   // How fast the brood develops at a minute (GDD 6.6, T1-14): full speed in a comfortable nest; cold snaps and heat
   // slow it, as much as the site lets the weather in. An attic heats up on sunny afternoons.
   // Water the colony has fanned over the comb takes the heat's share away (T2-1)
-  broodSpeed(m = this.minute) {
-    const H = T.thermal, S = T.sites[this.nest.site || 'trunk'], air = this._nestAir(m);
-    const cold = clamp01((H.coldFrom - air) / H.coldSpan), hot = clamp01((air - H.hotFrom) / H.hotSpan) * H.hotWeight * (1 - clamp01(this.colony.cool ?? 1));
+  broodSpeed(m = this.minute, site = this.nest.site, cool = this.colony.cool) {
+    const H = T.thermal, S = T.sites[site || 'trunk'], air = this._nestAir(m, site);
+    const cold = clamp01((H.coldFrom - air) / H.coldSpan), hot = clamp01((air - H.hotFrom) / H.hotSpan) * H.hotWeight * (1 - clamp01(cool ?? 1));
     return Math.max(H.minSpeed, 1 - (1 - S.insulation) * (cold + hot));
   }
-  // the air at the nest: the weather, plus the sun on an attic roof
-  _nestAir(m) {
-    const S = T.sites[this.nest.site || 'trunk'], d = minuteOfDay(m);
+  // the air at a nest: the weather, plus the sun on an attic roof
+  _nestAir(m, site = this.nest.site) {
+    const S = T.sites[site || 'trunk'], d = minuteOfDay(m);
     return this.airAt(m) + S.heat * Math.max(0, dsin(TAU * (d - 540) / 1440)) * (isRaining(this.seed, m) ? 0 : 1);
   }
   // The nest's heat (GDD 6.6, T2-1): how hot it is past comfort through the site's insulation (0..1), and how far the
   // comb is past the temperature that kills brood (0..1)
-  nestHeat(m = this.minute) {
-    const H = T.thermal, W = T.water, S = T.sites[this.nest.site || 'trunk'], air = this._nestAir(m), keep = 1 - S.insulation;
+  nestHeat(m = this.minute, site = this.nest.site) {
+    const H = T.thermal, W = T.water, S = T.sites[site || 'trunk'], air = this._nestAir(m, site), keep = 1 - S.insulation;
     const nestT = W.nestBase + Math.max(0, air - W.nestBase) * keep;
     return { heat: keep * clamp01((air - H.hotFrom) / H.hotSpan), cook: clamp01((nestT - W.lethal) / W.lethalSpan), nestT };
   }
@@ -172,6 +173,8 @@ export class Sim {
   }
   get physicalCount() { return this._own().length; }
   _own() { return this.wasps.filter((w) => w.colony === 'own'); }
+  // Another colony's wasp that fights the line: a rival, not one of the line's sister colonies (T2-4)
+  isRival(w) { return w.colony !== 'own' && !(typeof w.colony === 'string' && w.colony.startsWith('line:')); }
   get seasonFrac() { return (this.minute - this.season.startMinute) / (this.settings.seasonDays * 1440); }
   canFly() { return this.temperature >= T.weather.flyMinTemp; }
 
@@ -404,7 +407,7 @@ export class Sim {
     if (!dueD && !dueN && !dueM && !dueF) return;
     const pack = (w) => ({
       id: w.id, caste: w.caste, x: w.x, y: w.y, z: w.z, vx: w.vx, vy: w.vy, vz: w.vz, state: w.state,
-      carry: w.carry ? w.carry.what : null, under: w.under ? w.under.hex : null, rival: w.colony !== 'own',
+      carry: w.carry ? w.carry.what : null, under: w.under ? w.under.hex : null, rival: this.isRival(w),
     });
     // wasps gone since the last state packets, so receivers drop them at once
     let gone = [];
@@ -612,7 +615,7 @@ export class Sim {
         // another peer's wasp touched one of my rivals on its own screen: start the fight if the rival is free
         if (mine || ev.toPeer !== this.peer) break;
         const a = this.waspById(ev.a);
-        if (a && a.colony !== 'own' && (a.state === 'fly' || a.state === 'landed' || a.state === 'chewing')) this._startRemoteFight(a, ev.b, ev.peer);
+        if (a && this.isRival(a) && (a.state === 'fly' || a.state === 'landed' || a.state === 'chewing')) this._startRemoteFight(a, ev.b, ev.peer);
         break;
       }
       case 'fightJoin': {
@@ -2035,8 +2038,15 @@ export class Sim {
       const s = cands[i], k = Math.floor(col.mated * f * H.survival * s.q + h32(n, i, 952));
       if (k >= 1) { sites.push({ kind: s.kind, x: s.x, y: s.y, z: s.z, q: s.q, n: k, scouted: i === pk }); survivors += k; }
     }
+    // the sister colonies' mated queens winter by their nests (T2-4)
+    for (const sc of this.line) {
+      const k = Math.floor(sc.colony.mated * H.survival * H.q.sister + h32(n, sc.id, 953));
+      if (k >= 1) { sites.push({ kind: 'sister', x: sc.nest.spawn.x, y: sc.nest.spawn.y, z: sc.nest.spawn.z, q: H.q.sister, n: k, scouted: false }); survivors += k; }
+    }
     sites.sort((a, b) => b.n - a.n || b.q - a.q || a.x - b.x || a.z - b.z);
-    const lineage = Math.floor(this.lineage * S.lineageSurvival + h32(n, 32));
+    for (const w of this.wasps.slice()) if (w.colony !== 'own' && !this.isRival(w)) this._despawn(w);
+    this.line = [];
+    const lineage = Math.floor(this.lineage * S.lineageSurvival + h32(n, 32)); // queens of the line beyond the colonies that were real
     this.emit('winter', { why, mated: col.mated, survivors, lineage, season: n, sites: sites.map((s) => ({ kind: s.kind, n: s.n, q: s.q, scouted: s.scouted, dist: Math.sqrt(sq(s.x - this.nest.x) + sq(s.z - this.nest.z)) })) });
     if (survivors + lineage < 1) { this.extinct = true; for (const w of this.wasps.slice()) this._despawn(w); this.emit('lineExtinct', { nestAlive: col.nestAlive }); return; }
     // only sister nests made it: you wake in one of them
@@ -2055,8 +2065,7 @@ export class Sim {
   _spring(choice) {
     const W = this.winter, site = W.sites[choice], survivors = W.survivors, lineage = W.lineage;
     this.winter = null;
-    // the queen that continues is yours; the rest found lineage colonies (Q-10)
-    this.lineage = survivors + lineage - 1;
+    // the queen that continues is yours; the rest found lineage colonies (Q-10), real ones first (T2-4)
     const winterDays = rnd(this.settings.seasonDays * T.season.winterShare);
     const target = (this.day + 1 + winterDays) * 1440 + T.time.dawn;
     this.clockOffset += (target - this.minute) * this.tpm;
@@ -2078,6 +2087,7 @@ export class Sim {
     const q = this._spawnWasp(true, 'queen');
     q.x = site.x; q.y = site.y + 0.05; q.z = site.z;
     this.drivenId = q.id;
+    this.lineage = this._foundLine(W.sites, choice, survivors + lineage - 1);
     for (const hm of this.active) this._catchUpHuman(hm);
     this._updateChunks(true);
     this.emit('spring', { season: this.season.n, lineage: this.lineage, id: q.id, kind: site.kind });
@@ -3401,9 +3411,9 @@ export class Sim {
   // Rival workers come and go only around their own nest, and only on the world-authority peer
   _rivals(daylight) {
     if (this.net && this.peer !== 0) return;
-    if (!this.settings.rivals) { for (const w of this.wasps.slice()) if (w.colony !== 'own') this._despawn(w); return; }
+    if (!this.settings.rivals) { for (const w of this.wasps.slice()) if (this.isRival(w)) this._despawn(w); return; }
     const activeKeys = new Set(this.activeChunks.map((r) => chunkKey(r.cx, r.cz)));
-    for (const w of this.wasps.slice()) if (w.colony !== 'own' && !activeKeys.has(w.colony)) this._despawn(w);
+    for (const w of this.wasps.slice()) if (this.isRival(w) && !activeKeys.has(w.colony)) this._despawn(w);
     if (!daylight) return;
     for (const rec of this.activeChunks) {
       const rv = rec.content.rival;
@@ -3436,6 +3446,18 @@ export class Sim {
       this._steer(w, t, cmd); cmd.throttle = 1; cmd.burst = 1;
       return cmd;
     }
+    return this._thinkForager(w, cmd, home);
+  }
+  // A sister colony's worker (T2-4): forages from its own nest and never fights the line
+  _thinkSister(w, cmd) {
+    const sc = this.line.find((x) => 'line:' + x.id === w.colony);
+    if (!sc) { this._despawn(w); return cmd; }
+    if (!isDaylight(this.minute) || this.raining) w.ai.mode = 'home';
+    return this._thinkForager(w, cmd, sc.nest.entrance);
+  }
+  // Another colony's forager: out to food from its home and back (a rival's or a sister colony's)
+  _thinkForager(w, cmd, home) {
+    const ai = w.ai;
     if (ai.mode === 'home' || ai.mode === 'return') {
       this._steer(w, home, cmd);
       if (dist2(w, home) < 0.07 * 0.07) {
@@ -3500,13 +3522,13 @@ export class Sim {
       const score = (x) => x.venom + (x.caste === 'queen' ? 1 : 0) + x.fight.mash + h32(x.id, this.tick, 61) * 1.2;
       const [win, lose] = score(w) >= score(o) ? [w, o] : [o, w];
       win.state = 'stunned'; win.stateTicks = 20; win.fight = null;
-      this._die(lose, lose.colony === 'own' ? 'killed by a rival wasp' : 'killed by your worker', null);
+      this._die(lose, !this.isRival(lose) ? 'killed by a rival wasp' : 'killed by your worker', null);
       this.emit('fightOver', { winner: win.id, loser: lose.id });
     }
     const free = this.wasps.filter((w) => w.state === 'fly' || w.state === 'landed' || w.state === 'chewing');
     for (let i = 0; i < free.length; i++) for (let j = i + 1; j < free.length; j++) {
       const a = free[i], b = free[j];
-      if (a.colony === b.colony || a.state === 'fighting' || b.state === 'fighting') continue;
+      if (a.colony === b.colony || (!this.isRival(a) && !this.isRival(b)) || a.state === 'fighting' || b.state === 'fighting') continue; // the line's colonies are sisters
       if (dist2(a, b) > R.fightRange * R.fightRange) continue;
       for (const [x, y] of [[a, b], [b, a]]) { x.state = 'fighting'; x.vx = x.vy = x.vz = 0; x.fight = { other: y.id, until: this.tick + R.fightTicks, mash: 0 }; }
       this.emit('fight', { a: a.id, b: b.id, driven: a.id === this.drivenId || b.id === this.drivenId });
@@ -3538,7 +3560,7 @@ export class Sim {
     // My rivals against other peers' wasps: I own the rivals, so I start these fights
     const rr = R.remoteFightRange * R.remoteFightRange;
     for (const a of free) {
-      if (a.colony === 'own' || a.state === 'fighting') continue;
+      if (!this.isRival(a) || a.state === 'fighting') continue;
       for (const [id, r] of this.remote) {
         if (r.rival || busy.has(id) || !(r.state === 'fly' || r.state === 'landed' || r.state === 'chewing')) continue;
         if (dist2(a, r) > rr) continue;
@@ -3581,10 +3603,14 @@ export class Sim {
     const ph = seasonPhase(frac);
     if (ph !== this.season.phase) { this.season.phase = ph; this.emit('season', { phase: ph }); }
     if (frac >= 1) { this._endSeason('autumn'); return; }
+    this._lineTick(daylight, frac);
+    // lose your colony and the line goes on in the strongest of its sister colonies (T2-4)
+    if (this.line.length && colonyFinished(col, 0)) { this._takeOverSister(); return; }
     if (colonyFinished(col, this._own().length) && !this._own().length) { this._endSeason('colony lost'); return; }
     this._extCheck();
     // launch physical AI foragers while the player is near the nest (GDD 11.12: far colonies stay abstract)
     this._rivals(daylight);
+    this._lineTraffic(daylight);
     const nearNest = this.colony.sited && this.activeChunks.some((r) => chunkKey(r.cx, r.cz) === this.nest.key);
     if (!nearNest) {
       for (const w of this._own()) if (w.id !== this.drivenId) this._despawn(w);
@@ -3605,6 +3631,91 @@ export class Sim {
       w.role = 'guard'; w.ai.mode = 'guard';
       this.emit('guardOut', { id: w.id });
     } else if (ai < cap) this._spawnWasp(false);
+  }
+
+  // ---------------------------------------------------------------- lineage colonies (GDD 6.7, T2-4)
+
+  // In spring, the line's other queens found colonies on trunks near where they wintered
+  _foundLine(sites, choice, queens) {
+    const L = T.line, n = this.season.n, used = [{ x: sites[choice].x, z: sites[choice].z }];
+    this.line = [];
+    let left = queens;
+    for (let si = 0; si < sites.length; si++) {
+      let k = sites[si].n - (si === choice ? 1 : 0);
+      for (; k > 0 && this.line.length < L.max; k--) {
+        const t = this._lineTree(sites[si], used);
+        if (!t) break;
+        let dx = sites[si].x - t.x, dz = sites[si].z - t.z; const d = Math.sqrt(dx * dx + dz * dz) || 1; dx /= d; dz /= d;
+        const nest = makeNest(t.x, t.z, t.x + dx * (t.r + 0.2), clamp(1.6, 1.2, Math.max(1.2, t.h - 0.6)), t.z + dz * (t.r + 0.2), NEST.r, 'trunk');
+        const colony = newColony(true); colony.sited = true; colony.maxCells = T.sites.trunk.maxCells; colony.alloc = 0;
+        this.line.push({ id: ++this.lineSeq, nest, colony, season: n });
+        used.push({ x: t.x, z: t.z }); left--;
+        this.emit('sisterFounded', { id: this.lineSeq, x: nest.x, z: nest.z });
+      }
+    }
+    return left;
+  }
+  // The nearest tree to a wintering site that is free: no other nest of the line within minGap of it
+  _lineTree(s, used) {
+    const L = T.line, cx = chunkOf(s.x), cz = chunkOf(s.z);
+    let best = null, bd = L.treeRange * L.treeRange;
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) for (const t of this._content(cx + dx, cz + dz).trees) {
+      const d = sq(t.x - s.x) + sq(t.z - s.z);
+      if (d >= bd || used.some((u) => sq(u.x - t.x) + sq(u.z - t.z) < L.minGap * L.minGap)) continue;
+      bd = d; best = t;
+    }
+    return best;
+  }
+  // Each sister colony lives through the season like yours, run by the AI; a founding queen forages alone
+  _lineTick(daylight, frac) {
+    if (!this.line.length) return;
+    const L = T.line, dt = 60 / this.dayTicks, av = this.ecoAvail();
+    for (const sc of this.line.slice()) {
+      const c = sc.colony, out = this.wasps.filter((w) => w.colony === 'line:' + sc.id).length;
+      if (c.adults < 1 && c.queenAlive && daylight) {
+        const q = L.queenForage; c.sugar += q.sugar * dt * av.sugar; c.protein += q.protein * dt * av.protein; c.pulp += q.pulp * dt;
+      }
+      const h = this.nestHeat(this.minute, sc.nest.site);
+      colonyStep(c, dt, out, daylight, frac, this.bio, this.broodSpeed(this.minute, sc.nest.site, c.cool), av, h);
+      if (colonyFinished(c, 0)) {
+        this.line = this.line.filter((x) => x !== sc);
+        for (const w of this.wasps.slice()) if (w.colony === 'line:' + sc.id) this._despawn(w);
+        this.emit('sisterLost', { id: sc.id });
+      }
+    }
+  }
+  // A sister colony near the player sends a few workers out
+  _lineTraffic(daylight) {
+    const L = T.line, keys = new Set(this.activeChunks.map((r) => chunkKey(r.cx, r.cz)));
+    for (const w of this.wasps.slice()) {
+      if (w.colony === 'own' || this.isRival(w)) continue;
+      const sc = this.line.find((x) => 'line:' + x.id === w.colony);
+      if (!sc || !keys.has(sc.nest.key)) this._despawn(w);
+    }
+    if (!daylight || this.noAI || this.tick % 180 >= 60) return;
+    for (const sc of this.line) {
+      if (!keys.has(sc.nest.key)) continue;
+      const out = this.wasps.filter((w) => w.colony === 'line:' + sc.id).length;
+      if (out >= Math.min(L.physical, Math.floor(sc.colony.adults * 0.2))) continue;
+      const w = this._spawnWasp(false);
+      w.colony = 'line:' + sc.id; w.x = sc.nest.entrance.x; w.y = sc.nest.entrance.y - 0.03; w.z = sc.nest.entrance.z;
+      w.role = h32(w.id, 9) < 0.5 ? 'sugar' : 'protein'; w.ai.mode = 'pick';
+    }
+  }
+  // Your colony is gone: you go on in the strongest sister colony
+  _takeOverSister() {
+    const size = (x) => x.colony.adults + broodTotal(x.colony);
+    let best = this.line[0];
+    for (const x of this.line) if (size(x) > size(best)) best = x;
+    this.line = this.line.filter((x) => x !== best);
+    for (const w of this.wasps.slice()) if (w.colony === 'line:' + best.id) this._despawn(w);
+    const alloc = this.colony.alloc;
+    this.oldNests.push(this.nest);
+    this.nest = best.nest; this.colony = best.colony; this.colony.alloc = alloc;
+    const d = this._driven();
+    for (const w of this.wasps.slice()) if (w.colony === 'own' && w !== d) this._despawn(w);
+    if (d) { d.x = this.nest.spawn.x; d.y = this.nest.spawn.y; d.z = this.nest.spawn.z; d.vx = d.vy = d.vz = 0; d.carry = null; }
+    this.emit('sisterTakeover', { id: best.id, adults: Math.floor(this.colony.adults) });
   }
 
   // ---------------------------------------------------------------- males and mating flights (GDD 6.5, 6.7, T2-3)
@@ -3694,7 +3805,7 @@ export class Sim {
     const cmd = { dirX: 0, dirY: 0, dirZ: 0, throttle: 0, burst: 0, sting: 0, act: 0 };
     if (w.state === 'balled') { this._ballEscape(w, false); return cmd; }
     if (w.state !== 'fly') return cmd;
-    if (w.colony !== 'own') return this._thinkRival(w, cmd);
+    if (w.colony !== 'own') return this.isRival(w) ? this._thinkRival(w, cmd) : this._thinkSister(w, cmd);
     if (w.caste === 'male') return this._thinkMale(w, cmd); // T2-3
     if (w.caste === 'gyne') return this._thinkGyne(w, cmd);
     // alarm pheromone pulls nearby workers into an attack
@@ -3782,7 +3893,7 @@ export class Sim {
     }
     ai.mode = 'guard';
     const r2 = G.radius * G.radius;
-    let t = this.wasps.find((x) => x.colony !== 'own' && live(x) && dist2(x, post) < r2);
+    let t = this.wasps.find((x) => this.isRival(x) && live(x) && dist2(x, post) < r2);
     if (!t) for (const [id, r] of this.remote) if (live(r) && dist2(r, post) < r2) { t = { id, remote: !r.rival }; break; }
     if (t) { ai.mode = 'hunt'; ai.huntId = t.id; ai.timer = this.tick + G.huntTicks; this.emit('guardHunt', { id: w.id, target: t.id, player: !!t.remote }); return cmd; }
     const x = this.ext.hm;

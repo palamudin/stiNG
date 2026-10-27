@@ -492,6 +492,7 @@ function buildNestMesh(n, abandoned) {
 }
 let nestView = null, nestSig = '';
 const oldNestViews = [];
+const lineViews = new Map(); // the line's sister colonies (T2-4)
 function syncNests() {
   const n = sim.nest, sig = `${n.x},${n.y},${n.z},${sim.colony.sited}`;
   if (sig !== nestSig) {
@@ -505,6 +506,10 @@ function syncNests() {
     const same = o.x === n.x && o.y === n.y && o.z === n.z && sim.colony.sited !== false;
     oldNestViews.push(same ? null : buildNestMesh(o, true));
   }
+  // sister colonies: a nest each while they live (one taken over is now yours, drawn above)
+  const ids = new Set(sim.line.map((x) => x.id));
+  for (const [id, v] of lineViews) if (!ids.has(id)) { scene.remove(v); lineViews.delete(id); }
+  for (const sc of sim.line) if (!lineViews.has(sc.id)) lineViews.set(sc.id, buildNestMesh(sc.nest, false));
 }
 
 // ------------------------------------------------------------------ prey and bees (instanced, positions each frame)
@@ -1063,7 +1068,7 @@ function renderWasps(alpha, t, dt) {
   for (const w of sim.wasps) {
     seen.add(w.id);
     let g = waspViews.get(w.id);
-    if (!g) { g = buildWasp(false, w.colony !== 'own', w.caste); waspViews.set(w.id, g); }
+    if (!g) { g = buildWasp(false, sim.isRival(w), w.caste); waspViews.set(w.id, g); } // the line's sister colonies look like yours (T2-4)
     const pp = pos.get(w.id);
     const p = pp ? new THREE.Vector3().lerpVectors(pp.p, pp.c, alpha) : V(w);
     const driven = w.id === sim.drivenId;
@@ -1517,7 +1522,8 @@ function updateNest() {
     .map(([k, v]) => `<span class="label">${k}</span><div class="b"><i style="width:${(v / max * 100).toFixed(0)}%"></i></div><span class="n">${fmt(v)}</span>`).join('');
   $('nRepro').innerHTML = [
     ['Queen cells (brood)', fmt(c.rEggs + c.rLarvae + c.rPupae)], ['Young queens in the nest', fmt(c.gynes)],
-    ['Mated and gone to hibernate', fmt(c.mated)], ['Males', fmt(c.males)], ['Sister nests of this line', fmt(sim.lineage)],
+    ['Mated and gone to hibernate', fmt(c.mated)], ['Males', fmt(c.males)],
+    ['Sister colonies of the line', sim.line.length ? sim.line.map((x) => `${fmt(x.colony.adults)} adults, ${fmt(broodTotal(x.colony))} brood ${Math.round(Math.hypot(x.nest.x - sim.nest.x, x.nest.z - sim.nest.z))} m off`).join(' · ') + (sim.lineage ? ` · ${fmt(sim.lineage)} more queens elsewhere` : '') : sim.lineage ? `${fmt(sim.lineage)} queens elsewhere` : 'none'], // T2-4
   ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
   T.alloc.forEach((a, i) => $('alloc' + i).setAttribute('aria-pressed', c.alloc === i));
 }
@@ -1938,6 +1944,9 @@ function handleEvents(events) {
           if (!lab && sim.winter) showWinter(`${e.why === 'autumn' ? 'The colony died with the autumn, as colonies do.' : 'Your colony did not make it through the season.'} ${fmt(e.mated)} young queen${Math.round(e.mated) === 1 ? '' : 's'} mated and went into hibernation; ${e.survivors} survived the cold.${e.lineage ? ` ${e.lineage} older sister nest${e.lineage === 1 ? '' : 's'} of your line also made it.` : ''} ${total > 1 ? 'Choose which queen you wake as; the others found sister nests.' : 'You wake as the last queen of the line.'}`);
         }
         break;
+      case 'sisterFounded': logEvent(`a sister colony of the line was founded ${Math.round(Math.hypot(e.x - sim.nest.x, e.z - sim.nest.z))} m away`); break; // T2-4
+      case 'sisterLost': toast('A sister colony of the line has died out', 'var(--red)', 2); break;
+      case 'sisterTakeover': toast(`Your colony is gone. The line goes on: you are now a worker of a sister colony (${e.adults} adults).`, 'var(--yellow)', 4); syncNests(); break;
       case 'hiberScouted': toast(`Winter site scouted: ${T.hiber.name[e.kind]}. Most of the young queens will winter here.`, 'var(--yellow)', 3); break;
       case 'spring':
         logEvent(`season ${e.season} · you are the queen, waking ${T.hiber.name[e.kind] || ''}`);
@@ -2181,6 +2190,7 @@ function newWorld(s, restored = null) {
   if (nestView) scene.remove(nestView);
   for (const o of oldNestViews) if (o) scene.remove(o);
   nestView = null; nestSig = ''; oldNestViews.length = 0;
+  for (const v of lineViews.values()) scene.remove(v); lineViews.clear();
   if (restored) { sim = restored.sim; loadSnap = restored.json; lab = null; settings = sim.settings; }
   else {
     loadSnap = null;

@@ -381,7 +381,7 @@ Economy step in Appendix A.4.
 
 - Gynes leave in autumn, mate with males present in the mating area, then search for a hibernation site. As built (18.39): the mating area is the crown of a tall tree near the nest, and the males present are the colony's own and the neighbourhood's.
 - Winter mortality per hibernating queen depends on site quality *(tune)*.
-- In spring the player picks which surviving queen continues as the controlled colony. The other surviving queens found **lineage colonies** run by AI. **[Q] Q-10**
+- In spring the player picks which surviving queen continues as the controlled colony. The other surviving queens found **lineage colonies** run by AI. **[Q] Q-10** As built (18.40): up to five are real colonies on trunks near where they wintered.
 - **The line** is the player's founding queen and all colonies descended from her. Game over when the line is extinct.
 
 ---
@@ -1266,6 +1266,20 @@ These complete 11.8. Like the earlier checks, each reads only the event and the 
 
 **Checks.** JS and C# check the mating chance with and without males, the spot over a crown near the nest, males patrolling and young queens mating (three matings with males of the line in the same run in both), a male unable to sting or catch prey, and a player's male mating with a young queen. The save format is 19.
 
+### 18.40 Lineage colonies as built (T2-4)
+
+**Founding.** In spring, after the player picks a queen, the line's other surviving queens found colonies, up to five as real ones. Each takes the nearest free trunk within 40 m of where it wintered (at least 8 m from every other nest of the line and from where the player's queen woke) and builds its nest there, facing the site. Queens beyond the five, or with no free tree, stay a count of queens elsewhere, which survives the winter by the old abstract rate as before.
+
+**Running them.** A sister colony is stepped like the player's (the same colony model, brood speed and heat for its site, water, the season, the forage the season offers). Its founding queen, alone, brings in a little food a day by herself; once workers emerge, they forage abstractly. When the player is near a sister nest in daylight, up to three of its workers fly out and forage from it (the same forager brain as rival colonies' workers, with their own nest as home). A colony that collapses is gone. Sister colonies are not rivals: their workers never fight the player's, the player's guards leave them be, and rival colonies fight them as they fight the player's.
+
+**The line goes on.** At the end of the season each sister colony's mated queens winter by its nest; they are offered in the spring choice with the player's own (as sites "in a sister nest"), so the player can wake as a queen of any colony of the line. If the player's own colony is lost mid-season while sister colonies live, the player takes over the strongest of them (adults plus brood) instead of going to winter early: its nest and colony become the player's, and the player flies on as one of its workers.
+
+**Shown.** Sister nests are drawn like the player's; the colony view lists each sister colony (adults, brood, distance) and the count of queens elsewhere; foundings, losses and a takeover are announced.
+
+**Checks.** JS and C# check founding from wintering sites (four colonies from four queens, at least 8 m apart), a sister queen raising her first workers alone (one adult and 24 cells by day 3 in both), her workers flying near the player and not fighting the player's wasp, her mated queens offered in spring (6, 6, 6, 6 queens in both), save and restore, and taking over the strongest sister (29 adults in both). The save format is 20.
+
+**Limits.** Sister colonies do not raise physical males and young queens or guards near the player, and the exterminator and pest control only ever come for the player's own nest.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1274,7 +1288,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (90 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (91 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -1315,7 +1329,7 @@ Agreed 2026-10-27: Tier 2 is built on the current stack in the order that surviv
 | T2-1 | **Built (18.37).** Water as a resource: birdbaths and rain puddles, water loads carried home, a hot nest cooled by water, brood that cooks without it | 6.2, 6.6 | M | sim and generator |
 | T2-2 | **Built (18.38).** Extreme weather: heatwaves, storms (gusts and downpours), cold snaps | 5.3 | M | sim; makes T2-1 matter |
 | T2-3 | **Built (18.39).** Males as wasps: drones fly physically late in the season, no sting, mating flights with gynes | 6.5, 6.7 | M | sim |
-| T2-4 | Lineage colonies as real AI colonies: the queens the player did not wake found colonies of the line, run by AI | 6.7 | L | sim |
+| T2-4 | **Built (18.40).** Lineage colonies as real AI colonies: the queens the player did not wake found colonies of the line, run by AI | 6.7 | L | sim |
 | T2-5 | Town centers and beer gardens: a new land use with dense outdoor seating and drinks | 4.1, 4.3 | M | generator and sim; new art |
 | T2-6 | Feature modifiers that need the bigger generator: biome mix, town density, terrain | 4.8 | L | terrain touches all collision |
 | T2-7 | The Reflex skill tree | 7.8 | M | mostly UI and progression: after the Unity move |
