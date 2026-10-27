@@ -121,7 +121,13 @@ namespace Sting.Core
                 else if (hm.state == "return")
                 {
                     if (hm.panic >= T.resolve.fleePanic) { StartFlee(hm, CS(hm.chunk).lastSting); continue; }
-                    if (WalkTo(hm, hm.home.x, hm.home.z, T.panic.walkSpeed)) { Seat(hm); Emit("settled", ("humanHex", hm.hex)); }
+                    if (hm.home.path != null && (hm.home.act == "stroll" || hm.home.act == "garden"))
+                    {
+                        // a stroller or gardener goes back to the nearest point of their round and carries on from there
+                        var j = Rejoin(hm);
+                        if (WalkTo(hm, j.x, j.z, T.panic.walkSpeed)) { hm.state = hm.home.act; hm.wp = j.wp; hm.until = 0; hm.walking = true; Emit("settled", ("humanHex", hm.hex)); }
+                    }
+                    else if (WalkTo(hm, hm.home.x, hm.home.z, T.panic.walkSpeed)) { Seat(hm); Emit("settled", ("humanHex", hm.hex)); }
                 }
                 else if (hm.state == "fetch") FetchStep(hm);
                 else if (hm.state == "toGrill" || hm.state == "cook") CookStep(hm);
@@ -134,6 +140,23 @@ namespace Sting.Core
                     else Annoyance(hm);
                 }
             }
+        }
+
+        /// The nearest point of a stroller's or gardener's round (a closed loop of waypoints) and the waypoint after it; worked out
+        /// afresh each step, so nothing is saved (see sim.js _rejoin)
+        public (Num x, Num z, int wp) Rejoin(Human hm)
+        {
+            var p = hm.home.path; int n = p.Length / 2;
+            (Num x, Num z, int wp) best = (0, 0, 0); Num bd = 0; bool any = false;
+            for (int k = 0; k < n; k++)
+            {
+                Num ax = p[k * 2], az = p[k * 2 + 1], bx = p[((k + 1) % n) * 2], bz = p[((k + 1) % n) * 2 + 1];
+                Num ex = bx - ax, ez = bz - az, L = ex * ex + ez * ez;
+                Num t = L > 0 ? Max(0, Min(1, ((hm.x - ax) * ex + (hm.z - az) * ez) / L)) : 0;
+                Num x = ax + ex * t, z = az + ez * t, d = Sq(hm.x - x) + Sq(hm.z - z);
+                if (!any || d < bd) { any = true; bd = d; best = (x, z, (k + 1) % n); }
+            }
+            return best;
         }
 
         /// Strollers walk their loop; gardeners work each spot a while, then move on (T1-11). Both notice wasps as they go.
@@ -329,9 +352,10 @@ namespace Sting.Core
             }
         }
 
-        int NestAreaLevel()
+        int NestAreaLevel() => NestAreaLevel(nest.key);
+        int NestAreaLevel(string key)
         {
-            var (cx, cz) = SplitKey(nest.key);
+            var (cx, cz) = SplitKey(key);
             int lv = 0;
             for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++) lv = System.Math.Max(lv, EscLevel(ChunkKey(cx + dx, cz + dz)));
             return lv;
@@ -958,6 +982,24 @@ namespace Sting.Core
                     Num nx = k == 0 ? -1 : k == 1 ? 1 : 0, ny = k == 2 ? -1 : k == 3 ? 1 : 0, nz = k == 4 ? -1 : k == 5 ? 1 : 0;
                     Take(p.x + nx * f[k], p.y + ny * f[k], p.z + nz * f[k], nx, ny, nz, 0, kind);
                 }
+                // pitched roofs: the nearest point of the slope on each side
+                foreach (var f in RoofsOf(rec))
+                {
+                    var r = RoofLocal(f, p.x, p.y, p.z);
+                    if (Abs(r.v) > f.half + lim || Abs(r.u) > f.S + lim || r.y < -lim || r.y > f.rise + lim) continue;
+                    bool inside = Abs(r.v) < f.half && r.y > 0 && f.rise * (Abs(r.u) - f.S) + f.S * r.y < 0;
+                    foreach (int su in new[] { -1, 1 })
+                    {
+                        if (inside && (r.u < 0 ? -1 : 1) != su) continue;
+                        Num uu = su * r.u, d = (f.rise * (uu - f.S) + f.S * r.y) / f.L;
+                        Num pu = Clamp(uu - d * f.rise / f.L, 0, f.S), py = f.rise * (1 - pu / f.S), pv = Clamp(r.v, -f.half, f.half);
+                        var q = RoofWorld(f, su * pu, py, pv); Num nu = su * f.rise / f.L, nyy = f.S / f.L;
+                        Num nxx = f.alongX ? 0 : nu, nzz = f.alongX ? nu : 0;
+                        if (inside) { Take(q.x, q.y, q.z, nxx, nyy, nzz, 0, "roof"); continue; }
+                        Num ex = p.x - q.x, ey = p.y - q.y, ez = p.z - q.z, dd = Sqrt(ex * ex + ey * ey + ez * ez);
+                        if (dd > 0) Take(q.x, q.y, q.z, ex / dd, ey / dd, ez / dd, dd, "roof");
+                    }
+                }
                 foreach (var cy in CylsOf(rec))
                 {
                     Num hx = p.x - cy.x, hz = p.z - cy.z, hd = Sqrt(hx * hx + hz * hz); string sk = cy.grill ? "grill" : "bark";
@@ -1195,14 +1237,19 @@ namespace Sting.Core
         }
 
         /// Abstract foragers in a baited area bring poison home too, in proportion to how hard they hunt protein
-        void MuniAbstract()
+        internal void MuniAbstract()
         {
-            var m = muni; var col = colony;
-            if (!col.nestAlive || !m.active.keys.Contains(nest.key)) return;
             if (!(IsDaylight(minute) && !Raining && CanFly())) return;
+            MuniPoison(colony, nest, Own().Count);
+            // a sister colony's foragers take the bait too (T2-4 polish)
+            foreach (var sc in line) { string k = "line:" + sc.id; int o = 0; foreach (var w in wasps) if (w.colony == k) o++; MuniPoison(sc.colony, sc.nest, o); }
+        }
+        void MuniPoison(ColonyState col, Nest n, int outN)
+        {
+            if (!col.nestAlive || !muni.active.keys.Contains(n.key)) return;
             var a = T.alloc[col.alloc]; Num share = a.protein / ((a.sugar + a.protein + a.pulp) / 3) * a.traffic; // fewer foragers out, less bait brought home
             Num dtDay = (Num)60 / dayTicks;
-            Num inside = Max(0, col.adults - Own().Count);
+            Num inside = Max(0, col.adults - outN);
             Num kill = inside * T.muni.abstractKillPerDay * share * dtDay;
             col.adults -= kill; col.larvae -= col.larvae * T.muni.abstractKillPerDay * share * dtDay;
             col.stats.poisoned += kill;
@@ -1295,7 +1342,10 @@ namespace Sting.Core
         {
             LineColony sc = null; foreach (var x in line) if ("line:" + x.id == w.colony) { sc = x; break; }
             if (sc == null) { Despawn(w); return cmd; }
+            if (w.caste == "male") return ThinkMale(w, cmd, sc.nest);
+            if (w.caste == "gyne") return ThinkGyne(w, cmd, sc.nest);
             if (!IsDaylight(minute) || Raining) w.ai.mode = "home";
+            if (w.role == "guard" && w.ai.mode != "home" && w.ai.mode != "return") return ThinkGuard(w, cmd, sc.nest);
             return ThinkForager(w, cmd, sc.nest.entrance);
         }
         /// another colony's forager: out to food from its home and back (a rival's or a sister colony's)

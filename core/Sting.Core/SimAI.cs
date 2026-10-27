@@ -15,15 +15,16 @@ namespace Sting.Core
 
         /// A guard (T1-13) circles just outside the entrance. Another colony's wasp near it (a rival, or another
         /// player's) gets chased and grappled; the exterminator close to the nest gets stung.
-        Cmd ThinkGuard(Wasp w, Cmd cmd)
+        Cmd ThinkGuard(Wasp w, Cmd cmd) => ThinkGuard(w, cmd, nest);
+        Cmd ThinkGuard(Wasp w, Cmd cmd, Nest n)
         {
-            var ai = w.ai; var n = nest; var e = n.entrance;
+            var ai = w.ai; var e = n.entrance;
             Num ox = e.x - n.x, oz = e.z - n.z, od = Sqrt(ox * ox + oz * oz);
             var post = od > 0.01 ? new V3(e.x + ox / od * 0.08, e.y, e.z + oz / od * 0.08) : new V3(e.x, e.y - 0.08, e.z);
             if (ai.mode == "hunt")
             {
                 WaspBase t = (WaspBase)WaspById(ai.huntId) ?? remote.Get(ai.huntId);
-                if (t == null || !Free3(t.state) || (t is Wasp tw && tw.colony == "own") || tick > ai.timer || D2(t, post) > T.guard.chase * T.guard.chase) ai.mode = "guard";
+                if (t == null || !Free3(t.state) || (t is Wasp tw && !IsRival(tw)) || tick > ai.timer || D2(t, post) > T.guard.chase * T.guard.chase) ai.mode = "guard";
                 else { Steer(w, t.P, cmd); cmd.throttle = 1; cmd.burst = 1; return cmd; }
             }
             ai.mode = "guard";
@@ -32,7 +33,7 @@ namespace Sting.Core
             foreach (var x in wasps) if (IsRival(x) && Free3(x.state) && D2(x, post) < r2) { tid = x.id; found = true; break; }
             if (!found) foreach (var kv in remote) if (Free3(kv.Value.state) && D2(kv.Value, post) < r2) { tid = kv.Key; found = true; player = !kv.Value.rival; break; }
             if (found) { ai.mode = "hunt"; ai.huntId = tid; ai.timer = tick + T.guard.huntTicks; Emit("guardHunt", ("id", w.id), ("target", tid), ("player", player)); return cmd; }
-            var xh = ext.hm;
+            var xh = n == nest ? ext.hm : null;
             if (xh != null && xh.state != "flee" && xh.state != "leave" && Sq(xh.x - e.x) + Sq(xh.z - e.z) < T.guard.humanRadius * T.guard.humanRadius) { AiAttack(w, xh.hex); return cmd; }
             Num a = (Num)tick / 40 + w.id;
             Steer(w, new V3(post.x + T.guard.ring * DCos(a), post.y + 0.03, post.z + T.guard.ring * DSin(a)), cmd);
@@ -284,6 +285,26 @@ namespace Sting.Core
                 }
                 var h = NestHeat(minute, sc.nest.site);
                 Colony.Step(c, dt, outN, daylight, frac, bio, BroodSpeed(minute, sc.nest.site, c.cool), av, (h.heat, h.cook));
+                // the exterminator (abstract; he is drawn only for the player's own nest): called to a sister nest's
+                // neighbourhood, he comes the next morning, or in two hours before mid-afternoon, and destroys it unless things
+                // calm down first (sim.js)
+                if (settings.exterminator && c.nestAlive)
+                {
+                    int lv = NestAreaLevel(sc.nest.key);
+                    if (!(sc.ext > 0) && lv >= T.ext.level)
+                    {
+                        long md = MinuteOfDay(minute);
+                        sc.ext = md < 15 * 60 && md >= (long)T.time.dawn ? minute + 120 : (md >= (long)T.time.dawn ? day + 1 : day) * 1440 + (long)T.ext.arriveMinute;
+                        Emit("sisterExtScheduled", ("id", sc.id), ("arriveMinute", sc.ext));
+                    }
+                    else if (sc.ext > 0 && lv < 3) sc.ext = 0;
+                    else if (sc.ext > 0 && minute >= sc.ext)
+                    {
+                        sc.ext = 0; Colony.DestroyNest(c);
+                        foreach (var w in new List<Wasp>(wasps)) if (w.colony == key) Despawn(w);
+                        Emit("sisterExterminated", ("id", sc.id));
+                    }
+                }
                 if (Colony.Finished(c, 0))
                 {
                     line.Remove(sc);
@@ -302,13 +323,24 @@ namespace Sting.Core
                 if (sc == null || !keys.Contains(sc.nest.key)) Despawn(w);
             }
             if (!daylight || noAI || tick % 180 >= 60) return;
+            bool breeding = SeasonFrac >= T.season.reproStart;
             foreach (var sc in line)
             {
-                if (!keys.Contains(sc.nest.key)) continue;
-                string key = "line:" + sc.id; int outN = 0; foreach (var w in wasps) if (w.colony == key) outN++;
-                if (outN >= System.Math.Min(T.line.physical, (int)Floor(sc.colony.adults * 0.2))) continue;
-                var nw = SpawnWasp(false);
-                nw.colony = key; nw.x = sc.nest.entrance.x; nw.y = sc.nest.entrance.y - 0.03; nw.z = sc.nest.entrance.z;
+                if (!keys.Contains(sc.nest.key) || !sc.colony.nestAlive) continue;
+                string key = "line:" + sc.id; var c = sc.colony;
+                int guards = 0, males = 0, gynes = 0, foragers = 0;
+                foreach (var w in wasps) if (w.colony == key) { if (w.role == "guard") guards++; if (w.caste == "male") males++; else if (w.caste == "gyne") gynes++; else if (w.caste == "worker" && w.role != "guard") foragers++; }
+                Wasp At(Wasp w) { w.colony = key; w.x = sc.nest.entrance.x; w.y = sc.nest.entrance.y - 0.03; w.z = sc.nest.entrance.z; return w; }
+                // guards at the entrance once it is big enough, as at yours (T1-13)
+                if (guards < (c.adults - c.young >= T.guard.minAdults ? T.guard.count : 0)) { var g = At(SpawnWasp(false)); g.role = "guard"; g.ai.mode = "guard"; continue; }
+                // in the breeding season its males and young queens fly to its own mating spot (T2-3)
+                if (breeding)
+                {
+                    if (c.males >= 1 && males < T.males.physMales && H32(tick, sc.id, 511) < T.males.launchChance) { c.males -= 1; var m = At(SpawnWasp(false, "male")); m.role = "male"; m.venom = 0; m.ai.mode = "patrol"; continue; }
+                    if (c.gynes >= 1 && gynes < T.males.physGynes && H32(tick, sc.id, 512) < T.males.launchChance) { c.gynes -= 1; var q = At(SpawnWasp(false, "gyne")); q.role = "gyne"; q.ai.mode = "mate"; q.ai.timer = tick + T.males.gyneTicks; continue; }
+                }
+                if (foragers >= System.Math.Min(T.line.physical, (int)Floor(c.adults * 0.2))) continue;
+                var nw = At(SpawnWasp(false));
                 nw.role = H32(nw.id, 9) < 0.5 ? "sugar" : "protein"; nw.ai.mode = "pick";
             }
         }
@@ -345,12 +377,14 @@ namespace Sting.Core
                 var w = SpawnWasp(false, "gyne"); w.role = "gyne"; w.ai.mode = "mate"; w.ai.timer = tick + T.males.gyneTicks;
             }
         }
-        string lekKey; V3 lekP; Num lekR;
-        /// the mating spot: over the crown of the tallest tree near the nest, nearer ones preferred
-        public (V3 p, Num r) LekSpot()
+        readonly Dictionary<string, (V3 p, Num r)> leks = new Dictionary<string, (V3 p, Num r)>();
+        /// the mating spot: over the crown of the tallest tree near the nest, nearer ones preferred (a sister colony's too)
+        public (V3 p, Num r) LekSpot() => LekSpot(nest);
+        public (V3 p, Num r) LekSpot(Nest n)
         {
-            var n = nest; string key = n.key + ":" + n.x + ":" + n.z;
-            if (lekKey == key) return (lekP, lekR);
+            string key = n.key + ":" + n.x + ":" + n.z;
+            if (leks.TryGetValue(key, out var hit)) return hit;
+            V3 lekP; Num lekR;
             int cx = World.ChunkOf(n.x), cz = World.ChunkOf(n.z);
             Tree best = null; Num bs = Num.MinValue;
             for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++) foreach (var t in Content(cx + dx, cz + dz).trees)
@@ -361,31 +395,34 @@ namespace Sting.Core
                 if (s > bs) { bs = s; best = t; }
             }
             if (best != null) { lekP = new V3(best.x, best.h + T.males.lekAbove, best.z); lekR = best.cr; } else { lekP = new V3(n.x, n.y + 3, n.z); lekR = 1; }
-            lekKey = key;
+            if (leks.Count > 16) leks.Clear();
+            leks[key] = (lekP, lekR);
             return (lekP, lekR);
         }
-        Cmd ThinkMale(Wasp w, Cmd cmd)
+        Cmd ThinkMale(Wasp w, Cmd cmd) => ThinkMale(w, cmd, nest);
+        Cmd ThinkMale(Wasp w, Cmd cmd, Nest n)
         {
-            var ai = w.ai; var (lek, lr) = LekSpot();
+            var ai = w.ai; var (lek, lr) = LekSpot(n);
             if (!IsDaylight(minute) || Raining || w.energy < 0.3) ai.mode = "home";
             if (ai.mode == "home")
             {
-                Steer(w, nest.entrance, cmd);
-                if (D2(w, nest.entrance) < 0.07 * 0.07) Despawn(w);
+                Steer(w, n.entrance, cmd);
+                if (D2(w, n.entrance) < 0.07 * 0.07) Despawn(w);
                 return cmd;
             }
             Num a = tick * 0.02 + w.id, r = Max(T.males.patrolR, lr * 0.8);
             Steer(w, new V3(lek.x + r * DCos(a), lek.y + 0.4 * DSin(a * 1.7), lek.z + r * DSin(a)), cmd);
             return cmd;
         }
-        Cmd ThinkGyne(Wasp w, Cmd cmd)
+        Cmd ThinkGyne(Wasp w, Cmd cmd) => ThinkGyne(w, cmd, nest);
+        Cmd ThinkGyne(Wasp w, Cmd cmd, Nest n)
         {
-            var ai = w.ai; var (lek, lr) = LekSpot();
+            var ai = w.ai; var (lek, lr) = LekSpot(n);
             if (ai.mode == "mate" && (tick > ai.timer || !IsDaylight(minute) || Raining)) ai.mode = "home";
             if (ai.mode == "home")
             {
-                Steer(w, nest.entrance, cmd);
-                if (D2(w, nest.entrance) < 0.07 * 0.07) Despawn(w);
+                Steer(w, n.entrance, cmd);
+                if (D2(w, n.entrance) < 0.07 * 0.07) Despawn(w);
                 return cmd;
             }
             Num a = -tick * 0.015 + w.id * 2, r = Max(T.males.patrolR, lr * 0.8) * 0.9;
@@ -394,7 +431,7 @@ namespace Sting.Core
             Wasp mate = null; Num md = T.males.mateDist * T.males.mateDist;
             foreach (var x in wasps)
             {
-                if (x.caste != "male" || x.colony != "own" || (x.state != "fly" && x.state != "landed")) continue;
+                if (x.caste != "male" || IsRival(x) || (x.state != "fly" && x.state != "landed")) continue;
                 Num q = D2(x, w);
                 if (q <= md) { md = q; mate = x; }
             }
@@ -510,7 +547,12 @@ namespace Sting.Core
                         return new V3(s.x + s.r * 0.4 * (H32(w.id, t.i, 61) - 0.5), s.y + T.wasp.radius + 0.006, s.z + s.r * 0.4 * (H32(w.id, t.i, 62) - 0.5));
                 return null;
             }
-            if (t.kind == "wood") { var b = c.boxes[t.i]; return new V3((b.minx + b.maxx) / 2 + 0.2 * (H32(w.id, t.i) - 0.5), b.maxy + T.wasp.radius + 0.008, (b.minz + b.maxz) / 2); }
+            if (t.kind == "wood")
+            {
+                var b = c.boxes[t.i];
+                if (b.shed) return new V3((b.minx + b.maxx) / 2 + 0.2 * (H32(w.id, t.i) - 0.5), Min(1.2, b.maxy / 2), b.maxz + T.wasp.radius + 0.008); // a shed's wall: its top is under the roof
+                return new V3((b.minx + b.maxx) / 2 + 0.2 * (H32(w.id, t.i) - 0.5), b.maxy + T.wasp.radius + 0.008, (b.minz + b.maxz) / 2);
+            }
             // a fly already taken: its table still draws flies, so go there and take whatever is about (T1-16)
             if (t.sub == "fly") { if (!FlyActive(rec, t.i)) return null; var fl = c.flies[t.i]; return (st.caughtFly.TryGetValue(t.i, out var cf) ? cf : 0) > tick ? new V3(fl.x, fl.y, fl.z) : FlyPos(fl, tick); }
             if (t.sub == "cat") { if (st.caughtCat.ContainsKey(t.i) || !CatActive(rec, t.i)) return null; var cp = c.caterpillars[t.i]; return new V3(cp.x, cp.y, cp.z); }

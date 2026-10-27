@@ -136,6 +136,7 @@ export const LINKS = {
   good: { name: 'Good internet', latency: 5, jitter: 2, loss: 0.02 },
   bad: { name: 'Bad internet', latency: 9, jitter: 4, loss: 0.08 },
   awful: { name: 'Past the window', latency: 16, jitter: 6, loss: 0.1 },
+  over: { name: 'Well past the window', latency: 24, jitter: 6, loss: 0.1 }, // late events often: the corrections at work
 };
 
 // Unreliable state packets are simply dropped on loss. Events ride redundantly in following packets
@@ -222,7 +223,8 @@ export class NetLab {
     if (!this.b) { this.checks.skipped++; return null; }
     this.checks.compared++;
     const same = this.a.humanHash() === this.b.humanHash();
-    if (same) this.checks.agreed++; else if (!this.checks.firstDiverge) this.checks.firstDiverge = this.a.tick;
+    if (same) this.checks.agreed++; else { if (!this.checks.firstDiverge) this.checks.firstDiverge = this.a.tick; this.checks.lastDiverge = this.a.tick; }
+    this.checks.last = same;
     return same;
   }
   // How far A's picture of B's wasp is from where B's wasp really is (GDD 11.4)

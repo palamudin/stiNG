@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, humanParts, malesAbout, chunkOf, toLocal, dirToWorld, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, CMD_FIELDS,
+  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, CMD_FIELDS,
 } from '../sim/index.js';
 import { applyTuning, parseTuning, tuningHash, tuningLeaves, TUNE } from '../sim/tunefile.js';
 
@@ -1276,6 +1276,20 @@ function seated(sim, pred) {
   run(s, 1, () => idle());
   const rec = s.records.get(chunkKey(yx, yz)), h = rec.content.sheds.find((q) => q.house);
   ok(!s.canSee({ x: h.x, z: h.z - h.hd - 2 }, { x: h.x, z: h.z + h.hd + 2 }) && s.canSee({ x: h.x + h.hw + 3, z: h.z - h.hd - 2 }, { x: h.x + h.hw + 3, z: h.z + h.hd + 2 }), 'a house blocks the view across it; the gap beside it does not');
+  // pitched roofs are solid as drawn: a wasp is pushed out onto the slope, can land on it, and keeps dry under the eaves
+  {
+    const f = shedRoof(h), R = T.wasp.radius, at = (u, y, v) => f.alongX ? { x: f.x + v, y: f.y0 + y, z: f.z + u } : { x: f.x + u, y: f.y0 + y, z: f.z + v };
+    const off = (p) => { const l = s._roofLocal(f, p); return (f.rise * (Math.abs(l.u) - f.S) + f.S * l.y) / f.L; }; // height above the slope
+    const ww = s.wasp; place(ww, at(0.8, 0.5, 1)); ww.vx = ww.vy = ww.vz = 0;
+    for (let i = 0; i < 6; i++) s._collide(ww);
+    const sf = s._staticSurface(at(1.5, f.rise * (1 - 1.5 / f.S) + 0.05, 0), 0.2);
+    ok(Math.abs(off(ww) - R) < 1e-9 && ww.y > f.y0 + 0.5 && sf && sf.kind === 'roof' && sf.ny < 0.99 && sf.ny > 0.5 && Math.abs(off(sf)) < 1e-9,
+      `a house's roof is pitched: a wasp inside it comes out on the slope (${(ww.y - f.y0).toFixed(2)} m above the eaves, not on a flat top), and lands on it at its tilt`);
+    ok(s._inSolid(at(0, 1, 0)) && !s._inSolid(at(0, f.rise + 0.1, 0)) && s._sheltered(at(f.wall + 0.06, -0.3, 0)) && !s._sheltered(at(f.S + 0.4, -0.3, 0)),
+      'inside the roof is solid; under the eaves it is dry, a step out it is not');
+    const shed = c.sheds.find((q) => !q.house) || generateChunk(1234n, 2, 0).sheds[0];
+    if (shed) { const g = shedRoof(shed); ok(g.rise === 0.55 && g.y0 === shed.h && g.S > Math.min(shed.hw, shed.hd), 'garden sheds have the low pitched roof they are drawn with'); }
+  }
   // a fence section holds so much pulp, then it is stripped
   const key = chunkKey(yx, yz), fi = rec.content.boxes.findIndex((b) => b.fence), fb = rec.content.boxes[fi], loads = s.pulpLoads(fb);
   const w = s.wasp;
@@ -1348,9 +1362,11 @@ function seated(sim, pred) {
   const st = of('stroll').map((r) => r.hm).find((h) => h.state === 'stroll');
   s._applyCommit({ type: 'sting', peer: s.peer, humanHex: st.hex, panicGain: 0, driven: false, sx: st.x - st.fx, sz: st.z - st.fz, zone: 0, flee: true, waspId: 0 });
   ok(st.state === 'flee', 'a stroller who is stung runs');
+  const x0 = st.x, z0 = st.z, p0 = st.home.path;
   let back2 = false;
   for (let t = 0; t < 3000 && !back2; t++) { s.step(idle()); s.drainEvents(); back2 = st.state === 'stroll'; }
-  ok(back2, 'and once calm, walks on');
+  const onPath = s._rejoin(st), fromStart = Math.hypot(p0[0] - x0, p0[1] - z0), fromRun = Math.hypot(st.x - x0, st.z - z0);
+  ok(back2 && Math.hypot(onPath.x - st.x, onPath.z - st.z) < 1e-6 && (fromRun < 8 || fromRun < fromStart), `and once calm, walks back to the nearest point of the round and walks on (${fromRun.toFixed(1)} m from where it ran, the round starts ${fromStart.toFixed(1)} m away)`);
   // a wasp can reach a sunbather
   if (sun) {
     const hm = sun.hm, w = s.wasp; place(w, toWorld(hm, { x: 0.3, y: 1.0, z: 0.6 }));
@@ -1544,6 +1560,46 @@ function seated(sim, pred) {
     const ev = run(s, 3, () => { if (s.wasp && out) place(s.wasp, out); return idle(); });
     ok(count(ev, 'fight') === 0 && out.state !== 'fighting', 'your wasp touching a sister colony\'s worker does not fight it');
   }
+  // a big sister colony posts guards at its entrance, and they go for a rival there, not for you
+  sc.colony.young = 0;
+  const nearSis = () => { if (s.wasp) { place(s.wasp, { x: sc.nest.x + 1, y: sc.nest.y, z: sc.nest.z + 1 }); s.wasp.born = s.minute; } };
+  let sg = [];
+  for (let i = 0; i < 1500 && sg.length < T.guard.count; i++) { s.step(idle()); s.drainEvents(); nearSis(); sg = s.wasps.filter((w) => w.colony === 'line:' + sc.id && w.role === 'guard'); }
+  const riv = s._spawnWasp(false); riv.colony = '9,9'; place(riv, { x: sc.nest.entrance.x + 0.2, y: sc.nest.entrance.y, z: sc.nest.entrance.z }); riv.state = 'fly';
+  let hunted = false;
+  for (let i = 0; i < 30 && !hunted; i++) { nearSis(); for (const e of run(s, 1)) if (e.type === 'guardHunt' && e.target === riv.id && sg.some((g) => g.id === e.id)) hunted = true; }
+  s._despawn(riv);
+  ok(sg.length === T.guard.count && hunted && sg.every((g) => g.ai.huntId !== s.drivenId), `a sister colony of ${sc.colony.adults.toFixed(0)} posts ${sg.length} guards, who go for a rival at its entrance and not for you`);
+  // in the breeding season its males and young queens fly to its own mating spot, and its queens mate with the line's males
+  s.season.startMinute = s.minute - (T.season.reproStart + 0.05) * s.settings.seasonDays * 1440;
+  sc.colony.males = 20; sc.colony.gynes = 10;
+  const lek = s.lekSpot(sc.nest), sisM = new Set(), sisQ = new Set();
+  let mt = null, sm = [];
+  for (let i = 0; i < 6000 && !mt; i++) {
+    s.step(idle()); nearSis();
+    for (const w of s.wasps) if (w.colony === 'line:' + sc.id) { if (w.caste === 'male') sisM.add(w.id); if (w.caste === 'gyne') sisQ.add(w.id); }
+    for (const e of s.drainEvents()) if (e.type === 'mated' && sisQ.has(e.gyne) && sisM.has(e.male)) mt = e;
+    sm = s.wasps.filter((w) => w.colony === 'line:' + sc.id && w.caste === 'male');
+    if (sm.length) for (const g of s.wasps) if (g.colony === 'line:' + sc.id && g.caste === 'gyne' && g.ai.mode === 'mate' && Math.hypot(g.x - lek.x, g.z - lek.z) < 4) place(g, sm[0]);
+  }
+  ok(!!mt && Math.hypot(lek.x - sc.nest.x, lek.z - sc.nest.z) < T.males.lekRange + 1, `its males (${sisM.size}) and young queens (${sisQ.size}) fly from its nest to its own mating spot, where they mate`);
+  // the exterminator comes for a sister nest whose neighbourhood calls him, and destroys it
+  { const sx = new Sim({ seed: 1234, birds: false }, { noAI: true }); run(sx, 2);
+    sx._foundLine([{ kind: 'bark', x: sx.nest.x + 3, y: 1, z: sx.nest.z + 3, q: 0.5, n: 2 }], 0, 1);
+    const t = sx.line[0]; t.colony.adults = 20;
+    sx.cs(t.nest.key).esc = 30;
+    const ev = run(sx, 120), sched = ev.find((e) => e.type === 'sisterExtScheduled');
+    const m = sched ? sched.arriveMinute + 1 : 0; if (sched) { sx.clockOffset += (m - sx.minute) * sx.tpm; sx.cs(t.nest.key).esc = 30; }
+    const ev2 = run(sx, 120);
+    ok(!!sched && count(ev2, 'sisterExterminated') === 1 && !t.colony.nestAlive, 'the exterminator is called to a sister nest\'s neighbourhood and destroys the nest');
+    // and pest control's bait poisons a sister colony in its area
+    const sp = new Sim({ seed: 1234, birds: false }, { noAI: true }); run(sp, 2);
+    sp._foundLine([{ kind: 'bark', x: sp.nest.x + 3, y: 1, z: sp.nest.z + 3, q: 0.5, n: 2 }], 0, 1);
+    const pc = sp.line[0]; pc.colony.adults = 30; pc.colony.nestAlive = true;
+    sp.muni = { n: 1, active: { n: 1, keys: [pc.nest.key], until: sp.minute + 1440 }, cooldownUntil: 0 };
+    const a0 = pc.colony.adults; for (let i = 0; i < 20; i++) sp._muniAbstract();
+    ok(pc.colony.adults < a0 && pc.colony.stats.poisoned > 0, `pest control's bait poisons a sister colony in its area (${(a0 - pc.colony.adults).toFixed(2)} adults)`);
+  }
   // its mated queens winter by its nest and are offered in spring
   for (const x of s.line) x.colony.mated = 200;
   s._endSeason('autumn');
@@ -1579,6 +1635,11 @@ function seated(sim, pred) {
   const beers = g.cans.filter((k) => k.color === 4).length, seated = g.humans.filter((h) => h.posture === 'sit').length;
   ok(garden.length === 1 && g.tables.length === 6 && seated === 36 && beers === 18 && g.sugar.filter((k) => k.kind === 'can').length >= 24,
     `one quarter is a beer garden: 6 full tables, ${seated} drinkers, ${beers} beers among ${g.cans.length} drinks`);
+  // they stay into the night: on dry days a drinker arrives in the afternoon and leaves after dark
+  const late = [], idOf = (cc, h) => hash(1234n, Domain.WorldGen, BigInt.asUintN(64, BigInt(cc.cx)), BigInt.asUintN(64, BigInt(cc.cz)), BigInt(h.slot));
+  for (let d = 1; d < 30; d++) if (!dayWeather(1234n, d).rain) for (const h of g.humans.filter((h) => h.posture === 'sit')) { const w = humanWindow(1234n, idOf(g, h), d, 1, h.evening); if (w) late.push(w); }
+  ok(g.humans.filter((h) => h.posture === 'sit').every((h) => h.evening) && late.length > 100 && late.every((w) => w.arrive >= T.days.eveningFrom && w.leave >= T.days.lateFrom) && !q.some((c) => c !== g && c.humans.some((h) => h.evening)),
+    `beer garden drinkers come from ${T.days.eveningFrom / 60}:00 and stay past ${Math.floor(T.days.lateFrom / 60)}:${T.days.lateFrom % 60} (${late.length} evenings out in 30 days); nobody else does`);
   ok(q.every((c) => c.plazas.length === 1 && c.shops.length === 3 && c.boxes.filter((b) => b.shop && !b.wood).length === 3 && c.roads.length === 0),
     'every quarter is paved over, with three shops (solid, not wood) and no street through it');
   ok(fountains.length === 1 && !garden.some((c) => c.baths.length), 'the block has one fountain, across from the beer garden');

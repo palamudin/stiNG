@@ -1,6 +1,6 @@
 // Two peers over a simulated link must agree on every shared human (GDD 11.5). Run: node test/net.test.mjs
 import { readFileSync } from 'node:fs';
-import { NetLab, MeshLab, Sim, stingBot, idleCmd, flyPos, encodeState, decodeState, encodeSwarm, decodeSwarm, encodeTraffic, decodeTraffic, BYTES_PER_WASP, BYTES_PER_SWARM_WASP, T, applyTuning } from '../sim/index.js';
+import { NetLab, MeshLab, Sim, stingBot, idleCmd, makeNest, flyPos, encodeState, decodeState, encodeSwarm, decodeSwarm, encodeTraffic, decodeTraffic, BYTES_PER_WASP, BYTES_PER_SWARM_WASP, T, applyTuning } from '../sim/index.js';
 applyTuning(T, readFileSync(new URL('../../tuning/sting.tune', import.meta.url), 'utf8')); // T1-22: the shipped tuning
 
 let failures = 0;
@@ -27,15 +27,27 @@ for (const name of ['lan', 'good', 'bad', 'awful']) {
   const r = run(name, 18000);
   ok(r.lab.a.stats.stings > 3 && r.lab.b.stats.stings > 3, `${name}: both peers sting the shared humans`);
   ok(Math.abs(r.lab.a.stats.remoteStings - r.lab.b.stats.stings) <= 1 && Math.abs(r.lab.b.stats.remoteStings - r.lab.a.stats.stings - r.lab.a.stats.aiStings) <= 1, `${name}: every sting reaches the other peer (A saw ${r.lab.a.stats.remoteStings} of B's ${r.lab.b.stats.stings}; B saw ${r.lab.b.stats.remoteStings} of A's ${r.lab.a.stats.stings} + AI ${r.lab.a.stats.aiStings})`);
-  // past the window (the awful link) an event can now and then arrive after its commit tick: it is counted, and the
-  // peers agree on every human until then (late-event corrections by the chunk authority are not built, GDD 11.6)
+  // past the window (the awful link) an event can now and then arrive after its commit tick: it is counted, the chunk's
+  // authority sends a correction, and the peers agree again once it commits (GDD 11.6)
   const late = r.lab.a.netStats.late + r.lab.b.netStats.late, firstLate = Math.min(r.lab.a.netStats.firstLate || Infinity, r.lab.b.netStats.firstLate || Infinity);
   if (name !== 'awful') {
     ok(r.c.compared > 100 && r.c.agreed === r.c.compared, `${name}: human state identical on both peers at every check (${r.c.agreed}/${r.c.compared})`);
     ok(late === 0, `${name}: no event arrived after its commit tick`);
-  } else ok(r.c.compared > 100 && (r.c.agreed === r.c.compared || (late > 0 && r.c.firstDiverge >= firstLate)),
-    `${name}: human state identical on both peers until the first late event (${r.c.agreed}/${r.c.compared}; ${late} late, first at ${firstLate === Infinity ? '-' : firstLate}, first difference at ${r.c.firstDiverge || '-'})`);
+  } else ok(r.c.compared > 100 && (r.c.agreed === r.c.compared || (late > 0 && r.c.firstDiverge >= firstLate && r.c.last && r.c.agreed >= r.c.compared * 0.97)),
+    `${name}: human state identical on both peers except briefly after a late event, until its correction commits (${r.c.agreed}/${r.c.compared}; ${late} late, first at ${firstLate === Infinity ? '-' : firstLate}, first difference at ${r.c.firstDiverge || '-'})`);
   ok(r.lab.a.netStats.rejected === 0 && r.lab.b.netStats.rejected === 0, `${name}: plausibility checks never reject honest traffic`);
+}
+
+// Over the window: late events every so often. The chunk authority's corrections set the humans right on both peers;
+// without them the peers drift apart for good.
+{
+  const r = run('over', 18000), A = r.lab.a, B = r.lab.b, late = A.netStats.late + B.netStats.late;
+  ok(late > 0 && A.netStats.fixes + B.netStats.fixes > 0 && A.netStats.fixed > 0 && B.netStats.fixed > 0 && r.c.last && r.c.agreed >= r.c.compared * 0.97,
+    `over the window: ${late} late events, ${A.netStats.fixes + B.netStats.fixes} corrections; the peers agree again after each (${r.c.agreed}/${r.c.compared}, last difference at ${r.c.lastDiverge || '-'})`);
+  const off = new NetLab({ seed: 1234 }, 'over'); off.a._applyFix = off.b._applyFix = () => {};
+  const bot = stingBot({ plan: 'jab', rest: 200 });
+  for (let i = 0; i < 18000; i++) { off.step(bot(off.a)); off.a.drainEvents(); if (i % 60 === 0) off.check(); }
+  ok(off.checks.agreed < r.c.agreed, `without the corrections they drift apart (${off.checks.agreed}/${off.checks.compared} agree)`);
 }
 
 // Peers far apart: B works a picnic two chunks east while A stays home. Humans still agree everywhere (Q-16).
@@ -380,6 +392,46 @@ for (const name of ['lan', 'good', 'bad', 'awful']) {
   const dropped = A.netStats.dropped;
   A.receive([{ mk: 'state', peer: 1, tick: A.tick + 1, driven: 4242, gone: [], wasps: [{ id: 4242, caste: 'worker', x: house.x, y: 2, z: house.z, vx: 0, vy: 0, vz: 0, state: 'fly', carry: null, under: null, rival: false }] }]);
   ok(!A.remote.has(4242) && A.netStats.dropped === dropped + 1, 'a player\'s wasp reported inside a house is not drawn there');
+  // fences and table tops are thinner than the margin: a move straight through one between two packets is caught instead
+  let fence = null, table = null;
+  for (let x = -4; x < 4 && !(fence && table); x++) for (let z = -4; z < 4 && !(fence && table); z++) {
+    const bs = A._content(x, z).boxes;
+    fence = fence || bs.find((b) => b.fence && Math.max(b.maxx - b.minx, b.maxz - b.minz) > 2);
+    table = table || bs.find((b) => b.wood && !b.fence && !b.shed && !b.hive && b.maxy - b.miny < 0.06 && b.miny > 0.6);
+  }
+  const fx = fence.maxx - fence.minx < fence.maxz - fence.minz, fm = { x: (fence.minx + fence.maxx) / 2, y: 0.75, z: (fence.minz + fence.maxz) / 2 };
+  const side = (d, o = {}) => ({ x: fm.x + (fx ? d : 0), y: fm.y, z: fm.z + (fx ? 0 : d), ...o });
+  const endA = fx ? { x: fm.x - 0.1, y: 0.75, z: fence.maxz - 0.1 } : { x: fence.maxx - 0.1, y: 0.75, z: fm.z - 0.1 }, endB = fx ? { ...endA, x: fm.x + 0.1 } : { ...endA, z: fm.z + 0.1 };
+  const tm = { x: (table.minx + table.maxx) / 2, z: (table.minz + table.maxz) / 2 };
+  ok(A._throughThin(side(-0.2), side(0.2), 3 / 60) && !A._throughThin(side(-0.2, { y: 1.62 }), side(0.2, { y: 1.62 }), 3 / 60) && !A._throughThin(endA, endB, 3 / 60)
+    && A._throughThin({ ...tm, y: 0.9 }, { ...tm, y: 0.6 }, 3 / 60) && !A._inSolid(fm),
+    'a move straight through the middle of a fence or a table top is caught; over the top or round the end of a fence is not');
+  const d2 = A.netStats.dropped, pk = (t, p) => ({ mk: 'state', peer: 1, tick: t, driven: 4343, gone: [], wasps: [{ id: 4343, caste: 'worker', ...p, vx: 0, vy: 0, vz: 0, state: 'fly', carry: null, under: null, rival: false }] });
+  A.receive([pk(A.tick + 2, side(-0.2))]); A.receive([pk(A.tick + 5, side(0.2))]);
+  ok(A.remote.get(4343) && A.remote.get(4343).pz === side(-0.2).z && A.remote.get(4343).px === side(-0.2).x && A.netStats.dropped === d2 + 1, 'a player\'s wasp reported going through a fence is not drawn on the far side');
+}
+
+// Colony against colony: each player's nest is known to the others, and a player's wasp can steal a larva from another
+// player's nest as from a rival's; its owner loses the larva and sends its guards after the thief
+{
+  const lab = new NetLab({ seed: 1234, birds: false }, 'lan'), A = lab.a, B = lab.b;
+  const t = B.records.get('0,0').content.trees.find((q) => Math.hypot(q.x - A.nest.x, q.z - A.nest.z) > 4);
+  B.nest = makeNest(t.x, t.z, t.x + t.r + 0.2, 1.6, t.z, 0.14, 'trunk');
+  for (let i = 0; i < 30; i++) lab.step(idleCmd(), idleCmd());
+  const known = A.peerNests.get(1), e = B.nest.entrance;
+  ok(known && known.alive && Math.abs(known.x - e.x) < 1e-9 && Math.abs(known.z - e.z) < 1e-9, 'each player knows where the other\'s nest is');
+  const w = A._driven(); w.x = e.x; w.y = e.y; w.z = e.z; w.vx = w.vy = w.vz = 0; w.state = 'fly'; w.carry = null;
+  A._hints(w);
+  const hint = A.hint.raid, larvae = B.colony.larvae;
+  A._interact(w);
+  let raided = null;
+  for (let i = 0; i < 20 && !raided; i++) { lab.step(idleCmd(), idleCmd()); raided = (lab.bEvents || []).find((x) => x.type === 'raided'); }
+  ok(hint === 1 && w.carry && w.carry.what === 'larva' && raided && raided.by === 0 && B.colony.larvae === Math.max(0, larvae - 1) && A.netStats.rejected === 0 && B.netStats.rejected === 0,
+    `a player's wasp steals a larva from the other player's nest; its owner loses it (${larvae.toFixed(1)} -> ${B.colony.larvae.toFixed(1)} larvae) and hears who it was`);
+  const strikes = B.plaus.strikes[0] || 0;
+  A._publish({ type: 'praid', toPeer: 1, waspId: w.id, x: e.x + 3, y: e.y, z: e.z });
+  for (let i = 0; i < 10; i++) lab.step(idleCmd(), idleCmd());
+  ok((B.plaus.strikes[0] || 0) === strikes + 1 && B.colony.larvae === Math.max(0, larvae - 1), 'a raid claimed from 3 m off the nest is rejected and takes nothing');
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');

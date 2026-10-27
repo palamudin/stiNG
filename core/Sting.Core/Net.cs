@@ -171,6 +171,7 @@ namespace Sting.Core
             ["good"] = new LinkSpec { name = "Good internet", latency = 5, jitter = 2, loss = 0.02 },
             ["bad"] = new LinkSpec { name = "Bad internet", latency = 9, jitter = 4, loss = 0.08 },
             ["awful"] = new LinkSpec { name = "Past the window", latency = 16, jitter = 6, loss = 0.1 },
+            ["over"] = new LinkSpec { name = "Well past the window", latency = 24, jitter = 6, loss = 0.1 }, // late events often: the corrections at work
         };
         public static LinkSpec Spec(string name) => name != null && LINKS.TryGetValue(name, out var s) ? s : LINKS["good"];
 
@@ -213,7 +214,7 @@ namespace Sting.Core
         }
     }
 
-    public sealed class Checks { public int compared, agreed, skipped, firstDiverge; }
+    public sealed class Checks { public int compared, agreed, skipped, firstDiverge, lastDiverge; public bool last; }
 
     /// Peer A is the player; peer B is a scripted second player stinging the same humans.
     public sealed class NetLab
@@ -294,7 +295,8 @@ namespace Sting.Core
             if (b == null) { checks.skipped++; return null; }
             checks.compared++;
             bool same = a.HumanHash() == b.HumanHash();
-            if (same) checks.agreed++; else if (checks.firstDiverge == 0) checks.firstDiverge = a.tick;
+            if (same) checks.agreed++; else { if (checks.firstDiverge == 0) checks.firstDiverge = a.tick; checks.lastDiverge = a.tick; }
+            checks.last = same;
             return same;
         }
 

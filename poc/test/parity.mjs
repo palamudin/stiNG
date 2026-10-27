@@ -32,7 +32,7 @@ export function digestChunk(c, d) {
   f(c.flowers.length); for (const t of c.flowers) { f(t.x); f(t.y); f(t.z); f(t.color); }
   f(c.caterpillars.length); for (const t of c.caterpillars) { f(t.x); f(t.y); f(t.z); }
   f(c.flies.length); for (const t of c.flies) { for (const k of ['x', 'y', 'z', 'r', 'w1', 'w2', 'w3', 'p1', 'p2', 'p3']) f(t[k]); }
-  f(c.humans.length); for (const t of c.humans) { f(t.slot); f(t.x); f(t.z); f(t.fx); f(t.fz); f(t.posture === 'sit'); f(t.exit); f(t.posture === 'lie'); f(t.act === 'stroll' ? 1 : t.act === 'garden' ? 2 : t.act === 'sun' ? 3 : 0); f(t.path ? t.path.length : 0); if (t.path) for (const v of t.path) f(v); }
+  f(c.humans.length); for (const t of c.humans) { f(t.slot); f(t.x); f(t.z); f(t.fx); f(t.fz); f(t.posture === 'sit'); f(t.exit); f(t.posture === 'lie'); f(t.act === 'stroll' ? 1 : t.act === 'garden' ? 2 : t.act === 'sun' ? 3 : 0); f(t.path ? t.path.length : 0); if (t.path) for (const v of t.path) f(v); f(!!t.evening); }
   f(c.boxes.length); for (const t of c.boxes) { for (const k of ['minx', 'maxx', 'miny', 'maxy', 'minz', 'maxz']) f(t[k]); f(!!t.wood); f(!!t.hive); f(!!t.shed); f(!!t.fence); f(!!t.mall); f(!!t.shop); }
   f(c.cylinders.length); for (const t of c.cylinders) { f(t.x); f(t.z); f(t.r); f(t.h); }
   f(c.sugar.length); for (const t of c.sugar) { f(t.x); f(t.y); f(t.z); f(t.rate); f(KIND[t.kind]); f(t.table ?? -1); }
@@ -75,7 +75,7 @@ for (const seed of seeds) {
   for (let m = 0; m < 1440 * 4; m += 37) { const v = windAt(seed, m); d.f(v.x); d.f(v.z); }
   for (let i = 0; i < 40; i++) {
     const id = hash(seed, Domain.WorldGen, u64(i), 3n, 1000n);
-    for (let day = 0; day < 20; day++) { const w = humanWindow(seed, id, day, 1 - (i % 3) * 0.15); d.f(w ? 1 : 0); if (w) { d.f(w.arrive); d.f(w.leave); } }
+    for (let day = 0; day < 20; day++) { const w = humanWindow(seed, id, day, 1 - (i % 3) * 0.15, i % 4 === 3); d.f(w ? 1 : 0); if (w) { d.f(w.arrive); d.f(w.leave); } }
   }
   out(`weather.${seed}`, d.hex());
 }
@@ -198,6 +198,7 @@ export const NET_SCENARIOS = [
   { name: 'awful', link: 'awful', ticks: 6000 },
   { name: 'join', link: 'good', ticks: 9000, joinAt: 3000 },
   { name: 'cheat', link: 'good', ticks: 14000, cheat: true },
+  { name: 'over', link: 'over', ticks: 18000 }, // late events and the chunk authority's corrections (GDD 11.6)
 ];
 for (const sc of NET_SCENARIOS) {
   const d = Digest(), lab = new NetLab({ seed: 1234 }, sc.link, {}, sc.joinAt || 0), botA = stingBot({ plan: 'jab', rest: 200 });

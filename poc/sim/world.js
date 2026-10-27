@@ -94,11 +94,12 @@ export function windAt(seed, m) {
 export function isDaylight(m) { const d = minuteOfDay(m); return d >= T.time.dawn && d < T.time.dusk; }
 
 // When a human is in the park on a given day (GDD 8.2). Returns null when absent.
-export function humanWindow(seed, id, day, density = 1) {
-  const H = (i) => hash(seed, Domain.HumanSchedule, id, BigInt(day), BigInt(i));
+export function humanWindow(seed, id, day, density = 1, evening = false) {
+  const H = (i) => hash(seed, Domain.HumanSchedule, id, BigInt(day), BigInt(i)), D = T.days;
   if (day > 0 && unit(H(0)) > 0.85 * density) return null;
-  let arrive = day === 0 ? 0 : 600 + rangeInt(H(1), 0, 150);
-  let leave = 1020 + rangeInt(H(2), 0, 180);
+  // a beer garden's drinkers come in the afternoon and stay into the night (T2-5)
+  let arrive = day === 0 ? 0 : evening ? D.eveningFrom + rangeInt(H(1), 0, D.eveningSpread) : 600 + rangeInt(H(1), 0, 150);
+  let leave = evening ? D.lateFrom + rangeInt(H(2), 0, D.lateSpread) : 1020 + rangeInt(H(2), 0, 180);
   const w = dayWeather(seed, day);
   if (w.rain) {
     if (arrive < w.rainStart) leave = Math.min(leave, w.rainStart);
@@ -133,6 +134,14 @@ export function dragonPos(b, tick) {
 
 // Shed nest sites: a crack in one wall at chest height, and the gap under the eaves on one side.
 // (x, z) is just outside the face; (ix, iz) is inside the shed.
+// The pitched roof on a shed or a house, drawn and solid: the ridge runs along the long side, rise above the eaves at
+// the top of the walls; it overhangs the walls by 0.12 m on the long sides and 0.1 m at the gable ends. u is across
+// the ridge, v along it; wall and wallHalf are the walls' half sizes across and along, S the eaves' half span, L the
+// slope's length (for its normal).
+export function shedRoof(sh) {
+  const alongX = sh.hw >= sh.hd, wall = alongX ? sh.hd : sh.hw, wallHalf = alongX ? sh.hw : sh.hd, S = wall + 0.12, rise = sh.house ? 1.9 : 0.55;
+  return { x: sh.x, z: sh.z, alongX, wall, wallHalf, half: wallHalf + 0.1, S, y0: sh.h, rise, L: Math.sqrt(rise * rise + S * S) };
+}
 export function shedSites(sh) {
   const faces = [[1, 0], [-1, 0], [0, 1], [0, -1]];
   const at = (f, y) => {
@@ -428,6 +437,7 @@ export function generateChunk(seed, cx, cz, settings) {
       for (let k = 0; k < 6; k++) {
         const px = gx + ((k % 3) - 1) * 5.5, pz = gz + (Math.floor(k / 3) - 0.5) * 5, base = 7100 + k * 400, ti = c.tables.length;
         addPicnic(px, pz, true, 0b111111, base);
+        for (const h of c.humans.slice(-6)) h.evening = true; // they stay into the night
         for (let i = 0; i < 3; i++) { // a round of drinks on every table
           const x = px + range(H(base + 90 + i), -0.8, 0.8), z = pz + range(H(base + 95 + i), -0.22, 0.22);
           c.cans.push({ x, z, color: 4, table: ti }); c.sugar.push({ x, y: 0.87, z, rate: 1.0, kind: 'can', table: ti });

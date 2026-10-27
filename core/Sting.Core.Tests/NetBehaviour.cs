@@ -246,6 +246,48 @@ namespace Sting.Core.Tests
                 sm.wasps.Add(new RemoteWasp { id = 4242, caste = "worker", x = house.x, y = 2, z = house.z, state = "fly" });
                 A.Receive(new Msg[] { sm });
                 Okn(A.remote.Get(4242) == null && A.netStats.dropped == dropped + 1, "a player's wasp reported inside a house is not drawn there");
+                // fences and table tops are thinner than the margin: a move straight through one between two packets is caught instead
+                Box fence = null, table = null;
+                for (int x = -4; x < 4; x++) for (int z = -4; z < 4; z++)
+                {
+                    var bs = World.GenerateChunk(A.seed, x, z).boxes;
+                    if (fence == null) fence = bs.FirstOrDefault(q => q.fence && Max(q.maxx - q.minx, q.maxz - q.minz) > 2);
+                    if (table == null) table = bs.FirstOrDefault(q => q.wood && !q.fence && !q.shed && !q.hive && q.maxy - q.miny < 0.06 && q.miny > 0.6);
+                }
+                bool fx = fence.maxx - fence.minx < fence.maxz - fence.minz; var fm = new V3((fence.minx + fence.maxx) / 2, 0.75, (fence.minz + fence.maxz) / 2);
+                V3 Side(Num d, Num y) => new V3(fm.x + (fx ? d : 0), y, fm.z + (fx ? 0 : d));
+                var endA = fx ? new V3(fm.x - 0.1, 0.75, fence.maxz - 0.1) : new V3(fence.maxx - 0.1, 0.75, fm.z - 0.1);
+                var endB = fx ? new V3(fm.x + 0.1, 0.75, endA.z) : new V3(endA.x, 0.75, fm.z + 0.1);
+                Num tmx = (table.minx + table.maxx) / 2, tmz = (table.minz + table.maxz) / 2, dt3 = (Num)3 / 60;
+                Okn(A.ThroughThin(Side(-0.2, 0.75), Side(0.2, 0.75), dt3) && !A.ThroughThin(Side(-0.2, 1.62), Side(0.2, 1.62), dt3) && !A.ThroughThin(endA, endB, dt3)
+                    && A.ThroughThin(new V3(tmx, 0.9, tmz), new V3(tmx, 0.6, tmz), dt3) && !A.InSolid(fm.x, fm.y, fm.z),
+                    "a move straight through the middle of a fence or a table top is caught; over the top or round the end of a fence is not");
+                Num d2 = A.netStats.dropped;
+                StateMsg Pk(long t, V3 p) { var q = new StateMsg { peer = 1, tick = (int)t, driven = 4343 }; q.wasps.Add(new RemoteWasp { id = 4343, caste = "worker", x = p.x, y = p.y, z = p.z, state = "fly" }); return q; }
+                A.Receive(new Msg[] { Pk(A.tick + 2, Side(-0.2, 0.75)) }); A.Receive(new Msg[] { Pk(A.tick + 5, Side(0.2, 0.75)) });
+                var rw = A.remote.Get(4343);
+                Okn(rw != null && rw.pz == Side(-0.2, 0.75).z && rw.px == Side(-0.2, 0.75).x && A.netStats.dropped == d2 + 1, "a player's wasp reported going through a fence is not drawn on the far side");
+            }
+            // colony against colony: each player's nest is known to the others, and a player's wasp can steal a larva from it
+            {
+                var lab = new NetLab(new Settings { seed = 1234, birds = false }, "lan"); var A = lab.a; var B = lab.b;
+                var t = B.records.Get("0,0").content.trees.First(q => Sqrt(Sq(q.x - A.nest.x) + Sq(q.z - A.nest.z)) > 4);
+                B.nest = World.MakeNest(t.x, t.z, t.x + t.r + 0.2, 1.6, t.z, 0.14, "trunk");
+                for (int i = 0; i < 30; i++) lab.Step(Idle(), Idle());
+                A.peerNests.TryGetValue(1, out var known); var e = B.nest.entrance;
+                Okn(known != null && known.alive && D(Abs(known.x - e.x)) < 1e-9 && D(Abs(known.z - e.z)) < 1e-9, "each player knows where the other's nest is");
+                var w = A.Driven(); w.x = e.x; w.y = e.y; w.z = e.z; w.vx = w.vy = w.vz = 0; w.state = "fly"; w.carry = null;
+                A.Hints(w); int? hint = A.hint.raid; Num larvae = B.colony.larvae;
+                A.Interact(w);
+                SimEvent raided = null;
+                for (int i = 0; i < 20 && raided == null; i++) { lab.Step(Idle(), Idle()); raided = lab.bEvents.FirstOrDefault(x => x.type == "raided"); }
+                Okn(hint == 1 && w.carry != null && w.carry.what == "larva" && raided != null && (int)raided["by"] == 0 && B.colony.larvae == Max(0, larvae - 1) && A.netStats.rejected == 0 && B.netStats.rejected == 0,
+                    $"a player's wasp steals a larva from the other player's nest; its owner loses it ({D(larvae):0.0} -> {D(B.colony.larvae):0.0} larvae) and hears who it was");
+                B.plaus.strikes.TryGetValue(0, out int strikes);
+                A.Publish(new NetEv { type = "praid", toPeer = 1, waspId = w.id, x = e.x + 3, y = e.y, z = e.z });
+                for (int i = 0; i < 10; i++) lab.Step(Idle(), Idle());
+                B.plaus.strikes.TryGetValue(0, out int strikes2);
+                Okn(strikes2 == strikes + 1 && B.colony.larvae == Max(0, larvae - 1), "a raid claimed from 3 m off the nest is rejected and takes nothing");
             }
         }
     }

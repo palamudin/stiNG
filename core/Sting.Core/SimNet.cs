@@ -9,10 +9,10 @@ namespace Sting.Core
         // Every change to shared world state is an event. Its immediate part (swats, sprays) runs as soon as a
         // peer has it; its human-state part (panic, flight, counters, alert points) commits on one agreed tick,
         // T.net.commitTicks after it happened, so every peer applies it identically (GDD 11.5).
-        void Publish(NetEv ev)
+        internal void Publish(NetEv ev)
         {
             ev.mk = "ev"; ev.peer = peer; ev.seq = ++evSeq; ev.tick = tick;
-            ev.commit = tick + T.net.commitTicks;
+            ev.commit = tick + (ev.type == "fix" ? T.net.fixTicks : T.net.commitTicks);
             if (net) { outbox.Add(ev); netStats.sent++; }
             ApplyImmediate(ev);
             if (!IMMEDIATE.Contains(ev.type)) Schedule(ev);
@@ -47,6 +47,9 @@ namespace Sting.Core
                     netStats.late++; netStats.lateMax = Max(netStats.lateMax, by);
                     if (netStats.firstLate == 0) netStats.firstLate = tick;
                     Emit("lateEvent", ("evType", ev.type), ("by", by));
+                    // the chunk's authority sets its humans right for everyone (GDD 11.6)
+                    string key = EvChunk(ev);
+                    if (key != null) { if (ChunkAuthority(key) == peer) OwesFix(key); else Publish(new NetEv { type = "fixReq", key = key }); }
                 }
                 Schedule(ev);
             }
@@ -107,11 +110,16 @@ namespace Sting.Core
         internal string Implausible(NetEv ev)
         {
             plaus.lastSeq.TryGetValue(ev.peer, out int last);
-            if (ev.commit != ev.tick + T.net.commitTicks) return "commit tick";
+            if (ev.commit != ev.tick + (ev.type == "fix" ? T.net.fixTicks : T.net.commitTicks)) return "commit tick";
             if (ev.seq <= last) return "replayed or out of order";
             plaus.lastSeq[ev.peer] = ev.seq;
             if (ev.tick > tick + T.plaus.futureTicks) return "from the future";
             if (ev.type == "quarantine" && ev.peer != host) return "only the host rules on peers";
+            if (ev.type == "praid") // from that nest's entrance, as its owner or anyone who has heard where it is knows
+            {
+                V3? n = ev.toPeer == peer ? nest.entrance : peerNests.TryGetValue(ev.toPeer, out var pn) ? new V3(pn.x, pn.y, pn.z) : (V3?)null;
+                if (n != null && Sq(ev.x - n.Value.x) + Sq(ev.y - n.Value.y) + Sq(ev.z - n.Value.z) > T.plaus.pickupReach * T.plaus.pickupReach) return "raided from out of reach";
+            }
             if (ev.type == "sting" || ev.type == "notice" || ev.type == "press" || ev.type == "preSwat")
             {
                 var hm = HumanByHex(ev.humanHex);
@@ -175,6 +183,30 @@ namespace Sting.Core
                 if (x > b.minx + D && x < b.maxx - D && y > b.miny + D && y < b.maxy - D && z > b.minz + D && z < b.maxz - D) return true;
             }
             foreach (var cy in CylsOf(rec)) if (cy.r > D && y < cy.h - D && Sq(x - cy.x) + Sq(z - cy.z) < Sq(cy.r - D)) return true;
+            foreach (var f in RoofsOf(rec)) { var r = RoofLocal(f, x, y, z); if (Abs(r.v) < f.half - D && r.y > D && (f.rise * (Abs(r.u) - f.S) + f.S * r.y) / f.L < -D) return true; }
+            return false;
+        }
+        /// A straight move from a to b through a thin box (a fence, a table top, a bench seat) well inside its face, which the
+        /// solid check's margin cannot see; the margin from the face's edges is half the distance a wasp can fly in the time
+        /// between the two positions, so an honest turn round the end of a fence or over its top is never taken for one
+        internal bool ThroughThin(V3 a, V3 b, Num dt)
+        {
+            Num D = T.plaus.solidDepth, M = Max(D, T.plaus.maxSpeed * dt / 2);
+            var A = new[] { a.x, a.y, a.z }; var B = new[] { b.x, b.y, b.z };
+            var ra = PlausRec(World.ChunkOf(a.x), World.ChunkOf(a.z)); var rb = PlausRec(World.ChunkOf(b.x), World.ChunkOf(b.z));
+            foreach (var rec in ra == rb ? new[] { ra } : new[] { ra, rb })
+                foreach (var bx in rec.content.boxes)
+                {
+                    var lo = new[] { bx.minx, bx.miny, bx.minz }; var hi = new[] { bx.maxx, bx.maxy, bx.maxz };
+                    int k = 0;
+                    for (int i = 1; i < 3; i++) if (hi[i] - lo[i] < hi[k] - lo[k]) k = i;
+                    if (hi[k] - lo[k] > 2 * D) continue; // thicker ones the solid check sees
+                    if (!((A[k] < lo[k] && B[k] > hi[k]) || (B[k] < lo[k] && A[k] > hi[k]))) continue;
+                    Num t = ((lo[k] + hi[k]) / 2 - A[k]) / (B[k] - A[k]);
+                    bool inside = true;
+                    for (int i = 0; i < 3; i++) if (i != k) { Num q = A[i] + (B[i] - A[i]) * t; if (q < lo[i] + M || q > hi[i] - M) inside = false; }
+                    if (inside) return true;
+                }
             return false;
         }
         static bool ParseKey(string key, out int cx, out int cz)
@@ -286,6 +318,8 @@ namespace Sting.Core
                 }
                 // display only, like speed: a player's own wasp is never inside a wall or the ground (T1-20)
                 if (r.id == m.driven && InSolid(r.x, r.y, r.z)) { netStats.dropped++; ids.Add(r.id); if (prev != null) prev.seen = tick; continue; }
+                // nor does it go through a fence or a table top between two packets, which is too thin for that margin
+                if (r.id == m.driven && prev != null && prev.peer == m.peer && m.tick > prev.stamp && ThroughThin(new V3(prev.px, prev.py, prev.pz), new V3(r.x, r.y, r.z), (Num)(m.tick - prev.stamp) / 60)) { netStats.dropped++; ids.Add(r.id); prev.seen = tick; continue; }
                 ids.Add(r.id);
                 var e = remote.Get(r.id) ?? new RemoteWasp();
                 e.id = r.id; e.caste = r.caste; e.x = r.x; e.y = r.y; e.z = r.z; e.vx = r.vx; e.vy = r.vy; e.vz = r.vz; e.state = r.state;
@@ -346,11 +380,91 @@ namespace Sting.Core
             return c;
         }
 
+        // ---------------- another player's nest (colony against colony); see sim.js
+
+        public readonly Dictionary<int, PeerNest> peerNests = new Dictionary<int, PeerNest>();
+        string nestSig = ""; int nestSentTick = -1000000000;
+        /// every peer says where its nest is when it moves or dies, and every ten seconds so a peer that joins hears it
+        void ShareNest()
+        {
+            var e = nest.entrance; bool alive = colony.sited && colony.nestAlive;
+            string sig = e.x + "," + e.y + "," + e.z + "," + alive;
+            if (sig == nestSig && tick - nestSentTick < 600) return;
+            nestSig = sig; nestSentTick = tick;
+            Publish(new NetEv { type = "nest", x = e.x, y = e.y, z = e.z, key = nest.key, alive = alive });
+        }
+        /// another player's live nest at the wasp, not where its own is (players can share the home tree)
+        internal (int peer, PeerNest n)? PeerNestNear(Wasp w)
+        {
+            var own = nest.entrance;
+            foreach (var kv in peerNests)
+            {
+                var n = kv.Value;
+                if (!n.alive || plaus.quarantined.Contains(kv.Key) || Sq(n.x - own.x) + Sq(n.y - own.y) + Sq(n.z - own.z) < 0.3 * 0.3) continue;
+                if (Sq(w.x - n.x) + Sq(w.y - n.y) + Sq(w.z - n.z) < 0.08 * 0.08) return (kv.Key, n);
+            }
+            return null;
+        }
+        /// steal a larva from it, as from a rival's nest: its owner loses one and sends its guards after the thief
+        void RaidPeer(Wasp w, int toPeer)
+        {
+            w.carry = new Carry { kind = "protein", amount = T.rival.raidProtein, what = "larva" };
+            Publish(new NetEv { type = "praid", toPeer = toPeer, waspId = w.id, x = w.x, y = w.y, z = w.z });
+            Emit("raid", ("id", w.id), ("peer", toPeer));
+        }
+
+        // ---------------- late-event corrections (GDD 11.6); see sim.js
+
+        readonly List<string> fixDue = new List<string>(); readonly Dictionary<string, int> fixLast = new Dictionary<string, int>();
+        /// the chunk an event's consequences land in: its human's, or the chunk it names
+        string EvChunk(NetEv ev)
+        {
+            if (ev.humanHex != null) { var hm = HumanByHex(ev.humanHex); if (hm != null && !hm.special) return hm.chunk; }
+            return ev.key != null && System.Text.RegularExpressions.Regex.IsMatch(ev.key, @"^-?\d+,-?\d+$") ? ev.key : null;
+        }
+        void OwesFix(string key) { if (!fixDue.Contains(key)) fixDue.Add(key); }
+        /// as a chunk's authority, publish its humans and its shared state as they are now; every peer, this one too, takes
+        /// them as they stand when the correction commits; at most one per chunk per fixEvery ticks
+        void SendFixes()
+        {
+            if (fixDue.Count == 0) return;
+            var keep = new List<string>();
+            foreach (var key in fixDue)
+            {
+                if (ChunkAuthority(key) != peer) continue;
+                if (fixLast.TryGetValue(key, out int l) && tick < l + T.net.fixEvery) { keep.Add(key); continue; }
+                fixLast[key] = tick;
+                var hs = new List<(string, byte[])>();
+                foreach (var hm in active) if (!hm.special && hm.chunk == key) hs.Add((hm.hex, Persist.HumanBytes(hm)));
+                chunkState.TryGet(key, out var st);
+                Publish(new NetEv { type = "fix", key = key, fixHumans = hs, fixChunk = st != null ? Persist.ChunkBytes(st) : null });
+                netStats.fixes++;
+                Emit("fixSent", ("key", key), ("humans", hs.Count));
+            }
+            fixDue.Clear(); fixDue.AddRange(keep);
+        }
+        void ApplyFix(NetEv ev)
+        {
+            if (ChunkAuthority(ev.key) != ev.peer) return; // only the chunk's authority sets it right
+            foreach (var (hex, s) in ev.fixHumans) { var hm = HumanByHex(hex); if (hm != null) Persist.HumanFromBytes(hm, s); }
+            if (ev.fixChunk != null) chunkState.Set(ev.key, Persist.ChunkFromBytes(ev.fixChunk)); else chunkState.Delete(ev.key);
+            netStats.fixed_++;
+            Emit("fixed", ("key", ev.key), ("humans", ev.fixHumans.Count), ("from", ev.peer));
+        }
+
         void ApplyImmediate(NetEv ev)
         {
             bool mine = ev.peer == peer;
             switch (ev.type)
             {
+                case "fixReq": if (ChunkAuthority(ev.key) == peer) OwesFix(ev.key); break;
+                case "nest": if (!mine) peerNests[ev.peer] = new PeerNest { x = ev.x, y = ev.y, z = ev.z, key = ev.key, alive = ev.alive }; break;
+                case "praid": // another player's wasp took a larva from my nest: one fewer, and my guards go after it
+                    if (mine || ev.toPeer != peer || !colony.nestAlive) break;
+                    colony.larvae = Max(0, colony.larvae - 1);
+                    foreach (var g in Own()) if (g.role == "guard" && g.state == "fly") { g.ai.mode = "hunt"; g.ai.huntId = ev.waspId; g.ai.timer = tick + T.guard.huntTicks; }
+                    Emit("raided", ("by", ev.peer), ("waspId", ev.waspId));
+                    break;
                 case "sting":
                 {
                     var hm = HumanByHex(ev.humanHex);
@@ -484,6 +598,7 @@ namespace Sting.Core
             bool mine = ev.peer == peer;
             switch (ev.type)
             {
+                case "fix": ApplyFix(ev); break;
                 case "quarantine":
                     if (ev.peer == host) Quarantine(ev.target);
                     break;

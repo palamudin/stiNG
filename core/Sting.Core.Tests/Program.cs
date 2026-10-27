@@ -126,7 +126,7 @@ namespace Sting.Core.Tests
                 for (int i = 0; i < 40; i++)
                 {
                     ulong id = Hash(seed, Domain.WorldGen, U64(i), 3, 1000);
-                    for (int day = 0; day < 20; day++) { var w = World.HumanWindow(seed, id, day, 1 - (i % 3) * 0.15); d.F(w != null ? 1 : 0); if (w != null) { d.F(w.arrive); d.F(w.leave); } }
+                    for (int day = 0; day < 20; day++) { var w = World.HumanWindow(seed, id, day, 1 - (i % 3) * 0.15, i % 4 == 3); d.F(w != null ? 1 : 0); if (w != null) { d.F(w.arrive); d.F(w.leave); } }
                 }
                 Out($"weather.{seed}", d.Hex);
             }

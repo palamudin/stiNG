@@ -222,7 +222,7 @@ namespace Sting.Core
             return false;
         }
 
-        void Collide(Wasp w)
+        internal void Collide(Wasp w)
         {
             Num R = T.wasp.radius;
             if (w.y < R) { w.y = R; if (w.vy < 0) w.vy = 0; w.vx *= 0.9; w.vz *= 0.9; }
@@ -244,6 +244,21 @@ namespace Sting.Core
                     else if (k == 3) { w.y = b.maxy + R; if (w.vy < 0) w.vy = 0; }
                     else if (k == 4) { w.z = b.minz - R; if (w.vz > 0) w.vz = 0; }
                     else { w.z = b.maxz + R; if (w.vz < 0) w.vz = 0; }
+                }
+                // pitched roofs: the slope on the wasp's side, the gable ends, and the underside where it overhangs the walls
+                foreach (var f in RoofsOf(rec))
+                {
+                    var r = RoofLocal(f, w.x, w.y, w.z); Num au = Abs(r.u), av = Abs(r.v);
+                    if (av > f.half + R || au > f.S + R || r.y < -R || r.y > f.rise + R) continue;
+                    Num su = r.u < 0 ? -1 : 1, dS = (f.rise * (au - f.S) + f.S * r.y) / f.L, dE = av - f.half;
+                    Num k = dS, nu = su * f.rise / f.L, ny = f.S / f.L, nv = 0;
+                    if (dE > k) { k = dE; nu = 0; ny = 0; nv = r.v < 0 ? -1 : 1; }
+                    if ((au > f.wall || av > f.wallHalf) && -r.y > k) { k = -r.y; nu = 0; ny = -1; nv = 0; }
+                    if (k >= R) continue;
+                    Num push = R - k, nx = f.alongX ? nv : nu, nz = f.alongX ? nu : nv;
+                    w.x += nx * push; w.y += ny * push; w.z += nz * push;
+                    Num vn = w.vx * nx + w.vy * ny + w.vz * nz;
+                    if (vn < 0) { w.vx -= vn * nx; w.vy -= vn * ny; w.vz -= vn * nz; }
                 }
                 // hollow cups: thin walls, open at the top unless covered (GDD 7.5)
                 {
@@ -450,7 +465,7 @@ namespace Sting.Core
 
         // ---------------- interactions (E): crawl under, catch prey, chew pulp
 
-        void Interact(Wasp w)
+        internal void Interact(Wasp w)
         {
             if (w.caste == "male") { var mc = w.contact; if (mc != null && w.state == "fly") PerchOn(w, mc.humanHex, mc.zone, mc.surf, mc.n, mc.part); return; } // a male does no work (T2-3)
             if (w.caste == "queen" && !colony.sited) { var site = SiteNear(w); if (site != null) { FoundNest(w, site); return; } }
@@ -463,6 +478,8 @@ namespace Sting.Core
             if (hb != null) { StartRob(w, hb.Value.key, hb.Value.h); return; }
             var rv = RivalNestNear(w);
             if (rv != null && w.carry == null) { Raid(w, rv); return; }
+            var pnest = w.carry == null ? PeerNestNear(w) : null;
+            if (pnest != null) { RaidPeer(w, pnest.Value.peer); return; }
             var c = w.contact;
             if (c != null && c.opening >= 0 && w.carry == null) { EnterUnder(w, c.humanHex, c.opening); return; }
             if (c != null && w.state == "fly") { PerchOn(w, c.humanHex, c.zone, c.surf, c.n, c.part); return; }
@@ -476,7 +493,7 @@ namespace Sting.Core
             if (w.carry != null) Emit("carrying", ("kind", w.carry.kind));
         }
 
-        void Hints(Wasp w)
+        internal void Hints(Wasp w)
         {
             var c = w.contact;
             var pn = w.carry == null ? PreyNear(w) : null;
@@ -490,6 +507,7 @@ namespace Sting.Core
                 nest = D2(w, nest.entrance) < 0.4 * 0.4,
                 site = w.caste == "queen" && !colony.sited ? SiteNear(w)?.type : null,
                 rival = w.carry == null && RivalNestNear(w) != null,
+                raid = w.carry == null && w.caste == "worker" ? PeerNestNear(w)?.peer : null,
                 hive = w.carry == null && w.caste != "queen" && HiveEntranceNear(w) != null,
                 hiber = w.caste != "queen" && SeasonFrac >= T.season.reproStart && colony.mated + colony.gynes >= 1 ? HiberNear(w)?.kind : null,
             };
@@ -1288,10 +1306,13 @@ namespace Sting.Core
             }
         }
 
-        void Despawn(Wasp w)
+        internal void Despawn(Wasp w)
         {
-            if (w.colony == "own" && w.caste == "male") colony.males += 1; // back in the nest (T2-3)
-            else if (w.colony == "own" && w.caste == "gyne") { if (w.mated) colony.mated += 1; else colony.gynes += 1; }
+            ColonyState home = null;
+            if (w.colony == "own") home = colony;
+            else if ((w.caste == "male" || w.caste == "gyne") && w.colony != null && w.colony.StartsWith("line:")) foreach (var x in line) if ("line:" + x.id == w.colony) { home = x.colony; break; }
+            if (home != null && w.caste == "male") home.males += 1; // back in the nest (T2-3), the player's or a sister colony's
+            else if (home != null && w.caste == "gyne") { if (w.mated) home.mated += 1; else home.gynes += 1; }
             wasps = wasps.FindAll(x => x != w);
             Publish(new NetEv { type = "died", waspId = w.id, cause = "home", x = w.x, y = w.y, z = w.z });
             ReleaseBees(w.id);

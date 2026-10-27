@@ -29,7 +29,7 @@ const reviver = (k, v) => {
 };
 
 const HUMAN_FIXED = new Set(['id', 'hex', 'short', 'tr', 'chunk', 'home', 'parts']);
-const SKIP = new Set(['events', 'outbox', 'remote', 'log', 'logLen', 'hint', 'feeding', 'humans', 'active', 'activeChunks', 'records', 'ext', 'netStats', '_baitCache', '_siteCache', '_fruitCache', '_tc', '_wc', '_genCache', '_hiberCache', 'claims', 'remoteDriven', 'remoteTraffic', 'lastIds', '_plausCache']);
+const SKIP = new Set(['events', 'outbox', 'remote', 'log', 'logLen', 'hint', 'feeding', 'humans', 'active', 'activeChunks', 'records', 'ext', 'netStats', '_baitCache', '_siteCache', '_fruitCache', '_tc', '_wc', '_genCache', '_hiberCache', 'claims', 'remoteDriven', 'remoteTraffic', 'lastIds', '_plausCache', 'fixes', 'peerNests', 'nestShared']);
 
 export function snapshot(sim) {
   const out = { v: SAVE_VERSION, gen: GEN_VERSION, tune: TUNE.hash, opts: { peer: sim.peer, net: sim.net, noAI: sim.noAI, peers: [...sim.interest.keys()] } };
@@ -75,7 +75,7 @@ export function restore(json) {
       if (!saved) return;
       const tr = sim.traitsFor(id);
       const ax = hs.x + T.panic.approachDist * dcos(hs.exit), az = hs.z + T.panic.approachDist * dsin(hs.exit);
-      const home = { x: hs.x, z: hs.z, fx: hs.fx, fz: hs.fz, posture: hs.posture, ax, az, act: hs.act || null, path: hs.path || null };
+      const home = { x: hs.x, z: hs.z, fx: hs.fx, fz: hs.fz, posture: hs.posture, ax, az, act: hs.act || null, path: hs.path || null, evening: !!hs.evening };
       const hm = { id, hex, short: hex.slice(0, 4), tr, chunk: rec.cx + ',' + rec.cz, parts: humanParts(tr), home };
       Object.assign(hm, saved);
       sim.humans.set(hex, hm);

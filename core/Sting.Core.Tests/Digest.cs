@@ -27,7 +27,7 @@ namespace Sting.Core.Tests
             F(c.flowers.Count); foreach (var t in c.flowers) { F(t.x); F(t.y); F(t.z); F(t.color); }
             F(c.caterpillars.Count); foreach (var t in c.caterpillars) { F(t.x); F(t.y); F(t.z); }
             F(c.flies.Count); foreach (var t in c.flies) { F(t.x); F(t.y); F(t.z); F(t.r); F(t.w1); F(t.w2); F(t.w3); F(t.p1); F(t.p2); F(t.p3); }
-            F(c.humans.Count); foreach (var t in c.humans) { F(t.slot); F(t.x); F(t.z); F(t.fx); F(t.fz); F(t.posture == "sit"); F(t.exit); F(t.posture == "lie"); F(t.act == "stroll" ? 1 : t.act == "garden" ? 2 : t.act == "sun" ? 3 : 0); F(t.path == null ? 0 : t.path.Length); if (t.path != null) foreach (var v in t.path) F(v); }
+            F(c.humans.Count); foreach (var t in c.humans) { F(t.slot); F(t.x); F(t.z); F(t.fx); F(t.fz); F(t.posture == "sit"); F(t.exit); F(t.posture == "lie"); F(t.act == "stroll" ? 1 : t.act == "garden" ? 2 : t.act == "sun" ? 3 : 0); F(t.path == null ? 0 : t.path.Length); if (t.path != null) foreach (var v in t.path) F(v); F(t.evening); }
             F(c.boxes.Count); foreach (var t in c.boxes) { F(t.minx); F(t.maxx); F(t.miny); F(t.maxy); F(t.minz); F(t.maxz); F(t.wood); F(t.hive); F(t.shed); F(t.fence); F(t.mall); F(t.shop); }
             F(c.cylinders.Count); foreach (var t in c.cylinders) { F(t.x); F(t.z); F(t.r); F(t.h); }
             F(c.sugar.Count); foreach (var t in c.sugar) { F(t.x); F(t.y); F(t.z); F(t.rate); F(t.kind == "can" ? 1 : t.kind == "flower" ? 2 : t.kind == "spill" ? 3 : 4); F(t.table); }

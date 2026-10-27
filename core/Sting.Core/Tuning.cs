@@ -148,7 +148,8 @@ namespace Sting.Core
             public static int carrionDays = 3, carrionLoads = 4;
         }
         /// Human days (GDD 8.2, T1-11): sunbathers lie this high; who comes out in what weather; gardeners' dwell; stroll pace
-        public static class days { public static Num lieLift = 0.18, sunTemp = 23, sunFrom = 600, sunTo = 1050, minStay = 60, gardenTemp = 12, gardenMin = 20, gardenMax = 45, strollSpeed = 1.0; }
+        public static class days { public static Num lieLift = 0.18, sunTemp = 23, sunFrom = 600, sunTo = 1050, minStay = 60, gardenTemp = 12, gardenMin = 20, gardenMax = 45, strollSpeed = 1.0,
+            eveningFrom = 960, eveningSpread = 180, lateFrom = 1290, lateSpread = 120; }
         /// Barbecues (GDD 4.3, 6.2, T1-10): grills at some tables, a cook, meat on the grate and the plate, a hot grate
         public static class bbq
         {
@@ -226,7 +227,7 @@ namespace Sting.Core
             public static int maxPhysical = 3, remoteFightTimeout = 240, fightTicks = 40, huntTicks = 600;
             public static Num fightRange = 0.025, remoteFightRange = 0.06, guardRadius = 1.5, raidProtein = 2, mash = 0.15;
         }
-        public static class net { public static int commitTicks = 30, stateEvery = 3, remoteTimeout = 45, claimTicks = 120; }
+        public static class net { public static int commitTicks = 30, stateEvery = 3, remoteTimeout = 45, claimTicks = 120, fixEvery = 30, fixTicks = 120; }
         /// Relevance tiers (GDD 11.12, T1-21), judged per receiving peer from where its own wasp is
         public static class relevance { public static Num nearDist = 50; public static int interestChunks = 3, nearEvery = 6, midEvery = 20, farEvery = 60, midTtl = 75; }
         public static class plaus

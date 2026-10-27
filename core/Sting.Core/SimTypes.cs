@@ -89,7 +89,7 @@ namespace Sting.Core
     public sealed class MemRec { public Num m, x, z; }
     public sealed class Land { public Num nx, ny, nz; public string kind; public bool hasH; public Num hx, hy, hz; public int yawQ; }
     public sealed class Surf { public Num x, y, z, nx, ny, nz, gap; public string kind; }
-    public sealed class Home { public Num x, z, fx, fz, ax, az; public string posture; public string act; public Num[] path; }
+    public sealed class Home { public Num x, z, fx, fz, ax, az; public string posture; public string act; public Num[] path; public bool evening; }
     public sealed class Human
     {
         public ulong id; public string hex, @short; public Traits tr; public Clothing clothing; public string chunk; public Home home;
@@ -129,6 +129,10 @@ namespace Sting.Core
         public int a, b, toPeer; public Num venom, mash; public bool queen; public int id;
         /// contested pickups (T1-19): the authority a claim is for, and on a ruling the claiming peer, its wasp and the claim's tick
         public int auth = -1, claimPeer = -1, claimWasp; public int? ctick;
+        /// a late-event correction (GDD 11.6): the chunk's humans and its shared state, as the chunk authority had them
+        public List<(string hex, byte[] s)> fixHumans; public byte[] fixChunk;
+        /// a player's nest is alive (the `nest` event)
+        public bool alive;
         public NetEv() { mk = "ev"; }
         public NetEv Copy()
         {
@@ -176,7 +180,7 @@ namespace Sting.Core
         internal object sites; internal List<Food> fruit; internal long fruitDay = long.MinValue; internal int fruitSeason;
         internal List<Bait> baits; internal int baitsCampaign = -1;
         internal List<Cup> cups; internal int[] beeLoad, flowerIdx; internal List<Hive> hives;
-        internal List<Grill> grills; internal List<Cyl> cyls;
+        internal List<Grill> grills; internal List<Cyl> cyls; internal List<Roof> roofs;
         internal List<WaterSrc> puddles; internal long puddleDay = long.MinValue; // T2-1
         string[] _sub = new string[0];
         /// "cx,cz#i": the key of the i-th hive or hunter in this chunk
@@ -220,7 +224,7 @@ namespace Sting.Core
     public sealed class Muni { public int n; public MuniCampaign active; public Num cooldownUntil; }
     public sealed class PendingSwitch { public int at, target; }
     public sealed class SimStats { public Num stings, aiStings, remoteStings, full, deaths, caught, deposits; public Dictionary<string, Num> causes = new Dictionary<string, Num>(); }
-    public sealed class NetStats { public Num sent, recv, late, lateMax, rejected, dropped; public int firstLate; }
+    public sealed class NetStats { public Num sent, recv, late, lateMax, rejected, dropped; public int firstLate, fixes, fixed_; }
     public sealed class Plaus
     {
         public Dictionary<int, int> strikes = new Dictionary<int, int>(); public List<int> quarantined = new List<int>();
@@ -230,10 +234,12 @@ namespace Sting.Core
         public Dictionary<string, int> held = new Dictionary<string, int>(); public Dictionary<string, List<SipRec>> sips = new Dictionary<string, List<SipRec>>();
     }
     public sealed class SipRec { public int t; public Num amount; }
-    public sealed class Hint { public string opening, prey, site, hiber; public bool bait, wood, nest, rival, hive, water; }
+    public sealed class Hint { public string opening, prey, site, hiber; public bool bait, wood, nest, rival, hive, water; public int? raid; }
+    /// another player's nest, as it last said (colony against colony)
+    public sealed class PeerNest { public Num x, y, z; public string key; public bool alive; }
     /// A hibernation site and the queens waking there (T1-15)
     /// a colony of the line run by the AI (T2-4)
-    public sealed class LineColony { public int id, season; public Nest nest; public ColonyState colony; }
+    public sealed class LineColony { public int id, season; public Nest nest; public ColonyState colony; /** when the exterminator comes for it (0: not called) */ public long ext; }
     public sealed class HiberSite { public string kind; public Num x, y, z, q; public int n; public bool scouted; }
     public sealed class Winter { public string why; public List<HiberSite> sites = new List<HiberSite>(); public Num survivors, lineage; public int until; }
     public sealed class HiberPick { public int season; public Num x, z; public string kind; }

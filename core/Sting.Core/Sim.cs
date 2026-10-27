@@ -14,7 +14,7 @@ namespace Sting.Core
         static Num D2(V3 a, V3 b) { Num dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z; return dx * dx + dy * dy + dz * dz; }
         static Num D2(WaspBase a, V3 b) => D2(a.P, b);
         static Num D2(WaspBase a, WaspBase b) => D2(a.P, b.P);
-        static readonly HashSet<string> IMMEDIATE = new HashSet<string> { "caught", "claim", "denied", "drop", "sip", "beeAlarm", "died", "fight", "fightReq", "fightJoin", "fightRefuse", "fightEnd", "raid" };
+        static readonly HashSet<string> IMMEDIATE = new HashSet<string> { "caught", "claim", "denied", "drop", "sip", "beeAlarm", "died", "fight", "fightReq", "fightJoin", "fightRefuse", "fightEnd", "raid", "fixReq", "nest", "praid" };
 
         public Settings settings;
         public int peer; public bool net, noAI;
@@ -228,6 +228,7 @@ namespace Sting.Core
             {
                 var c = rec.content;
                 foreach (var b in c.boxes) if (w.x > b.minx && w.x < b.maxx && w.z > b.minz && w.z < b.maxz && b.miny >= w.y) return true;
+                foreach (var f in RoofsOf(rec)) { var r = RoofLocal(f, w.x, w.y, w.z); if (Abs(r.u) < f.S && Abs(r.v) < f.half && r.y < 0) return true; } // under the eaves
                 foreach (var t in c.trees) if (w.y < t.h && Sq(w.x - t.x) + Sq(w.z - t.z) < t.cr * t.cr) return true;
             }
             return false;
@@ -315,7 +316,7 @@ namespace Sting.Core
                         hm = new Human
                         {
                             id = id, hex = hex, @short = hex.Substring(0, 4), tr = tr, clothing = Body.HumanClothing(seed, id, day), chunk = k,
-                            home = new Home { x = hs.x, z = hs.z, fx = hs.fx, fz = hs.fz, posture = hs.posture, ax = ax, az = az, act = hs.act, path = hs.path },
+                            home = new Home { x = hs.x, z = hs.z, fx = hs.fx, fz = hs.fz, posture = hs.posture, ax = ax, az = az, act = hs.act, path = hs.path, evening = hs.evening },
                             x = hs.x, z = hs.z, fx = hs.fx, fz = hs.fz, posture = hs.posture, clothesDay = day,
                             sit = Body.BodyParts(tr, "sit"), stand = Body.BodyParts(tr, "stand"),
                         };
@@ -335,7 +336,7 @@ namespace Sting.Core
         {
             if (hm.winDay != day)
             {
-                hm.winDay = day; hm.win = hm.special ? null : HumanWindow(seed, hm.id, day, settings.humanDensity);
+                hm.winDay = day; hm.win = hm.special ? null : HumanWindow(seed, hm.id, day, settings.humanDensity, hm.home != null && hm.home.evening);
                 if (hm.win != null && hm.home != null && hm.home.act != null) hm.win = ActWindow(hm.home.act, hm.win);
             }
             return hm.win;
@@ -431,7 +432,7 @@ namespace Sting.Core
             // 5. respawn of the driven wasp
             if (Driven() == null && !extinct && winter == null && tick >= respawnAt) Respawn();
             UpdateChunks();
-            if (net) { DropSweep(); SendState(); }
+            if (net) { DropSweep(); ShareNest(); SendFixes(); SendState(); }
             if (claims.Count > 0 && tick % 60 == 0) ExpireClaims();
         }
 

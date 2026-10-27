@@ -86,7 +86,7 @@ namespace Sting.Core
 
     public static class Persist
     {
-        public const int SAVE_VERSION = 21; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home); 14: barbecue meat taken; 15: regions, pulp taken from wood; 16: strolls and garden rounds; 17: the carry ledger and sips (T1-20); 18: water (T2-1); 19: young queens on their mating flight (T2-3); 20: lineage colonies (T2-4); 21: feature modifiers (T2-6)
+        public const int SAVE_VERSION = 22; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home); 14: barbecue meat taken; 15: regions, pulp taken from wood; 16: strolls and garden rounds; 17: the carry ledger and sips (T1-20); 18: water (T2-1); 19: young queens on their mating flight (T2-3); 20: lineage colonies (T2-4); 21: feature modifiers (T2-6); 22: the exterminator called to a sister colony
         const uint MAGIC = 0x474E4953; // "SING"
 
         // ---------------------------------------------------------------- one Io per type
@@ -193,6 +193,12 @@ namespace Sting.Core
             a.I(ref h.fetchT); a.B(ref h.wantSpray); a.D(ref h.wpx); a.D(ref h.wpz); a.D(ref h.clue); a.I(ref h.watch); a.I(ref h.lines);
             a.I(ref h.wp); a.L(ref h.until); a.B(ref h.walking);
         }
+
+        /// a human's state and a chunk's shared state as bytes, for a late-event correction (GDD 11.6)
+        internal static byte[] HumanBytes(Human h) { using var ms = new MemoryStream(); using (var bw = new BinaryWriter(ms)) IoHumanState(new Archive(bw), h); return ms.ToArray(); }
+        internal static void HumanFromBytes(Human h, byte[] data) { using var br = new BinaryReader(new MemoryStream(data)); IoHumanState(new Archive(br), h); }
+        internal static byte[] ChunkBytes(ChunkState s) { using var ms = new MemoryStream(); using (var bw = new BinaryWriter(ms)) IoChunkState(new Archive(bw), s); return ms.ToArray(); }
+        internal static ChunkState ChunkFromBytes(byte[] data) { using var br = new BinaryReader(new MemoryStream(data)); return IoChunkState(new Archive(br), new ChunkState()); }
 
         static void IoNest(Archive a, Nest n)
         {
@@ -309,7 +315,7 @@ namespace Sting.Core
             if (a.Reading) s.season = new Season();
             a.I(ref s.season.n); a.D(ref s.season.startMinute); a.S(ref s.season.phase);
             a.D(ref s.lineage); a.I(ref s.drivenId);
-            a.List(ref s.line, () => new LineColony(), x => { a.I(ref x.id); a.I(ref x.season); if (a.Reading) { x.nest = new Nest(); x.colony = new ColonyState(); } IoNest(a, x.nest); IoColony(a, x.colony); }); a.I(ref s.lineSeq); // T2-4
+            a.List(ref s.line, () => new LineColony(), x => { a.I(ref x.id); a.I(ref x.season); if (a.Reading) { x.nest = new Nest(); x.colony = new ColonyState(); } IoNest(a, x.nest); IoColony(a, x.colony); a.L(ref x.ext); }); a.I(ref s.lineSeq); // T2-4
             if (a.Opt(ref s.winter))
             {
                 var W = s.winter; a.S(ref W.why); a.D(ref W.survivors); a.D(ref W.lineage); a.I(ref W.until);
@@ -400,7 +406,7 @@ namespace Sting.Core
                     string hex = R.Hex64(id);
                     if (!saved.TryGetValue(hex, out var hm)) continue;
                     hm.id = id; hm.hex = hex; hm.@short = hex.Substring(0, 4); hm.tr = sim.TraitsFor(id); hm.chunk = rec.cx + "," + rec.cz;
-                    hm.home = new Home { x = hs.x, z = hs.z, fx = hs.fx, fz = hs.fz, posture = hs.posture, ax = hs.x + T.panic.approachDist * R.DCos(hs.exit), az = hs.z + T.panic.approachDist * R.DSin(hs.exit), act = hs.act, path = hs.path };
+                    hm.home = new Home { x = hs.x, z = hs.z, fx = hs.fx, fz = hs.fz, posture = hs.posture, ax = hs.x + T.panic.approachDist * R.DCos(hs.exit), az = hs.z + T.panic.approachDist * R.DSin(hs.exit), act = hs.act, path = hs.path, evening = hs.evening };
                     hm.sit = Body.BodyParts(hm.tr, "sit"); hm.stand = Body.BodyParts(hm.tr, "stand");
                     sim.humans.Set(hex, hm);
                 }

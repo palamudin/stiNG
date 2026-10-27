@@ -445,6 +445,10 @@ gardenTemp = 12
 gardenMin = 20
 gardenMax = 45
 strollSpeed = 1
+eveningFrom = 960
+eveningSpread = 180
+lateFrom = 1290
+lateSpread = 120
 
 [bbq]
 share = 0.35
@@ -701,6 +705,8 @@ commitTicks = 30
 stateEvery = 3
 remoteTimeout = 45
 claimTicks = 120
+fixEvery = 30
+fixTicks = 120
 
 [relevance]
 nearDist = 50

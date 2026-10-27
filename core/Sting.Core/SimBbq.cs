@@ -85,6 +85,11 @@ namespace Sting.Core
             return o;
         }
         /// trunks and grills as solid cylinders, for collision and landing (a grill's top is its grate)
+        /// the roofs of a chunk's sheds and houses, and a point in a roof's own frame (u across the ridge, y above the eaves,
+        /// v along it) and back (sim.js _roofsOf)
+        internal List<Roof> RoofsOf(ChunkRec rec) => rec.roofs ??= rec.content.sheds.ConvertAll(World.ShedRoof);
+        internal static (Num u, Num y, Num v) RoofLocal(Roof f, Num x, Num y, Num z) => f.alongX ? (z - f.z, y - f.y0, x - f.x) : (x - f.x, y - f.y0, z - f.z);
+        internal static V3 RoofWorld(Roof f, Num u, Num y, Num v) => f.alongX ? new V3(f.x + v, f.y0 + y, f.z + u) : new V3(f.x + u, f.y0 + y, f.z + v);
         internal List<Cyl> CylsOf(ChunkRec rec)
         {
             if (rec.cyls != null) return rec.cyls;

@@ -167,7 +167,10 @@ export const T = {
   // standing one turned onto its back, its back lieLift below the body's middle line; sunbathers come on warm dry days
   // between sunFrom and sunTo (minutes of the day), gardeners on dry days from gardenTemp, working a spot for
   // gardenMin to gardenMax game minutes; strollers walk their loop at strollSpeed, slower when stiff with age.
-  days: { lieLift: 0.18, sunTemp: 23, sunFrom: 600, sunTo: 1050, minStay: 60, gardenTemp: 12, gardenMin: 20, gardenMax: 45, strollSpeed: 1.0 },
+  // Beer garden drinkers (T2-5) come in the afternoon, from eveningFrom over eveningSpread minutes, and stay into the
+  // night, leaving from lateFrom over lateSpread.
+  days: { lieLift: 0.18, sunTemp: 23, sunFrom: 600, sunTo: 1050, minStay: 60, gardenTemp: 12, gardenMin: 20, gardenMax: 45, strollSpeed: 1.0,
+    eveningFrom: 960, eveningSpread: 180, lateFrom: 1290, lateSpread: 120 },
   // Barbecues (GDD 4.3, 6.2, T1-10). Some picnic tables have a kettle grill at one end. On a warm dry day the first
   // person at the table may cook a lunchtime barbecue: they stand at the grill while it is lit, meat sits on the grate
   // and later on a plate on the table. Meat is protein; people guard it and slap at wasps near it from the start; the
@@ -261,7 +264,9 @@ export const T = {
 
   // Networking (GDD 11): human-side effects of events commit at the end of the consequence window
   // claimTicks (T1-19): how long a pickup waits for the chunk authority's word before it is taken as granted
-  net: { commitTicks: 30, stateEvery: 3, remoteTimeout: 45, claimTicks: 120 },
+  // fixEvery: the chunk authority corrects a chunk's humans after a late event at most this often (ticks); a correction
+  // commits fixTicks after it is sent, a longer window than an event's, so it reaches every peer in time on a slow link
+  net: { commitTicks: 30, stateEvery: 3, remoteTimeout: 45, claimTicks: 120, fixEvery: 30, fixTicks: 120 },
   // Relevance tiers (GDD 11.12, T1-21), judged per receiving peer from where its own wasp is: my driven wasp every
   // stateEvery ticks; AI wasps within nearDist of its wasp every nearEvery ticks, full state; within interestChunks
   // chunks every midEvery ticks in swarm packets (position and state only); beyond that a count per chunk every farEvery.

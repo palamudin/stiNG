@@ -24,6 +24,7 @@ namespace Sting.Core.Tests
             Lab("awful", "awful", 6000);
             Lab("join", "good", 9000, 3000);
             Lab("cheat", "good", 14000, 0, true);
+            Lab("over", "over", 18000); // late events and the chunk authority's corrections (GDD 11.6)
             {
                 var d = new Digest(); var lab = new MeshLab(new Settings { seed = 1234 }, 3, "bad"); var botA = Bots.StingBot("jab", null, 200);
                 lab.tamper = (from, m, sim) => { if (from == 2 && sim.tick > 1500 && m is NetEv ev && ev.type == "sting") foreach (var sw in ev.swats) sw.start += 1000; };
@@ -60,9 +61,12 @@ namespace Sting.Core.Tests
             if (cheat) Assert($"net.{name}", lab.a.plaus.quarantined.Contains(1) && lab.a.remote.Count == 0, $"the cheating peer is quarantined (rejected {lab.a.netStats.rejected})");
             else
             {
-                // past the window an event can arrive after its commit tick: counted, and the peers agree until then
+                // past the window an event can arrive after its commit tick: counted, and the chunk authority's correction
+                // sets the humans right again (GDD 11.6)
                 int late = (int)(lab.a.netStats.late + (lab.b?.netStats.late ?? 0)), firstLate = Math.Min(lab.a.netStats.firstLate == 0 ? int.MaxValue : lab.a.netStats.firstLate, lab.b == null || lab.b.netStats.firstLate == 0 ? int.MaxValue : lab.b.netStats.firstLate);
-                Assert($"net.{name}", c.compared > 50 && (c.agreed == c.compared || (late > 0 && c.firstDiverge >= firstLate)), $"peers agree on every human until the first late event ({c.agreed}/{c.compared}, {late} late)");
+                int fixes = lab.a.netStats.fixes + (lab.b?.netStats.fixes ?? 0);
+                Assert($"net.{name}", c.compared > 50 && (c.agreed == c.compared || (late > 0 && c.firstDiverge >= firstLate && fixes > 0 && c.last && c.agreed >= c.compared * 0.97)),
+                    $"peers agree on every human except briefly after a late event, until its correction commits ({c.agreed}/{c.compared}, {late} late, {fixes} corrections)");
             }
             stats.Add(Stat("net." + name, lab.a));
         }

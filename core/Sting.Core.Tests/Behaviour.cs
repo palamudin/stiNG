@@ -659,6 +659,20 @@ namespace Sting.Core.Tests
                 RunS(s, 1);
                 var rec = s.records.Get("0,1"); var h = rec.content.sheds.First(q => q.house);
                 Ok(!s.CanSee(h.x, h.z - h.hd - 2, h.x, h.z + h.hd + 2) && s.CanSee(h.x + h.hw + 3, h.z - h.hd - 2, h.x + h.hw + 3, h.z + h.hd + 2), "a house blocks the view across it; the gap beside it does not");
+                // pitched roofs are solid as drawn: a wasp is pushed out onto the slope, can land on it, and keeps dry under the eaves
+                {
+                    var f = World.ShedRoof(h); Num R = T.wasp.radius;
+                    V3 At(Num u, Num y, Num v) => Sim.RoofWorld(f, u, y, v);
+                    Num Off(Num x, Num y, Num z) { var l = Sim.RoofLocal(f, x, y, z); return (f.rise * (Abs(l.u) - f.S) + f.S * l.y) / f.L; }
+                    var ww = s.wasp; var p0 = At(0.8, 0.5, 1); Place(ww, p0);
+                    for (int i = 0; i < 6; i++) s.Collide(ww);
+                    var sf = s.StaticSurface(At(1.5, f.rise * (1 - 1.5 / f.S) + 0.05, 0), 0.2);
+                    Ok(D(Abs(Off(ww.x, ww.y, ww.z) - R)) < 1e-9 && ww.y > f.y0 + 0.5 && sf != null && sf.kind == "roof" && sf.ny < 0.99 && sf.ny > 0.5 && D(Abs(Off(sf.x, sf.y, sf.z))) < 1e-9,
+                        $"a house's roof is pitched: a wasp inside it comes out on the slope ({D(ww.y - f.y0):0.00} m above the eaves, not on a flat top), and lands on it at its tilt");
+                    var a1 = At(0, 1, 0); var a2 = At(0, f.rise + 0.1, 0);
+                    Place(ww, At(f.wall + 0.06, -0.3, 0)); bool dry = s.Sheltered(ww); Place(ww, At(f.S + 0.4, -0.3, 0)); bool wet = !s.Sheltered(ww);
+                    Ok(s.InSolid(a1.x, a1.y, a1.z) && !s.InSolid(a2.x, a2.y, a2.z) && dry && wet, "inside the roof is solid; under the eaves it is dry, a step out it is not");
+                }
                 int fi = rec.content.boxes.FindIndex(q => q.fence); var fb = rec.content.boxes[fi]; int loads = s.PulpLoads(fb);
                 var w = s.wasp; int got = 0;
                 for (int k = 0; k < loads + 2; k++)
@@ -713,9 +727,10 @@ namespace Sting.Core.Tests
                 Ok(strollers.Any(h => moved.GetValueOrDefault(h.hex) > 60) && dwell > 0 && lying > 0, $"strollers walk their loops, gardeners stop at their beds, sunbathers lie out ({string.Join(", ", strollers.Select(h => moved.GetValueOrDefault(h.hex).ToString("0") + " m"))})");
                 var st = strollers.First(h => h.state == "stroll");
                 s.ApplyCommit(new NetEv { type = "sting", peer = s.peer, humanHex = st.hex, panicGain = 0, driven = false, sx = st.x - st.fx, sz = st.z - st.fz, zone = 0, flee = true, waspId = 0 });
-                bool ran = st.state == "flee", back = false;
+                bool ran = st.state == "flee", back = false; Num x0 = st.x, z0 = st.z; var pth = st.home.path;
                 for (int t = 0; t < 3000 && !back; t++) { RunS(s, 1); back = st.state == "stroll"; }
-                Ok(ran && back, "a stroller who is stung runs, then walks on");
+                var onPath = s.Rejoin(st); double fromStart = D(Sqrt(Sq(pth[0] - x0) + Sq(pth[1] - z0))), fromRun = D(Sqrt(Sq(st.x - x0) + Sq(st.z - z0)));
+                Ok(ran && back && D(Sqrt(Sq(onPath.x - st.x) + Sq(onPath.z - st.z))) < 1e-6 && (fromRun < 8 || fromRun < fromStart), $"a stroller who is stung runs, then walks back to the nearest point of the round and walks on ({fromRun:0.0} m from where it ran, the round starts {fromStart:0.0} m away)");
                 var r = Persist.Restore(Persist.Snapshot(s));
                 Ok(r.HumanHash() == s.HumanHash() && r.HumanByHex(st.hex).wp == st.wp && r.HumanByHex(st.hex).home.path.Length == st.home.path.Length, "a walk in progress survives save and restore");
             }
@@ -878,6 +893,45 @@ namespace Sting.Core.Tests
                     var ev = RunS(s, 3, (sim, i) => { if (sim.wasp != null) Place(sim.wasp, P(outW.x, outW.y, outW.z)); return Idle(); });
                     Ok(Count(ev, "fight") == 0 && outW.state != "fighting", "your wasp touching a sister colony's worker does not fight it");
                 }
+                // a big sister colony posts guards at its entrance, and they go for a rival there, not for you
+                sc.colony.young = 0;
+                void NearSis() { if (s.wasp != null) { Place(s.wasp, P(sc.nest.x + 1, sc.nest.y, sc.nest.z + 1)); s.wasp.born = s.minute; } }
+                string sk2 = "line:" + sc.id; List<Wasp> sg = new List<Wasp>();
+                for (int i = 0; i < 1500 && sg.Count < T.guard.count; i++) { RunS(s, 1); NearSis(); sg = s.wasps.Where(w => w.colony == sk2 && w.role == "guard").ToList(); }
+                var riv = s.SpawnWasp(false); riv.colony = "9,9"; Place(riv, P(sc.nest.entrance.x + 0.2, sc.nest.entrance.y, sc.nest.entrance.z)); riv.state = "fly";
+                bool hunted = false;
+                for (int i = 0; i < 30 && !hunted; i++) { NearSis(); foreach (var e in RunS(s, 1)) if (e.type == "guardHunt" && (int)e["target"] == riv.id && sg.Any(g => g.id == (int)e["id"])) hunted = true; }
+                s.Despawn(riv);
+                Ok(sg.Count == T.guard.count && hunted && sg.All(g => g.ai.huntId != s.drivenId), $"a sister colony of {D(sc.colony.adults):0} posts {sg.Count} guards, who go for a rival at its entrance and not for you");
+                // in the breeding season its males and young queens fly to its own mating spot, and its queens mate with the line's males
+                s.season.startMinute = s.minute - (T.season.reproStart + 0.05) * s.settings.seasonDays * 1440;
+                sc.colony.males = 20; sc.colony.gynes = 10;
+                var lek = s.LekSpot(sc.nest).p; var sisM = new HashSet<int>(); var sisQ = new HashSet<int>(); bool mt = false;
+                for (int i = 0; i < 6000 && !mt; i++)
+                {
+                    var evs = RunS(s, 1); NearSis();
+                    foreach (var w in s.wasps) if (w.colony == sk2) { if (w.caste == "male") sisM.Add(w.id); if (w.caste == "gyne") sisQ.Add(w.id); }
+                    foreach (var e in evs) if (e.type == "mated" && sisQ.Contains((int)e["gyne"]) && sisM.Contains((int)e["male"])) mt = true;
+                    var sm0 = s.wasps.FirstOrDefault(w => w.colony == sk2 && w.caste == "male");
+                    if (sm0 != null) foreach (var g in s.wasps) if (g.colony == sk2 && g.caste == "gyne" && g.ai.mode == "mate" && D(Sqrt(Sq(g.x - lek.x) + Sq(g.z - lek.z))) < 4) Place(g, P(sm0.x, sm0.y, sm0.z));
+                }
+                Ok(mt && D(Sqrt(Sq(lek.x - sc.nest.x) + Sq(lek.z - sc.nest.z))) < D(T.males.lekRange) + 1, $"its males ({sisM.Count}) and young queens ({sisQ.Count}) fly from its nest to its own mating spot, where they mate");
+                {
+                    var sx = new Sim(new Settings { seed = 1234, birds = false }, new SimOpts { noAI = true }); RunS(sx, 2);
+                    sx.FoundLine(new List<HiberSite> { new HiberSite { kind = "bark", x = sx.nest.x + 3, y = 1, z = sx.nest.z + 3, q = 0.5, n = 2 } }, 0, 1);
+                    var t = sx.line[0]; t.colony.adults = 20;
+                    sx.CS(t.nest.key).esc = 30;
+                    var ev1 = RunS(sx, 120); var sched = ev1.FirstOrDefault(e => e.type == "sisterExtScheduled");
+                    if (sched != null) { long m = (long)sched["arriveMinute"] + 1; sx.clockOffset += (m - sx.minute) * sx.tpm; sx.CS(t.nest.key).esc = 30; }
+                    var evX = RunS(sx, 120);
+                    Ok(sched != null && Count(evX, "sisterExterminated") == 1 && !t.colony.nestAlive, "the exterminator is called to a sister nest's neighbourhood and destroys the nest");
+                    var sp = new Sim(new Settings { seed = 1234, birds = false }, new SimOpts { noAI = true }); RunS(sp, 2);
+                    sp.FoundLine(new List<HiberSite> { new HiberSite { kind = "bark", x = sp.nest.x + 3, y = 1, z = sp.nest.z + 3, q = 0.5, n = 2 } }, 0, 1);
+                    var pc = sp.line[0]; pc.colony.adults = 30; pc.colony.nestAlive = true;
+                    sp.muni = new Muni { n = 1, active = new MuniCampaign { n = 1, keys = new List<string> { pc.nest.key }, until = sp.minute + 1440 }, cooldownUntil = 0 };
+                    Num a0 = pc.colony.adults; for (int i = 0; i < 20; i++) sp.MuniAbstract();
+                    Ok(pc.colony.adults < a0 && pc.colony.stats.poisoned > 0, $"pest control's bait poisons a sister colony in its area ({D(a0 - pc.colony.adults):0.00} adults)");
+                }
                 foreach (var x in s.line) x.colony.mated = 200;
                 s.EndSeasonForTest("autumn");
                 var sis = s.winter?.sites.Where(x => x.kind == "sister").ToList();
@@ -911,6 +965,10 @@ namespace Sting.Core.Tests
                 int beers = g.cans.Count(k => k.color == 4), seated = g.humans.Count(h => h.posture == "sit");
                 Ok(garden.Count == 1 && g.tables.Count == 6 && seated == 36 && beers == 18 && g.sugar.Count(k => k.kind == "can") >= 24,
                     $"one quarter is a beer garden: 6 full tables, {seated} drinkers, {beers} beers among {g.cans.Count} drinks");
+                var late = new List<HumanWin>(); var seatedG = g.humans.Where(h => h.posture == "sit").ToList();
+                for (int dd = 1; dd < 30; dd++) if (!World.Weather(1234, dd).rain) foreach (var h in seatedG) { var w0 = World.HumanWindow(1234, R.Hash(1234, Domain.WorldGen, R.U64(g.cx), R.U64(g.cz), R.U64(h.slot)), dd, 1, h.evening); if (w0 != null) late.Add(w0); }
+                Ok(seatedG.All(h => h.evening) && late.Count > 100 && late.All(w0 => w0.arrive >= T.days.eveningFrom && w0.leave >= T.days.lateFrom) && !q.Any(c => c != g && c.humans.Any(h => h.evening)),
+                    $"beer garden drinkers come from {D(T.days.eveningFrom) / 60}:00 and stay past {(int)(D(T.days.lateFrom) / 60)}:{D(T.days.lateFrom) % 60} ({late.Count} evenings out in 30 days); nobody else does");
                 Ok(q.All(c => c.plazas.Count == 1 && c.shops.Count == 3 && c.boxes.Count(b => b.shop && !b.wood) == 3 && c.roads.Count == 0),
                     "every quarter is paved over, with three shops (solid, not wood) and no street through it");
                 Ok(fountains.Count == 1 && !garden.Any(c => c.baths.Count > 0), "the block has one fountain, across from the beer garden");

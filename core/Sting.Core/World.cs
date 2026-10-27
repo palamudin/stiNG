@@ -13,7 +13,7 @@ namespace Sting.Core
     public sealed class Flower { public Num x, y, z; public int color; }
     public sealed class Caterpillar { public Num x, y, z; }
     public sealed class Fly { public Num x, y, z, r, w1, w2, w3, p1, p2, p3; }
-    public sealed class HumanSlot { public int slot; public Num x, z, fx, fz, exit; public string posture; public string act; public Num[] path; }
+    public sealed class HumanSlot { public int slot; public Num x, z, fx, fz, exit; public string posture; public string act; public Num[] path; public bool evening; }
     public sealed class Box { public Num minx, maxx, miny, maxy, minz, maxz; public bool wood, hive, shed, fence, mall, shop; }
     public sealed class Cyl { public Num x, z, r, h; public bool wood, grill, bath; }
     /// a birdbath (T2-1): a basin on a pedestal; h is the water's surface
@@ -28,6 +28,8 @@ namespace Sting.Core
     public sealed class Patrol { public Num x, y, z, r, dir; public int period, phase; }
     public sealed class Rival { public Num x, y, z, r, ex, ey, ez; public int workers; }
     public sealed class Shed { public Num x, z, hw, hd, h; public int crack, eave; public bool house; }
+    /// a shed's or house's pitched roof (see World.ShedRoof)
+    public sealed class Roof { public Num x, z, wall, wallHalf, half, S, y0, rise, L; public bool alongX; }
     /// streets and parking lots (T1-12): flat rectangles; cul-de-sacs; strip-mall buildings
     public sealed class Rect { public Num minx, maxx, minz, maxz; }
     public sealed class Loop { public Num x, z, r; }
@@ -167,12 +169,13 @@ namespace Sting.Core
         public static bool IsDaylight(long m) { long d = MinuteOfDay(m); return d >= T.time.dawn && d < T.time.dusk; }
 
         public static HumanWin HumanWindow(ulong seed, ulong id, long day) => HumanWindow(seed, id, day, 1);
-        public static HumanWin HumanWindow(ulong seed, ulong id, long day, Num density)
+        public static HumanWin HumanWindow(ulong seed, ulong id, long day, Num density, bool evening = false)
         {
             ulong H(ulong i) => Hash(seed, Domain.HumanSchedule, id, U64(day), i);
             if (day > 0 && Unit(H(0)) > 0.85 * density) return null;
-            Num arrive = day == 0 ? 0 : 600 + RangeInt(H(1), 0, 150);
-            Num leave = 1020 + RangeInt(H(2), 0, 180);
+            // a beer garden's drinkers come in the afternoon and stay into the night (T2-5)
+            Num arrive = day == 0 ? 0 : evening ? T.days.eveningFrom + RangeInt(H(1), 0, (int)T.days.eveningSpread) : 600 + RangeInt(H(1), 0, 150);
+            Num leave = evening ? T.days.lateFrom + RangeInt(H(2), 0, (int)T.days.lateSpread) : 1020 + RangeInt(H(2), 0, 180);
             var w = Weather(seed, day);
             if (w.rain)
             {
@@ -200,6 +203,13 @@ namespace Sting.Core
             return new V3(b.x + b.r * DCos(a) * (1 + 0.3 * DSin(a * 2)), b.y + 0.25 * DSin(a * 5), b.z + b.r * DSin(a));
         }
         static readonly int[,] Faces = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+        /// The pitched roof on a shed or a house, drawn and solid: the ridge runs along the long side, rise above the eaves at
+        /// the top of the walls; it overhangs the walls by 0.12 m on the long sides and 0.1 m at the gable ends (world.js shedRoof)
+        public static Roof ShedRoof(Shed sh)
+        {
+            bool alongX = sh.hw >= sh.hd; Num wall = alongX ? sh.hd : sh.hw, wallHalf = alongX ? sh.hw : sh.hd, S = wall + 0.12, rise = sh.house ? 1.9 : 0.55;
+            return new Roof { x = sh.x, z = sh.z, alongX = alongX, wall = wall, wallHalf = wallHalf, half = wallHalf + 0.1, S = S, y0 = sh.h, rise = rise, L = Sqrt(rise * rise + S * S) };
+        }
         public static (ShedSite wall, ShedSite attic) ShedSites(Shed sh)
         {
             ShedSite At(int f, Num y)
@@ -525,6 +535,7 @@ namespace Sting.Core
                     {
                         Num px = gx + ((k % 3) - 1) * 5.5, pz = gz + ((k / 3) - 0.5) * 5; long b = 7100 + k * 400; int ti = c.tables.Count;
                         AddPicnic(px, pz, true, 0b111111, b);
+                        for (int hi = c.humans.Count - 6; hi < c.humans.Count; hi++) c.humans[hi].evening = true; // they stay into the night
                         for (int i = 0; i < 3; i++) // a round of drinks on every table
                         {
                             Num x = px + Range(H(b + 90 + i), -0.8, 0.8), z = pz + Range(H(b + 95 + i), -0.22, 0.22);

@@ -720,7 +720,7 @@ This is the property that makes rollback unnecessary for humans.
 - Some things can't be resolved by events alone: two wasps grabbing the same caterpillar, the same soda can.
 - Each chunk has one **chunk authority** among the peers interested in it, chosen by rendezvous hashing: the peer with the smallest `Hash(chunkKey, peerId)` wins. Membership changes move as few chunks as possible. Appendix A.9.
 - The chunk authority resolves contested pickups, writes chunk deltas, and sends late-event corrections.
-- As built (18.32): contested pickups in the lab; deltas and late-event corrections are not on the authority yet.
+- As built (18.32, 18.43): contested pickups and late-event corrections in the lab; chunk deltas are not on the authority yet.
 
 ### 11.7 Topology and interest **[T0] [Infra]** (rendezvous, hole punching, relay)
 
@@ -918,7 +918,7 @@ Section 11.5 proposed fast-forwarding a human's plan when an event arrives late.
 | Immediate | Swat volumes, sprays, presses under clothing, cosmetic reactions | As soon as a peer has the event |
 | Committed | Panic, flight, sting counters, alert points, torn clothing | On the commit tick: event tick + 30 (500 ms), on every peer, in (commit, peer, sequence) order |
 
-Because human state changes only on agreed ticks and from data inside the events, every peer computes identical humans. In the two-peer lab, human state matched on every check (300 of 300 per link) over links from LAN to 16±6 ticks one-way with 10% loss, with no late events. The commit window is a tuning value: it must exceed the worst one-way delay plus one redundancy interval. 500 ms leaves room for about 370 ms one-way.
+Because human state changes only on agreed ticks and from data inside the events, every peer computes identical humans. In the two-peer lab, human state matched on every check (300 of 300 per link) over links from LAN to 16±6 ticks one-way with 10% loss, with no late events. The commit window is a tuning value: it must exceed the worst one-way delay plus one redundancy interval. 500 ms leaves room for about 370 ms one-way. Past it, an event can arrive after its commit tick; the chunk's authority then corrects the chunk (18.43).
 
 ### 18.3 The owner decides about its own wasps (D-19)
 
@@ -1007,7 +1007,7 @@ A dragonfly patrols a low loop (0.6–1.4 m) in about half the chunks. It darts 
 
 ### 18.18 The C# core, ported (D-11, R-04)
 
-`core/Sting.Core` is the whole PoC simulation in C#: world generation, weather, bodies and the sting resolver, colony economy, the `Sim` itself (wasps, humans, bees, hunters, rivals, the exterminator, pest control, the yearly cycle, the AI), the network lab with its wire format and plausibility checks, and saves. It is bit-identical to the JS reference: `core/fixtures/parity.txt` holds 22 digests written by `poc/test/parity.mjs` (world, bodies, colony, five whole-game scenarios, a save and restore mid-run, two-peer labs on good and awful links, a late joiner, a cheater, and a three-peer mesh where the host rules), and the C# runner reproduces every one. The scenario digests cover every sim event and the state and human hashes once a second, so a single differing bit anywhere fails the run.
+`core/Sting.Core` is the whole PoC simulation in C#: world generation, weather, bodies and the sting resolver, colony economy, the `Sim` itself (wasps, humans, bees, hunters, rivals, the exterminator, pest control, the yearly cycle, the AI), the network lab with its wire format and plausibility checks, and saves. It is bit-identical to the JS reference: `core/fixtures/parity.txt` holds 23 digests written by `poc/test/parity.mjs` (world, bodies, colony, five whole-game scenarios, a save and restore mid-run, two-peer labs on good and awful links and one well past the window with late-event corrections, a late joiner, a cheater, and a three-peer mesh where the host rules), and the C# runner reproduces every one. The scenario digests cover every sim event and the state and human hashes once a second, so a single differing bit anywhere fails the run.
 
 Two rules made the port mechanical: the JS sim may use only operations that are exact in IEEE doubles (its own sine, arctangent and rounding, no `Math.round`, `hypot` or `atan2`), and every map whose order can change a result is an insertion-ordered map in C# (`OrderedMap`), every sort is stable, every string sort is ordinal.
 
@@ -1157,7 +1157,7 @@ Every can on a table is a hollow cup: a 3 mm wall, open at the top, holding a dr
 
 **Checked.** Two peers whose wasps take the same caterpillar on the same tick both see it taken; the authority's wasp keeps it, the other lets go, and both peers have it gone. With one load of carrion left, one wasp gets it and both peers count it taken once. The five network parity runs now include claims and rulings, and the C# port reproduces them bit for bit. The lab panel shows who rules the chunk you are in and any claims waiting.
 
-**Limits.** A wasp that deposits its load at the nest before a denial arrives (it would need to be within a few hundred milliseconds of home) keeps it. Honey eaten during a lost robbery stays eaten; only the brood goes back. Chunk deltas and late-event corrections do not go through the authority yet.
+**Limits.** A wasp that deposits its load at the nest before a denial arrives (it would need to be within a few hundred milliseconds of home) keeps it. Honey eaten during a lost robbery stays eaten; only the brood goes back. Chunk deltas do not go through the authority yet; late-event corrections do (18.43).
 
 ### 18.33 Relevance tiers as built (T1-21)
 
@@ -1222,7 +1222,7 @@ These complete 11.8. Like the earlier checks, each reads only the event and the 
 
 **Checks.** JS and C# run two minutes of honest two-peer play (14 of A's pickups and 84 sips checked on B, none rejected on either peer, the same counts in both), and forged events: a second pickup without letting go, a pickup after a drop, a fly taken from 5 m away, a claim on a caterpillar that does not exist, pulp chewed from inside a shed wall and from outside it, an oversized sip, a sip from 3 m away, a wasp drinking too fast, a forged pickup that strikes and changes nothing, and a player's wasp reported inside a house. The save format is 17 (the ledger and recent sips, and whether a wasp holds a load it must say it let go of).
 
-**Limits.** Fences and table tops are thinner than the 8 cm margin, so passing through one is not caught; houses, sheds and trunks are. A cheat that takes things within reach and only within its own carry limit (honest-looking play with an aimbot) is not something these checks can see.
+**Limits.** Fences and table tops are thinner than the 8 cm margin, so a position inside one is not caught; a player's wasp reported going straight through one between two packets is (18.43). A cheat that takes things within reach and only within its own carry limit (honest-looking play with an aimbot) is not something these checks can see.
 
 ### 18.37 Water as built (T2-1)
 
@@ -1278,7 +1278,7 @@ These complete 11.8. Like the earlier checks, each reads only the event and the 
 
 **Checks.** JS and C# check founding from wintering sites (four colonies from four queens, at least 8 m apart), a sister queen raising her first workers alone (one adult and 24 cells by day 3 in both), her workers flying near the player and not fighting the player's wasp, her mated queens offered in spring (6, 6, 6, 6 queens in both), save and restore, and taking over the strongest sister (29 adults in both). The save format is 20.
 
-**Limits.** Sister colonies do not raise physical males and young queens or guards near the player, and the exterminator and pest control only ever come for the player's own nest.
+**Limits.** The exterminator who comes for a sister nest is abstract: he is drawn only for the player's own (18.43).
 
 ### 18.41 Town centres and beer gardens as built (T2-5)
 
@@ -1290,7 +1290,7 @@ These complete 11.8. Like the earlier checks, each reads only the event and the 
 
 **Checks.** JS and C# check that every region has its 2x2 town, never next to home; that the beer garden has 6 full tables, 36 drinkers and 18 beers among 26 drinks (identical in both); that every quarter has its paving, three shops and no road; that there is one fountain, outside the garden; that a wasp over the fountain can take water and that inside a shop is solid; and that puddles after rain lie on the square, never inside a shop. The chunk digests now cover plazas, shops, gardens, the shop flag on boxes and the fountain flag on baths. The generator version is 7.
 
-**Limits.** Shops are closed boxes: there is no going inside, and no shop sells anything to wasps. The beer garden's drinkers keep the ordinary park hours rather than staying into the evening.
+**Limits.** Shops are closed boxes: there is no going inside, and no shop sells anything to wasps. The beer garden's drinkers stay into the night (18.43).
 
 
 ### 18.42 Feature modifiers as built (T2-6)
@@ -1303,6 +1303,31 @@ These complete 11.8. Like the earlier checks, each reads only the event and the 
 
 **Not built: terrain.** Terrain roughness is the one feature modifier left. Everything on this stack stands on flat ground at height 0: collision, landing, walking, humans, sting reach, puddles and every placed object. A heightfield would touch all of it twice, in the JS reference and in the C# core. Once the game moves to Unity the C# core is the only sim, so terrain is planned for after the move, built once there.
 
+
+### 18.43 Known limits closed (polish before terrain)
+
+Agreed 2026-10-27: the PoC's known limits are worked through before terrain is tried.
+
+**Pitched roofs.** Shed and house roofs now collide as they are drawn: a prism on the walls, its ridge along the long side (1.9 m high on a house, 0.55 m on a shed), overhanging 0.12 m at the eaves and 0.1 m at the gables. A wasp is pushed out onto the slope, lands on it at its tilt and walks on it; inside a roof is solid for the plausibility checks; under the eaves is dry in the rain. The drawn slabs' top faces lie on the solid slope (world.js `shedRoof`, used by both). A shed's wood is chewed from its wall now, since its top is under the roof.
+
+**Strollers and gardeners.** One who ran from a sting walks back to the nearest point of their round and carries on from the waypoint after it, rather than going back to where the round starts. The point is worked out afresh each step, so nothing new is saved.
+
+**Beer gardens.** The drinkers come from 16:00 to 19:00 and leave from 21:30 to 23:30 (rain still sends them home). `T.days` holds the hours; the chunk digest covers which seats keep evening hours.
+
+**The landed eye view** (hold RMB) now looks along the wasp's own heading on whatever it stands on, with the surface's up as up, so on a trunk or under a table it turns with the wasp.
+
+**Other players' wasps on the minimap.** Near and mid-tier remote wasps are blue dots; far-tier traffic is a cluster of dots per chunk, with the count when it is over nine, or a tick at the edge of the map pointing at a chunk off it.
+
+**Through thin solids.** A player's own wasp reported in a state packet is not drawn where it went straight through a fence, a table top or a bench seat since the last packet, crossing it more than half the distance a wasp could fly in that time from the face's edges (so an honest turn round the end of a fence is never taken for one). Display only, like the speed and solid checks.
+
+**Sister colonies, rounded out.** Near the player a sister colony now does what the player's does: once it has 25 mature adults it posts two guards at its entrance, who go for rivals and other players' wasps there (never for the player's); in the breeding season its males and young queens fly to its own mating spot over the tallest crown near it, and its queens mate with any male of the line, the player's or a sister colony's (the player's young queens likewise). Males and queens that go home are back in their own colony's counts. Pest control's bait poisons a sister colony in a campaign's area as it does the player's. When a sister nest's neighbourhood reaches the exterminator's level he is called to it: he comes the next morning (or in two hours, before mid-afternoon) and destroys it unless the neighbourhood calms down first. He is abstract there; only the player's own nest gets the exterminator in person. The C# save format is 22 (when he is due at each sister nest).
+
+**Late-event corrections.** An event that reaches a peer after its commit tick is still counted and applied late, and now that peer asks for a correction (an immediate `fixReq` naming the chunk the event lands in: its human's, or the chunk it names), or queues one itself if it is that chunk's authority. The authority publishes a `fix`: the chunk's humans (all their state) and the chunk's shared state, as it has them. A correction commits 120 ticks after it is sent, a longer window than an event's 30, so it reaches every peer in time on a slow link; on its commit tick every peer, the authority too, takes that state as it stands, so they agree from then on. Only the chunk's authority at the commit tick can correct it; a chunk is corrected at most once every 30 ticks. What happened to those humans between sending and committing is lost on every peer alike. The lab has a link well past the window (24±6 ticks one-way, 10% loss) to show it: 2 late events, 2 corrections, 297 of 300 checks agree and the peers agree again after each; with the corrections switched off they drift apart (238 of 300). Its run is a new parity digest (`net.over`), identical in JS and C#. The lab panel counts corrections.
+
+**Colony against colony.** Each peer says where its nest is (an immediate `nest` event) when it moves or dies, and every ten seconds so a peer that joins hears it; other players' live nests are blue rings on the minimap. At another player's nest entrance (not where the player's own nest is: players can share the home tree) E steals a larva, as from a rival's nest: the thief carries it home as protein, and the owner's colony loses a larva and its guards go after the thief (the `praid` event). Every peer that knows where that nest is checks that the raid was made at its entrance, so a raid claimed from off the nest is rejected with a strike. The player's own wasp raids; AI workers raid neither rival nests nor other players'.
+
+**Checks.** JS and C# agree on all of it: the stroller is back on its round 15.0 m from where it ran (the round starts 46.6 m away); 630 evenings out in 30 days at the beer garden; a wasp pushed out of a house roof ends 1.44 m above the eaves on the slope; a fence crossing in the middle is caught, over the top or round the end is not; a sister colony of 40 posts 2 guards who go for a rival at its entrance; 2 of its males and 1 of its young queens fly to its mating spot and mate; the exterminator destroys a sister nest whose neighbourhood calls him; pest control poisons 0.89 adults of a sister colony in its area over 20 colony ticks; a raid takes a larva from the other player's nest (45 to 44) and one claimed 3 m off it is rejected.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1311,7 +1336,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (93 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (94 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), and the polish of known limits (18.43). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 

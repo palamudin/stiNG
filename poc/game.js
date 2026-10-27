@@ -5,7 +5,7 @@ import {
   Sim, Act, T, DT, ZONES, ZoneName, SwatKind, SwatKindName, StyleName, TopName, BottomName, Top, Bottom,
   toWorld, toLocal, dirToWorld, chunkKey, chunkOf, hash, Domain, rangeInt, resolveSting, zoneCover, segClosest, classify, predictedKind,
   NEST, NEST_ENTRANCE, flyPos, beePos, fmtClock, minuteOfDay, isLowerZone, broodTotal, sugarCap, proteinCap, waterCap, garmentGraph, dayWeather,
-  NetLab, LINKS, birdPos, dragonPos, shedSites, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE,
+  NetLab, LINKS, birdPos, dragonPos, shedSites, shedRoof, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE,
 } from './sim/index.js';
 
 // Tuning as data (GDD 13, T1-22): read tuning/sting.tune, served next to the page, before anything uses T. Without it
@@ -244,11 +244,13 @@ function buildChunk(rec) {
         gm.position.set(sh.x + along[0] * s * half, sh.h, sh.z + along[1] * s * half); gm.rotation.y = long ? Math.PI / 2 : 0; g.add(gm);
       }
     }
-    const slope = Math.hypot(span + 0.12, rise), ang = Math.atan2(rise, span + 0.12);
+    // the slabs' top faces lie on the solid roof the sim collides with (world.js shedRoof)
+    const rf = shedRoof(sh), slope = rf.L, ang = Math.atan2(rf.rise, rf.S), th = sh.house ? 0.12 : 0.05;
+    const cy = sh.h + rf.rise / 2 - rf.S / rf.L * th / 2, cu = rf.S / 2 - rf.rise / rf.L * th / 2;
     for (const side of [-1, 1]) {
-      const roof = new THREE.Mesh(new THREE.BoxGeometry(long ? len : slope, sh.house ? 0.12 : 0.05, long ? slope : len), mat(sh.house ? '#4e4b52' : '#3d3a36'));
-      if (long) { roof.position.set(sh.x, sh.h + rise / 2, sh.z + side * (span + 0.12) / 2); roof.rotation.x = side * ang; }
-      else { roof.position.set(sh.x + side * (span + 0.12) / 2, sh.h + rise / 2, sh.z); roof.rotation.z = -side * ang; }
+      const roof = new THREE.Mesh(new THREE.BoxGeometry(long ? rf.half * 2 : slope, th, long ? slope : rf.half * 2), mat(sh.house ? '#4e4b52' : '#3d3a36'));
+      if (long) { roof.position.set(sh.x, cy, sh.z + side * cu); roof.rotation.x = side * ang; }
+      else { roof.position.set(sh.x + side * cu, cy, sh.z); roof.rotation.z = -side * ang; }
       roof.castShadow = true; g.add(roof);
     }
     const ss = shedSites(sh);
@@ -1609,7 +1611,8 @@ function updateLab() {
       ['Rules hash', lab.b ? `${rulesHash(sim.settings)} / ${rulesHash(lab.b.settings)}${rulesHash(sim.settings) === rulesHash(lab.b.settings) ? ' · same' : ' · DIFFERENT'}` : rulesHash(sim.settings)],
       ['Rejected by checks', `${sim.netStats.rejected}${sim.plaus.quarantined.length ? ' · player 2 quarantined' : ''}`],
       ['Rules here (chunk authority)', lab.b ? `player ${sim.chunkAuthority(sim.activeKey) + 1}${sim.claims.size ? ` · ${sim.claims.size} claim${sim.claims.size > 1 ? 's' : ''} waiting` : ''}` : '-'],
-      ['Humans agree', c.compared ? `${c.agreed}/${c.compared} checks${c.agreed === c.compared ? '' : ' · diverged at tick ' + c.firstDiverge}` : '-'],
+      ['Corrections (late events)', `${sim.netStats.fixes + (lab.b ? lab.b.netStats.fixes : 0)} sent · ${sim.netStats.fixed} applied here`],
+      ['Humans agree', c.compared ? `${c.agreed}/${c.compared} checks${c.agreed === c.compared ? '' : ` · differed at tick ${c.firstDiverge}${c.lastDiverge > c.firstDiverge ? '–' + c.lastDiverge : ''}${c.last ? ', agree now' : ''}`}` : '-'],
       ['Player 2 drawn off by', err === null ? '-' : `${(err * 100).toFixed(1)} cm`],
       ['Your upstream', (() => { const b = lab.bandwidth(); return `${(b.total / 1024).toFixed(1)} KB/s · state ${(b.state / 1024).toFixed(1)}, swarm ${(b.swarm / 1024).toFixed(1)}, traffic ${(b.traffic / 1024).toFixed(2)}`; })()],
       // relevance tiers (T1-21): how player 2 hears about your wasps, from where its wasp is
@@ -1697,6 +1700,7 @@ function updateHud() {
   else if (w.state === 'landed') hint = w.walking ? 'Walking · it follows the surface round edges, up trunks and under tables · look where you want to go' : `Resting costs no sugar in the warmth · mouse turns · ${kbd('W')}${kbd('A')}${kbd('S')}${kbd('D')} walk on any surface · ${kbd('LMB')} sting someone within reach · ${kbd('Space')} or ${kbd('Shift')} take off`;
   else if (w.state === 'perched') hint = `${kbd('W')}${kbd('A')}${kbd('S')}${kbd('D')} crawl (look up or down to climb) · ${kbd('LMB')} sting · ${kbd('Space')} take off · ${kbd('E')} crawl under at an opening`;
   else if (h.rival) hint = `${kbd('E')} steal a larva from the rival nest`;
+  else if (h.raid !== null && h.raid !== undefined) hint = `${kbd('E')} steal a larva from player ${h.raid + 1}'s nest · their guards will come after you`;
   else if (h.hive) hint = `${kbd('E')} get into the hive for honey and brood · the bees inside fight back`;
   else if (h.hiber) hint = `${kbd('E')} scout this winter site for the young queens: ${T.hiber.name[h.hiber]}, shelter ${Math.round(T.hiber.q[h.hiber] * 100)}%`;
   else if (w.state === 'under') {
@@ -1777,6 +1781,31 @@ function drawMap() {
   }
   ctx.fillStyle = 'rgba(246,199,0,.8)';
   for (const x of sim.wasps) { if (x.id === sim.drivenId) continue; ctx.fillStyle = x.colony === 'own' ? 'rgba(246,199,0,.8)' : css('--orange'); const [px, py] = toS(x.x, x.z); ctx.fillRect(px - 1, py - 1, 2, 2); }
+  // other players' wasps (T1-21): near and mid ones as dots; far traffic as a count per chunk, a cluster of dots where
+  // the chunk is on the map and a tick at the edge of the map, pointing at it, where it is off it
+  const blue = '#4fd1ff';
+  ctx.fillStyle = blue;
+  for (const [, r] of sim.remote) { if (r.rival) continue; const [px, py] = toS(r.x, r.z); ctx.fillRect(px - 2, py - 2, 4, 4); }
+  // other players' nests (colony against colony)
+  ctx.strokeStyle = blue; ctx.lineWidth = 2;
+  for (const [, n] of sim.peerNests) { if (!n.alive) continue; const [px, py] = toS(n.x, n.z); ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI * 2); ctx.stroke(); }
+  const far = new Map();
+  for (const [, tr] of sim.remoteTraffic) for (const [k, n] of tr.chunks) far.set(k, (far.get(k) || 0) + n);
+  ctx.font = '600 18px ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (const [k, n] of far) {
+    const [cx, cz] = k.split(',').map(Number), [sx, sy] = toS((cx + 0.5) * CSZ, (cz + 0.5) * CSZ);
+    if (sx > 4 && sx < W - 4 && sy > 4 && sy < W - 4) {
+      for (let i = 0; i < Math.min(n, 9); i++) { const a = i * 2.4, rr = 4 + 4 * Math.sqrt(i); ctx.fillRect(sx + rr * Math.cos(a) - 2, sy + rr * Math.sin(a) - 2, 4, 4); }
+      if (n > 9) ctx.fillText(String(n), sx, sy - 20);
+    } else {
+      const dx = sx - W / 2, dy = sy - W / 2, m = (W / 2 - 12) / Math.max(Math.abs(dx), Math.abs(dy));
+      const ex = W / 2 + dx * m, ey = W / 2 + dy * m, ang = Math.atan2(dy, dx);
+      ctx.save(); ctx.translate(ex, ey); ctx.rotate(ang);
+      ctx.beginPath(); ctx.moveTo(10, 0); ctx.lineTo(-4, -8); ctx.lineTo(-4, 8); ctx.closePath(); ctx.fill();
+      ctx.restore();
+      ctx.fillText(String(n), ex - Math.cos(ang) * 20, ey - Math.sin(ang) * 20);
+    }
+  }
   const [nx, ny] = toS(sim.nest.x, sim.nest.z);
   ctx.strokeStyle = sim.colony.nestAlive ? yellow : red; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.arc(nx, ny, 5, 0, Math.PI * 2); ctx.stroke();
@@ -1959,7 +1988,8 @@ function handleEvents(events) {
       case 'birdMiss': toast('The bird missed', 'var(--yellow)', 1.2); break;
       case 'fight': if (e.driven) toast('Grappling a rival wasp · mash LMB', 'var(--red)', 1.8); break;
       case 'fightOver': logEvent(`fight: worker ${e.winner} killed worker ${e.loser}`); break;
-      case 'raid': toast('Stole a larva · their workers are coming', 'var(--orange)', 2.2); break;
+      case 'raid': toast(e.peer !== undefined ? `Stole a larva from player ${e.peer + 1}'s nest · get it home` : 'Stole a larva · their workers are coming', 'var(--orange)', 2.2); break;
+      case 'raided': toast(`Player ${e.by + 1} stole a larva from your nest · your guards are after them`, 'var(--red)', 2.6); logEvent(`player ${e.by + 1} raided the nest`); break;
       case 'notice':
         pushSwatAnims(e.swats, e.humanHex, e.contactTick);
         if (e.waspId === sim.drivenId) toast('They felt you · get off', 'var(--red)', 1.6);
@@ -2129,9 +2159,13 @@ function updateCamera(p, dt) {
   if (eyeBlend > 0 && !dead) {
     // eye view: at the front of the head, looking wherever the mouse says, carried rigidly
     const sc = w.caste === 'queen' ? 1.3 : 1;
-    const eye = focus.clone().add(new THREE.Vector3(Math.sin(input.yaw) * 0.0078 * sc, 0.0012 * sc, Math.cos(input.yaw) * 0.0078 * sc));
-    const ly = input.yaw + fl.yaw, lp = Math.max(-1.5, Math.min(1.5, input.pitch + fl.pitch));
-    const dir = new THREE.Vector3(Math.sin(ly) * Math.cos(lp), Math.sin(lp), Math.cos(ly) * Math.cos(lp));
+    // in the wasp's own frame: its heading, the up of whatever it stands on (the sky in flight), and the side between;
+    // landed on a trunk or under a table the eyes turn with the wasp, not with the world
+    const hf = ld ? new THREE.Vector3(ld.hx, ld.hy, ld.hz) : new THREE.Vector3(Math.sin(input.yaw), 0, Math.cos(input.yaw));
+    const hn = ld ? new THREE.Vector3(ld.nx, ld.ny, ld.nz) : UP.clone(), hs = new THREE.Vector3().crossVectors(hn, hf);
+    const eye = focus.clone().addScaledVector(hf, 0.0078 * sc).addScaledVector(hn, 0.0012 * sc);
+    const lp = Math.max(-1.5, Math.min(1.5, input.pitch + fl.pitch));
+    const dir = hf.clone().multiplyScalar(Math.cos(fl.yaw)).addScaledVector(hs, Math.sin(fl.yaw)).multiplyScalar(Math.cos(lp)).addScaledVector(hn, Math.sin(lp));
     const k = eyeBlend * eyeBlend * (3 - 2 * eyeBlend);
     pos = chase.clone().lerp(eye, k);
     const d0 = chaseLook.clone().sub(chase).normalize();
