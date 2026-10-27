@@ -14,7 +14,7 @@ namespace Sting.Core
     public static class Wire
     {
         static readonly string[] STATES = { "fly", "stunned", "attached", "under", "chewing", "trapped", "balled", "landed", "webbed", "fighting", "dead", "perched", "drowning", "robbing" };
-        static readonly string[] CARRY = { null, "fly", "caterpillar", "bee", "pulp", "larva", "carrion", "meat", "bee brood", "bait" };
+        static readonly string[] CARRY = { null, "fly", "caterpillar", "bee", "pulp", "larva", "carrion", "meat", "bee brood", "bait", "moth", "pollen", "wasp" }; // the last three: the species' loads (GDD 6.8)
         static readonly Num CS = T.chunk.size, YMAX = 40, VMAX = 8;
         public const int BYTES_PER_WASP = 19, STATE_HEAD = 11, BYTES_PER_SWARM_WASP = 9, GROUP_HEAD = 9;
 

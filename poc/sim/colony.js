@@ -5,12 +5,15 @@
 import { T } from './tuning.js';
 import { clamp01 } from './rng.js';
 
-export function newColony(founding = false) {
-  const s = T.colony.start;
+// The colony's species (GDD 6.8): its row of the species table
+export const spOf = (c) => T.species[(c && c.species) || 'wasp'] || T.species.wasp;
+
+export function newColony(founding = false, species = 'wasp') {
+  const s = T.colony.start, k = T.species[species].start; // a hornet colony starts small, a bee colony big
   const c = {
-    queenAlive: true, nestAlive: true, sited: true,
-    adults: founding ? 0 : s.adults, eggs: founding ? 0 : s.eggs, larvae: founding ? 0 : s.larvae, pupae: founding ? 0 : s.pupae,
-    cells: founding ? 0 : s.cells, protein: founding ? 0 : s.protein, sugar: founding ? 0.5 : s.sugar, pulp: founding ? 0 : s.pulp,
+    queenAlive: true, nestAlive: true, sited: true, species,
+    adults: founding ? 0 : s.adults * k, eggs: founding ? 0 : s.eggs * k, larvae: founding ? 0 : s.larvae * k, pupae: founding ? 0 : s.pupae * k,
+    cells: founding ? 0 : s.cells * k, protein: founding ? 0 : s.protein, sugar: founding ? 0.5 : s.sugar, pulp: founding ? 0 : s.pulp,
     water: founding ? 0 : s.water, cool: 1, thirst: 0, // T2-1
     rEggs: 0, rLarvae: 0, rPupae: 0, gynes: 0, males: 0, mated: 0, young: 0,
     deficit: 0, fed: 1, alloc: 0, sugarlessDays: 0,
@@ -20,7 +23,7 @@ export function newColony(founding = false) {
 }
 
 export const proteinCap = (c) => T.colony.proteinCapBase + (c.larvae + c.rLarvae * T.season.reproProtein) * T.colony.larvaProtein * T.colony.proteinCapDays;
-export const sugarCap = (c) => T.colony.sugarCapBase + c.adults * T.colony.adultSugar * T.colony.sugarCapDays;
+export const sugarCap = (c) => (T.colony.sugarCapBase + c.adults * T.colony.adultSugar * T.colony.sugarCapDays) * spOf(c).store; // bees keep honey
 // The males a young queen can meet (T2-3): her colony's and the neighbourhood's, which peak with the breeding season
 export const malesAbout = (c, frac) => clamp01((c.males + T.males.area * reproShare(frac)) / T.males.need);
 export const waterCap = (c) => T.water.capBase + c.adults * T.water.capPerAdult; // T2-1
@@ -35,6 +38,8 @@ export function seasonPhase(frac) { let p = SEASON_PHASES[0]; for (const x of SE
 
 // Share of new eggs laid in queen cells (gynes and males) at a season fraction.
 export function reproShare(frac) { const C = T.season; return clamp01((frac - C.reproStart) / (C.reproFull - C.reproStart)); }
+// A honeybee colony raises queens and drones early in the season, and only when crowded (T2-11)
+export function beeRepro(c, frac) { const H = T.hive; return frac >= H.swarmFrom && frac < H.swarmTo && c.adults >= H.swarmAdults ? H.reproShare : 0; }
 
 // One step of `dtDay` in-game days. `physical` = adults outside as agents.
 // `foraging` = abstract foragers can work now. `frac` = season fraction. `bio` = biological time scale.
@@ -42,7 +47,7 @@ export function reproShare(frac) { const C = T.season; return clamp01((frac - C.
 // avail: what the season offers foragers (T1-8), { sugar, protein } multipliers, 1 when absent
 // hot: the nest's heat (T2-1), { heat: 0..1 through the site's insulation, cook: 0..1 past the brood's lethal temperature }
 export function colonyStep(c, dtDay, physical, foraging, frac = 0.3, bio = 1, thermal = 1, avail = null, hot = null) {
-  const C = T.colony, S = T.season, W = T.water;
+  const C = T.colony, S = T.season, W = T.water, SP = spOf(c);
   if (!c.nestAlive) return;
   const inside = Math.max(0, c.adults - physical);
   if (c.water === undefined) { c.water = 0; c.cool = 1; c.thirst = 0; } // saves from before water (T2-1)
@@ -55,9 +60,10 @@ export function colonyStep(c, dtDay, physical, foraging, frac = 0.3, bio = 1, th
     const a = T.alloc[c.alloc], wsum = (a.sugar + a.protein + a.pulp) / 3;
     const f = Math.max(0, inside - c.young) * C.forageShare * a.traffic * dtDay; // 'Lie low' sends fewer out (T1-7); the young stay in (T1-13)
     const food = f * (1 - divert);
-    c.sugar += food * C.income.sugar * a.sugar / wsum * (avail ? avail.sugar : 1);
-    c.protein += food * C.income.protein * a.protein / wsum * (avail ? avail.protein : 1);
-    c.pulp += food * C.income.pulp * a.pulp / wsum;
+    c.sugar += food * C.income.sugar * a.sugar / wsum * (avail ? avail.sugar : 1) * SP.sugarIn;
+    c.protein += food * C.income.protein * a.protein / wsum * (avail ? avail.protein : 1) * SP.proteinIn;
+    if (SP.wood) c.pulp += food * C.income.pulp * a.pulp / wsum; // bees build wax from sugar instead (T2-11)
+    else c.sugar += food * C.income.pulp * a.pulp / wsum * SP.sugarIn;
     c.water += f * divert * W.income;
   }
   if (c.water > wcap) c.water = wcap;
@@ -119,22 +125,28 @@ export function colonyStep(c, dtDay, physical, foraging, frac = 0.3, bio = 1, th
   c.gynes += newRepro * S.gyneShare; c.males += newRepro * (1 - S.gyneShare); c.stats.gynesRaised += newRepro * S.gyneShare;
 
   // Gynes fly out to mate on fair days (GDD 6.7); how many find a male depends on the males about (T2-3)
-  if (foraging && c.gynes > 0) { const m = c.gynes * S.matePerDay * dtDay; c.gynes -= m; c.mated += m * S.mateSuccess * malesAbout(c, frac); }
+  if (foraging && c.gynes > 0 && !SP.perennial) { const m = c.gynes * S.matePerDay * dtDay; c.gynes -= m; c.mated += m * S.mateSuccess * malesAbout(c, frac); }
 
   // Adult mortality rises as the colony collapses in autumn
-  const late = frac > S.collapseFrom ? 1 + S.collapseMul * (frac - S.collapseFrom) / (1 - S.collapseFrom) : 1;
+  const late = frac > S.collapseFrom && !SP.perennial ? 1 + S.collapseMul * (frac - S.collapseFrom) / (1 - S.collapseFrom) : 1; // a bee colony does not collapse
   const die = inside * C.adultMortality / bio * late * dtDay;
   c.adults -= die; c.stats.died += die;
   c.males -= c.males * 0.2 * dtDay / bio;
-  if (frac >= S.queenDiesAt) c.queenAlive = false;
+  if (frac >= S.queenDiesAt && !SP.perennial) c.queenAlive = false;
 
-  const use = Math.min(c.pulp, C.buildPerDay * dtDay * (1 + inside / 40));
-  c.pulp -= use; c.cells = Math.min(c.cells + use * C.cellsPerPulp, c.maxCells || Infinity); // the site caps nest size (GDD 6.6)
+  let use;
+  if (SP.wood) { use = Math.min(c.pulp, C.buildPerDay * dtDay * (1 + inside / 40)); c.pulp -= use; }
+  else { // wax from the store above a reserve (T2-11)
+    use = Math.min(Math.max(0, c.sugar - sugarCap(c) * T.hive.waxFrom) / T.hive.waxSugar, C.buildPerDay * dtDay * (1 + inside / 40));
+    if (c.cells >= (c.maxCells || Infinity)) use = 0;
+    c.sugar -= use * T.hive.waxSugar;
+  }
+  c.cells = Math.min(c.cells + use * C.cellsPerPulp, c.maxCells || Infinity); // the site caps nest size (GDD 6.6)
 
   if (c.queenAlive && c.protein > 0) {
     const free = Math.max(0, c.cells - broodTotal(c));
-    const lay = Math.min(free, Math.min(C.layMax, C.layBase + c.adults * C.layPerAdult) * dtDay);
-    const r = reproShare(frac);
+    const lay = Math.min(free, Math.min(C.layMax * SP.lay, (C.layBase + c.adults * C.layPerAdult) * SP.lay) * dtDay);
+    const r = SP.perennial ? beeRepro(c, frac) : reproShare(frac);
     c.eggs += lay * (1 - r); c.rEggs += lay * r; c.stats.laid += lay;
   }
   if (c.adults < 0) c.adults = 0;

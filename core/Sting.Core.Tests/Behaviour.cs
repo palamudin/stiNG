@@ -1104,6 +1104,75 @@ namespace Sting.Core.Tests
                 Ok(rs.settings.terrain == 2 && new Settings { terrain = 2 }.WorldTag() == "hilly" && new Settings { terrain = 1 }.WorldTag() == "rolling" && new Settings { terrain = 1 }.RulesHash() != new Settings().RulesHash(),
                     "terrain is a world setting: kept in saves, in the world tag and in the rules peers compare");
             }
+            // 49. the three species (GDD 6.8, T2-9 to T2-11): wasps, hornets and honeybees on the one code path
+            {
+                Sim Mk(string sp) => new Sim(new Settings { seed = 1234, birds = false, species = sp });
+                var W = Mk("wasp"); var H = Mk("hornet"); var B = Mk("bee");
+                Ok(W.species == "wasp" && H.wasp.sp == "hornet" && B.colony.species == "bee" && Abs(H.colony.adults - 30 * T.species.hornet.start) < 1e-6 && Abs(B.colony.adults - 30 * T.species.bee.start) < 1e-6 && B.colony.maxCells > W.colony.maxCells,
+                    $"a line starts as its species: {D(W.colony.adults)} wasps, {D(H.colony.adults):0.0} hornets, {D(B.colony.adults)} bees with room for {D(B.colony.maxCells)} cells");
+                Ok(string.Join(",", new Settings { progression = "open" }.SpeciesAllowed()) == "wasp,hornet,bee" && string.Join(",", new Settings { progression = "earned" }.SpeciesAllowed()) == "wasp"
+                    && string.Join(",", new Settings { progression = "fixed:hornet" }.SpeciesAllowed()) == "hornet" && new Settings { progression = "earned" }.RulesHash() != new Settings().RulesHash(),
+                    "progression is a world rule: open lets a line start as any species, earned only as wasps, fixed as one");
+                (double v, double e) Cruise(string sp) { var s = Mk(sp); Place(s.wasp, P(5, 2, 5)); double v = 0; RunS(s, 120, (sim, i) => { v = Hypot(sim.wasp.vx, sim.wasp.vz); return Idle(c => { c.mz = 100; c.yawQ = 0; }); }); return (v, D(1 - s.wasp.energy)); }
+                var cw = Cruise("wasp"); var ch = Cruise("hornet"); var cb = Cruise("bee");
+                Ok(ch.v > cw.v && cw.v > cb.v && ch.e > cw.e && cw.e > cb.e, $"a hornet flies faster and burns more, a bee slower and less ({ch.v:0.00}, {cw.v:0.00}, {cb.v:0.00} m/s)");
+                (double esc, int deepen, string died) Sting(string sp)
+                {
+                    var s = Calm(Mk(sp)); var hm = Seated(s, h => true); var fa = hm.sit.First(p => p.name == "ForearmR"); Num e0 = s.CS(hm.chunk).esc; int id = s.wasp.id;
+                    Place(s.wasp, Body.ToWorld(hm.F, P((fa.a.x + fa.b.x) / 2, (fa.a.y + fa.b.y) / 2 + fa.r + 0.008, (fa.a.z + fa.b.z) / 2)));
+                    var ev = RunS(s, 10, (sim, i) => Idle(c => c.sting = 1)); ev.AddRange(RunS(s, 60));
+                    var dd = ev.FirstOrDefault(e => e.type == "waspDied" && (int)e["id"] == id);
+                    return (D(s.CS(hm.chunk).esc - e0), Count(ev, "deepen"), dd == null ? null : (string)dd["cause"]);
+                }
+                var sw = Sting("wasp"); var sh = Sting("hornet"); var sb = Sting("bee");
+                Ok(Math.Abs(sw.esc - 1) < 1e-6 && Math.Abs(sh.esc - D(T.species.hornet.pain)) < 1e-6 && sw.died == null && sh.died == null, $"a hornet's jab counts {sh.esc:0.00} alert points to a wasp's {sw.esc:0.00}");
+                Ok(sb.died == "left its sting in a person" && sb.deepen == 1, $"a honeybee's barbed sting stays in, pumps the rest of its venom (a full sting) and the bee dies ({sb.died})");
+                string bad; { var s = Mk("wasp"); var hm = Seated(s, h => true); bad = s.Implausible(new NetEv { type = "sting", tick = s.tick, commit = s.tick + T.net.commitTicks, seq = 1, peer = 1, humanHex = hm.hex, swats = new List<Swat>(), panicGain = 0.5, pain = 3, waspId = 1 }); }
+                Ok(bad == "pain out of range", $"a sting claiming more pain than any species is rejected ({bad})");
+                (double @out, int moths) NightOut(string sp)
+                {
+                    var s = new Sim(new Settings { seed = 1234, species = sp, dayMinutes = 2 }); double o = 0; int n = 0;
+                    var ev = RunS(s, (int)(60 * 60 * 2 * 1.2), (sim, i) => { if (sim.wasp != null) Place(sim.wasp, P(sim.nest.entrance.x, sim.nest.entrance.y + 0.3, sim.nest.entrance.z)); if (!World.IsDaylight(sim.minute)) { n++; o += sim.Own().Count - 1; } return Idle(); });
+                    return (o / Math.Max(1, n), ev.Count(e => e.type == "caught" && (string)e["kind"] == "moth"));
+                }
+                var nw = NightOut("wasp"); var nh = NightOut("hornet");
+                Ok(nh.@out > 2 && nw.@out < 1 && nh.moths > 0, $"hornets forage at night ({nh.@out:0.0} out on average against {nw.@out:0.0} wasps) and take {nh.moths} moths at the porch lights");
+                {
+                    var s = Mk("hornet"); long md = s.minute % 1440; s.clockOffset += (s.minute - md + 1320 - s.minute) * s.tpm; s.Minute(World.ClockMinutes(s.tick + s.clockOffset, s.settings));
+                    Moth? mo = null; foreach (var r in s.activeChunks) { var ms = s.MothsIn(r); if (ms.Count > 0) { mo = ms[0]; break; } }
+                    Place(s.wasp, mo.Value.p); var ev = RunS(s, 2, (sim, i) => Idle(c => c.act = i == 0 ? Act.Interact : 0));
+                    Ok(s.activeChunks.Any(r => s.LightsIn(r).Count > 0) && ev.Any(e => e.type == "caught" && (string)e["kind"] == "moth") && s.wasp.carry != null && s.wasp.carry.what == "moth", "at 22:00 a porch light burns with moths round it, and E at one takes it");
+                }
+                {
+                    var s = Mk("hornet"); RunS(s, 600); var rv = s.wasps.First(x => Sim.IsRival(x) && x.state == "fly");
+                    Place(s.wasp, P(rv.x + 0.01, rv.y, rv.z)); var ev = RunS(s, 2, (sim, i) => Idle(c => c.act = i == 0 ? Act.Interact : 0));
+                    Ok(ev.Any(e => e.type == "waspDied" && (string)e["cause"] == "taken by a hornet") && s.wasp.carry != null && s.wasp.carry.what == "wasp", "a hornet takes a rival yellowjacket on the wing and carries it home as prey");
+                }
+                {
+                    var s = Mk("bee"); var cats = s.records.Get("0,0").content.caterpillars;
+                    if (cats.Count > 0) { var cat = cats[0]; Place(s.wasp, P(cat.x, cat.y, cat.z)); var ev = RunS(s, 2, (sim, i) => Idle(c => c.act = i == 0 ? Act.Interact : 0)); Ok(!ev.Any(e => e.type == "caught") && s.wasp.carry == null, "a bee takes no prey"); }
+                }
+                {
+                    var s = new Sim(new Settings { seed = 1234, species = "bee" });
+                    var ev = RunS(s, 60 * 60, (sim, i) => { if (sim.wasp != null) Place(sim.wasp, P(sim.nest.entrance.x, sim.nest.entrance.y + 0.3, sim.nest.entrance.z)); return Idle(); });
+                    Ok(Count(ev, "pollen") > 5 && s.colony.stats.depProtein > 5 && s.colony.pulp == T.colony.start.pulp, $"bee foragers pack pollen at the flowers and bring it home as protein ({Count(ev, "pollen")} loads, {D(s.colony.stats.depProtein):0.0} protein); no pulp is gathered");
+                }
+                {
+                    var s = Mk("bee"); Cmd Park(Sim sim, int i) { if (sim.wasp != null) Place(sim.wasp, P(sim.nest.entrance.x + 2, 1.5, sim.nest.entrance.z)); return Idle(); }
+                    RunS(s, 2400, Park);
+                    var rk = s.activeChunks.First(r => r.content.rival != null); var rv = s.SpawnWasp(false); var e = s.nest.entrance; Num h0 = s.colony.sugar;
+                    rv.colony = rk.key; rv.sp = "wasp"; rv.role = "sugar"; rv.ai.mode = "outbound"; rv.ai.target = new AiTarget { kind = "phive", key = s.nest.key, i = 0, c = 999 }; Place(rv, P(e.x + 0.4, e.y, e.z));
+                    var ev = RunS(s, 1200, Park); var mine = ev.Where(x => x["id"] is int xi && xi == rv.id).ToList();
+                    Ok(mine.Any(x => x.type == "balled") && mine.Any(x => x.type == "waspDied" && (string)x["cause"] == "cooked by bees"), $"a rival wasp at the hive is balled by the guards and cooked ({string.Join(", ", mine.Select(x => x.type))}; honey {D(h0):0.0} -> {D(s.colony.sugar):0.0})");
+                }
+                {
+                    var s = new Sim(new Settings { seed = 99, dayMinutes = 0.4, seasonDays = 10, species = "bee" }); var n0 = s.nest.entrance;
+                    var ev = RunS(s, 30000);
+                    Ok(Count(ev, "swarm") >= 1 && Count(ev, "winter") >= 1 && Count(ev, "spring") >= 1 && !s.extinct && s.season.n >= 2 && s.nest.entrance.x == n0.x && s.nest.entrance.z == n0.z && s.colony.queenAlive,
+                        $"a bee colony swarms in early summer ({Count(ev, "swarm")}), winters as a cluster on its honey and goes on in the same hive (season {s.season.n}, {D(s.colony.adults):0} bees)");
+                }
+                { var s = Mk("hornet"); RunS(s, 100); var r = Persist.Restore(Persist.Snapshot(s)); Ok(r.species == "hornet" && r.colony.species == "hornet" && r.wasp.sp == "hornet", "a save keeps the line's species"); }
+            }
             // 46. feature modifiers (T2-6): woods, towns, water and hives set at world creation act on generation
             {
                 (int forest, int town, int baths, int hives, bool apart) Census(Settings st)

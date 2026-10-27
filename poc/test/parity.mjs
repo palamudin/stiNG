@@ -170,6 +170,10 @@ export const SIM_SCENARIOS = [
   { name: 'idle7', settings: { seed: 7 }, ticks: 12000, bot: () => (sim) => idleCmd({ alloc: sim.tick < 4000 ? 0 : sim.tick < 8000 ? 2 : 4 }) },
   { name: 'season', settings: { seed: 99, dayMinutes: 0.4, seasonDays: 10 }, ticks: 30000, bot: () => () => idleCmd() },
   { name: 'hot', settings: { seed: 1234, escalation: 6, reaction: 1.5 }, ticks: 20000, bot: () => stingBot({ plan: 'full', pick: () => true, rest: 40 }) },
+  // the species (GDD 6.8): hornets stinging through a night, a honeybee season with a swarm and a winter, bees that die stinging
+  { name: 'hornet', settings: { seed: 1234, species: 'hornet' }, ticks: 9000, bot: () => stingBot({ plan: 'full', rest: 60 }) },
+  { name: 'bee', settings: { seed: 99, dayMinutes: 0.4, seasonDays: 10, species: 'bee' }, ticks: 30000, bot: () => () => idleCmd() },
+  { name: 'beesting', settings: { seed: 1234, species: 'bee' }, ticks: 7200, bot: () => stingBot({ plan: 'jab' }) },
 ];
 for (const sc of SIM_SCENARIOS) {
   const d = Digest(), sim = new Sim(sc.settings), bot = sc.bot();

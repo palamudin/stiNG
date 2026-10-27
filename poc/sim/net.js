@@ -8,7 +8,7 @@ import { chunkOf, chunkKey } from './world.js';
 // ---------------------------------------------------------------- wire format for state packets (GDD 11.12)
 // Positions are chunk-relative, 16 bits per axis (1 mm horizontally, 0.6 mm vertically); velocity 8 bits per axis.
 const STATES = ['fly', 'stunned', 'attached', 'under', 'chewing', 'trapped', 'balled', 'landed', 'webbed', 'fighting', 'dead', 'perched', 'drowning', 'robbing'];
-const CARRY = [null, 'fly', 'caterpillar', 'bee', 'pulp', 'larva', 'carrion', 'meat', 'bee brood', 'bait'];
+const CARRY = [null, 'fly', 'caterpillar', 'bee', 'pulp', 'larva', 'carrion', 'meat', 'bee brood', 'bait', 'moth', 'pollen', 'wasp']; // the last three: the species' loads (GDD 6.8)
 const CS = T.chunk.size, YMAX = 40, VMAX = 8;
 export const BYTES_PER_WASP = 19;
 

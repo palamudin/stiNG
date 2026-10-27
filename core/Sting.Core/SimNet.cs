@@ -116,6 +116,7 @@ namespace Sting.Core
             if (ev.tick > tick + T.plaus.futureTicks) return "from the future";
             if (ev.type == "quarantine" && ev.peer != host) return "only the host rules on peers";
             if (ev.type == "startle" && !(ev.amount > 0 && ev.amount <= T.swoop.panic)) return "startle out of range";
+            if (ev.type == "deepen" && ev.pain.HasValue && !(ev.pain.Value > 0 && ev.pain.Value <= T.plaus.maxPain)) return "pain out of range";
             if (ev.type == "praid") // from that nest's entrance, as its owner or anyone who has heard where it is knows
             {
                 V3? n = ev.toPeer == peer ? nest.entrance : peerNests.TryGetValue(ev.toPeer, out var pn) ? new V3(pn.x, pn.y, pn.z) : (V3?)null;
@@ -130,6 +131,7 @@ namespace Sting.Core
                 if (ev.type == "sting")
                 {
                     if (!(ev.panicGain >= 0 && ev.panicGain <= 1)) return "panic out of range";
+                    if (ev.pain.HasValue && !(ev.pain.Value > 0 && ev.pain.Value <= T.plaus.maxPain)) return "pain out of range"; // no species stings harder (GDD 6.8)
                     if (hm != null)
                     {
                         Num drift = T.plaus.humanDrift * Max(0, tick - ev.tick) / 60;
@@ -228,6 +230,7 @@ namespace Sting.Core
             switch (ev.what)
             {
                 case "fly": if (i >= 0 && i < c.flies.Count) at = World.FlyPos(c.flies[i], ev.tick); break;
+                case "moth": { var L = LightsIn(rec); if (i >= 0 && i / T.moths.perLight < L.Count && Lit(World.ClockMinutes(ev.tick + clockOffset, settings))) at = MothPos(L[i / T.moths.perLight], i % T.moths.perLight, ev.tick); break; }
                 case "caterpillar": if (i >= 0 && i < c.caterpillars.Count) { var q = c.caterpillars[i]; at = new V3(q.x, q.y, q.z); } break;
                 case "carrion": if (i <= day && i >= day - T.eco.carrionDays) at = CarrionSpot(cx, cz, i); break;
                 case "meat":
@@ -392,7 +395,7 @@ namespace Sting.Core
             string sig = e.x + "," + e.y + "," + e.z + "," + alive;
             if (sig == nestSig && tick - nestSentTick < 600) return;
             nestSig = sig; nestSentTick = tick;
-            Publish(new NetEv { type = "nest", x = e.x, y = e.y, z = e.z, key = nest.key, alive = alive });
+            Publish(new NetEv { type = "nest", x = e.x, y = e.y, z = e.z, key = nest.key, alive = alive, species = species });
         }
         /// another player's live nest at the wasp, not where its own is (players can share the home tree)
         internal (int peer, PeerNest n)? PeerNestNear(Wasp w)
@@ -459,7 +462,7 @@ namespace Sting.Core
             switch (ev.type)
             {
                 case "fixReq": if (ChunkAuthority(ev.key) == peer) OwesFix(ev.key); break;
-                case "nest": if (!mine) peerNests[ev.peer] = new PeerNest { x = ev.x, y = ev.y, z = ev.z, key = ev.key, alive = ev.alive }; break;
+                case "nest": if (!mine) peerNests[ev.peer] = new PeerNest { x = ev.x, y = ev.y, z = ev.z, key = ev.key, alive = ev.alive, species = ev.species ?? "wasp" }; break;
                 case "praid": // another player's wasp took a larva from my nest: one fewer, and my guards go after it
                     if (mine || ev.toPeer != peer || !colony.nestAlive) break;
                     colony.larvae = Max(0, colony.larvae - 1);
@@ -516,8 +519,8 @@ namespace Sting.Core
                     if (w != null && (w.state == "fly" || w.state == "landed" || w.state == "chewing"))
                     {
                         w.state = "fighting"; w.vx = w.vy = w.vz = 0;
-                        w.fight = new Fight { other = ev.a, remote = true, peer = ev.peer, start = ev.tick, until = tick + T.rival.fightTicks, mash = 0, theirVenom = ev.venom, theirQueen = ev.queen, myVenom = w.venom };
-                        Publish(new NetEv { type = "fightJoin", a = ev.a, b = ev.b, toPeer = ev.peer, venom = w.venom, queen = w.caste == "queen" });
+                        w.fight = new Fight { other = ev.a, remote = true, peer = ev.peer, start = ev.tick, until = tick + T.rival.fightTicks, mash = 0, theirVenom = ev.venom, theirQueen = ev.queen, theirFb = ev.fb, myVenom = w.venom };
+                        Publish(new NetEv { type = "fightJoin", a = ev.a, b = ev.b, toPeer = ev.peer, venom = w.venom, queen = w.caste == "queen", fb = Spw(w).fight });
                         Emit("fight", ("a", ev.a), ("b", ev.b), ("driven", w.id == drivenId), ("remote", true));
                     }
                     else Publish(new NetEv { type = "fightRefuse", a = ev.a, b = ev.b, toPeer = ev.peer });
@@ -538,7 +541,7 @@ namespace Sting.Core
                 {
                     if (mine || ev.toPeer != peer) break;
                     var w = WaspById(ev.a);
-                    if (w != null && w.fight != null && w.fight.other == ev.b) { w.fight.theirVenom = ev.venom; w.fight.theirQueen = ev.queen; }
+                    if (w != null && w.fight != null && w.fight.other == ev.b) { w.fight.theirVenom = ev.venom; w.fight.theirQueen = ev.queen; w.fight.theirFb = ev.fb; }
                     break;
                 }
                 case "fightRefuse":
@@ -554,7 +557,7 @@ namespace Sting.Core
                     var w = WaspById(ev.a);
                     if (w == null || w.fight == null || w.fight.other != ev.b) break;
                     var f = w.fight;
-                    bool aWins = FightScore(w.id, f.myVenom, w.caste == "queen", 0, f.start) >= FightScore(ev.b, ev.venom, ev.queen, ev.mash, f.start);
+                    bool aWins = FightScore(w.id, f.myVenom, w.caste == "queen", 0, f.start, Spw(w).fight) >= FightScore(ev.b, ev.venom, ev.queen, ev.mash, f.start, ev.fb);
                     FightResolve(w, aWins, ev.b);
                     break;
                 }
@@ -570,6 +573,7 @@ namespace Sting.Core
                     if (ev.claimPeer == peer) { claims.Delete(ev.claimWasp); break; } // our own claim, granted: applied already
                     var st = CS(ev.key);
                     if (ev.what == "fly") st.caughtFly[ev.i] = (ev.ctick ?? ev.tick) + T.prey.flyRespawnTicks;
+                    else if (ev.what == "moth") { st.caughtMoth ??= new Dictionary<int, long>(); st.caughtMoth[ev.i] = (ev.ctick ?? ev.tick) + T.moths.respawnTicks; }
                     else if (ev.what == "caterpillar") st.caughtCat[ev.i] = 1;
                     else if (ev.what == "carrion") { st.carrion ??= new Dictionary<int, int>(); st.carrion[ev.i] = (st.carrion.TryGetValue(ev.i, out var cn) ? cn : 0) + 1; }
                     else if (ev.what == "meat") { st.meat ??= new Dictionary<int, int>(); st.meat[ev.i] = (st.meat.TryGetValue(ev.i, out var mn) ? mn : 0) + 1; }
@@ -614,7 +618,7 @@ namespace Sting.Core
                     bool first = !stung.Has(hm.hex);
                     stung.Set(hm.hex, true);
                     if (!mine) stats.remoteStings++; else if (ev.driven) stats.stings++; else stats.aiStings++;
-                    AddEsc(hm.x, hm.z, T.esc.sting);
+                    AddEsc(hm.x, hm.z, T.esc.sting * (ev.pain ?? 1));
                     CS(hm.chunk).lastSting = new LastSting { x = ev.sx, z = ev.sz };
                     // at level 3 a person with it in them goes for a can once things calm down (T1-6)
                     if (!hm.special && !(hm.sprayCount > 0) && hm.tr.escalation >= T.esc.sprayTrait && EscAt(hm.x, hm.z) >= 3) hm.wantSpray = true;
@@ -627,7 +631,7 @@ namespace Sting.Core
                     var hm = HumanByHex(ev.humanHex);
                     if (hm == null) break;
                     hm.panic = Min(1, hm.panic + ev.extra);
-                    AddEsc(hm.x, hm.z, T.esc.full);
+                    AddEsc(hm.x, hm.z, T.esc.full * (ev.pain ?? 1));
                     Emit("deepen", ("humanHex", hm.hex), ("zone", ev.zone));
                     if (hm.panic >= T.resolve.fleePanic && Calm(hm)) StartFlee(hm, new LastSting { x = ev.sx, z = ev.sz });
                     break;

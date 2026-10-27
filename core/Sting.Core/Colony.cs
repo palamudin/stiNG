@@ -23,6 +23,8 @@ namespace Sting.Core
         public Num water, cool = 1, thirst;
         public int alloc;
         public Num maxCells = Num.MaxValue;
+        /// the colony's species (GDD 6.8), and the season a honeybee colony last swarmed in (T2-11)
+        public string species = "wasp"; public int swarmed;
         public ColonyStats stats = new ColonyStats();
         public ColonyState Clone() { var c = (ColonyState)MemberwiseClone(); c.stats = stats.Clone(); return c; }
         public Num this[string k]
@@ -34,15 +36,18 @@ namespace Sting.Core
 
     public static class Colony
     {
-        public static ColonyState New(bool founding = false) => new ColonyState
+        /// the colony's species row (GDD 6.8)
+        public static SpeciesRow Sp(ColonyState c) => T.species.Of(c?.species);
+        public static ColonyState New(bool founding = false, string species = "wasp") { Num k = T.species.Of(species).start; return new ColonyState // a hornet colony starts small, a bee colony big
         {
-            adults = founding ? 0 : T.colony.start.adults, eggs = founding ? 0 : T.colony.start.eggs, larvae = founding ? 0 : T.colony.start.larvae,
-            pupae = founding ? 0 : T.colony.start.pupae, cells = founding ? 0 : T.colony.start.cells, protein = founding ? 0 : T.colony.start.protein,
+            species = species,
+            adults = founding ? 0 : T.colony.start.adults * k, eggs = founding ? 0 : T.colony.start.eggs * k, larvae = founding ? 0 : T.colony.start.larvae * k,
+            pupae = founding ? 0 : T.colony.start.pupae * k, cells = founding ? 0 : T.colony.start.cells * k, protein = founding ? 0 : T.colony.start.protein,
             sugar = founding ? 0.5 : T.colony.start.sugar, pulp = founding ? 0 : T.colony.start.pulp, water = founding ? 0 : T.colony.start.water,
-        };
+        }; }
 
         public static Num ProteinCap(ColonyState c) => T.colony.proteinCapBase + (c.larvae + c.rLarvae * T.season.reproProtein) * T.colony.larvaProtein * T.colony.proteinCapDays;
-        public static Num SugarCap(ColonyState c) => T.colony.sugarCapBase + c.adults * T.colony.adultSugar * T.colony.sugarCapDays;
+        public static Num SugarCap(ColonyState c) => (T.colony.sugarCapBase + c.adults * T.colony.adultSugar * T.colony.sugarCapDays) * Sp(c).store; // bees keep honey
         /// the males a young queen can meet (T2-3): her colony's and the neighbourhood's, which peak with the breeding season
         public static Num MalesAbout(ColonyState c, Num frac) => Clamp01((c.males + T.males.area * ReproShare(frac)) / T.males.need);
         public static Num WaterCap(ColonyState c) => T.water.capBase + c.adults * T.water.capPerAdult; // T2-1
@@ -51,6 +56,8 @@ namespace Sting.Core
         static readonly (Num from, string name)[] PHASES = { (0, "Founding"), (0.15, "Growth"), (0.55, "Peak"), (0.8, "Collapse") };
         public static string SeasonPhase(Num frac) { var p = PHASES[0]; foreach (var x in PHASES) if (frac >= x.from) p = x; return p.name; }
         public static Num ReproShare(Num frac) => Clamp01((frac - T.season.reproStart) / (T.season.reproFull - T.season.reproStart));
+        /// a honeybee colony raises queens and drones early in the season, and only when crowded (T2-11)
+        public static Num BeeRepro(ColonyState c, Num frac) => frac >= T.hive.swarmFrom && frac < T.hive.swarmTo && c.adults >= T.hive.swarmAdults ? T.hive.reproShare : 0;
 
         /// One step of dtDay in-game days (colony.js colonyStep)
         public static void Step(ColonyState c, Num dtDay, Num physical, bool foraging) => Step(c, dtDay, physical, foraging, 0.3, 1);
@@ -64,6 +71,7 @@ namespace Sting.Core
         public static void Step(ColonyState c, Num dtDay, Num physical, bool foraging, Num frac, Num bio, Num thermal, (Num sugar, Num protein)? avail, (Num heat, Num cook)? hot)
         {
             if (!c.nestAlive) return;
+            var SP = Sp(c);
             Num inside = Max(0, c.adults - physical);
             Num heat = hot.HasValue ? hot.Value.heat : 0, wcap = WaterCap(c);
             // a hot nest with a low store sends some foragers for water instead of food
@@ -74,9 +82,10 @@ namespace Sting.Core
                 var a = T.alloc[c.alloc]; Num wsum = (a.sugar + a.protein + a.pulp) / 3;
                 Num f = Max(0, inside - c.young) * T.colony.forageShare * a.traffic * dtDay; // 'Lie low' sends fewer out (T1-7); the young stay in (T1-13)
                 Num food = f * (1 - divert);
-                c.sugar += food * T.colony.income.sugar * a.sugar / wsum * (avail.HasValue ? avail.Value.sugar : 1);
-                c.protein += food * T.colony.income.protein * a.protein / wsum * (avail.HasValue ? avail.Value.protein : 1);
-                c.pulp += food * T.colony.income.pulp * a.pulp / wsum;
+                c.sugar += food * T.colony.income.sugar * a.sugar / wsum * (avail.HasValue ? avail.Value.sugar : 1) * SP.sugarIn;
+                c.protein += food * T.colony.income.protein * a.protein / wsum * (avail.HasValue ? avail.Value.protein : 1) * SP.proteinIn;
+                if (SP.wood != 0) c.pulp += food * T.colony.income.pulp * a.pulp / wsum; // bees build wax from sugar instead (T2-11)
+                else c.sugar += food * T.colony.income.pulp * a.pulp / wsum * SP.sugarIn;
                 c.water += f * divert * T.water.income;
             }
             if (c.water > wcap) c.water = wcap;
@@ -139,22 +148,29 @@ namespace Sting.Core
             c.young += newWorkers - c.young / (T.colony.youngDays * bio) * dtDay;
             c.gynes += newRepro * T.season.gyneShare; c.males += newRepro * (1 - T.season.gyneShare); c.stats.gynesRaised += newRepro * T.season.gyneShare;
 
-            if (foraging && c.gynes > 0) { Num m = c.gynes * T.season.matePerDay * dtDay; c.gynes -= m; c.mated += m * T.season.mateSuccess * MalesAbout(c, frac); } // T2-3
+            if (foraging && c.gynes > 0 && SP.perennial == 0) { Num m = c.gynes * T.season.matePerDay * dtDay; c.gynes -= m; c.mated += m * T.season.mateSuccess * MalesAbout(c, frac); } // T2-3
 
-            Num late = frac > T.season.collapseFrom ? 1 + T.season.collapseMul * (frac - T.season.collapseFrom) / (1 - T.season.collapseFrom) : 1;
+            Num late = frac > T.season.collapseFrom && SP.perennial == 0 ? 1 + T.season.collapseMul * (frac - T.season.collapseFrom) / (1 - T.season.collapseFrom) : 1;
             Num die = inside * T.colony.adultMortality / bio * late * dtDay;
             c.adults -= die; c.stats.died += die;
             c.males -= c.males * 0.2 * dtDay / bio;
-            if (frac >= T.season.queenDiesAt) c.queenAlive = false;
+            if (frac >= T.season.queenDiesAt && SP.perennial == 0) c.queenAlive = false;
 
-            Num use = Min(c.pulp, T.colony.buildPerDay * dtDay * (1 + inside / 40));
-            c.pulp -= use; c.cells = Min(c.cells + use * T.colony.cellsPerPulp, c.maxCells != 0 ? c.maxCells : Num.MaxValue);
+            Num use;
+            if (SP.wood != 0) { use = Min(c.pulp, T.colony.buildPerDay * dtDay * (1 + inside / 40)); c.pulp -= use; }
+            else
+            { // wax from the store above a reserve (T2-11)
+                use = Min(Max(0, c.sugar - SugarCap(c) * T.hive.waxFrom) / T.hive.waxSugar, T.colony.buildPerDay * dtDay * (1 + inside / 40));
+                if (c.cells >= (c.maxCells != 0 ? c.maxCells : Num.MaxValue)) use = 0;
+                c.sugar -= use * T.hive.waxSugar;
+            }
+            c.cells = Min(c.cells + use * T.colony.cellsPerPulp, c.maxCells != 0 ? c.maxCells : Num.MaxValue);
 
             if (c.queenAlive && c.protein > 0)
             {
                 Num free = Max(0, c.cells - BroodTotal(c));
-                Num lay = Min(free, Min(T.colony.layMax, T.colony.layBase + c.adults * T.colony.layPerAdult) * dtDay);
-                Num r = ReproShare(frac);
+                Num lay = Min(free, Min(T.colony.layMax * SP.lay, (T.colony.layBase + c.adults * T.colony.layPerAdult) * SP.lay) * dtDay);
+                Num r = SP.perennial != 0 ? BeeRepro(c, frac) : ReproShare(frac);
                 c.eggs += lay * (1 - r); c.rEggs += lay * r; c.stats.laid += lay;
             }
             if (c.adults < 0) c.adults = 0;

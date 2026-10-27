@@ -386,7 +386,7 @@ Economy step in Appendix A.4.
 - In spring the player picks which surviving queen continues as the controlled colony. The other surviving queens found **lineage colonies** run by AI. **[Q] Q-10** As built (18.40): up to five are real colonies on trunks near where they wintered.
 - **The line** is the player's founding queen and all colonies descended from her. Game over when the line is extinct.
 
-### 6.8 The growth tree and the three species **[P] D-23** **[T2]** (not built)
+### 6.8 The growth tree and the three species **[P] D-23** **[T0] [T2]** (the species built, 18.47; the tree, the year's turn and the gauge not yet)
 
 The line earns experience, and experience grows a tree. A line that runs a whole year reaches a turning point in spring. With enough experience, the queen it wakes is a hornet queen, and the player plays hornets from then on. With too few stings and too little experience, the game offers the line a try at a honeybee colony. Both are expansion by reuse: a hornet and a honeybee run on the systems already built for wasps and bees, with their own tables.
 
@@ -1116,7 +1116,7 @@ A dragonfly patrols a low loop (0.6–1.4 m) in about half the chunks. It darts 
 
 ### 18.18 The C# core, ported (D-11, R-04)
 
-`core/Sting.Core` is the whole PoC simulation in C#: world generation, weather, bodies and the sting resolver, colony economy, the `Sim` itself (wasps, humans, bees, hunters, rivals, the exterminator, pest control, the yearly cycle, the AI), the network lab with its wire format and plausibility checks, and saves. It is bit-identical to the JS reference: `core/fixtures/parity.txt` holds 23 digests written by `poc/test/parity.mjs` (world, bodies, colony, five whole-game scenarios, a save and restore mid-run, two-peer labs on good and awful links and one well past the window with late-event corrections, a late joiner, a cheater, and a three-peer mesh where the host rules), and the C# runner reproduces every one. The scenario digests cover every sim event and the state and human hashes once a second, so a single differing bit anywhere fails the run.
+`core/Sting.Core` is the whole PoC simulation in C#: world generation, weather, bodies and the sting resolver, colony economy, the `Sim` itself (wasps, humans, bees, hunters, rivals, the exterminator, pest control, the yearly cycle, the AI), the network lab with its wire format and plausibility checks, and saves. It is bit-identical to the JS reference: `core/fixtures/parity.txt` holds 26 digests written by `poc/test/parity.mjs` (world, bodies, colony, eight whole-game scenarios (three of them the species of 18.47), a save and restore mid-run, two-peer labs on good and awful links and one well past the window with late-event corrections, a late joiner, a cheater, and a three-peer mesh where the host rules), and the C# runner reproduces every one. The scenario digests cover every sim event and the state and human hashes once a second, so a single differing bit anywhere fails the run.
 
 Two rules made the port mechanical: the JS sim may use only operations that are exact in IEEE doubles (its own sine, arctangent and rounding, no `Math.round`, `hypot` or `atan2`), and every map whose order can change a result is an insertion-ordered map in C# (`OrderedMap`), every sort is stable, every string sort is ordinal.
 
@@ -1472,6 +1472,51 @@ Any slam startles the people within `scareR` (1.5 m) by `nearPanic`. A `startle`
 
 **Checks.** JS and C# agree: with nothing locked, the dash peaks at 9.5 m/s, covers 5.1 m in a second and is back to cruising after; a second swoop waits for the first to recover; skimming the grass does not land; locked on a flower it lands in 0.28 s; locked on a seated person it slams on and their panic goes 0.00 to 0.27 with a notice; locked on a caterpillar it catches it in 0.27 s; locked on a web it dashes from 0.8 to 2.8 m away.
 
+### 18.47 The three species as built (6.8, T2-9 to T2-11)
+
+**One code path.** `T.species` holds a row per species: multipliers over the wasp's values and flags for what differs in kind. Every wasp carries `sp`; the player's line is `settings.species`, picked on the start screen ("Play as"). The PoC runs `progression: 'open'`, so all three can be picked from the start. `progression` is a world rule, in the rules hash and the world tag. `species` is the player's choice inside it, so it is not in the hash. The neighbourhood's rival colonies stay yellowjackets. A colony of the line keeps its species. Saves keep the line's species (C# save version 25); old saves load as wasps.
+
+**Hornets** (*Vespa crabro*, Appendix C).
+- **Body:** 1.7 times the size and a swat radius 6 mm larger. 15% faster, 30% more energy per second of flight, and they feel 65% of the wind.
+- **Colony:** starts at 0.35 of a wasp colony, lays at 0.3, and sends half as many workers out at once.
+- **Sting:** pain is 1.8. A hornet's sting scales the panic it adds and the alert points it earns; the plausibility checks reject any `pain` over 2. People notice a buzzing hornet 1.6 times sooner.
+- **Night:** hornets forage after dark (rain still grounds them). Each house has a porch light on one long wall, derived from the frozen houses, so old worlds have them too. Lights burn from dusk to dawn with three moths circling each.
+  - A hornet takes a moth for 1 protein; it is back 40 seconds later.
+  - AI hornets smell a lit porch from afar.
+  - Flies settle for the night for every species.
+- **Wasps as prey:** E at a rival yellowjacket in the air kills it and carries it home (2 protein, death cause "taken by a hornet"). AI hornets hunt them by sight. In a wrestle a hornet adds 1.5 to its score and keeps the loser.
+
+**Honeybees** (*Apis mellifera*).
+- **Colony:** starts 2.5 times larger, with room for 2.5 times the cells. Lays 1.5 times as fast and keeps ten times the sugar (honey). Cells are wax, built from honey while the store is over 30% of its cap.
+- **Food:** protein is pollen. A worker standing on a flower in bloom packs a load in 4 seconds; AI pollen foragers wait at the flower until it is packed. Bees take no prey and chew no pulp. They raid no wasp nest and take no bait. Robbing a feral hive takes honey only.
+- **Barbed sting:** a worker that stings a person, in the open or under clothing, leaves the sting in. On release it pumps in the rest (a full sting's pain), and the bee dies ("left its sting in a person"). The queen can sting again. Bees are noticed later (0.6) and hurt a little less (0.9). Five guards keep the entrance.
+- **The year:** the colony does not collapse in autumn and its queen does not die.
+  - Between 15% and 50% of the season a crowded colony (120 bees or more) raises 8% of its eggs as queens and drones.
+  - With a daughter queen out, it swarms: the old queen leaves with 60% of the workers and 30% of the honey and founds a colony of the line on a nearby tree, run by the AI. The daughter keeps the hive.
+  - At the season's end every colony of the line clusters on its honey: 0.05 sugar per bee per day of winter. What the store covers lives, less 30%. A cluster under 15 dies.
+  - Spring goes on in the same hive. If yours died, the player takes the strongest of the line's.
+- **Defence:** another colony's wasp that touches one of the line's bees is balled.
+  - Bees within 5 cm, and guards that reach it, heat it 0.5 °C per bee per second until it cooks at 46 °C.
+  - An AI wasp breaks out at 0.08% a tick; the player's presses work as at a feral hive (9.2).
+  - Rival foragers rob the player's hive, by its scent or by memory (30% of a rival nest's foragers within 120 m, on any day). Each robber takes 1 honey and a larva and sends the guards after it.
+
+**Network.** Nest events carry the species, so other players' wasps are drawn as theirs. Fight events carry the hornet's weight. Sting and deepen events carry their pain, which the checks bound. State packets know the new loads (moth, pollen, wasp).
+
+**Game.** Hornets are red-brown and larger, with the chase camera further back, and build tan paper nests. Bees are brown and furry, and their comb is wax-coloured. Lamps glow on houses at night, the nearest one lights its yard, and moths circle. Toasts tell pollen, swarms and robbers. The HUD names the species' workers, drones and pollen foragers.
+
+**Checks.** JS and C# agree on every figure:
+- **Starting colonies:** 30 wasps, 10.5 hornets, 75 bees.
+- **Cruise speed:** 3.67, 3.37 and 3.16 m/s.
+- **Stings:** a hornet's jab counts 1.80 alert points to a wasp's 1.00. A bee's jab becomes a full sting and the bee dies. A sting claiming pain 3 is rejected.
+- **Hornets at night:** an average of 4.0 hornets out against 0.6 wasps; they take moths at the lights. At 22:00, E at a moth takes it, and E at a rival yellowjacket in the air takes that.
+- **Bees:**
+  - They take no prey.
+  - In a minute of play (twelve in-game hours), 26 pollen loads bring 26 protein home.
+  - A rival wasp sent to the hive robs it, is balled and is cooked.
+  - A ten-day bee season swarms once, winters twice and goes on in the same hive.
+  - A save keeps the species.
+- **Parity:** three new digests (a hornet night, a bee season, bee stings) match bit for bit: 26 in all. 346 properties hold in both builds, and the wasp digests did not move.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1480,7 +1525,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (97 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), and the swoop (18.46). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (98 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), and the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony. In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -1526,9 +1571,9 @@ Agreed 2026-10-27: Tier 2 is built on the current stack in the order that surviv
 | T2-6 | **Built (18.42, 18.44).** Feature modifiers that need the bigger generator: biome mix, town density, terrain | 4.8 | L | terrain touches all collision |
 | T2-7 | The Reflex skill tree; now the Flight branch of the growth tree (T2-13) | 7.8 | M | mostly UI and progression: after the Unity move |
 | T2-8 | Colonies of thousands of wasps out at once | 11.12 | L | engine performance: after the Unity move |
-| T2-9 | Species as data: a species table over the one wasp code path, species in the colony record and saves, the `progression` world setting with `open` in test builds and a species pick on the start screen | 6.8 | M | sim; first, everything below needs it |
-| T2-10 | The hornet line: a heavier body, a small colony, yellowjackets and bees as prey, night flight with porch lights | 6.8 | L | sim and generator |
-| T2-11 | The honeybee colony: a perennial colony, honey stores and the winter cluster, swarming, the barbed sting, balling as the player's defence | 6.8, 9.1, 9.2 | L | sim; reuses hives and balling |
+| T2-9 | **Built (18.47).** Species as data: a species table over the one wasp code path, species in the colony record and saves, the `progression` world setting with `open` in test builds and a species pick on the start screen | 6.8 | M | sim; first, everything below needs it |
+| T2-10 | **Built (18.47).** The hornet line: a heavier body, a small colony, yellowjackets and bees as prey, night flight with porch lights | 6.8 | L | sim and generator |
+| T2-11 | **Built (18.47).** The honeybee colony: a perennial colony, honey stores and the winter cluster, swarming, the barbed sting, balling as the player's defence | 6.8, 9.1, 9.2 | L | sim; reuses hives and balling |
 | T2-12 | Experience and the year's turn: experience and stabs from sim events, the bars, the spring offer; multi-colony play (several colonies held, the rest on AI, switching in the colony view) with the player gauge: the player's measured rates set how AI colonies earn and play, capped at the player's level | 6.8 | L | sim; lineage-colony AI does the managing |
 | T2-13 | The growth tree: branches, node effects as colony parameters, the colony-view screen (takes in T2-7) | 6.8, 7.8 | M | node effects sim; the screen after the Unity move |
 

@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, humanParts, malesAbout, chunkOf, toLocal, dirToWorld, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, pickTarget, assistPilot, swoopPilot, targetPos, targetLabel, CMD_FIELDS,
+  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, pickTarget, assistPilot, swoopPilot, targetPos, targetLabel, speciesAllowed, isDaylight, CMD_FIELDS,
 } from '../sim/index.js';
 import { applyTuning, parseTuning, tuningHash, tuningLeaves, TUNE } from '../sim/tunefile.js';
 
@@ -1813,6 +1813,64 @@ function seated(sim, pred) {
   ok(top.g > 0 && wd(sh, top) > wd(sh, bottom) && wd(sf, top) === wd(sf, bottom), `the wind is stronger on a rise (${wd(sh, top).toFixed(3)} against ${wd(sh, bottom).toFixed(3)} m/s at the foot of it)`);
   const r = restore(snapshot(sh));
   ok(r.settings.terrain === 2 && worldTag({ terrain: 2 }) === 'hilly' && worldTag({ terrain: 1 }) === 'rolling' && rulesHash({ terrain: 1 }) !== rulesHash({}), 'terrain is a world setting: kept in saves, in the world tag and in the rules peers compare');
+}
+
+// 49. The three species (GDD 6.8, T2-9 to T2-11): wasps, hornets and honeybees on the one code path
+{
+  const mk = (sp, o = {}) => new Sim({ seed: 1234, birds: false, species: sp, ...o });
+  const W = mk('wasp'), H = mk('hornet'), B = mk('bee');
+  ok(W.species === 'wasp' && H.wasp.sp === 'hornet' && B.colony.species === 'bee' && Math.abs(H.colony.adults - 30 * T.species.hornet.start) < 1e-9 && Math.abs(B.colony.adults - 30 * T.species.bee.start) < 1e-9 && B.colony.maxCells > W.colony.maxCells,
+    `a line starts as its species: ${W.colony.adults} wasps, ${H.colony.adults.toFixed(1)} hornets, ${B.colony.adults} bees with room for ${B.colony.maxCells} cells`);
+  ok(speciesAllowed({ progression: 'open' }).join() === 'wasp,hornet,bee' && speciesAllowed({ progression: 'earned' }).join() === 'wasp' && speciesAllowed({ progression: 'fixed:hornet' }).join() === 'hornet' && rulesHash({ progression: 'earned' }) !== rulesHash({}),
+    'progression is a world rule: open lets a line start as any species, earned only as wasps, fixed as one');
+  // flight
+  const cruise = (sp) => { const s = mk(sp); place(s.wasp, { x: 5, y: 2, z: 5 }); let v = 0; run(s, 120, (sim) => { v = Math.hypot(sim.wasp.vx, sim.wasp.vz); return idle({ mz: 100, yawQ: 0 }); }); return { v, e: 1 - s.wasp.energy }; };
+  const cw = cruise('wasp'), ch = cruise('hornet'), cb = cruise('bee');
+  ok(ch.v > cw.v && cw.v > cb.v && ch.e > cw.e && cw.e > cb.e, `a hornet flies faster and burns more, a bee slower and less (${ch.v.toFixed(2)}, ${cw.v.toFixed(2)}, ${cb.v.toFixed(2)} m/s)`);
+  // stings
+  const sting = (sp) => {
+    const s = mk(sp); for (const h of s.active) h.tr = { ...h.tr, style: Style.Freezer };
+    const hm = seated(s, () => true), fa = hm.parts.sit.find((q) => q.name === 'ForearmR'), e0 = s.cs(hm.chunk).esc, id = s.wasp.id;
+    place(s.wasp, toWorld(hm, { x: (fa.a.x + fa.b.x) / 2, y: (fa.a.y + fa.b.y) / 2 + fa.r + 0.008, z: (fa.a.z + fa.b.z) / 2 }));
+    const ev = run(s, 10, () => idle({ sting: 1 })); ev.push(...run(s, 60));
+    return { esc: s.cs(hm.chunk).esc - e0, deepen: count(ev, 'deepen'), died: (ev.find((e) => e.type === 'waspDied' && e.id === id) || {}).cause };
+  };
+  const sw = sting('wasp'), sh = sting('hornet'), sb = sting('bee');
+  ok(Math.abs(sw.esc - 1) < 1e-9 && Math.abs(sh.esc - T.species.hornet.pain) < 1e-9 && !sw.died && !sh.died, `a hornet's jab counts ${sh.esc.toFixed(2)} alert points to a wasp's ${sw.esc.toFixed(2)}`);
+  ok(sb.died === 'left its sting in a person' && sb.deepen === 1, `a honeybee's barbed sting stays in, pumps the rest of its venom (a full sting) and the bee dies (${sb.died})`);
+  let bad = null; { const s = mk('wasp'), hm = seated(s, () => true); bad = s._implausible({ type: 'sting', tick: s.tick, commit: s.tick + T.net.commitTicks, seq: 1, peer: 1, humanHex: hm.hex, swats: [], panicGain: 0.5, pain: 3, waspId: 1 }); }
+  ok(bad === 'pain out of range', `a sting claiming more pain than any species is rejected (${bad})`);
+  // hornets after dark
+  const nightOut = (sp) => {
+    const s = new Sim({ seed: 1234, species: sp, dayMinutes: 2 }); let out = 0, n = 0;
+    const ev = run(s, 60 * 60 * 2 * 1.2, (sim) => { if (sim.wasp) place(sim.wasp, { x: sim.nest.entrance.x, y: sim.nest.entrance.y + 0.3, z: sim.nest.entrance.z }); if (!isDaylight(sim.minute)) { n++; out += sim._own().length - 1; } return idle(); });
+    return { out: out / Math.max(1, n), moths: ev.filter((e) => e.type === 'caught' && e.kind === 'moth').length };
+  };
+  const nw = nightOut('wasp'), nh = nightOut('hornet');
+  ok(nh.out > 2 && nw.out < 1 && nh.moths > 0, `hornets forage at night (${nh.out.toFixed(1)} out on average against ${nw.out.toFixed(1)} wasps) and take ${nh.moths} moths at the porch lights`);
+  { const s = mk('hornet'), md = s.minute % 1440; s.clockOffset += (s.minute - md + 1320 - s.minute) * s.tpm; s._minute(clockMinutes(s.tick + s.clockOffset, s.settings));
+    let mo = null; for (const r of s.activeChunks) { const m = s.mothsIn(r)[0]; if (m) { mo = m; break; } }
+    place(s.wasp, { x: mo.x, y: mo.y, z: mo.z }); const ev = run(s, 2, (sim, i) => idle({ act: i === 0 ? Act.Interact : 0 }));
+    ok(s.lightsIn(s.activeChunks.find((r) => s.lightsIn(r).length)).length > 0 && ev.some((e) => e.type === 'caught' && e.kind === 'moth') && s.wasp.carry.what === 'moth', 'at 22:00 a porch light burns with moths round it, and E at one takes it'); }
+  { const s = mk('hornet'); run(s, 600); const rv = s.wasps.find((x) => s.isRival(x) && x.state === 'fly');
+    place(s.wasp, { x: rv.x + 0.01, y: rv.y, z: rv.z }); const ev = run(s, 2, (sim, i) => idle({ act: i === 0 ? Act.Interact : 0 }));
+    ok(ev.some((e) => e.type === 'waspDied' && e.cause === 'taken by a hornet') && s.wasp.carry.what === 'wasp', 'a hornet takes a rival yellowjacket on the wing and carries it home as prey'); }
+  // bees: pollen, no prey, the hive's defence, the year
+  { const s = mk('bee'); const cat = s.records.get('0,0').content.caterpillars[0]; if (cat) { place(s.wasp, cat); const ev = run(s, 2, (sim, i) => idle({ act: i === 0 ? Act.Interact : 0 })); ok(!ev.some((e) => e.type === 'caught') && !s.wasp.carry, 'a bee takes no prey'); } }
+  { const s = new Sim({ seed: 1234, species: 'bee' });
+    const ev = run(s, 60 * 60, (sim) => { if (sim.wasp) place(sim.wasp, { x: sim.nest.entrance.x, y: sim.nest.entrance.y + 0.3, z: sim.nest.entrance.z }); return idle(); });
+    ok(count(ev, 'pollen') > 5 && s.colony.stats.deposited.protein > 5 && s.colony.pulp === T.colony.start.pulp, `bee foragers pack pollen at the flowers and bring it home as protein (${count(ev, 'pollen')} loads, ${s.colony.stats.deposited.protein.toFixed(1)} protein); no pulp is gathered`); }
+  { const s = mk('bee'), park = (sim) => { if (sim.wasp) place(sim.wasp, { x: sim.nest.entrance.x + 2, y: 1.5, z: sim.nest.entrance.z }); return idle(); };
+    run(s, 2400, park);
+    const rk = s.activeChunks.find((r) => r.content.rival), rv = s._spawnWasp(false), e = s.nest.entrance, h0 = s.colony.sugar;
+    rv.colony = chunkKey(rk.cx, rk.cz); rv.sp = 'wasp'; rv.role = 'sugar'; rv.ai.mode = 'outbound'; rv.ai.target = { kind: 'phive', key: s.nest.key, i: 0, c: 999 }; place(rv, { x: e.x + 0.4, y: e.y, z: e.z });
+    const ev = run(s, 1200, park), mine = ev.filter((x) => x.id === rv.id);
+    ok(mine.some((x) => x.type === 'balled') && mine.some((x) => x.type === 'waspDied' && x.cause === 'cooked by bees'), `a rival wasp at the hive is balled by the guards and cooked (${mine.map((x) => x.type).join(', ')}; honey ${h0.toFixed(1)} -> ${s.colony.sugar.toFixed(1)})`); }
+  { const s = new Sim({ seed: 99, dayMinutes: 0.4, seasonDays: 10, species: 'bee' }), n0 = { ...s.nest.entrance };
+    const ev = run(s, 30000, () => idle());
+    ok(count(ev, 'swarm') >= 1 && count(ev, 'winter') >= 1 && count(ev, 'spring') >= 1 && !s.extinct && s.season.n >= 2 && s.nest.entrance.x === n0.x && s.nest.entrance.z === n0.z && s.colony.queenAlive,
+      `a bee colony swarms in early summer (${count(ev, 'swarm')}), winters as a cluster on its honey and goes on in the same hive (season ${s.season.n}, ${s.colony.adults.toFixed(0)} bees)`); }
+  { const s = mk('hornet'); run(s, 100); const r = restore(snapshot(s)); ok(r.species === 'hornet' && r.colony.species === 'hornet' && r.wasp.sp === 'hornet', 'a save keeps the line\'s species'); }
 }
 
 // Tuning as data (GDD 13, T1-22): one plain-text file feeds both sims

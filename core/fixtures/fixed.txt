@@ -14,6 +14,9 @@ sim.full e6a593f7
 sim.idle7 92bca189
 sim.season d05e9ef0
 sim.hot 2dae5e8f
+sim.hornet b24e136a
+sim.bee 3b77fb45
+sim.beesting e110b53b
 sim.restored 239290a5
 net.good c63c88c8
 net.awful 85bd23df

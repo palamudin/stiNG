@@ -54,6 +54,10 @@ namespace Sting.Core.Tests
             Run("idle7", new Settings { seed = 7 }, 12000, () => sim => { var c = Bots.IdleCmd(); c.alloc = sim.tick < 4000 ? 0 : sim.tick < 8000 ? 2 : 4; return c; });
             Run("season", new Settings { seed = 99, dayMinutes = 0.4, seasonDays = 10 }, 30000, () => sim => Bots.IdleCmd());
             Run("hot", new Settings { seed = 1234, escalation = 6, reaction = 1.5 }, 20000, () => Bots.StingBot("full", h => true, 40));
+            // the species (GDD 6.8): hornets stinging through a night, a honeybee season with a swarm and a winter, bees that die stinging
+            Run("hornet", new Settings { seed = 1234, species = "hornet" }, 9000, () => Bots.StingBot("full", null, 60));
+            Run("bee", new Settings { seed = 99, dayMinutes = 0.4, seasonDays = 10, species = "bee" }, 30000, () => sim => Bots.IdleCmd());
+            Run("beesting", new Settings { seed = 1234, species = "bee" }, 7200, () => Bots.StingBot("jab"));
             // a save restored mid-run must carry on exactly like the run that was never saved
             {
                 string Go(bool save)

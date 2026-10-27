@@ -14,6 +14,7 @@ namespace Sting.Core
 
         void StepWasp(Wasp w, Cmd cmd, int edge, bool driven)
         {
+            if (w.spent) { Die(w, "left its sting in a person", null); return; } // a bee that stung a person (T2-11)
             if (driven && w.caste != "queen" && w.colony == "own" && minute - w.born > LifespanMinutes(w) && (w.state == "fly" || w.state == "landed"))
             {
                 Die(w, "old age", null);
@@ -154,6 +155,7 @@ namespace Sting.Core
                 if (w.caste == "queen") top *= T.queen.speedMul;
                 else if (w.caste == "male") top *= T.males.speedMul;
                 if (rain) top *= T.weather.rainSpeedMul;
+                top *= Spw(w).speed; // a hornet is quicker, a bee slower (GDD 6.8)
                 // the wasp flies in moving air (GDD 5.3): airspeed capped at its top speed plus the wind; no input leans into the
                 // wind and holds its place, full input flies the course at top airspeed (see sim.js)
                 var wd = Drift(w); Num thr = Min(1, Sqrt(dx * dx + dy * dy + dz * dz));
@@ -171,6 +173,7 @@ namespace Sting.Core
                 if (NearCitronella(w)) drain *= T.esc.citronellaDrain;
                 Num air0 = Temperature;
                 if (air0 > T.extreme.heatFrom) drain *= 1 + T.extreme.heatDrain * (air0 - T.extreme.heatFrom); // flying in heat costs more (T2-2)
+                drain *= Spw(w).drain;
                 w.energy -= drain;
                 if (w.energy < 0) { w.energy = 0; Emit("exhausted", ("id", w.id)); }
                 // a downpour knocks a wasp in the open out of the air (T2-2)
@@ -212,7 +215,7 @@ namespace Sting.Core
         {
             var wind = Wind; int t = tick;
             Num gust = 1 + WeatherToday.gust * DSin((Num)t * 0.031) * DSin((Num)t * 0.0137 + 1); // hard in a storm (T2-2)
-            Num k = T.wind.felt * gust * Clamp01(w.y / T.wind.refHeight);
+            Num k = T.wind.felt * gust * Clamp01(w.y / T.wind.refHeight) * Spw(w).felt;
             if (settings.terrain != 0) k *= 1 + T.terrain.exposure * Max(0, Ground(w.x, w.z)); // windier on a rise (T2-6)
             return new V3(wind.x * k, 0, wind.z * k);
         }
@@ -433,7 +436,8 @@ namespace Sting.Core
             });
             var sw = SwatsOut(plan, hm, comps);
             Emit("stingContact", ("waspId", w.id), ("driven", driven), ("humanHex", hm.hex), ("zone", zone), ("first", !stung.Has(hm.hex)), ("under", under), ("swats", sw), ("contactTick", tick));
-            Publish(new NetEv { type = "sting", waspId = w.id, driven = driven, humanHex = hm.hex, zone = zone, under = under, swats = sw, panicGain = plan.panicGain, flee = plan.flee, sx = w.x, sz = w.z });
+            Num pain = Spw(w).pain; // a hornet's sting hurts more (GDD 6.8)
+            Publish(new NetEv { type = "sting", waspId = w.id, driven = driven, humanHex = hm.hex, zone = zone, under = under, swats = sw, panicGain = Min(1, plan.panicGain * pain), pain = pain, flee = plan.flee, sx = w.x, sz = w.z });
         }
 
         void Attached(Wasp w, Cmd cmd, bool driven)
@@ -447,12 +451,19 @@ namespace Sting.Core
             if (holding && held >= T.sting.fullTicks && !a.deepened)
             {
                 a.deepened = true;
-                Num extra = (T.resolve.fullPain - T.resolve.jabPain) * Body.ZONES[a.zone].sens * hm.tr.panicSusceptibility;
-                w.venom = Max(0, w.venom - T.venom.deepen);
-                stats.full++;
-                Publish(new NetEv { type = "deepen", humanHex = hm.hex, zone = a.zone, extra = extra, sx = w.x, sz = w.z });
+                Deepen(w, hm, a);
             }
             if ((!holding && held >= T.sting.jabTicks) || a.deepened) Detach(w, null);
+        }
+
+        /// the sting driven home: more venom, more pain (GDD 7.4)
+        void Deepen(Wasp w, Human hm, Attach a)
+        {
+            Num pain = Spw(w).pain;
+            Num extra = (T.resolve.fullPain - T.resolve.jabPain) * Body.ZONES[a.zone].sens * hm.tr.panicSusceptibility * pain;
+            w.venom = Max(0, w.venom - T.venom.deepen);
+            stats.full++;
+            Publish(new NetEv { type = "deepen", humanHex = hm.hex, zone = a.zone, extra = extra, pain = pain, sx = w.x, sz = w.z });
         }
 
         void Detach(Wasp w, string why)
@@ -463,6 +474,8 @@ namespace Sting.Core
                 var n = Body.DirToWorld(hm.F, a.n);
                 w.vx = n.x * T.wasp.pushOff; w.vy = n.y * T.wasp.pushOff + 0.2; w.vz = n.z * T.wasp.pushOff;
             }
+            // a honeybee's barbed sting stays in the skin and pumps the rest of its venom in; the bee dies of it (T2-11)
+            if (a != null && Spw(w).barbed != 0 && w.caste != "queen") { if (hm != null && !a.deepened) Deepen(w, hm, a); w.spent = true; }
             w.attach = null;
             w.state = "fly";
             Emit("detach", ("id", w.id), ("why", why));
@@ -475,47 +488,48 @@ namespace Sting.Core
         {
             if (w.caste == "male") { var mc = w.contact; if (mc != null && w.state == "fly") PerchOn(w, mc.humanHex, mc.zone, mc.surf, mc.n, mc.part); return; } // a male does no work (T2-3)
             if (w.caste == "queen" && !colony.sited) { var site = SiteNear(w); if (site != null) { FoundNest(w, site); return; } }
-            if (w.caste != "queen" && SeasonFrac >= T.season.reproStart && colony.mated + colony.gynes >= 1)
+            if (w.caste != "queen" && Spw(w).perennial == 0 && SeasonFrac >= T.season.reproStart && colony.mated + colony.gynes >= 1)
             {
                 var hs = HiberNear(w);
                 if (hs != null) { hiberPick = new HiberPick { season = season.n, x = hs.x, z = hs.z, kind = hs.kind }; Emit("hiberScouted", ("kind", hs.kind), ("q", hs.q)); return; }
             }
             var hb = w.carry == null && w.caste != "queen" ? HiveEntranceNear(w) : null;
             if (hb != null) { StartRob(w, hb.Value.key, hb.Value.h); return; }
-            var rv = RivalNestNear(w);
+            var SP = Spw(w);
+            var rv = SP.hunts != 0 ? RivalNestNear(w) : null; // bees raid no wasp nest (T2-11)
             if (rv != null && w.carry == null) { Raid(w, rv); return; }
-            var pnest = w.carry == null ? PeerNestNear(w) : null;
+            var pnest = w.carry == null && SP.hunts != 0 ? PeerNestNear(w) : null;
             if (pnest != null) { RaidPeer(w, pnest.Value.peer); return; }
             var c = w.contact;
             if (c != null && c.opening >= 0 && w.carry == null) { EnterUnder(w, c.humanHex, c.opening); return; }
             if (c != null && w.state == "fly") { PerchOn(w, c.humanHex, c.zone, c.surf, c.n, c.part); return; }
             var prey = w.carry == null ? PreyNear(w) : null; // one load at a time (T1-20)
             if (prey != null) { Catch(w, prey); return; }
-            if (w.carry == null && BaitNear(w) != null) { TakeBait(w); return; }
+            if (w.carry == null && SP.hunts != 0 && BaitNear(w) != null) { TakeBait(w); return; }
             var wet = w.carry == null ? WaterNear(w) : null; // T2-1
             if (wet != null) { w.state = "chewing"; w.chew = 0; w.chewAt = new WoodSpot { key = wet.Value.key, i = wet.Value.i, water = true }; w.vx = w.vy = w.vz = 0; Emit("drinkStart", ("id", w.id)); return; }
-            var wood = w.carry == null ? WoodNear(w) : null;
+            var wood = w.carry == null && SP.wood != 0 ? WoodNear(w) : null;
             if (wood != null) { w.state = "chewing"; w.chew = 0; w.chewAt = wood; w.vx = w.vy = w.vz = 0; Emit("chewStart", ("id", w.id)); return; }
             if (w.carry != null) Emit("carrying", ("kind", w.carry.kind));
         }
 
         internal void Hints(Wasp w)
         {
-            var c = w.contact;
+            var c = w.contact; var SP = Spw(w);
             var pn = w.carry == null ? PreyNear(w) : null;
             hint = new Hint
             {
                 opening = c != null && c.opening >= 0 ? c.openingKey : null,
                 prey = pn?.kind,
-                bait = w.carry == null && BaitNear(w) != null,
-                wood = w.carry == null && c == null && WoodNear(w) != null,
+                bait = w.carry == null && SP.hunts != 0 && BaitNear(w) != null,
+                wood = w.carry == null && c == null && SP.wood != 0 && WoodNear(w) != null,
                 water = w.carry == null && c == null && WaterNear(w) != null,
                 nest = D2(w, nest.entrance) < 0.4 * 0.4,
                 site = w.caste == "queen" && !colony.sited ? SiteNear(w)?.type : null,
-                rival = w.carry == null && RivalNestNear(w) != null,
-                raid = w.carry == null && w.caste == "worker" ? PeerNestNear(w)?.peer : null,
+                rival = w.carry == null && SP.hunts != 0 && RivalNestNear(w) != null,
+                raid = w.carry == null && SP.hunts != 0 && w.caste == "worker" ? PeerNestNear(w)?.peer : null,
                 hive = w.carry == null && w.caste != "queen" && HiveEntranceNear(w) != null,
-                hiber = w.caste != "queen" && SeasonFrac >= T.season.reproStart && colony.mated + colony.gynes >= 1 ? HiberNear(w)?.kind : null,
+                hiber = w.caste != "queen" && SP.perennial == 0 && SeasonFrac >= T.season.reproStart && colony.mated + colony.gynes >= 1 ? HiberNear(w)?.kind : null,
             };
         }
 
@@ -580,10 +594,14 @@ namespace Sting.Core
         PreyHit PreyNear(Wasp w) => PreyNear(w, T.prey.catchDist);
         PreyHit PreyNear(Wasp w, Num reach)
         {
-            Num r2 = reach * reach;
+            Num r2 = reach * reach; var SP = Spw(w);
+            if (SP.hunts == 0) return null; // bees take no prey (T2-11)
+            // a hornet takes another colony's wasp on the wing (T2-10)
+            if (SP.fight > 0) foreach (var x in wasps) if (IsRival(x) && Spw(x).fight < SP.fight && (x.state == "fly" || x.state == "landed") && D2(w, x.P) <= r2) return new PreyHit { kind = "wasp", id = x.id, protein = T.moths.waspProtein };
             foreach (var rec in activeChunks)
             {
                 if (!Near(rec, w.x, w.z)) { CS(rec.key); continue; } // the JS creates chunk state here, and the state hash sees it
+                foreach (var mo in MothsIn(rec)) if (D2(w, mo.p) <= r2) return new PreyHit { kind = "moth", key = rec.key, i = mo.i, protein = T.moths.protein };
                 var c = rec.content; string key = rec.key; var st = CS(key);
                 for (int i = 0; i < c.flies.Count; i++)
                 {
@@ -614,11 +632,21 @@ namespace Sting.Core
 
         void Catch(Wasp w, PreyHit p)
         {
+            if (p.kind == "wasp")
+            { // killed and carried off, not a pickup anyone else could make
+                var x = WaspById(p.id);
+                if (x != null) Die(x, "taken by a hornet", null);
+                w.carry = new Carry { kind = "protein", amount = p.protein, what = "wasp" };
+                stats.caught++;
+                Emit("caught", ("id", w.id), ("kind", "wasp"));
+                return;
+            }
             var st = CS(p.key);
             if (p.kind == "fly") st.caughtFly[p.i] = tick + T.prey.flyRespawnTicks;
             else if (p.kind == "caterpillar") st.caughtCat[p.i] = 1;
             else if (p.kind == "carrion") { st.carrion ??= new Dictionary<int, int>(); st.carrion[p.i] = (st.carrion.TryGetValue(p.i, out var cn) ? cn : 0) + 1; }
             else if (p.kind == "meat") { st.meat ??= new Dictionary<int, int>(); st.meat[p.i] = (st.meat.TryGetValue(p.i, out var mn) ? mn : 0) + 1; }
+            else if (p.kind == "moth") (st.caughtMoth ??= new Dictionary<int, long>())[p.i] = tick + T.moths.respawnTicks;
             else
             {
                 if (!st.beeLost.TryGetValue(p.hive, out var l)) st.beeLost[p.hive] = l = new Dictionary<int, int>();
@@ -774,6 +802,7 @@ namespace Sting.Core
         {
             Num d2max = T.energy.feedDist * T.energy.feedDist;
             if (driven) feeding = false;
+            if (Spw(w).pollen != 0 && w.carry == null && w.caste == "worker") Pollen(w, driven, d2max);
             foreach (var rec in activeChunks)
             {
                 if (!Near(rec, w.x, w.z)) continue;
@@ -843,6 +872,25 @@ namespace Sting.Core
                 foreach (var s in FruitIn(rec)) if (FeedAt(w, driven, s.x, s.y, s.z, s.rate, s.kind, d2max, key)) return;
             }
             w.ai.atFood = null;
+        }
+
+        /// a bee at a flower in bloom packs pollen into its leg baskets: a load of protein after a few seconds (T2-11)
+        void Pollen(Wasp w, bool driven, Num d2max)
+        {
+            foreach (var rec in activeChunks)
+            {
+                if (!Near(rec, w.x, w.z)) continue;
+                var fl = rec.content.flowers;
+                for (int i = 0; i < fl.Count; i++)
+                {
+                    var f = fl[i];
+                    bool onHead = w.state == "landed" && Sq(w.x - f.x) + Sq(w.y - f.y) + Sq(w.z - f.z) <= Sq(T.land.headR + T.wasp.radius + 0.006);
+                    if ((!onHead && Sq(w.x - f.x) + Sq(w.y - f.y - 0.02) + Sq(w.z - f.z) > d2max) || !InBloom(rec, i)) continue;
+                    w.pollenT++;
+                    if (w.pollenT >= T.hive.pollenSecs * 60) { w.pollenT = 0; w.carry = new Carry { kind = "protein", amount = T.hive.pollenLoad, what = "pollen" }; Emit("pollen", ("id", w.id), ("driven", driven)); }
+                    return;
+                }
+            }
         }
 
         bool FeedAt(Wasp w, bool driven, Num x, Num y, Num z, Num rate, string kind, Num d2max, string key)
@@ -933,7 +981,7 @@ namespace Sting.Core
             var st = CS(r.key); st.robbed ??= new Dictionary<int, int>();
             st.robbed[r.h] = (st.robbed.TryGetValue(r.h, out var n) ? n : 0) + 1;
             w.energy = 1; w.ai.cargo = Max(w.ai.cargo, T.feral.honeyCargo);
-            w.carry = new Carry { kind = "protein", amount = T.feral.broodProtein, what = "bee brood" };
+            if (Spw(w).hunts != 0) w.carry = new Carry { kind = "protein", amount = T.feral.broodProtein, what = "bee brood" }; // a robbing bee takes only honey (T2-11)
             Pickup(w, new NetEv { type = "caught", key = r.key, what = "honey", i = r.h });
             stats.caught++;
             Emit("robbed", ("id", w.id), ("driven", driven), ("key", r.key), ("h", r.h));
@@ -986,7 +1034,42 @@ namespace Sting.Core
             return frac >= T.eco.catFrom + j && frac < T.eco.catTo + j;
         }
         public Num FlyShare() => Clamp(T.eco.flyBase + T.eco.flySlope * Clamp(SeasonFrac, 0, 1), 0, 1);
-        public bool FlyActive(ChunkRec rec, int i) => HSeq((long)(seed & 0xffffffffUL), rec.cx, rec.cz, i, day, 973) < FlyShare();
+        public bool FlyActive(ChunkRec rec, int i) => IsDaylight(minute) && HSeq((long)(seed & 0xffffffffUL), rec.cx, rec.cz, i, day, 973) < FlyShare(); // flies settle for the night
+        /// porch lights (T2-10): one on each house, on a long wall at the middle, burning from dusk to dawn; derived from
+        /// the frozen houses, so old worlds have them; moths circle each one, and a hornet takes them
+        public List<PorchLight> LightsIn(ChunkRec rec)
+        {
+            if (rec.lights != null) return rec.lights;
+            long sd = (long)(seed & 0xffffffffUL); var list = new List<PorchLight>();
+            var sheds = rec.content.sheds;
+            for (int si = 0; si < sheds.Count; si++)
+            {
+                var sh = sheds[si];
+                if (!sh.house) continue;
+                Num side = HSeq(sd, rec.cx, rec.cz, si, 991) < 0.5 ? -1 : 1; bool alongX = sh.hw >= sh.hd;
+                Num nx = alongX ? 0 : side, nz = alongX ? side : 0;
+                list.Add(new PorchLight { si = si, x = sh.x + nx * ((alongX ? 0 : sh.hw) + T.moths.@out), y = T.moths.height, z = sh.z + nz * ((alongX ? sh.hd : 0) + T.moths.@out), nx = nx, nz = nz });
+            }
+            rec.lights = list;
+            return list;
+        }
+        public bool Lit() => !IsDaylight(minute);
+        public bool Lit(long m) => !IsDaylight(m);
+        /// where moth k of a light is
+        public static V3 MothPos(PorchLight l, int k, long tick)
+        {
+            Num a = (Num)tick * 0.045 * (1 + 0.25 * k) + k * 2.1;
+            return new V3(l.x + l.nx * T.moths.orbit * 0.6 + T.moths.orbit * DCos(a), l.y + 0.12 * DSin((Num)tick * 0.07 + k), l.z + l.nz * T.moths.orbit * 0.6 + T.moths.orbit * DSin(a));
+        }
+        public List<Moth> MothsIn(ChunkRec rec)
+        {
+            var o = new List<Moth>();
+            if (!Lit() || Raining) return o;
+            Dictionary<int, long> cm = chunkState.TryGet(rec.key, out var st) ? st.caughtMoth : null;
+            var L = LightsIn(rec);
+            for (int li = 0; li < L.Count; li++) for (int k = 0; k < T.moths.perLight; k++) { int i = li * T.moths.perLight + k; if (!(cm != null && cm.TryGetValue(i, out var until) && until > tick)) o.Add(new Moth { i = i, p = MothPos(L[li], k, tick) }); }
+            return o;
+        }
         /// carrion: some days a dead mouse or bird lies in a chunk for a few days, good for a few loads of meat
         public List<Carrion> CarrionIn(ChunkRec rec)
         {
@@ -1233,7 +1316,7 @@ namespace Sting.Core
                 if (armed)
                 {
                     pressUsed = true;
-                    if (w.venom >= T.venom.jab) { w.venom -= T.venom.jab; ApplySting(w, hm, here.zone, here.pos, "jab", true); }
+                    if (w.venom >= T.venom.jab) { w.venom -= T.venom.jab; ApplySting(w, hm, here.zone, here.pos, "jab", true); if (Spw(w).barbed != 0 && w.caste != "queen") w.spent = true; }
                     else Emit("noVenom");
                 }
             }
@@ -1297,7 +1380,8 @@ namespace Sting.Core
                 {
                     if (s.hits.Contains(w.id)) continue;
                     if (s.underOnly != 0 ? w.id != s.underOnly || w.state != "under" : !Swattable(w.state)) continue;
-                    if (D2(w, c) > r * r) continue;
+                    Num rw = r + Spw(w).swatR; // a hornet is a bigger target
+                    if (D2(w, c) > rw * rw) continue;
                     s.hits.Add(w.id);
                     Emit("swatHit", ("waspId", w.id), ("actorHex", s.actorHex), ("frameHex", s.frameHex), ("kind", s.kind), ("kills", s.kills), ("delayTicks", s.start - s.contactTick));
                     string cause = s.kind == SwatKind.Slap ? "slap" : s.kind == SwatKind.Cover ? "cover" : s.kind == SwatKind.Compress ? "crushed under clothing" : "swat";
@@ -1476,6 +1560,7 @@ namespace Sting.Core
         internal void EndSeasonForTest(string why) => EndSeason(why);
         void EndSeason(string why)
         {
+            if (Colony.Sp(colony).perennial != 0) { BeeWinter(why); return; } // a bee colony winters as a cluster (T2-11)
             var col = colony; int sn = season.n;
             var cands = HiberSites();
             var order = new List<int>(); for (int i = 0; i < cands.Count; i++) order.Add(i);
@@ -1513,6 +1598,72 @@ namespace Sting.Core
             winter = new Winter { why = why, sites = sites, survivors = survivors, lineage = lin, until = tick + T.hiber.chooseTicks };
         }
 
+        /// A honeybee colony's winter (T2-11): no queens to choose. Each colony of the line, yours and its swarms, clusters
+        /// on its honey; what the store covers lives, less the winter's losses, and a cluster too small dies. In spring
+        /// the colony goes on in the same hive; with yours gone, you go on in the strongest of the line's. See sim.js.
+        void BeeWinter(string why)
+        {
+            int n = season.n; Num days = Rnd(settings.seasonDays * T.season.winterShare);
+            bool WinterOf(ColonyState c)
+            {
+                if (!c.nestAlive || !c.queenAlive) return false;
+                Num need = c.adults * T.hive.winterNeed * days, fed = need > 0 ? Clamp01(c.sugar / need) : 1;
+                c.sugar = Max(0, c.sugar - need);
+                c.adults *= (1 - T.hive.winterLoss) * fed;
+                c.eggs = c.larvae = c.pupae = c.rEggs = c.rLarvae = c.rPupae = 0; c.young = 0; c.gynes = 0; c.males = 0; c.mated = 0;
+                c.deficit = 0; c.sugarlessDays = 0; c.water = 0; c.cool = 1; c.thirst = 0;
+                if (c.adults < T.hive.minCluster) { c.adults = 0; c.queenAlive = false; return false; }
+                return true;
+            }
+            foreach (var w in new List<Wasp>(wasps)) Despawn(w);
+            bool mine = why != "colony lost" && WinterOf(colony);
+            line = line.FindAll(sc => WinterOf(sc.colony));
+            Emit("winter", ("why", why), ("bee", true), ("adults", Floor(mine ? colony.adults : 0)), ("honey", colony.sugar), ("sisters", line.Count), ("season", n), ("mated", (Num)0), ("survivors", (Num)(mine ? 1 : 0)), ("lineage", (Num)line.Count), ("sites", 0));
+            if (!mine && line.Count == 0) { extinct = true; Emit("lineExtinct", ("nestAlive", colony.nestAlive)); return; }
+            Num target = (day + 1 + days) * 1440 + T.time.dawn;
+            clockOffset += (long)((target - minute) * tpm);
+            Minute(ClockMinutes(tick + clockOffset, settings));
+            season = new Season { n = n + 1, startMinute = target, phase = "Founding" };
+            if (!mine)
+            { // yours did not make it: the line goes on in its strongest colony
+                var best = line[0];
+                foreach (var x in line) if (x.colony.adults > best.colony.adults) best = x;
+                line.Remove(best);
+                int alloc = colony.alloc;
+                oldNests.Add(nest); nest = best.nest; colony = best.colony; colony.alloc = alloc;
+            }
+            foreach (var st in chunkState.Values) st.esc = 0;
+            swats = new List<Swat>(); sprays = new List<Spray>(); alarms = new List<Alarm>(); hiveAlarms.Clear(); homeScent = null; hiberPick = null;
+            ext = new Ext();
+            ghost = null;
+            var q = SpawnWasp(true);
+            drivenId = q.id;
+            foreach (var hm in active) CatchUpHuman(hm);
+            UpdateChunks(true);
+            Emit("spring", ("season", season.n), ("lineage", lineage), ("id", q.id), ("kind", "hive"), ("bee", true), ("took", !mine));
+        }
+
+        /// A crowded honeybee colony with a daughter queen raised swarms (T2-11): the old queen leaves with most of the
+        /// workers and some honey and founds a colony of the line on a tree nearby; the daughter keeps the hive.
+        void Swarm(ColonyState c, Nest from)
+        {
+            if (!c.nestAlive || !c.queenAlive || c.gynes < 1 || c.adults < T.hive.swarmAdults || c.swarmed == season.n) return;
+            Num frac = SeasonFrac;
+            if (frac < T.hive.swarmFrom || frac >= T.hive.swarmTo || !IsDaylight(minute) || Raining) return;
+            Num moved = c.adults * T.hive.swarmShare, honey = c.sugar * T.hive.swarmHoney;
+            c.adults -= moved; c.young = Min(c.young, c.adults); c.sugar -= honey; c.gynes = 0; c.swarmed = season.n;
+            var used = new List<(Num x, Num z)> { (nest.treeX, nest.treeZ) };
+            foreach (var x in line) used.Add((x.nest.treeX, x.nest.treeZ));
+            var t = line.Count < T.line.max ? LineTree(new HiberSite { x = from.x, z = from.z }, used) : null;
+            if (t == null) { lineage++; Emit("swarm", ("x", from.x), ("z", from.z), ("adults", moved), ("gone", true)); return; }
+            Num dx = from.x - t.x, dz = from.z - t.z, d = Sqrt(dx * dx + dz * dz); if (d == 0) d = 1; dx /= d; dz /= d;
+            var nn = World.MakeNest(t.x, t.z, t.x + dx * (t.r + 0.2), Clamp(1.6, 1.2, Max(1.2, t.h - 0.6)), t.z + dz * (t.r + 0.2), World.NEST.r, "trunk");
+            var col = Colony.New(true, "bee"); col.sited = true; col.maxCells = MaxCells("trunk", "bee"); col.alloc = 0;
+            col.adults = moved; col.sugar = honey; col.swarmed = season.n;
+            line.Add(new LineColony { id = ++lineSeq, nest = nn, colony = col, season = season.n });
+            Emit("swarm", ("x", nn.x), ("z", nn.z), ("adults", moved), ("id", lineSeq), ("from", from == nest ? "own" : "line"));
+        }
+
         void WinterStep(int k)
         {
             var W = winter;
@@ -1531,7 +1682,7 @@ namespace Sting.Core
             Minute(ClockMinutes(tick + clockOffset, settings));
             season = new Season { n = season.n + 1, startMinute = target, phase = "Founding" };
             int alloc = colony.alloc;
-            colony = Colony.New(true);
+            colony = Colony.New(true, species);
             colony.alloc = alloc;
             colony.sited = false;
             colony.sugar *= 0.5 + site.q; // a queen who wintered well wakes with more in reserve

@@ -207,6 +207,43 @@ export const T = {
     minWatchTicks: 120, parkDist: 10, // he parks this far from where he starts and works until dusk
   },
 
+  // Species (GDD 6.8, T2-9 to T2-11): the player's line is wasps, hornets or honeybees, on the one wasp code path.
+  // Multipliers over the wasp's values, and flags for what differs in kind. size: drawn size and a bigger target for a
+  // swat (swatR m); speed, drain: top speed and energy use in flight; felt: how much of the wind it feels; pain: what a
+  // sting does to a person (panic and alert points); annoy: how fast a buzzing one is noticed; night: forages after
+  // dark; barbed: a worker that stings a person dies; hunts: takes prey (else none, and no raids or baits); pollen:
+  // gathers protein as pollen at flowers; wood: chews pulp (else builds wax from sugar); fight: added to its score when
+  // wrestling another colony's wasp; start, lay, store: the colony's starting size, laying and sugar store; out: AI
+  // workers out at once, as a share of T.ai.maxPhysical; guards: at the entrance; perennial: the colony winters as a
+  // cluster instead of dying.
+  // bio (Appendix C): European hornet workers to 25 mm, colonies of 200-400 (to 1,000), nocturnal, hunting flies,
+  // grasshoppers and yellowjackets; honeybee colonies of 2,000-60,000 that winter as a cluster on honey, swarm to
+  // reproduce, and whose workers die when they sting a person.
+  species: {
+    wasp: { size: 1, swatR: 0, speed: 1, drain: 1, felt: 1, pain: 1, annoy: 1, night: 0, barbed: 0, hunts: 1, pollen: 0, wood: 1, fight: 0,
+      start: 1, lay: 1, store: 1, sugarIn: 1, proteinIn: 1, out: 1, guards: 2, perennial: 0 },
+    hornet: { size: 1.7, swatR: 0.006, speed: 1.15, drain: 1.3, felt: 0.65, pain: 1.8, annoy: 1.6, night: 1, barbed: 0, hunts: 1, pollen: 0, wood: 1, fight: 1.5,
+      start: 0.35, lay: 0.3, store: 1.5, sugarIn: 0.7, proteinIn: 1.4, out: 0.5, guards: 2, perennial: 0 },
+    bee: { size: 0.85, swatR: -0.001, speed: 0.9, drain: 0.8, felt: 1.15, pain: 0.9, annoy: 0.6, night: 0, barbed: 1, hunts: 0, pollen: 1, wood: 0, fight: 0,
+      start: 2.5, lay: 1.5, store: 10, sugarIn: 1.3, proteinIn: 1, out: 1.2, guards: 5, perennial: 1 },
+  },
+  // Hornets at night (T2-10): a porch light on each house burns from dusk to dawn and draws moths, perLight of them
+  // circling it at orbit m; a hornet takes one as protein. bio: European hornets hunt at night and come to lights.
+  // A hornet that wins a wrestle with another colony's wasp keeps it as prey (waspProtein).
+  moths: { perLight: 3, orbit: 0.3, height: 2.3, out: 0.25, protein: 1, respawnTicks: 2400, strength: 5, waspProtein: 2 },
+  // The honeybee colony (T2-11). A bee standing at a flower in bloom gathers a pollen load (protein) in pollenSecs.
+  // Cells are wax, made from sugar (waxSugar a pulp's worth), while the store is over waxFrom of its cap. In winter the
+  // cluster eats winterNeed sugar per bee per day; what the store covers lives, less winterLoss, and a cluster under
+  // minCluster dies. Between swarmFrom and swarmTo of the season a crowded colony (swarmAdults) raises reproShare of
+  // its eggs as queens and drones; with a daughter queen out it swarms: the old queen leaves with swarmShare of the
+  // workers and swarmHoney of the store to found a colony of the line nearby. Guards and any bee touching another
+  // colony's wasp at home ball it: ballHeat °C per bee per second, ballR m, and an AI wasp gets out at aiEscape a tick.
+  // A rival forager robs the player's hive (robHoney) when it smells it (robStrength), and robChance of a rival nest's
+  // sugar foragers within robRange m go for it by memory each day: wasps know where the hives are.
+  hive: { pollenSecs: 4, pollenLoad: 1, waxSugar: 1.5, waxFrom: 0.3, winterNeed: 0.05, winterLoss: 0.3, minCluster: 15,
+    swarmFrom: 0.15, swarmTo: 0.5, swarmAdults: 120, reproShare: 0.08, swarmShare: 0.6, swarmHoney: 0.3,
+    ballHeat: 0.5, ballR: 0.05, aiEscape: 0.0008, robHoney: 1, robStrength: 5, robChance: 0.3, robRange: 120 },
+
   bees: {
     guards: 6, foragers: 14, pursueSpeed: 4.2, accel: 30, contact: 0.016, ballMin: 3,
     heatPerBeeSec: 0.13, startTemp: 35, lethal: 46, entranceAlarm: 0.5, alarmTicks: 1200,
@@ -287,7 +324,7 @@ export const T = {
   terrain: { amp: 2.5, cell: 36, cell2: 11, detail: 0.3, flatR: 14, rise: 24, sightStep: 4, poolTries: 3, exposure: 0.05,
     roll: { park: 1, forest: 1, yards: 0.45, mall: 0.12, town: 0.1 } },
   plaus: { futureTicks: 120, stingReach: 1.6, humanDrift: 3, maxSwatDelay: 240, maxSwats: 4, rateWindow: 120, rateMax: 6,
-    maxSpeed: 12, strikes: 3, pickupReach: 0.3, solidDepth: 0.08, sipMax: 0.12 },
+    maxSpeed: 12, strikes: 3, pickupReach: 0.3, solidDepth: 0.08, sipMax: 0.12, maxPain: 2 }, // maxPain: no species stings harder (GDD 6.8)
 };
 
 export const DEFAULT_SETTINGS = {
@@ -296,10 +333,23 @@ export const DEFAULT_SETTINGS = {
   reaction: 1, escalation: 1, exterminator: true, birds: true, rivals: true, pestControl: true,
   // feature modifiers (T2-6): act at generation; see world.js features()
   woods: 1, towns: 1, water: 1, hives: 1, terrain: 0,
+  // Which species a line may play (GDD 6.8): 'earned' (wasps first, the rest through the year's turn), 'open' (all
+  // three from the start: test builds and personal worlds), or 'fixed:<species>'. The PoC runs open.
+  progression: 'open',
+  // the species the player's line starts as (a player's choice within the world's progression, not a world rule)
+  species: 'wasp',
 };
+export const SPECIES = ['wasp', 'hornet', 'bee'];
+// The species a world lets a new line start as
+export function speciesAllowed(settings) {
+  const p = (settings && settings.progression) || DEFAULT_SETTINGS.progression;
+  if (p === 'open') return SPECIES.slice();
+  if (p.startsWith('fixed:')) return [p.slice(6)];
+  return ['wasp'];
+}
 
 // The settings that change the rules, in a fixed order. Their hash is the world's rules hash: peers compare it.
-const RULE_KEYS = ['dayMinutes', 'humanDensity', 'beeAggression', 'seasonDays', 'reaction', 'escalation', 'exterminator', 'birds', 'rivals', 'pestControl', 'woods', 'towns', 'water', 'hives', 'terrain'];
+const RULE_KEYS = ['dayMinutes', 'humanDensity', 'beeAggression', 'seasonDays', 'reaction', 'escalation', 'exterminator', 'birds', 'rivals', 'pestControl', 'woods', 'towns', 'water', 'hives', 'terrain', 'progression'];
 export function rulesHash(settings) {
   const s = { ...DEFAULT_SETTINGS, ...settings };
   let h = 0x811c9dc5;
@@ -327,5 +377,6 @@ export function worldTag(settings) {
   if (s.water !== d.water) t.push(s.water > d.water ? 'wet' : 'dry');
   if (s.hives !== d.hives) t.push(s.hives ? `hives ${x(s.hives)}` : 'no hives');
   if (s.terrain !== d.terrain) t.push(s.terrain > 1 ? 'hilly' : 'rolling');
+  if (s.progression !== d.progression) t.push(s.progression === 'earned' ? 'species earned' : s.progression.startsWith('fixed:') ? s.progression.slice(6) + 's only' : s.progression);
   return t.join(' · ');
 }

@@ -282,7 +282,7 @@ namespace Sting.Core
             if (target == null) { hm.annoy = 0; hm.annoyId = 0; return; }
             if (hm.annoyId != target.id) { hm.annoyId = target.id; hm.annoy = 0; }
             hm.annoy += 3;
-            Num need = hm.tr.reactionTicks * (why == "face" ? 3 : why == "cup" ? T.cup.noticeMul : why == "meat" ? T.bbq.noticeMul : T.esc.noticeMul) + (why == "spray" ? 20 : 0);
+            Num need = hm.tr.reactionTicks * (why == "face" ? 3 : why == "cup" ? T.cup.noticeMul : why == "meat" ? T.bbq.noticeMul : T.esc.noticeMul) / Spw(target).annoy + (why == "spray" ? 20 : 0); // a hornet is noticed sooner, a bee later
             if (hm.annoy < need) return;
             hm.annoy = 0;
             hm.cooldown = tick + T.esc.cooldownTicks;
@@ -595,7 +595,7 @@ namespace Sting.Core
             if (w.state != "balled") return;
             Num n = Max(1, w.ball.bees != 0 ? w.ball.bees : T.bees.ballMin);
             if (burstEdge) w.ball.progress += T.bees.escapePerPress / (n * 0.2);
-            if (w.id != drivenId && H32(w.id, tick, 11) < 0.004) w.ball.progress = 1;
+            if (w.id != drivenId && H32(w.id, tick, 11) < (w.ball.own ? T.hive.aiEscape : 0.004)) w.ball.progress = 1;
             if (w.ball.progress >= 1)
             {
                 w.state = "fly"; w.ball = null; w.vy = 2.5; w.vx = (H32(w.id, tick) - 0.5) * 3; w.vz = (H32(tick, w.id) - 0.5) * 3;
@@ -817,7 +817,7 @@ namespace Sting.Core
                 nest = MakeNest(t.x, t.z, t.x + dx * (t.r + 0.2), y, t.z + dz * (t.r + 0.2), NEST.r, "trunk");
             }
             colony.sited = true;
-            colony.maxCells = T.sites.Of(nest.site).maxCells;
+            colony.maxCells = MaxCells(nest.site);
             w.x = nest.spawn.x; w.y = nest.spawn.y; w.z = nest.spawn.z; w.vx = w.vy = w.vz = 0;
             Emit("nestFounded", ("x", nest.x), ("y", nest.y), ("z", nest.z), ("key", nest.key), ("site", nest.site));
         }
@@ -1316,7 +1316,7 @@ namespace Sting.Core
                 int n = 0; foreach (var x in wasps) if (x.colony == key) n++;
                 if (n >= System.Math.Min(T.rival.maxPhysical, rv.workers) || tick % 180 >= 60) continue;
                 var w = SpawnWasp(false);
-                w.colony = key; w.x = rv.ex; w.y = rv.ey - 0.03; w.z = rv.ez;
+                w.colony = key; w.sp = "wasp"; w.x = rv.ex; w.y = rv.ey - 0.03; w.z = rv.ez;
                 w.role = n == 0 ? "guard" : H32(w.id, 9) < 0.5 ? "sugar" : "protein";
                 w.ai.mode = w.role == "guard" ? "guard" : "pick";
             }
@@ -1355,7 +1355,7 @@ namespace Sting.Core
             if (sc == null) { Despawn(w); return cmd; }
             if (w.caste == "male") return ThinkMale(w, cmd, sc.nest);
             if (w.caste == "gyne") return ThinkGyne(w, cmd, sc.nest);
-            if (!IsDaylight(minute) || Raining) w.ai.mode = "home";
+            if (!ForageHours(Spw(w))) w.ai.mode = "home";
             if (w.role == "guard" && w.ai.mode != "home" && w.ai.mode != "return") return ThinkGuard(w, cmd, sc.nest);
             return ThinkForager(w, cmd, sc.nest.entrance);
         }
@@ -1385,7 +1385,9 @@ namespace Sting.Core
                 if (ai.mode == "outbound" && D2(w, tp.Value) < T.ai.arrive * T.ai.arrive) { ai.mode = "collect"; ai.timer = tick + T.ai.collectTicks; }
                 if (ai.mode == "collect")
                 {
-                    if (ai.target.kind == "prey") { var p = w.carry == null ? PreyNear(w) : null; if (p != null) { Catch(w, p); ai.mode = "return"; } else if (tick > ai.timer) ai.mode = "pick"; }
+                    if (ai.target.kind == "prey") { var p = w.carry == null ? PreyNear(w) : null; if (p != null) { Catch(w, p); ai.mode = "return"; } else if (w.carry != null) ai.mode = "return"; else if (tick > ai.timer) ai.mode = "pick"; }
+                    else if (ai.target.kind == "pollen") { if (w.carry != null) ai.mode = "return"; else if (tick > ai.timer + 300) ai.mode = "pick"; }
+                    else if (ai.target.kind == "phive") { RobHive(w); ai.mode = "return"; ai.target = null; }
                     else if (ai.target.kind == "bait") { if (w.carry == null) TakeBait(w); ai.mode = "return"; ai.target = null; }
                     else if (ai.cargo >= 0.95 || tick > ai.timer + 300) ai.mode = "return";
                 }
@@ -1400,14 +1402,14 @@ namespace Sting.Core
         {
             a.state = "fighting"; a.vx = a.vy = a.vz = 0;
             a.fight = new Fight { other = otherId, remote = true, starter = true, peer = p, start = tick, until = tick + T.rival.fightTicks, myVenom = a.venom, mash = 0 };
-            Publish(new NetEv { type = "fight", a = a.id, b = otherId, toPeer = p, venom = a.venom, queen = a.caste == "queen" });
+            Publish(new NetEv { type = "fight", a = a.id, b = otherId, toPeer = p, venom = a.venom, queen = a.caste == "queen", fb = Spw(a).fight });
         }
 
-        static Num FightScore(int id, Num venom, bool queen, Num mash, Num start) => venom + (queen ? 1 : 0) + mash + H32(id, start, 61) * 1.2;
+        static Num FightScore(int id, Num venom, bool queen, Num mash, Num start, Num fb) => venom + (queen ? 1 : 0) + mash + H32(id, start, 61) * 1.2 + fb; // fb: a hornet's weight (GDD 6.8)
 
         void FightResolve(Wasp w, bool won, int otherId)
         {
-            if (won) { w.state = "stunned"; w.stateTicks = 20; w.fight = null; Emit("fightOver", ("winner", w.id), ("loser", otherId)); }
+            if (won) { w.state = "stunned"; w.stateTicks = 20; w.fight = null; Spoils(w); Emit("fightOver", ("winner", w.id), ("loser", otherId)); }
             else { Die(w, w.colony == "own" ? "killed by a rival wasp" : "killed by a player's wasp", null); Emit("fightOver", ("winner", otherId), ("loser", w.id)); }
         }
 
@@ -1418,9 +1420,46 @@ namespace Sting.Core
             var f = w.fight;
             if (f.starter) { if (tick > f.until + T.rival.remoteFightTimeout) { w.state = "fly"; w.fight = null; } return; }
             if (tick < f.until) return;
-            bool bWins = FightScore(w.id, f.myVenom, w.caste == "queen", f.mash, f.start) > FightScore(f.other, f.theirVenom, f.theirQueen, 0, f.start);
-            Publish(new NetEv { type = "fightEnd", a = f.other, b = w.id, toPeer = f.peer, mash = f.mash, venom = f.myVenom, queen = w.caste == "queen" });
+            bool bWins = FightScore(w.id, f.myVenom, w.caste == "queen", f.mash, f.start, Spw(w).fight) > FightScore(f.other, f.theirVenom, f.theirQueen, 0, f.start, f.theirFb);
+            Publish(new NetEv { type = "fightEnd", a = f.other, b = w.id, toPeer = f.peer, mash = f.mash, venom = f.myVenom, queen = w.caste == "queen", fb = Spw(w).fight });
             FightResolve(w, bWins, f.other);
+        }
+
+        /// a hornet that wins a wrestle with another colony's wasp keeps it (T2-10)
+        void Spoils(Wasp w) { if (Spw(w).fight > 0 && w.carry == null && w.caste == "worker") { w.carry = new Carry { kind = "protein", amount = T.moths.waspProtein, what = "wasp" }; stats.caught++; Emit("caught", ("id", w.id), ("kind", "wasp")); } }
+
+        /// the bees of the line ball another colony's wasp that touches one of them (T2-11)
+        void OwnBall(Wasp t)
+        {
+            if (t.state == "attached") Detach(t, "balled");
+            t.state = "balled"; t.ball = new Ball { temp = T.bees.startTemp, progress = 0, prevBurst = 0, own = true, bees = 1, idle = 0 }; t.vx = t.vy = t.vz = 0;
+            foreach (var g in wasps) if (g.role == "guard" && !IsRival(g) && Spw(g).perennial != 0 && g.id != drivenId) { g.ai.mode = "hunt"; g.ai.huntId = t.id; g.ai.timer = tick + T.guard.huntTicks; }
+            Emit("balled", ("id", t.id), ("driven", t.id == drivenId), ("own", true));
+        }
+        /// each ball heats with the bees in it; guards that reach it hold on; with nobody on it, it falls apart
+        void OwnBalls()
+        {
+            foreach (var t in new List<Wasp>(wasps))
+            {
+                if (t.state != "balled" || t.ball == null || !t.ball.own) continue;
+                int n = 0;
+                foreach (var x in wasps)
+                {
+                    if (x == t || IsRival(x) || Spw(x).perennial == 0 || (x.state != "fly" && x.state != "landed")) continue;
+                    Num d2 = D2(x, t.P);
+                    if (x.id != drivenId && x.role == "guard" && x.ai.huntId == t.id && d2 <= 4 * T.hive.ballR * T.hive.ballR)
+                    { // a guard that gets there holds on
+                        Num a = x.id * 2.39996; x.x = t.x + 0.012 * DCos(a); x.y = t.y + 0.008; x.z = t.z + 0.012 * DSin(a); x.vx = x.vy = x.vz = 0; n++;
+                    }
+                    else if (d2 <= T.hive.ballR * T.hive.ballR) n++;
+                }
+                t.ball.bees = n;
+                if (n == 0) { if (++t.ball.idle > 60) { t.state = "fly"; t.ball = null; Emit("ballEscape", ("id", t.id)); } continue; }
+                t.ball.idle = 0;
+                t.ball.temp += T.hive.ballHeat * n * T.DT;
+                t.y = Max(T.wasp.radius, t.y - 0.05 * T.DT);
+                if (t.ball.temp >= T.bees.lethal) Die(t, "cooked by bees", null);
+            }
         }
 
         void Fights()
@@ -1432,10 +1471,11 @@ namespace Sting.Core
                 if (tick < w.fight.until || w.fight.other < w.id) continue;
                 var o = WaspById(w.fight.other);
                 if (o == null) { w.state = "fly"; w.fight = null; continue; }
-                Num Score(Wasp x) => x.venom + (x.caste == "queen" ? 1 : 0) + x.fight.mash + H32(x.id, tick, 61) * 1.2;
+                Num Score(Wasp x) => x.venom + (x.caste == "queen" ? 1 : 0) + x.fight.mash + H32(x.id, tick, 61) * 1.2 + Spw(x).fight;
                 var (win, lose) = Score(w) >= Score(o) ? (w, o) : (o, w);
                 win.state = "stunned"; win.stateTicks = 20; win.fight = null;
-                Die(lose, !IsRival(lose) ? "killed by a rival wasp" : "killed by your worker", null);
+                Die(lose, !IsRival(lose) ? "killed by a rival wasp" : Spw(win).fight != 0 ? "taken by a hornet" : "killed by your worker", null);
+                Spoils(win);
                 Emit("fightOver", ("winner", win.id), ("loser", lose.id));
             }
             var free = wasps.FindAll(w => Free3(w.state));
@@ -1444,6 +1484,8 @@ namespace Sting.Core
                     var a = free[i]; var b = free[j];
                     if (a.colony == b.colony || (!IsRival(a) && !IsRival(b)) || a.state == "fighting" || b.state == "fighting") continue; // the line's colonies are sisters
                     if (D2(a, b) > T.rival.fightRange * T.rival.fightRange) continue;
+                    // a bee of the line does not wrestle: it balls the intruder (T2-11)
+                    if (Spw(a).perennial != Spw(b).perennial && (Spw(a).perennial != 0 ? !IsRival(a) : !IsRival(b))) { var tb = Spw(a).perennial != 0 ? b : a; if (tb.state != "balled") OwnBall(tb); continue; }
                     foreach (var (x, y) in new[] { (a, b), (b, a) }) { x.state = "fighting"; x.vx = x.vy = x.vz = 0; x.fight = new Fight { other = y.id, until = tick + T.rival.fightTicks, mash = 0 }; }
                     Emit("fight", ("a", a.id), ("b", b.id), ("driven", a.id == drivenId || b.id == drivenId));
                 }
@@ -1499,7 +1541,8 @@ namespace Sting.Core
             MuniTick(); // the town's campaign runs on whether or not any colony is left
             if (extinct || winter != null) return; // the line is over, or the queens sleep until one is chosen
             var col = colony;
-            bool daylight = IsDaylight(minute) && !Raining && CanFly();
+            bool day = IsDaylight(minute) && !Raining && CanFly();
+            bool daylight = ForageHours(Colony.Sp(col)) && CanFly(); // the line's own hours: hornets work at night (T2-10)
             Num frac = SeasonFrac;
             if (!colony.sited && frac > 0.03)
             {
@@ -1513,7 +1556,7 @@ namespace Sting.Core
                 }
                 else nest = MakeNest(old.treeX, old.treeZ, old.x, old.y, old.z, old.r, old.site ?? "trunk");
                 colony.sited = true;
-                colony.maxCells = T.sites.Of(nest.site).maxCells;
+                colony.maxCells = MaxCells(nest.site);
                 Emit("nestFounded", ("x", nest.x), ("y", nest.y), ("z", nest.z), ("key", nest.key), ("auto", true));
             }
             var nheat = NestHeat();
@@ -1528,6 +1571,7 @@ namespace Sting.Core
                 Num cold = Min(inside, inside * T.sites.rainMortality * st.exposure * dt);
                 col.adults -= cold; col.stats.died += cold;
             }
+            if (Colony.Sp(col).perennial != 0) Swarm(col, nest);
             string ph = Colony.SeasonPhase(frac);
             if (ph != season.phase) { season.phase = ph; Emit("season", ("phase", ph)); }
             if (frac >= 1) { EndSeason("autumn"); return; }
@@ -1537,7 +1581,7 @@ namespace Sting.Core
             if (Colony.Finished(col, Own().Count) && Own().Count == 0) { EndSeason("colony lost"); return; }
             ExtCheck();
             // launch physical AI foragers while the player is near the nest (GDD 11.12: far colonies stay abstract)
-            Rivals(daylight);
+            Rivals(day); // the neighbourhood's wasps keep the day's hours
             LineTraffic(daylight);
             bool nearNest = false;
             if (colony.sited) foreach (var r in activeChunks) if (r.key == nest.key) { nearNest = true; break; }
@@ -1551,12 +1595,13 @@ namespace Sting.Core
             var d = Driven();
             int guards = 0; foreach (var w in Own()) if (w.role == "guard" && w != d) guards++;
             int ai = own - (d != null && d.caste == "worker" ? 1 : 0) - guards;
-            if (!noAI && daylight && col.nestAlive && frac >= T.season.reproStart) LaunchRepro(col);
+            var SP = Colony.Sp(col);
+            if (!noAI && day && col.nestAlive && frac >= (SP.perennial != 0 ? T.hive.swarmFrom : T.season.reproStart)) LaunchRepro(col);
             // the oldest workers guard the entrance first (T1-13); the rest of the cap is foragers, and the young stay in
             Num mature = col.adults - col.young;
-            Num cap = Min(T.ai.maxPhysical, Floor(mature * 0.4 * T.alloc[col.alloc].traffic));
+            Num cap = Min(Rnd(T.ai.maxPhysical * SP.@out), Floor(mature * 0.4 * T.alloc[col.alloc].traffic)); // a hornet colony sends out few, a bee colony many
             if (noAI || !daylight || !col.nestAlive || inside2 - col.young < 1 || tick % T.ai.launchEvery >= 60) return;
-            if (guards < (mature >= T.guard.minAdults ? T.guard.count : 0))
+            if (guards < (mature >= T.guard.minAdults ? SP.guards : 0))
             {
                 var g = SpawnWasp(false);
                 g.role = "guard"; g.ai.mode = "guard";

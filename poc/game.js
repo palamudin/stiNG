@@ -554,12 +554,14 @@ function updateChunkDynamics() {
 
 // ------------------------------------------------------------------ nests (the colony's current one, and abandoned ones)
 
-function buildNestMesh(n, abandoned) {
-  const g = new THREE.Group();
+// a nest's colour by the species that built it: grey paper for wasps, tan paper for hornets, wax for bees (GDD 6.8)
+const NEST_TINT = { wasp: '#ffffff', hornet: '#d8b48a', bee: '#e9b347' };
+function buildNestMesh(n, abandoned, species = 'wasp') {
+  const g = new THREE.Group(), tint = NEST_TINT[species] || '#ffffff';
   if (n.site === 'wall' || n.site === 'attic' || n.site === 'hollow') {
     // the nest is inside the shed; outside you see papery comb pushing out of the gap
     const dx = n.x - n.treeX, dz = n.z - n.treeZ, d = Math.hypot(dx, dz) || 1;
-    const rim = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 8), new THREE.MeshLambertMaterial({ map: paperTex, color: abandoned ? '#857a68' : '#ffffff' }));
+    const rim = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 8), new THREE.MeshLambertMaterial({ map: paperTex, color: abandoned ? '#857a68' : tint }));
     rim.scale.set(dx ? 0.35 : 1, 0.8, dz ? 0.35 : 1); rim.position.set(n.x + dx / d * 0.005, n.y, n.z + dz / d * 0.005);
     const hole = new THREE.Mesh(new THREE.CircleGeometry(0.02, 12), mat('#0c0905', { side: THREE.DoubleSide }));
     hole.position.set(n.x + dx / d * 0.03, n.y, n.z + dz / d * 0.03); hole.lookAt(n.x + dx / d, n.y, n.z + dz / d);
@@ -579,7 +581,7 @@ function buildNestMesh(n, abandoned) {
     scene.add(g);
     return g;
   }
-  const ball = new THREE.Mesh(new THREE.SphereGeometry(n.r, 20, 16), new THREE.MeshLambertMaterial({ map: paperTex, color: abandoned ? '#857a68' : '#ffffff' }));
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(n.r, 20, 16), new THREE.MeshLambertMaterial({ map: paperTex, color: abandoned ? '#857a68' : tint }));
   ball.scale.set(1, 1.25, 1); ball.position.set(n.x, n.y, n.z); ball.castShadow = true;
   const hole = new THREE.Mesh(new THREE.CircleGeometry(0.03, 16), mat('#120d08', { side: THREE.DoubleSide }));
   hole.rotation.x = Math.PI / 2; hole.position.set(n.entrance.x, n.entrance.y + 0.002, n.entrance.z);
@@ -605,10 +607,10 @@ function syncNests() {
   const n = sim.nest, sig = `${n.x},${n.y},${n.z},${sim.colony.sited}`;
   if (sig !== nestSig) {
     if (nestView) scene.remove(nestView);
-    nestView = sim.colony.sited !== false ? buildNestMesh(n, false) : null;
+    nestView = sim.colony.sited !== false ? buildNestMesh(n, false, sim.colony.species) : null;
     nestSig = sig;
   }
-  if (nestView && sim.nest.site !== 'ground') nestView.userData.ball.material.color.set(sim.colony.nestAlive ? '#ffffff' : '#6b5d4a');
+  if (nestView && sim.nest.site !== 'ground') nestView.userData.ball.material.color.set(sim.colony.nestAlive ? NEST_TINT[sim.colony.species] || '#ffffff' : '#6b5d4a');
   while (oldNestViews.length < sim.oldNests.length) {
     const o = sim.oldNests[oldNestViews.length];
     const same = o.x === n.x && o.y === n.y && o.z === n.z && sim.colony.sited !== false;
@@ -617,7 +619,7 @@ function syncNests() {
   // sister colonies: a nest each while they live (one taken over is now yours, drawn above)
   const ids = new Set(sim.line.map((x) => x.id));
   for (const [id, v] of lineViews) if (!ids.has(id)) { scene.remove(v); lineViews.delete(id); }
-  for (const sc of sim.line) if (!lineViews.has(sc.id)) lineViews.set(sc.id, buildNestMesh(sc.nest, false));
+  for (const sc of sim.line) if (!lineViews.has(sc.id)) lineViews.set(sc.id, buildNestMesh(sc.nest, false, sc.colony.species));
 }
 
 // ------------------------------------------------------------------ prey and bees (instanced, positions each frame)
@@ -626,7 +628,11 @@ const MAXI = 600;
 const flyMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.0035, 6, 5), mat('#1b1a17'), MAXI);
 const catMesh = new THREE.InstancedMesh(new THREE.CapsuleGeometry(0.0035, 0.018, 3, 6), mat('#6fa83a'), MAXI);
 const beeMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.0045, 8, 6), mat('#a7742a'), MAXI);
-for (const m of [flyMesh, catMesh, beeMesh]) { m.count = 0; m.frustumCulled = false; scene.add(m); }
+const porchLight = new THREE.PointLight('#ffcf80', 0, 9, 1.6); scene.add(porchLight); // the nearest lamp lights the yard round it
+const mothMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.006, 6, 5), mat('#b9b2a2'), MAXI); // T2-10
+const lampMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.06, 10, 8), new THREE.MeshBasicMaterial({ color: '#ffdf9a' }), 256);
+const glowMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.4, 12, 10), new THREE.MeshBasicMaterial({ color: '#ffc870', transparent: true, opacity: 0.1, depthWrite: false }), 256);
+for (const m of [flyMesh, catMesh, beeMesh, mothMesh, lampMesh, glowMesh]) { m.count = 0; m.frustumCulled = false; scene.add(m); }
 const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(1, 1, 1), _p = new THREE.Vector3();
 
 // Pest-control bait stations: a dark box on the trunk with the bait showing through its slot
@@ -731,6 +737,21 @@ function renderCritters(t) {
       }
     });
   }
+  // porch lights burn from dusk to dawn, with moths round them (T2-10)
+  let nl = 0, nmo = 0;
+  if (sim.lit()) for (const rec of sim.activeChunks) {
+    const st = sim.chunkState.get(chunkKey(rec.cx, rec.cz)), cm = st && st.caughtMoth;
+    sim.lightsIn(rec).forEach((l, li) => {
+      if (nl >= 256) return;
+      lampMesh.setMatrixAt(nl, _m4.makeTranslation(l.x, l.y, l.z)); glowMesh.setMatrixAt(nl++, _m4.makeTranslation(l.x, l.y, l.z));
+      if (sim.raining) return;
+      for (let k = 0; k < T.moths.perLight && nmo < MAXI; k++) { const i = li * T.moths.perLight + k; if (cm && cm[i] > sim.tick) continue; const p = sim.mothPos(l, k, t); mothMesh.setMatrixAt(nmo++, _m4.makeTranslation(p.x, p.y, p.z)); }
+    });
+  }
+  lampMesh.count = glowMesh.count = nl; mothMesh.count = nmo;
+  { let best = null, bd = 30 * 30; if (nl) for (const rec of sim.activeChunks) for (const l of sim.lightsIn(rec)) { const d = (l.x - camera.position.x) ** 2 + (l.z - camera.position.z) ** 2; if (d < bd) { bd = d; best = l; } }
+    porchLight.intensity = best ? 2.2 : 0; if (best) porchLight.position.set(best.x + best.nx * 0.3, best.y + (sim.settings.terrain ? sim.ground(best.x, best.z) : 0), best.z + best.nz * 0.3); }
+  for (const m of [lampMesh, glowMesh, mothMesh]) m.instanceMatrix.needsUpdate = true;
   // carrion (T1-8): a small dark carcass on the grass
   let nk = 0;
   for (const rec of sim.activeChunks) for (const cr of sim.carrionIn(rec)) {
@@ -1121,17 +1142,27 @@ function applyZoneColors(view, on) {
 // ------------------------------------------------------------------ wasps
 
 const CASTE_SCALE = { queen: 1.3, gyne: 1.25, male: 1.1, worker: 1 }; // T2-3
-function buildWasp(remote = false, rival = false, caste = 'worker') {
+// The three species (GDD 6.8): a yellowjacket's black and yellow; a European hornet's red-brown head and thorax over a
+// yellow and brown abdomen; a honeybee's dark head and furry brown thorax over amber and brown bands
+const SPECIES_LOOK = {
+  wasp: { band: '#f2c200', dark: '#15120c', head: null, thorax: null },
+  hornet: { band: '#e8b21c', dark: '#4a1f0e', head: '#c46a22', thorax: '#7a2e14' },
+  bee: { band: '#c9973a', dark: '#2e2214', head: '#2e2214', thorax: '#8a6a3e' },
+};
+const speciesSize = (sp) => (T.species[sp] || T.species.wasp).size;
+const remoteSpecies = (r) => (r.rival ? 'wasp' : (sim.peerNests.get(r.peer) || {}).species || 'wasp');
+function buildWasp(remote = false, rival = false, caste = 'worker', species = 'wasp') {
   const g = new THREE.Group();
   if (remote) {
     const ring = new THREE.Mesh(new THREE.TorusGeometry(0.009, 0.0009, 6, 24), new THREE.MeshBasicMaterial({ color: '#4fd1ff' }));
     ring.rotation.x = Math.PI / 2; ring.position.y = 0.007;
     g.add(ring);
   }
-  const black = mat('#15120c'), yellow = mat(rival ? '#e0901a' : '#f2c200');
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.0021, 12, 10), yellow); head.position.z = 0.0058; head.scale.set(1.15, 1, 0.9);
-  const eyes = new THREE.Mesh(new THREE.SphereGeometry(0.0013, 8, 6), black); eyes.scale.set(2.0, 1.1, 0.8); eyes.position.set(0, 0.0004, 0.0062);
-  const thorax = new THREE.Mesh(new THREE.SphereGeometry(0.0026, 12, 10), black); thorax.position.z = 0.0025; thorax.scale.set(1, 0.95, 1.2);
+  const L = SPECIES_LOOK[species] || SPECIES_LOOK.wasp;
+  const black = mat(L.dark), yellow = mat(rival ? '#e0901a' : L.band);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.0021, 12, 10), L.head ? mat(L.head) : yellow); head.position.z = 0.0058; head.scale.set(1.15, 1, 0.9);
+  const eyes = new THREE.Mesh(new THREE.SphereGeometry(0.0013, 8, 6), mat('#15120c')); eyes.scale.set(2.0, 1.1, 0.8); eyes.position.set(0, 0.0004, 0.0062);
+  const thorax = new THREE.Mesh(new THREE.SphereGeometry(0.0026, 12, 10), L.thorax ? mat(L.thorax) : black); thorax.position.z = 0.0025; thorax.scale.set(1, 0.95, 1.2);
   const abdomen = new THREE.Group(); abdomen.position.z = 0.0004;
   let z = -0.0012;
   for (const [r, m] of [[0.0027, yellow], [0.003, black], [0.0029, yellow], [0.0025, black], [0.0021, yellow], [0.0014, black]]) {
@@ -1167,7 +1198,7 @@ bulge.visible = false;
 scene.add(bulge);
 
 const WATER_MAT = new THREE.MeshLambertMaterial({ color: '#6f93ad', transparent: true, opacity: 0.75, depthWrite: false }); // T2-1
-const CARRY_MAT = { fly: mat('#1b1a17'), caterpillar: mat('#6fa83a'), bee: mat('#a7742a'), pulp: mat('#b7ab92'), water: new THREE.MeshLambertMaterial({ color: '#9cc7e6', transparent: true, opacity: 0.7 }) };
+const CARRY_MAT = { pollen: mat('#e8b830'), wasp: mat('#d4a514'), moth: mat('#8a8478'), 'bee brood': mat('#efe6cf'), fly: mat('#1b1a17'), caterpillar: mat('#6fa83a'), bee: mat('#a7742a'), pulp: mat('#b7ab92'), water: new THREE.MeshLambertMaterial({ color: '#9cc7e6', transparent: true, opacity: 0.7 }) };
 
 function renderWasps(alpha, t, dt) {
   const seen = new Set();
@@ -1176,7 +1207,7 @@ function renderWasps(alpha, t, dt) {
   for (const w of sim.wasps) {
     seen.add(w.id);
     let g = waspViews.get(w.id);
-    if (!g) { g = buildWasp(false, sim.isRival(w), w.caste); waspViews.set(w.id, g); } // the line's sister colonies look like yours (T2-4)
+    if (!g) { g = buildWasp(false, sim.isRival(w), w.caste, w.sp || 'wasp'); waspViews.set(w.id, g); } // the line's sister colonies look like yours (T2-4)
     const pp = pos.get(w.id);
     const p = pp ? new THREE.Vector3().lerpVectors(pp.p, pp.c, alpha) : V(w);
     const driven = w.id === sim.drivenId;
@@ -1184,7 +1215,7 @@ function renderWasps(alpha, t, dt) {
     // looking out of its own eyes: the body is not drawn (compound eyes see nearly all the way round)
     g.visible = w.state !== 'under' && w.state !== 'robbing' && !(driven && eyeBlend > 0.5); // inside clothes or a hive
     g.position.copy(p);
-    g.scale.setScalar(CASTE_SCALE[w.caste] || 1);
+    g.scale.setScalar((CASTE_SCALE[w.caste] || 1) * speciesSize(w.sp));
     g.rotation.order = 'YXZ';
     if (driven && w.state !== 'balled') { g.rotation.y = input.yaw; g.rotation.x = w.state === 'landed' ? 0 : -input.pitch * 0.6; }
     else {
@@ -1233,11 +1264,11 @@ function renderWasps(alpha, t, dt) {
   for (const [id, r] of sim.remote) {
     seen.add(id);
     let g = waspViews.get(id);
-    if (!g) { g = buildWasp(!r.rival, !!r.rival, r.caste); waspViews.set(id, g); g.position.set(r.x, r.y, r.z); }
+    if (!g) { g = buildWasp(!r.rival, !!r.rival, r.caste, remoteSpecies(r)); waspViews.set(id, g); g.position.set(r.x, r.y, r.z); }
     const tgt = new THREE.Vector3(r.x, r.y, r.z);
     if (g.position.distanceTo(tgt) > 0.5) g.position.copy(tgt); else g.position.lerp(tgt, 1 - Math.exp(-dt * 25));
     g.visible = r.state !== 'under';
-    g.scale.setScalar(CASTE_SCALE[r.caste] || 1);
+    g.scale.setScalar((CASTE_SCALE[r.caste] || 1) * speciesSize(remoteSpecies(r)));
     const sp = Math.hypot(r.vx, r.vz);
     if (sp > 0.05) { let d = Math.atan2(r.vx, r.vz) - g.userData.yaw; d = Math.atan2(Math.sin(d), Math.cos(d)); g.userData.yaw += d * Math.min(1, dt * 10); }
     g.rotation.order = 'YXZ'; g.rotation.y = g.userData.yaw; g.rotation.x = 0; g.rotation.z = 0;
@@ -1700,6 +1731,10 @@ function logEvent(text) {
 }
 
 // Colony view (GDD 10.3): the workers that are out, nearest first, each one a button to drive her
+// what a worker of the player's species is called, and what its protein foragers do (GDD 6.8)
+const NOUN = { wasp: 'Worker', hornet: 'Hornet', bee: 'Bee' };
+const noun = () => NOUN[sim.species] || 'Worker';
+const roleName = (r) => (r === 'protein' && sim.species === 'bee' ? 'pollen forager' : ROLE_NAME[r] || r);
 const ROLE_NAME = { sugar: 'sugar forager', protein: 'hunter', pulp: 'pulp forager', guard: 'guard', water: 'water carrier', male: 'patrolling the mating spot', gyne: 'on her mating flight' };
 const MODE_NAME = { pick: 'choosing', search: 'searching', outbound: 'flying out', collect: 'collecting', return: 'flying home', attack: 'attacking', evade: 'getting away', guard: 'guarding', hunt: 'chasing' };
 $('nWorkers').addEventListener('pointerdown', (e) => {
@@ -1715,7 +1750,7 @@ function updateWorkers() {
   $('nWorkers').innerHTML = list.length ? list.map(({ x, d }) => {
     const what = x.state === 'fly' ? (MODE_NAME[x.ai.mode] || x.ai.mode) : x.state;
     const carry = x.carry ? ` · carrying ${x.carry.what}` : '';
-    return `<div class="wk"><span>${x.caste === 'queen' ? 'Queen' : x.caste === 'male' ? 'Male ' + x.id : x.caste === 'gyne' ? 'Young queen ' + x.id : 'Worker ' + x.id} · ${ROLE_NAME[x.role] || x.role} · ${what}${carry}</span><span class="n">${d < 1 ? '<1' : Math.round(d)} m</span><button class="ghost" data-id="${x.id}">${d <= T.possess.freeRange ? 'Drive' : 'Relay'}</button></div>`;
+    return `<div class="wk"><span>${x.caste === 'queen' ? 'Queen' : x.caste === 'male' ? (sim.species === 'bee' ? 'Drone ' : 'Male ') + x.id : x.caste === 'gyne' ? 'Young queen ' + x.id : noun() + ' ' + x.id} · ${roleName(x.role)} · ${what}${carry}</span><span class="n">${d < 1 ? '<1' : Math.round(d)} m</span><button class="ghost" data-id="${x.id}">${d <= T.possess.freeRange ? 'Drive' : 'Relay'}</button></div>`;
   }).join('') : '<p class="label">Nobody is out. Workers leave the nest when you are near it in daylight.</p>';
 }
 
@@ -1727,7 +1762,9 @@ function updateNest() {
     ...(c.sited !== false ? [['Site', `${T.sites[sim.nest.site || 'trunk'].name} · up to ${fmt(c.maxCells || T.sites.trunk.maxCells)} cells`]] : []),
     ['Adults inside / out', `${fmt(Math.max(0, c.adults - out))} / ${out}`],
     ['Young · guards out', `${fmt(c.young || 0)} still nursing · ${sim._own().filter((w) => w.role === 'guard' && w.id !== sim.drivenId).length} at the door`], // T1-13
-    ['Protein', `${c.protein.toFixed(1)} / ${proteinCap(c).toFixed(0)}`], ['Sugar', `${c.sugar.toFixed(1)} / ${sugarCap(c).toFixed(0)}`], ['Pulp', c.pulp.toFixed(1)],
+    ...(c.species === 'bee' // a bee colony keeps pollen and honey, and builds wax from honey (T2-11)
+      ? [['Pollen', `${c.protein.toFixed(1)} / ${proteinCap(c).toFixed(0)}`], ['Honey', `${c.sugar.toFixed(1)} / ${sugarCap(c).toFixed(0)}`]]
+      : [['Protein', `${c.protein.toFixed(1)} / ${proteinCap(c).toFixed(0)}`], ['Sugar', `${c.sugar.toFixed(1)} / ${sugarCap(c).toFixed(0)}`], ['Pulp', c.pulp.toFixed(1)]]),
     ['Water', `${(c.water || 0).toFixed(1)} / ${waterCap(c).toFixed(0)}`], // T2-1
     ...(c.sited !== false ? [['Comb temperature', (() => { const h = sim.nestHeat(); return `${h.nestT.toFixed(1)} °C${h.cook > 0 && (c.cool ?? 1) < 0.95 ? ' · the brood is cooking' : h.heat > 0 ? ((c.cool ?? 1) > 0.95 ? ' · cooled with water' : ' · too hot, short of water') : ''}`; })()]] : []),
     ['Cells used', `${fmt(broodTotal(c))} / ${fmt(c.cells)}`], ['Larvae fed', Math.round(c.fed * 100) + '%'],
@@ -1836,7 +1873,7 @@ function updateHud() {
   $('stungN').textContent = fmt(sim.stung.size);
   $('adults').textContent = fmt(c.adults);
   $('brood').textContent = fmt(broodTotal(c));
-  $('serial').textContent = w ? (w.caste === 'queen' ? 'The queen' : w.caste === 'male' ? 'Male ' + w.id : 'Worker ' + w.id) : '-';
+  $('serial').textContent = w ? (w.caste === 'queen' ? 'The queen' : w.caste === 'male' ? (sim.species === 'bee' ? 'Drone ' : 'Male ') + w.id : noun() + ' ' + w.id) : '-';
   const md = minuteOfDay(sim.minute);
   { const sc = timeScale(); $('clockT').textContent = `Day ${sim.day + 1} · ${fmtClock(sim.minute)}${sc > 1 ? ` · ${sc}×` : sc < 1 ? ' · REFLEX' : ''}`; }
   const wnd = sim.wind, ws = Math.hypot(wnd.x, wnd.z);
@@ -1870,7 +1907,7 @@ function updateHud() {
   else if (w.state === 'chewing') status = w.chewAt && w.chewAt.water ? `Drinking water ${Math.round(w.chew / T.water.fillTicks * 100)}%` : `Chewing pulp ${Math.round(w.chew / T.pulp.chewTicks * 100)}%`;
   else if (w.state === 'trapped') status = 'Stuck in the trap';
   else if (w.state === 'webbed') status = `Stuck in a web · spider in ${Math.max(0, (w.web.spiderAt - sim.tick) / 60).toFixed(1)} s`;
-  else if (w.state === 'landed') status = sim.feeding ? 'Feeding' : w.land && w.land.kind === 'flower' ? 'Flower drained · try the next' : 'Resting';
+  else if (w.state === 'landed') status = w.pollenT > 0 && !w.carry ? `${sim.feeding ? 'Feeding · ' : ''}packing pollen ${Math.round(w.pollenT / (T.hive.pollenSecs * 60) * 100)}%` : sim.feeding ? 'Feeding' : w.land && w.land.kind === 'flower' ? 'Flower drained · try the next' : 'Resting';
   else if (w.state === 'perched') status = `On #${w.perch.hex.slice(0, 4)} · ${zoneLabel(w.perch.zone)}`;
   else if (w.state === 'fighting') status = 'Fighting a rival wasp';
   else if (w.state === 'robbing') status = `Inside the hive · ${Math.round(Math.min(1, w.rob.progress) * 100)}% · mash LMB · Space bails out`;
@@ -1920,6 +1957,8 @@ function updateHud() {
     hint = `A male: no sting, no work. Young queens come to the tallest tree near the nest (${dd} m) · fly into one to mate`;
   } else if (w.caste === 'queen' && sim.colony.sited === false) hint = 'Pick a nest site and press E: a trunk, a burrow in the grass, under a branch, or a gap in a shed';
   else if (w.caste === 'queen' && sim.colony.adults < 1) hint = 'Founding: chew pulp for cells, catch prey for the brood, bring both to the nest';
+  else if (sim.species === 'bee' && !w.carry && w.caste === 'worker') hint = 'Stay at a flower in bloom to pack pollen for the brood · your sting is barbed: a bee that stings a person dies of it';
+  else if (sim.species === 'hornet' && !w.carry && md >= T.time.dusk) hint = 'Night: the porch lights draw moths, and you hunt by them';
   $('hint').innerHTML = hint;
 
   const ret = $('reticle'), zl = $('zone'), ct = sim._driven() ? w.contact : null;
@@ -2026,6 +2065,7 @@ function deathWhy(e) {
   if (e.cause === 'taken by a bird') return 'Birds hunt wasps in open air above head height. Keep low or under the trees.';
   if (e.cause === 'taken by a dragonfly') return 'Dragonflies hunt low over open ground. They outrun you but turn worse: break hard, land, or stay under the trees.';
   if (e.cause === 'eaten by a spider') return 'Webs hang between trees. Mash Shift the moment you stick.';
+  if (e.cause === 'left its sting in a person') return 'A honeybee\'s sting is barbed: it stays in the skin and pumps in the rest of the venom, and the bee dies. Every sting costs a bee. Take over another with Q.';
   if (e.cause === 'cooked by bees') return 'Bees ball an intruder and heat it. Mash Shift before it reaches 46 °C.';
   if (e.cause === 'drowned in a trap') return 'Sweet-smelling bottles at alert level 3 are traps.';
   if (e.cause === 'drowned in a drink') return 'Cups are deep. Feed just above the drink without touching it, and mash Space or Shift the moment you slip in.';
@@ -2050,7 +2090,7 @@ function deathWhy(e) {
     default: return '';
   }
 }
-const DEATH_TITLE = { 'eaten by a spider': 'EATEN', 'taken by a bird': 'TAKEN', 'killed by a rival wasp': 'KILLED', slap: 'SWATTED', cover: 'SMOTHERED', 'crushed under clothing': 'CRUSHED', insecticide: 'SPRAYED', 'drowned in a trap': 'DROWNED', 'cooked by bees': 'COOKED', starved: 'STARVED', 'old age': 'SPENT', 'taken by a dragonfly': 'TAKEN', cold: 'CHILLED', 'drowned in a drink': 'DROWNED', 'drowned under a lid': 'SHUT IN', 'stung inside a hive': 'STUNG', 'burned on a grill': 'BURNED', 'cooked over a grill': 'GRILLED' };
+const DEATH_TITLE = { 'left its sting in a person': 'BARBED', 'taken by a hornet': 'TAKEN', 'eaten by a spider': 'EATEN', 'taken by a bird': 'TAKEN', 'killed by a rival wasp': 'KILLED', slap: 'SWATTED', cover: 'SMOTHERED', 'crushed under clothing': 'CRUSHED', insecticide: 'SPRAYED', 'drowned in a trap': 'DROWNED', 'cooked by bees': 'COOKED', starved: 'STARVED', 'old age': 'SPENT', 'taken by a dragonfly': 'TAKEN', cold: 'CHILLED', 'drowned in a drink': 'DROWNED', 'drowned under a lid': 'SHUT IN', 'stung inside a hive': 'STUNG', 'burned on a grill': 'BURNED', 'cooked over a grill': 'GRILLED' };
 
 function pushSwatAnims(list, frameHex, contactTick) {
   const frame = sim.humanByHex(frameHex);
@@ -2111,7 +2151,10 @@ function handleEvents(events) {
       case 'mated': if (e.driven) toast('Mated. A male mates once, and that is his life.', 'var(--yellow)', 3); else if (sim.wasps.length) toast('A young queen of the line has mated', 'var(--yellow)', 1.6); break; // T2-3
       case 'knockedDown': if (e.driven) toast('Knocked down by the rain · get under a table, a roof or a tree', 'var(--red)', 2.4); break; // T2-2
       case 'exhausted': if (e.id === sim.drivenId) toast('Crop empty · feed on flowers or soda', 'var(--red)', 2.6); break;
-      case 'caught': if (e.id === sim.drivenId) { toast(`Caught a ${e.kind}`, 'var(--yellow)', 1.4); blip(900, 600, 0.08, 0.05, 'square'); } break;
+      case 'caught': if (e.id === sim.drivenId) { toast(e.kind === 'wasp' ? 'Took a wasp · carry it home for the brood' : `Caught a ${e.kind}`, 'var(--yellow)', 1.4); blip(900, 600, 0.08, 0.05, 'square'); } break;
+      case 'pollen': if (e.driven) { toast('Pollen packed · bring it home', 'var(--yellow)', 1.4); blip(700, 900, 0.08, 0.05, 'triangle'); } break; // T2-11
+      case 'swarm': toast(e.gone ? 'The old queen swarmed off with most of the workers; the swarm left the area. A daughter keeps the hive.' : `The old queen swarmed with ${fmt(e.adults)} workers to a tree ${Math.round(Math.hypot(e.x - sim.nest.x, e.z - sim.nest.z))} m away: a new colony of the line. A daughter keeps the hive.`, 'var(--yellow)', 4); logEvent('swarm'); syncNests(); break;
+      case 'hiveRobbed': toast('A wasp is robbing the hive · get it before it gets away', 'var(--red)', 2.4); logEvent('a rival robbed the hive'); break;
       case 'chewed': if (e.id === sim.drivenId) toast('Pulp ready · bring it home', 'var(--yellow)', 1.4); break;
       case 'watered': if (e.id === sim.drivenId) toast('Water taken · bring it home to cool the comb', 'var(--yellow)', 1.4); break;
       case 'deposit': if (e.id === sim.drivenId) { toast(`Delivered ${e.what}`, 'var(--yellow)', 1.2); blip(500, 750, 0.12, 0.05, 'triangle'); } break;
@@ -2121,7 +2164,7 @@ function handleEvents(events) {
       case 'spray': logEvent(`#${e.humanHex.slice(0, 4)} sprays`); break;
       case 'escalation': toast(['Neighborhood calm again', 'People start swatting', 'Food covered · citronella out', 'Sprays and traps out', 'They called an exterminator'][e.level], e.level >= 3 ? 'var(--red)' : 'var(--orange)', 2.6); break;
       case 'beeAlarm': logEvent('the hive is alarmed'); break;
-      case 'balled': if (e.driven) toast('Balled by bees · mash Shift', 'var(--red)', 2.2); break;
+      case 'balled': if (e.driven) toast('Balled by bees · mash Shift', 'var(--red)', 2.2); else if (e.own) { toast('Your bees have balled an intruder', 'var(--yellow)', 2); logEvent('the guards ball an intruder'); } break;
       case 'ballEscape': if (e.id === sim.drivenId) toast('Broke free', 'var(--yellow)', 1.4); break;
       case 'aiAttack': logEvent(`worker ${e.id} attacks #${e.humanHex.slice(0, 4)}`); break;
       case 'alarm': logEvent('alarm pheromone'); break;
@@ -2156,7 +2199,8 @@ function handleEvents(events) {
       case 'rested': toast('Morning', 'var(--yellow)', 1.6); break;
       case 'newDay': logEvent(`day ${e.day + 1}`); saveWorld(false); break;
       case 'season': {
-        const msg = { Growth: 'The first workers are out. Growth season.', Peak: 'Peak season. The queen starts laying queen cells.', Collapse: 'Autumn. The colony is dying off. Young queens are leaving to mate.' }[e.phase];
+        const msg = (sim.species === 'bee' ? { Growth: 'The hive is building up. Growth season.', Peak: 'Peak season. Bring in honey for the winter.', Collapse: 'Autumn. The colony is packing honey for the winter cluster.' }
+          : { Growth: 'The first workers are out. Growth season.', Peak: 'Peak season. The queen starts laying queen cells.', Collapse: 'Autumn. The colony is dying off. Young queens are leaving to mate.' })[e.phase];
         if (msg) toast(msg, 'var(--yellow)', 3.5);
         logEvent(`season: ${e.phase}`);
         break;
@@ -2195,6 +2239,7 @@ function handleEvents(events) {
       case 'knockedOff': if (e.id === sim.drivenId) toast('Knocked off', 'var(--yellow)', 1.2); break;
       case 'nestFounded': toast(e.auto ? 'The queen settled in a tree near where she wintered' : 'Nest founded', 'var(--yellow)', 2.4); logEvent('nest founded'); break;
       case 'winter':
+        if (e.bee) { toast(e.survivors ? `Winter. The cluster ate its honey and came through: ${fmt(e.adults)} bees.${e.sisters ? ` ${e.sisters} colon${e.sisters === 1 ? 'y' : 'ies'} of the line too.` : ''}` : e.sisters ? 'Your hive did not survive the winter. The line goes on in one of its swarms.' : 'No colony of the line made it through the winter.', e.survivors || e.sisters ? 'var(--yellow)' : 'var(--red)', 5); break; } // T2-11
         {
           const total = e.survivors + e.lineage;
           if (!lab && sim.winter) showWinter(`${e.why === 'autumn' ? 'The colony died with the autumn, as colonies do.' : 'Your colony did not make it through the season.'} ${fmt(e.mated)} young queen${Math.round(e.mated) === 1 ? '' : 's'} mated and went into hibernation; ${e.survivors} survived the cold.${e.lineage ? ` ${e.lineage} older sister nest${e.lineage === 1 ? '' : 's'} of your line also made it.` : ''} ${total > 1 ? 'Choose which queen you wake as; the others found sister nests.' : 'You wake as the last queen of the line.'}`);
@@ -2205,7 +2250,8 @@ function handleEvents(events) {
       case 'sisterTakeover': toast(`Your colony is gone. The line goes on: you are now a worker of a sister colony (${e.adults} adults).`, 'var(--yellow)', 4); syncNests(); break;
       case 'hiberScouted': toast(`Winter site scouted: ${T.hiber.name[e.kind]}. Most of the young queens will winter here.`, 'var(--yellow)', 3); break;
       case 'spring':
-        logEvent(`season ${e.season} · you are the queen, waking ${T.hiber.name[e.kind] || ''}`);
+        logEvent(e.bee ? `season ${e.season} · spring in the hive` : `season ${e.season} · you are the queen, waking ${T.hiber.name[e.kind] || ''}`);
+        if (e.bee) syncNests();
         waspSwitched(e.id, 0.98);
         syncChunks();
         break;
@@ -2232,7 +2278,7 @@ function handleEvents(events) {
       case 'lineExtinct':
         try { if (!lab) { localStorage.removeItem('sting.save'); localStorage.removeItem('sting.saveMeta'); showContinue(); } } catch { /* optional */ }
         $('dead').hidden = true;
-        $('extinctStats').textContent = `No young queen survived the winter and no sister nest is left. ${sim.season.n} season${sim.season.n === 1 ? '' : 's'}, ${sim.day + 1} days. ${fmt(sim.stung.size)} humans stung (${fmt(sim.stats.stings)} by you, ${fmt(sim.stats.aiStings)} by workers). ${fmt(sim.stats.deaths)} wasps lost. ${fmt(sim.records.size)} chunks discovered.`;
+        $('extinctStats').textContent = `${sim.species === 'bee' ? 'No colony of the line came through the winter.' : 'No young queen survived the winter and no sister nest is left.'} ${sim.season.n} season${sim.season.n === 1 ? '' : 's'}, ${sim.day + 1} days. ${fmt(sim.stung.size)} humans stung (${fmt(sim.stats.stings)} by you, ${fmt(sim.stats.aiStings)} by workers). ${fmt(sim.stats.deaths)} wasps lost. ${fmt(sim.records.size)} chunks discovered.`;
         $('extinctScreen').hidden = false;
         document.exitPointerLock?.();
         break;
@@ -2326,7 +2372,7 @@ function updateCamera(p, dt) {
   // the camera's up follows the surface the wasp stands on, and eases back to the sky in flight
   camUp.lerp(ld ? new THREE.Vector3(ld.nx, ld.ny, ld.nz) : UP, 1 - Math.exp(-dt * 6)).normalize();
   camera.up.copy(camUp);
-  const want = dead ? 0.9 : sim._inCup(w) || (w.state === 'drowning') ? 0.035 : w.state === 'attached' || w.state === 'under' || w.state === 'perched' ? 0.17 : w.state === 'balled' ? 0.25 : w.contact ? 0.13 : 0.1;
+  const want = (dead ? 0.9 : sim._inCup(w) || (w.state === 'drowning') ? 0.035 : w.state === 'attached' || w.state === 'under' || w.state === 'perched' ? 0.17 : w.state === 'balled' ? 0.25 : w.contact ? 0.13 : 0.1) * (dead ? 1 : Math.sqrt(speciesSize(w && w.sp))); // a hornet's camera sits further back
   camDist += (want - camDist) * (1 - Math.exp(-dt * 4));
   const focus = dead && deathSpot ? deathSpot : p || (w ? V(w) : V(sim.nest.spawn)); // no wasp at all in winter (T1-15)
   let off = fwd.clone().multiplyScalar(-camDist).add(new THREE.Vector3(0, camDist * 0.28, 0));
@@ -2486,6 +2532,7 @@ function readSettings() {
     seed, dayMinutes: +$('dayLen').value, humanDensity: +$('density').value, beeAggression: +$('bees').value, seasonDays: +$('seasonLen').value, net: $('netMode').value,
     reaction: +$('reaction').value, escalation: +$('escRate').value,
     woods: +$('woods').value, towns: +$('towns').value, water: +$('water').value, hives: +$('hives').value, terrain: +$('terrain').value, // T2-6
+    species: $('species').value, progression: 'open', // GDD 6.8: test builds open all three
     exterminator: $('sysExt').checked, pestControl: $('sysMuni').checked, birds: $('sysBirds').checked, rivals: $('sysRivals').checked,
   };
 }

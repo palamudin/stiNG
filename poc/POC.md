@@ -18,7 +18,7 @@ The tier-0 slice of the GDD, built in the browser so it can move to Unity. Same 
 | `index.html` | Page shell, HUD markup and styles | UI Toolkit |
 | `test/sim.test.mjs` | 214 headless sim checks | `Sting.Core.Tests` |
 | `test/net.test.mjs` | 43 network checks | `Sting.Net.Tests` |
-| `test/parity.mjs` | Writes `core/fixtures/parity.txt`: 23 digests the C# core must reproduce bit for bit | `core/Sting.Core.Tests` |
+| `test/parity.mjs` | Writes `core/fixtures/parity.txt`: 26 digests the C# core must reproduce bit for bit | `core/Sting.Core.Tests` |
 
 Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 18+, no packages). Play locally with `node serve.mjs`. Any change to `sim/` that changes behaviour must be made in `core/` too: rerun `node test/parity.mjs`, then `dotnet run -c Release` in `core/Sting.Core.Tests`. To retune, edit `../tuning/sting.tune`: the game, the tests, parity and the core all read it, and a different file gives a different tuning hash, so old saves and peers on the old file are refused.
 
@@ -123,6 +123,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 95 | Terrain (T2-6): Ground flat, rolling or hilly on the start screen. Rolling hills in parks and woods, gently graded yards, level town squares and malls; the home tree stands on level ground. Hills block sight lines between people, puddles gather in hollows, the wind is stronger on a rise. The sim works in height above the ground; everything drawn is lifted onto it | 4.8 | 16 |
 | 96 | Lock-on and assisted flight (7.9): V or the middle button locks on to the spot you aim at on a person, else what is under the aim, else the nearest prey or danger; the camera faces it, W closes in, S backs off, A and D circle. E flies the wasp there and lands it on a flower, a drink or water, sets it on that spot on a person, or catches the prey. G turns the wasp to where you look in the eye view; held a second it toggles auto turn. A wasp feeding at a flower no longer settles on the stalk or grass, feeds anywhere on the head, and the HUD says when a flower is drained | 7.2, 7.9 | 17 |
 | 97 | The swoop (7.9): X or d-pad up dashes at 9 m/s for a third of a second, steered at speed. Whatever it reaches it slams onto: prey is snatched, a surface flown into is landed on, a person is perched on and startled (anyone near a slam starts too). With a lock it homes in and does what the target calls for: snatches prey, dives onto a flower or a drink, slams onto the spot on a person, makes for the nest, dashes away from a danger | 7.9 | 18 |
+| 98 | The three species (6.8, T2-9 to T2-11): Play as wasps, hornets or honeybees on the start screen. Hornets are big, quick and costly to fly, sting harder and are noticed sooner, keep a small colony, forage at night when porch lights burn on the houses with moths round them, and take rival yellowjackets on the wing. Honeybees gather pollen at flowers instead of hunting, build wax from honey, keep a big honey store, die when they sting a person, ball any wasp that touches them at home, swarm in early summer to found a colony of the line, and winter as a cluster in the same hive. Rival wasps come to rob a bee hive | 6.8, 9.1, 9.2 | 19 |
 
 ## Verified
 
@@ -148,7 +149,8 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 - AI wasps in state packets are not checked against solid geometry (their owner does not collide them far from its player).
 - With terrain on, flight does not feel the slope (the sim works in height above the ground), hills block sight lines between people only, and buildings lean slightly with the ground they stand on.
 - The assisted flight goes straight at its waypoints and slides off whatever is in the way; it does not plan round trees or houses, and it does not dodge.
-- Only the common wasp is playable. The growth tree, hornets and honeybee colonies (GDD 6.8, T2-9 to T2-13) are designed, not built; when species land, the PoC runs with progression `open` so all three can be picked from the start.
+- The three species are built (GDD 18.47) but the progression between them is not: the growth tree, the year's turn, multi-colony play and the player gauge (GDD 6.8, T2-12, T2-13). The PoC runs progression `open`, so any species can be picked on the start screen.
+- A swarm is told, not shown: the new colony appears on its tree, but no cloud of bees flies there. A bee colony's queens and drones stay abstract (no mating flights).
 - A raid on another player's nest takes one larva at a time, by the player's own wasp; AI workers do not raid other players' nests, as they do not raid rival nests.
 
 ## Controls

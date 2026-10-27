@@ -543,6 +543,107 @@ findDist = 4
 minWatchTicks = 120
 parkDist = 10
 
+[species.wasp]
+size = 1
+swatR = 0
+speed = 1
+drain = 1
+felt = 1
+pain = 1
+annoy = 1
+night = 0
+barbed = 0
+hunts = 1
+pollen = 0
+wood = 1
+fight = 0
+start = 1
+lay = 1
+store = 1
+sugarIn = 1
+proteinIn = 1
+out = 1
+guards = 2
+perennial = 0
+
+[species.hornet]
+size = 1.7
+swatR = 0.006
+speed = 1.15
+drain = 1.3
+felt = 0.65
+pain = 1.8
+annoy = 1.6
+night = 1
+barbed = 0
+hunts = 1
+pollen = 0
+wood = 1
+fight = 1.5
+start = 0.35
+lay = 0.3
+store = 1.5
+sugarIn = 0.7
+proteinIn = 1.4
+out = 0.5
+guards = 2
+perennial = 0
+
+[species.bee]
+size = 0.85
+swatR = -0.001
+speed = 0.9
+drain = 0.8
+felt = 1.15
+pain = 0.9
+annoy = 0.6
+night = 0
+barbed = 1
+hunts = 0
+pollen = 1
+wood = 0
+fight = 0
+start = 2.5
+lay = 1.5
+store = 10
+sugarIn = 1.3
+proteinIn = 1
+out = 1.2
+guards = 5
+perennial = 1
+
+[moths]
+perLight = 3
+orbit = 0.3
+height = 2.3
+out = 0.25
+protein = 1
+respawnTicks = 2400
+strength = 5
+waspProtein = 2
+
+[hive]
+pollenSecs = 4
+pollenLoad = 1
+waxSugar = 1.5
+waxFrom = 0.3
+winterNeed = 0.05
+winterLoss = 0.3
+minCluster = 15
+swarmFrom = 0.15
+swarmTo = 0.5
+swarmAdults = 120
+reproShare = 0.08
+swarmShare = 0.6
+swarmHoney = 0.3
+ballHeat = 0.5
+ballR = 0.05
+aiEscape = 0.0008
+robHoney = 1
+robStrength = 5
+robChance = 0.3
+robRange = 120
+
 [bees]
 guards = 6
 foragers = 14
@@ -759,3 +860,4 @@ strikes = 3
 pickupReach = 0.3
 solidDepth = 0.08
 sipMax = 0.12
+maxPain = 2

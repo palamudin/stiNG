@@ -24,14 +24,14 @@ namespace Sting.Core
             if (ai.mode == "hunt")
             {
                 WaspBase t = (WaspBase)WaspById(ai.huntId) ?? remote.Get(ai.huntId);
-                if (t == null || !Free3(t.state) || (t is Wasp tw && !IsRival(tw)) || tick > ai.timer || D2(t, post) > T.guard.chase * T.guard.chase) ai.mode = "guard";
+                if (t == null || !GuardLive(t) || (t is Wasp tw && !IsRival(tw)) || tick > ai.timer || D2(t, post) > T.guard.chase * T.guard.chase) ai.mode = "guard";
                 else { Steer(w, t.P, cmd); cmd.throttle = 1; cmd.burst = 1; return cmd; }
             }
             ai.mode = "guard";
             Num r2 = T.guard.radius * T.guard.radius;
             int tid = 0; bool found = false, player = false;
-            foreach (var x in wasps) if (IsRival(x) && Free3(x.state) && D2(x, post) < r2) { tid = x.id; found = true; break; }
-            if (!found) foreach (var kv in remote) if (Free3(kv.Value.state) && D2(kv.Value, post) < r2) { tid = kv.Key; found = true; player = !kv.Value.rival; break; }
+            foreach (var x in wasps) if (IsRival(x) && GuardLive(x) && D2(x, post) < r2) { tid = x.id; found = true; break; }
+            if (!found) foreach (var kv in remote) if (GuardLive(kv.Value) && D2(kv.Value, post) < r2) { tid = kv.Key; found = true; player = !kv.Value.rival; break; }
             if (found) { ai.mode = "hunt"; ai.huntId = tid; ai.timer = tick + T.guard.huntTicks; Emit("guardHunt", ("id", w.id), ("target", tid), ("player", player)); return cmd; }
             var xh = n == nest ? ext.hm : null;
             if (xh != null && xh.state != "flee" && xh.state != "leave" && Sq(xh.x - e.x) + Sq(xh.z - e.z) < T.guard.humanRadius * T.guard.humanRadius) { AiAttack(w, xh.hex); return cmd; }
@@ -39,6 +39,9 @@ namespace Sting.Core
             Steer(w, new V3(post.x + T.guard.ring * DCos(a), post.y + 0.03, post.z + T.guard.ring * DSin(a)), cmd);
             return cmd;
         }
+
+        /// what a guard goes for: a wasp out and about, or one the line's bees are balling (T2-11)
+        static bool GuardLive(WaspBase t) => Free3(t.state) || (t is Wasp x && x.state == "balled" && x.ball != null && x.ball.own);
 
         Cmd Think(Wasp w)
         {
@@ -58,7 +61,7 @@ namespace Sting.Core
                     if (D2(w, new V3(a.x, a.y, a.z)) < Sq(AlarmReach(w, a)) && k != null && k.state != "away") { AiAttack(w, a.killerHex); break; }
                 }
             }
-            bool daylight = IsDaylight(minute) && !Raining;
+            bool daylight = ForageHours(Spw(w)); // hornets hunt after dark (T2-10)
             if ((!daylight || w.caste == "queen") && ai.mode != "home") { ai.mode = "home"; ai.target = null; }
             if (w.energy < 0.2 && ai.mode != "home" && ai.mode != "collect") { ai.mode = "return"; ai.target = null; }
             if (w.role == "guard" && (ai.mode == "guard" || ai.mode == "hunt" || ai.mode == "pick")) return ThinkGuard(w, cmd);
@@ -84,12 +87,17 @@ namespace Sting.Core
                     {
                         var p = w.carry == null ? PreyNear(w) : null;
                         if (p != null) { Catch(w, p); ai.mode = "return"; ai.target = null; }
+                        else if (w.carry != null) { ai.mode = "return"; ai.target = null; } // won it in a wrestle (T2-10)
                         else if (tick > ai.timer) ai.mode = "pick";
                     }
                     else if (t.kind == "hive")
                     {
                         if (w.carry == null && HiveLoadsLeft(t.key, t.i) > 0) { StartRob(w, t.key, t.i); return cmd; }
                         ai.mode = "return"; ai.target = null;
+                    }
+                    else if (t.kind == "pollen") // stay at the flower until the baskets are full (T2-11)
+                    {
+                        if (w.carry != null) { ai.mode = "return"; ai.target = null; } else if (tick > ai.timer + 300) ai.mode = "pick";
                     }
                     else if (t.kind == "wood")
                     {
@@ -155,9 +163,12 @@ namespace Sting.Core
         /// smelled). Lidded or knocked-over cans have nothing to smell, and traps are only out from level 3. With policy,
         /// the AI's own choices apply (cans, traps and hives only when short of sugar); without, the list is what there
         /// is to smell, which the player's nose reads.
-        internal void Sources(ChunkRec rec, int ri, string role, bool policy, System.Action<AiTarget, V3, Num> cb)
+        internal void Sources(ChunkRec rec, int ri, string role, bool policy, System.Action<AiTarget, V3, Num> cb) => Sources(rec, ri, role, policy, cb, T.species.wasp);
+        internal void Sources(ChunkRec rec, int ri, string role, bool policy, System.Action<AiTarget, V3, Num> cb, SpeciesRow kind)
         {
             var c = rec.content; string key = rec.key; var st = CS(key); int lvl = EscLevel(key); var col = colony;
+            // a bee's protein is pollen: flowers in bloom (T2-11)
+            if (role == "protein" && kind.pollen != 0) { for (int i = 0; i < c.flowers.Count; i++) if (InBloom(rec, i)) { var f = c.flowers[i]; cb(new AiTarget { kind = "pollen", key = key, i = i, c = ri + 120 }, new V3(f.x, f.y, f.z), T.sense.flower); } return; }
             bool shortOf = col.deficit >= T.ai.canDeficit;
             if (role == "sugar")
             {
@@ -188,6 +199,10 @@ namespace Sting.Core
                 for (int i = 0; i < baits.Count; i++) cb(new AiTarget { kind = "bait", key = key, i = i, c = ri + 70 }, new V3(baits[i].x, baits[i].y, baits[i].z), T.sense.bait);
                 // barbecue meat smells a long way (T1-10)
                 foreach (var mt in MeatIn(rec)) cb(new AiTarget { kind = "prey", sub = "meat", key = key, i = mt.i, c = ri + 110 }, new V3(mt.x, mt.y, mt.z), T.sense.meat);
+                // a porch light at night shows from afar, and moths at it (T2-10)
+                if (kind.night != 0) foreach (var mo in MothsIn(rec)) cb(new AiTarget { kind = "prey", sub = "moth", key = key, i = mo.i, c = ri + 130 }, mo.p, T.moths.strength);
+                // a hornet sees another colony's wasp on the wing as prey
+                if (kind.fight > 0) foreach (var x in wasps) if (IsRival(x) && x.state == "fly" && World.ChunkOf(x.x) == rec.cx && World.ChunkOf(x.z) == rec.cz) cb(new AiTarget { kind = "prey", sub = "wasp", key = key, i = x.id, c = ri + 140 }, x.P, 0);
             }
         }
 
@@ -212,13 +227,21 @@ namespace Sting.Core
                     if (!(d < reach)) return;
                     Num sc = d / reach + H32(w.id, t.i, t.c, day) * T.sense.jitter;
                     if (sc < bs) { bs = sc; best = t; }
-                });
+                }, Spw(w));
+            }
+            // a rival forager smells honey in the player's hive and comes to rob it (T2-11)
+            var col = colony; var e = nest.entrance;
+            if (IsRival(w) && w.role == "sugar" && Colony.Sp(col).perennial != 0 && col.nestAlive && col.sited && col.sugar >= T.hive.robHoney)
+            {
+                Num d = Sqrt(D2(w, e)), reach = ScentRange(w.x, w.z, e, T.hive.robStrength);
+                if (d < reach) { Num sc = d / reach + H32(w.id, 0, 999, day) * T.sense.jitter; if (sc < bs) best = new AiTarget { kind = "phive", key = nest.key, i = 0, c = 999 }; }
             }
             return best;
         }
 
         /// Is a remembered source still there for a forager of this role (in the active world, still worth it)?
-        bool StillThere(string role, AiTarget t)
+        bool StillThere(string role, AiTarget t) => StillThere(role, t, T.species.wasp);
+        bool StillThere(string role, AiTarget t, SpeciesRow sp)
         {
             if (t == null) return false;
             int ri = -1;
@@ -227,7 +250,7 @@ namespace Sting.Core
             // a hunter remembers where the flies are (a table), not the one fly it took
             if (t.sub == "fly") return role == "protein" && FlyActive(activeChunks[ri], t.i);
             bool found = false;
-            Sources(activeChunks[ri], ri, role, true, (u, _, __) => { if (u.kind == t.kind && u.sub == t.sub && u.i == t.i) found = true; });
+            Sources(activeChunks[ri], ri, role, true, (u, _, __) => { if (u.kind == t.kind && u.sub == t.sub && u.i == t.i) found = true; }, sp);
             return found;
         }
 
@@ -250,7 +273,7 @@ namespace Sting.Core
                     if (t == null) break;
                     Num dx = sites[si].x - t.x, dz = sites[si].z - t.z, dd = Sqrt(dx * dx + dz * dz); if (dd == 0) dd = 1; dx /= dd; dz /= dd;
                     var n = World.MakeNest(t.x, t.z, t.x + dx * (t.r + 0.2), Clamp(1.6, 1.2, Max(1.2, t.h - 0.6)), t.z + dz * (t.r + 0.2), World.NEST.r, "trunk");
-                    var c = Colony.New(true); c.sited = true; c.maxCells = T.sites.trunk.maxCells; c.alloc = 0;
+                    var c = Colony.New(true, species); c.sited = true; c.maxCells = MaxCells("trunk"); c.alloc = 0;
                     line.Add(new LineColony { id = ++lineSeq, nest = n, colony = c, season = sn });
                     used.Add((t.x, t.z)); left--;
                     Emit("sisterFounded", ("id", lineSeq), ("x", n.x), ("z", n.z));
@@ -285,6 +308,7 @@ namespace Sting.Core
                 }
                 var h = NestHeat(minute, sc.nest.site);
                 Colony.Step(c, dt, outN, daylight, frac, bio, BroodSpeed(minute, sc.nest.site, c.cool), av, (h.heat, h.cook));
+                if (Colony.Sp(c).perennial != 0) Swarm(c, sc.nest);
                 // the exterminator (abstract; he is drawn only for the player's own nest): called to a sister nest's
                 // neighbourhood, he comes the next morning, or in two hours before mid-afternoon, and destroys it unless things
                 // calm down first (sim.js)
@@ -330,14 +354,14 @@ namespace Sting.Core
                 string key = "line:" + sc.id; var c = sc.colony;
                 int guards = 0, males = 0, gynes = 0, foragers = 0;
                 foreach (var w in wasps) if (w.colony == key) { if (w.role == "guard") guards++; if (w.caste == "male") males++; else if (w.caste == "gyne") gynes++; else if (w.caste == "worker" && w.role != "guard") foragers++; }
-                Wasp At(Wasp w) { w.colony = key; w.x = sc.nest.entrance.x; w.y = sc.nest.entrance.y - 0.03; w.z = sc.nest.entrance.z; return w; }
+                Wasp At(Wasp w) { w.colony = key; w.sp = c.species ?? "wasp"; w.x = sc.nest.entrance.x; w.y = sc.nest.entrance.y - 0.03; w.z = sc.nest.entrance.z; return w; }
                 // guards at the entrance once it is big enough, as at yours (T1-13)
-                if (guards < (c.adults - c.young >= T.guard.minAdults ? T.guard.count : 0)) { var g = At(SpawnWasp(false)); g.role = "guard"; g.ai.mode = "guard"; continue; }
+                if (guards < (c.adults - c.young >= T.guard.minAdults ? Colony.Sp(c).guards : 0)) { var g = At(SpawnWasp(false)); g.role = "guard"; g.ai.mode = "guard"; continue; }
                 // in the breeding season its males and young queens fly to its own mating spot (T2-3)
                 if (breeding)
                 {
                     if (c.males >= 1 && males < T.males.physMales && H32(tick, sc.id, 511) < T.males.launchChance) { c.males -= 1; var m = At(SpawnWasp(false, "male")); m.role = "male"; m.venom = 0; m.ai.mode = "patrol"; continue; }
-                    if (c.gynes >= 1 && gynes < T.males.physGynes && H32(tick, sc.id, 512) < T.males.launchChance) { c.gynes -= 1; var q = At(SpawnWasp(false, "gyne")); q.role = "gyne"; q.ai.mode = "mate"; q.ai.timer = tick + T.males.gyneTicks; continue; }
+                    if (c.gynes >= 1 && Colony.Sp(c).perennial == 0 && gynes < T.males.physGynes && H32(tick, sc.id, 512) < T.males.launchChance) { c.gynes -= 1; var q = At(SpawnWasp(false, "gyne")); q.role = "gyne"; q.ai.mode = "mate"; q.ai.timer = tick + T.males.gyneTicks; continue; }
                 }
                 if (foragers >= System.Math.Min(T.line.physical, (int)Floor(c.adults * 0.2))) continue;
                 var nw = At(SpawnWasp(false));
@@ -371,7 +395,7 @@ namespace Sting.Core
                 col.males -= 1;
                 var w = SpawnWasp(false, "male"); w.role = "male"; w.venom = 0; w.ai.mode = "patrol";
             }
-            else if (col.gynes >= 1 && gynes < T.males.physGynes && H32(tick, 502) < T.males.launchChance)
+            else if (col.gynes >= 1 && Colony.Sp(col).perennial == 0 && gynes < T.males.physGynes && H32(tick, 502) < T.males.launchChance) // a bee colony's queens stay in to swarm (T2-11)
             {
                 col.gynes -= 1;
                 var w = SpawnWasp(false, "gyne"); w.role = "gyne"; w.ai.mode = "mate"; w.ai.timer = tick + T.males.gyneTicks;
@@ -486,10 +510,14 @@ namespace Sting.Core
                 return;
             }
             // a forager goes back to a source that paid (site fidelity), then to the one whose scent a nestmate brought home
-            if (ai.known != null && ai.known.role == w.role && StillThere(w.role, ai.known.t)) { ai.target = ai.known.t.Copy(); ai.mode = "outbound"; return; }
+            if (ai.known != null && ai.known.role == w.role && StillThere(w.role, ai.known.t, Spw(w))) { ai.target = ai.known.t.Copy(); ai.mode = "outbound"; return; }
             ai.known = null;
+            // a rival knows where the player's bee hive is and some days goes to rob it of honey and brood (T2-11)
+            var pc = colony; var ne = nest.entrance;
+            if (IsRival(w) && (w.role == "sugar" || w.role == "protein") && Colony.Sp(pc).perennial != 0 && pc.nestAlive && pc.sited && pc.sugar >= T.hive.robHoney
+                && D2(w, ne) < T.hive.robRange * T.hive.robRange && H32(w.id, day, 92) < T.hive.robChance) { ai.target = new AiTarget { kind = "phive", key = nest.key, i = 0, c = 999 }; ai.mode = "outbound"; return; }
             var hs = homeScent;
-            if (w.colony == "own" && hs != null && hs.until > tick && hs.role == w.role && D2(w, nest.entrance) < 1 && StillThere(w.role, hs.t)) { ai.target = hs.t.Copy(); ai.mode = "outbound"; return; }
+            if (w.colony == "own" && hs != null && hs.until > tick && hs.role == w.role && D2(w, nest.entrance) < 1 && StillThere(w.role, hs.t, Spw(w))) { ai.target = hs.t.Copy(); ai.mode = "outbound"; return; }
             var t = Sense(w);
             if (t != null) { ai.target = t; ai.mode = "outbound"; return; }
             // nothing in reach: search in a widening spiral round home, sniffing as it goes
@@ -536,6 +564,8 @@ namespace Sting.Core
                 return new V3(s.x, s.y + 0.012, s.z);
             }
             if (t.kind == "trap") { var tr = c.traps[t.i]; return new V3(tr.x, tr.y, tr.z); }
+            if (t.kind == "pollen") { if (t.i >= c.flowers.Count || !InBloom(rec, t.i)) return null; var f = c.flowers[t.i]; return new V3(f.x, f.y + 0.012, f.z); }
+            if (t.kind == "phive") return Colony.Sp(colony).perennial != 0 && colony.nestAlive ? nest.entrance : (V3?)null;
             if (t.kind == "hive") { var hvs = HivesIn(rec); return t.i < hvs.Count ? new V3(hvs[t.i].ex, hvs[t.i].ey, hvs[t.i].ez) : (V3?)null; }
             if (t.kind == "fruit") { foreach (var f in FruitIn(rec)) if (f.i == t.i) return new V3(f.x, f.y + 0.015, f.z); return null; }
             if (t.kind == "spill") { foreach (var sp in SpillsIn(t.key)) if (sp.i == t.i) return new V3(sp.x, sp.y + 0.012, sp.z); return null; }
@@ -558,6 +588,8 @@ namespace Sting.Core
             if (t.sub == "cat") { if (st.caughtCat.ContainsKey(t.i) || !CatActive(rec, t.i)) return null; var cp = c.caterpillars[t.i]; return new V3(cp.x, cp.y, cp.z); }
             if (t.sub == "carrion") { foreach (var cr in CarrionIn(rec)) if (cr.d == t.i) return new V3(cr.x, cr.y, cr.z); return null; }
             if (t.sub == "meat") { foreach (var mt in MeatIn(rec)) if (mt.i == t.i) return new V3(mt.x, mt.y + 0.012, mt.z); return null; }
+            if (t.sub == "moth") { var L = LightsIn(rec); int li = t.i / T.moths.perLight; return li < L.Count && Lit() ? (st.caughtMoth != null && st.caughtMoth.TryGetValue(t.i, out var cm) && cm > tick ? new V3(L[li].x, L[li].y, L[li].z) : MothPos(L[li], t.i % T.moths.perLight, tick)) : (V3?)null; }
+            if (t.sub == "wasp") { var x = WaspById(t.i); return x != null && x.state == "fly" ? x.P : (V3?)null; }
             return null;
         }
 
@@ -595,6 +627,17 @@ namespace Sting.Core
             Num m = Sqrt(dx * dx + dy * dy + dz * dz);
             cmd.dirX = dx / m; cmd.dirY = dy / m; cmd.dirZ = dz / m;
             cmd.throttle = Clamp(Sqrt(2 * T.wasp.accel * d) * 0.7 / T.wasp.cruise, 0.06, 1);
+        }
+
+        /// a rival forager in at the player's bee hive: honey in its crop, a larva in its jaws, the guards after it (T2-11)
+        void RobHive(Wasp w)
+        {
+            var col = colony;
+            if (Colony.Sp(col).perennial == 0 || !col.nestAlive || D2(w, nest.entrance) > Sq(T.ai.arrive * 2)) return;
+            col.sugar -= Min(col.sugar, T.hive.robHoney); w.ai.cargo = 1;
+            if (col.larvae >= 1) { col.larvae -= 1; w.carry = new Carry { kind = "protein", amount = T.rival.raidProtein, what = "bee brood" }; }
+            foreach (var g in Own()) if (g.role == "guard" && g.state == "fly" && g.id != drivenId) { g.ai.mode = "hunt"; g.ai.huntId = w.id; g.ai.timer = tick + T.guard.huntTicks; }
+            Emit("hiveRobbed", ("id", w.id));
         }
 
         /// After an AI sting: get out

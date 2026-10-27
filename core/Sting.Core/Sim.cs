@@ -84,9 +84,10 @@ namespace Sting.Core
             seed = this.settings.seed;
             tpm = TicksPerMinute(this.settings);
             dayTicks = (long)tpm * 1440;
-            colony = Colony.New();
+            species = this.settings.species ?? "wasp"; // the player's line (GDD 6.8)
+            colony = Colony.New(false, species);
             nest = MakeNest(NEST.treeX, NEST.treeZ, NEST.x, NEST.y, NEST.z);
-            colony.maxCells = T.sites.trunk.maxCells;
+            colony.maxCells = MaxCells("trunk");
             nextWaspId = peer * 1000000 + 1;
             minute = ClockMinutes(0, this.settings);
             day = DayOf(minute);
@@ -234,12 +235,20 @@ namespace Sting.Core
             return false;
         }
         public int PhysicalCount => Own().Count;
-        List<Wasp> Own() { var l = new List<Wasp>(); foreach (var w in wasps) if (w.colony == "own") l.Add(w); return l; }
+        internal List<Wasp> Own() { var l = new List<Wasp>(); foreach (var w in wasps) if (w.colony == "own") l.Add(w); return l; }
         /// another colony's wasp that fights the line: a rival, not one of the line's sister colonies (T2-4)
         public static bool IsRival(Wasp w) => w.colony != "own" && !(w.colony != null && w.colony.StartsWith("line:", System.StringComparison.Ordinal));
         int OwnWorkers() { int n = 0; foreach (var w in wasps) if (w.colony == "own" && w.caste == "worker") n++; return n; } // males and gynes out are not workers (T2-3)
         public Num SeasonFrac => (minute - season.startMinute) / (settings.seasonDays * 1440);
         public bool CanFly() => Temperature >= T.weather.flyMinTemp;
+        /// the player's line's species (GDD 6.8)
+        public string species = "wasp";
+        /// a wasp's species row: its line's, or a rival's (the neighbourhood's yellowjackets)
+        internal static SpeciesRow Spw(Wasp w) => T.species.Of(w.sp);
+        /// a site's room for comb, for the line's species: a bee colony builds a bigger nest (T2-11)
+        internal Num MaxCells(string site, string sp = null) => T.sites.Of(site ?? "trunk").maxCells * Max(1, T.species.Of(sp ?? species).start);
+        /// out foraging after dark (hornets, T2-10), or by day
+        internal bool ForageHours(SpeciesRow sp) => (IsDaylight(minute) || sp.night != 0) && !Raining;
 
         static int ById(Wasp a, Wasp b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 
@@ -248,12 +257,13 @@ namespace Sting.Core
             int id = nextWaspId++;
             var w = new Wasp
             {
-                id = id, caste = caste, x = nest.spawn.x, y = nest.spawn.y, z = nest.spawn.z, yaw = nest.spawn.yaw, born = minute,
+                id = id, caste = caste, x = nest.spawn.x, y = nest.spawn.y, z = nest.spawn.z, yaw = nest.spawn.yaw, born = minute, sp = species,
             };
             if (!driven)
             {
                 var a = T.alloc[colony.alloc]; Num s = a.sugar + a.protein + a.pulp, r = H32(id, 77) * s;
                 w.role = r < a.sugar ? "sugar" : r < a.sugar + a.protein ? "protein" : "pulp";
+                if (w.role == "pulp" && Spw(w).wood == 0) w.role = "sugar"; // bees build wax at home (T2-11)
                 if (H32(id, 78) < colony.thirst * T.water.aiShare) w.role = "water"; // a hot nest sends water carriers (T2-1)
                 w.x = nest.entrance.x; w.y = nest.entrance.y - 0.03; w.z = nest.entrance.z;
             }
@@ -424,6 +434,7 @@ namespace Sting.Core
             Birds();
             Dragonflies();
             Fights();
+            OwnBalls();
             AlarmDecay();
             // 3. humans at 20 Hz
             if (tick % 3 == 0) Humans();

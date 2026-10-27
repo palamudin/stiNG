@@ -28,7 +28,7 @@ namespace Sting.Core
     public sealed class Attach { public string hex, posture; public V3 local, n; public int start; public bool deepened; public int zone; }
     public sealed class UnderMove { public int to, t; }
     public sealed class Under { public string hex, posture, key; public int node, sel, entered; public UnderMove move; public Num nextPress; public bool mxHeld, mzHeld; }
-    public sealed class Ball { public Num temp, progress, prevBurst, bees; }
+    public sealed class Ball { public Num temp, progress, prevBurst, bees; /** balled by the line's own bees (T2-11), and ticks with none on it */ public bool own; public int idle; }
     public sealed class Drown { public string key; public int until, i = -1; public Num progress, prevBurst; }
     public sealed class Cup { public Num x, z, level; public int i; }
     public sealed class Nectar { public Num lv; public long m; }
@@ -39,6 +39,8 @@ namespace Sting.Core
     public sealed class Fight
     {
         public int other; public bool remote, starter; public int peer; public Num start, until, mash, myVenom, theirVenom; public bool theirQueen;
+        /// the other side's species weight (a hornet's, GDD 6.8)
+        public Num theirFb;
     }
     public sealed class Contact
     {
@@ -75,6 +77,8 @@ namespace Sting.Core
         public Land land; public int noLandUntil; public string trapCause;
         /// the swoop (GDD 7.9): the tick its dash ends, and the tick the next one may start
         public int swoopUntil, swoopReady;
+        /// its species (GDD 6.8); a bee that has stung a person and dies of it (T2-11); pollen packed so far, in ticks
+        public string sp = "wasp"; public bool spent; public int pollenT;
         internal SipPend sipPend; // net only: sips not yet told to the other peers
         /// net only: holds a load the other peers saw it pick up, so letting go of it is told too (T1-20)
         public bool pubLoad;
@@ -135,6 +139,8 @@ namespace Sting.Core
         public List<(string hex, byte[] s)> fixHumans; public byte[] fixChunk;
         /// a player's nest is alive (the `nest` event)
         public bool alive;
+        /// the species (GDD 6.8): a fighter's weight, a sting's pain (null on events that carry none), a nest's species
+        public Num fb; public Num? pain; public string species;
         public NetEv() { mk = "ev"; }
         public NetEv Copy()
         {
@@ -184,6 +190,7 @@ namespace Sting.Core
         internal List<Cup> cups; internal int[] beeLoad, flowerIdx; internal List<Hive> hives;
         internal List<Grill> grills; internal List<Cyl> cyls; internal List<Roof> roofs;
         internal List<WaterSrc> puddles; internal long puddleDay = long.MinValue; // T2-1
+        internal List<PorchLight> lights; // T2-10
         string[] _sub = new string[0];
         /// "cx,cz#i": the key of the i-th hive or hunter in this chunk
         public string Sub(int i)
@@ -193,6 +200,10 @@ namespace Sting.Core
         }
     }
     public sealed class LastSting { public Num x, z; }
+    /// a porch light (T2-10): on a house's long wall, facing out along (nx, nz)
+    public sealed class PorchLight { public int si; public Num x, y, z, nx, nz; }
+    /// a moth at a porch light: i = light * perLight + k
+    public struct Moth { public int i; public V3 p; }
     public sealed class ChunkState
     {
         public Num esc, chewed;
@@ -210,6 +221,8 @@ namespace Sting.Core
         public Dictionary<int, int> robbed, meat;
         /// pulp chewed off each wooden box (T1-12)
         public Dictionary<int, int> pulp;
+        /// moths taken at the porch lights, back at this tick (T2-10)
+        public Dictionary<int, long> caughtMoth;
     }
 
     public sealed class BeePhys { public Num x, y, z, vx, vy, vz, stun; public string mode; }
@@ -238,7 +251,7 @@ namespace Sting.Core
     public sealed class SipRec { public int t; public Num amount; }
     public sealed class Hint { public string opening, prey, site, hiber; public bool bait, wood, nest, rival, hive, water; public int? raid; }
     /// another player's nest, as it last said (colony against colony)
-    public sealed class PeerNest { public Num x, y, z; public string key; public bool alive; }
+    public sealed class PeerNest { public Num x, y, z; public string key; public bool alive; public string species = "wasp"; }
     /// A hibernation site and the queens waking there (T1-15)
     /// a colony of the line run by the AI (T2-4)
     public sealed class LineColony { public int id, season; public Nest nest; public ColonyState colony; /** when the exterminator comes for it (0: not called) */ public long ext; }
@@ -248,7 +261,7 @@ namespace Sting.Core
     public sealed class Spot { public Num x, z; }
     public sealed class SiteHit { public string type; public Num x, y, z, ix, iz, nx, nz; public Tree t; }
     public sealed class Bait { public Num x, y, z; public string key; }
-    public sealed class PreyHit { public string kind, key; public int i, hive; public Num protein; }
+    public sealed class PreyHit { public string kind, key; public int i, hive, id; public Num protein; } // id: a wasp taken by a hornet (T2-10)
     public sealed class Food { public Num x, y, z, rate; public string kind; public int i; public SugarNode node; }
     public sealed class SimOpts { public int peer; public bool net, noAI; public List<int> peers; }
 }

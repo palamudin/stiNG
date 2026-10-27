@@ -5,6 +5,12 @@ namespace Sting.Core
 {
     public sealed class AllocPreset { public string name; public Num sugar, protein, pulp, traffic = 1; }
     public sealed class SiteType { public string name; public Num maxCells, flood, exposure, discovery, insulation, heat; }
+    /// A species' row (GDD 6.8): multipliers over the wasp's values and 0/1 flags for what differs in kind; see tuning.js
+    public sealed class SpeciesRow
+    {
+        public Num size, swatR, speed, drain, felt, pain, annoy, fight, start, lay, store, sugarIn, proteinIn, @out;
+        public int night, barbed, hunts, pollen, wood, guards, perennial;
+    }
 
     public static class T
     {
@@ -191,6 +197,26 @@ namespace Sting.Core
             public static Num sightR = 8, linesPerSec = 0.6, physPerSec = 1.2, trafficFull = 60, stepLen = 7, errFrac = 0.35, findDist = 4, parkDist = 10;
             public static int minWatchTicks = 120;
         }
+        /// Species (GDD 6.8, T2-9 to T2-11): see tuning.js
+        public static class species
+        {
+            public static SpeciesRow wasp = new SpeciesRow { size = 1, swatR = 0, speed = 1, drain = 1, felt = 1, pain = 1, annoy = 1, night = 0, barbed = 0, hunts = 1, pollen = 0, wood = 1, fight = 0,
+                start = 1, lay = 1, store = 1, sugarIn = 1, proteinIn = 1, @out = 1, guards = 2, perennial = 0 };
+            public static SpeciesRow hornet = new SpeciesRow { size = 1.7, swatR = 0.006, speed = 1.15, drain = 1.3, felt = 0.65, pain = 1.8, annoy = 1.6, night = 1, barbed = 0, hunts = 1, pollen = 0, wood = 1, fight = 1.5,
+                start = 0.35, lay = 0.3, store = 1.5, sugarIn = 0.7, proteinIn = 1.4, @out = 0.5, guards = 2, perennial = 0 };
+            public static SpeciesRow bee = new SpeciesRow { size = 0.85, swatR = -0.001, speed = 0.9, drain = 0.8, felt = 1.15, pain = 0.9, annoy = 0.6, night = 0, barbed = 1, hunts = 0, pollen = 1, wood = 0, fight = 0,
+                start = 2.5, lay = 1.5, store = 10, sugarIn = 1.3, proteinIn = 1, @out = 1.2, guards = 5, perennial = 1 };
+            public static SpeciesRow Of(string sp) => sp switch { "hornet" => hornet, "bee" => bee, _ => wasp };
+        }
+        /// Hornets at night (T2-10): porch lights and moths; see tuning.js
+        public static class moths { public static int perLight = 3, respawnTicks = 2400; public static Num orbit = 0.3, height = 2.3, @out = 0.25, protein = 1, strength = 5, waspProtein = 2; }
+        /// The honeybee colony (T2-11): see tuning.js
+        public static class hive
+        {
+            public static Num pollenSecs = 4, pollenLoad = 1, waxSugar = 1.5, waxFrom = 0.3, winterNeed = 0.05, winterLoss = 0.3, minCluster = 15,
+                swarmFrom = 0.15, swarmTo = 0.5, swarmAdults = 120, reproShare = 0.08, swarmShare = 0.6, swarmHoney = 0.3,
+                ballHeat = 0.5, ballR = 0.05, aiEscape = 0.0008, robHoney = 1, robStrength = 5, robChance = 0.3, robRange = 120;
+        }
         public static class bees
         {
             public static int guards = 6, foragers = 14, ballMin = 3, alarmTicks = 1200, returnTicks = 90;
@@ -245,6 +271,8 @@ namespace Sting.Core
             public static Num stingReach = 1.6, humanDrift = 3, maxSpeed = 12;
             /// T1-20: pickups and sips within reach of what they take, no position deep inside anything solid, a sip's size
             public static Num pickupReach = 0.3, solidDepth = 0.08, sipMax = 0.12;
+            /// no species stings harder (GDD 6.8)
+            public static Num maxPain = 2;
         }
     }
 
@@ -256,6 +284,13 @@ namespace Sting.Core
         public bool exterminator = true, birds = true, rivals = true, pestControl = true;
         /// feature modifiers (T2-6): act at generation; see World.Features
         public int woods = 1, towns = 1, terrain; public Num water = 1, hives = 1;
+        /// which species a line may play (GDD 6.8): "earned", "open" or "fixed:&lt;species&gt;"; the PoC runs open
+        public string progression = "open";
+        /// the species the player's line starts as: a player's choice within the world's progression, not a rule
+        public string species = "wasp";
+        public static readonly string[] SPECIES = { "wasp", "hornet", "bee" };
+        /// the species a world lets a new line start as
+        public string[] SpeciesAllowed() => progression == "open" ? (string[])SPECIES.Clone() : progression.StartsWith("fixed:") ? new[] { progression.Substring(6) } : new[] { "wasp" };
         public Settings Clone() => (Settings)MemberwiseClone();
 
 #if STING_FIXED
@@ -272,7 +307,7 @@ namespace Sting.Core
             string str = "gen" + T.GEN_VERSION + "|dayMinutes=" + N(dayMinutes) + "|humanDensity=" + N(humanDensity) + "|beeAggression=" + N(beeAggression)
                 + "|seasonDays=" + N(seasonDays) + "|reaction=" + N(reaction) + "|escalation=" + N(escalation)
                 + "|exterminator=" + B(exterminator) + "|birds=" + B(birds) + "|rivals=" + B(rivals)  + "|pestControl=" + B(pestControl)
-                + "|woods=" + woods + "|towns=" + towns + "|water=" + N(water) + "|hives=" + N(hives) + "|terrain=" + terrain
+                + "|woods=" + woods + "|towns=" + towns + "|water=" + N(water) + "|hives=" + N(hives) + "|terrain=" + terrain + "|progression=" + progression
                 + "|tune=" + Tune.Hash; // peers must share the tuning file too (T1-22)
             return R.Fnv32(str).ToString("x8");
         }
@@ -297,6 +332,7 @@ namespace Sting.Core
             if (water != d.water) t.Add(water > d.water ? "wet" : "dry");
             if (hives != d.hives) t.Add(hives != 0 ? $"hives {X(hives)}" : "no hives");
             if (terrain != d.terrain) t.Add(terrain > 1 ? "hilly" : "rolling");
+            if (progression != d.progression) t.Add(progression == "earned" ? "species earned" : progression.StartsWith("fixed:") ? progression.Substring(6) + "s only" : progression);
             return string.Join(" · ", t);
         }
     }

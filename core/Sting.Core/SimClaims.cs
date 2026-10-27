@@ -43,6 +43,7 @@ namespace Sting.Core
             switch (ev.what)
             {
                 case "fly": return !((st.caughtFly.TryGetValue(ev.i, out var cf) ? cf : 0) > tick);
+                case "moth": return !(st.caughtMoth != null && st.caughtMoth.TryGetValue(ev.i, out var cm) && cm > tick);
                 case "caterpillar": return !st.caughtCat.ContainsKey(ev.i);
                 case "carrion": return T.eco.carrionLoads - (st.carrion != null && st.carrion.TryGetValue(ev.i, out var cn) ? cn : 0) > 0;
                 case "meat": return (ev.i % 2 != 0 ? T.bbq.plateLoads : T.bbq.grillLoads) - (st.meat != null && st.meat.TryGetValue(ev.i, out var mn) ? mn : 0) > 0;
@@ -59,6 +60,7 @@ namespace Sting.Core
             switch (ev.what)
             {
                 case "fly": if (sign > 0) st.caughtFly[ev.i] = t + T.prey.flyRespawnTicks; break;
+                case "moth": if (sign > 0) (st.caughtMoth ??= new Dictionary<int, long>())[ev.i] = t + T.moths.respawnTicks; break;
                 case "caterpillar": if (sign > 0) st.caughtCat[ev.i] = 1; break;
                 case "carrion": Inc(st.carrion ??= new Dictionary<int, int>(), ev.i); break;
                 case "meat": Inc(st.meat ??= new Dictionary<int, int>(), ev.i); break;
