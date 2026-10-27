@@ -4,7 +4,7 @@
 |---|---|
 | Working title | STING (from the "Sting 7 billion people" meme) |
 | Version | 0.4 — feature tiers and stack compatibility (Section 19) |
-| Date | 2026-10-23 |
+| Date | 2026-10-27 |
 | Engine | Unity (presentation), engine-agnostic C# core (simulation) |
 | Status | Draft for review. Decisions marked **[D]**, proposals marked **[P]**, open questions marked **[Q]** |
 
@@ -83,7 +83,7 @@ PC (Steam), Windows first, Linux and Steam Deck desirable. English. Unity front 
 | Micro | seconds | Fly, pick a target, approach, sting, get out before the swat lands, return |
 | Meso | minutes | A foraging run, a scouting run, defending the entrance, raiding a hive |
 | Macro | in-game weeks | Allocate workers to roles, grow the nest, run the brood pipeline, choose the nest site, decide when to raise reproductives |
-| Meta | season to season | Get mated queens through winter, continue the line next spring, keep the discovered world |
+| Meta | season to season | Get mated queens through winter, continue the line next spring, keep the discovered world, grow the line's tree; at the turn of a full year, wake as hornets or try bees (6.8) |
 
 ### 2.2 The shape of a season
 
@@ -256,6 +256,7 @@ Worlds are separate, not one unified universe, in the way Valheim and Minecraft 
 - **Personal** worlds give full control over the environment.
 - An offshoot can be founded from a fresh seed, from Main's seed (same geography, undiscovered), or from a snapshot of an existing world (records and deltas copied) **[Q] Q-13**.
 - A colony line belongs to the world it was founded in **[Q] Q-14**.
+- Which species a line may play, and how it gets there, is a world setting (6.8): Main earns it, an offshoot's host chooses, a personal world can open everything.
 
 ### 4.8 World modifiers **[P] D-14** **[T0] [T1] [T2]**
 
@@ -274,6 +275,7 @@ Every world carries a modifier set that makes it recognizably itself.
 **Feature modifiers** change world generation and which systems run:
 - setting style, biome mix, town density, water, terrain roughness, hive density
 - system toggles: exterminators, bees, birds, extreme weather
+- species progression: earned, open or fixed to one species (6.8)
 
 Rules:
 - Modifiers are **data, not code**. They live in the world record, and the effective tuning hash is the hash of base tuning plus modifiers, so every peer computes the same values.
@@ -384,6 +386,81 @@ Economy step in Appendix A.4.
 - In spring the player picks which surviving queen continues as the controlled colony. The other surviving queens found **lineage colonies** run by AI. **[Q] Q-10** As built (18.40): up to five are real colonies on trunks near where they wintered.
 - **The line** is the player's founding queen and all colonies descended from her. Game over when the line is extinct.
 
+### 6.8 The growth tree and the three species **[P] D-23** **[T2]** (not built)
+
+The line earns experience, and experience grows a tree. A line that runs a whole year reaches a turning point in spring. With enough experience, the queen it wakes is a hornet queen, and the player plays hornets from then on. With too few stings and too little experience, the game offers the line a try at a honeybee colony. Both are expansion by reuse: a hornet and a honeybee run on the systems already built for wasps and bees, with their own tables.
+
+**Experience** *(tune)*
+- Belongs to the line, not to a wasp. The founding queen starts at zero; experience winters with the queens and passes to the one the player wakes.
+- Is a deterministic sum over events the sim already emits: humans stung, prey caught, loads brought home (sugar, protein, pulp, water), hives robbed, rivals and raiders killed, gynes mated, queens wintered, escalation levels survived. It is colony state, in the save and the snapshot, so every peer computes the same figure.
+- **Stabs** are the stings that move the counter (8.11). They are tracked apart from experience because the counter is the game's spine. A line can be rich in experience and still fail the stab bar.
+- Line extinct, everything is lost: the next line starts from a single queen at zero (P4).
+
+**The tree**
+- Three branches on systems that exist:
+  - **Nest:** cell building, brood speed, nest insulation, guard strength.
+  - **Flight:** the driven wasp's Reflex cue (7.8), swoop recovery, lock-on range, assisted-flight reach.
+  - **Line:** gyne output, winter survival by site, how many lineage colonies found.
+- Points come from experience, a few per season; the tree is spent in the colony view.
+- In shared worlds a node that changes an outcome is a colony parameter: data in the colony record that every peer reads, inside ranges the plausibility checks know (11.8). Presentation-only nodes, like the Reflex cue, are free. The ranges stay small. An old line is better, not untouchable.
+
+**The year's turn**
+- A line has run a year when it has founded in spring, raised gynes, wintered at least one queen and woken her the next spring. The test runs at the spring choice (6.7, 18.24), before the queen is woken.
+- **Hornet bar met** (experience and stabs both over their thresholds): the player may wake the chosen queen as a hornet queen. The line becomes a hornet line. The player can decline and stay wasps.
+- **Short of both** (stabs and experience under a lower bar): the game offers the line a try as a honeybee colony.
+  - Accepting takes over a feral hive in the world (18.28).
+  - The wasp line's other wintered queens found AI lineage colonies (18.40) instead of ending, so the line is not lost **[Q] Q-20**.
+  - Declining continues as wasps.
+- **In between:** the line continues as wasps.
+- The change happens only at a generation boundary: a new queen in spring, never a living wasp mid-season.
+
+**Pillar P1.** No wasp turns into a hornet. Like balling on *Vespula* (9.2), this is a game license: the change is the player's progression, applied when a new queen is woken. The world itself stays nature as is. Hornets and bees behave as their biology says; none gains a face or a voice.
+
+**The three species**, on one code path (D-22): the wasp code, with a species table read from tuning (18.29).
+
+| | Common wasp (*Vespula*) | European hornet (*Vespa crabro*) | Honeybee (*Apis mellifera*) |
+|---|---|---|---|
+| Body *(bio)* | worker 12–17 mm | worker up to 25 mm, queen up to 35 mm | smaller and lighter than a wasp *(tune)* |
+| Peak colony *(bio)* | thousands | 200–400 workers, large nests up to 1,000 | 2,000–60,000 workers |
+| Year | annual; mated queens winter | annual; mated queens winter under bark or in wall voids | perennial; the colony winters as a cluster on its honey and pollen |
+| New colonies | gynes and males, mating flights | the same | swarming: the old queen leaves with up to 60% of the workers; a daughter queen keeps the nest |
+| Food | prey for the larvae, sugar for adults, human food | hunts flies, grasshoppers and yellowjackets, sometimes honeybees; fallen fruit, sap from stripped bark | nectar and pollen only; no prey |
+| Sting | many times | many times; heavier *(tune)* | a worker that stings a person dies (barbed sting); the queen stings many times |
+| Hours | day | day and night; drawn to porch lights | day |
+| In the US setting | the meme | established in the eastern US since the 1840s | everywhere: beekeepers' boxes and feral hives |
+
+**What each species plays like**
+- **Hornets:** fewer, heavier insects, and each one counts, so the game is in the driven wasp.
+  - Rival wasp colonies become prey: hunting yellowjackets at their nest, picking bees off a hive entrance.
+  - Night flight under porch lights adds a night loop. Beer gardens already keep evening hours (18.43).
+  - People react harder to a hornet *(tune)*.
+  - Bees still ball them. The balling research is about hornets (Appendix C), so this is the matchup the data describes.
+- **Bees:** the inversion.
+  - Every sting on a person kills the bee that made it, so each stab is a sacrifice and the counter climbs slowly.
+  - Foraging, stores and defence are the game. The player is now the hive that balls raiders, including other players' wasps and hornets (Q-07).
+  - Winter is a stores problem (enough honey for the cluster), not a hibernation-site problem.
+  - The line continues by swarms, not by gynes.
+
+**Reuse map**
+
+| Needed | Already built | New |
+|---|---|---|
+| Species bodies and flight | one wasp code path (D-22), tuning as data (18.29) | a species table that overrides wasp values; species in the colony record and saves |
+| Hornet hunting | prey catching, raids on nests (18.43), robbing hives (18.28) | yellowjackets as prey at rival and AI nests |
+| Night | the clock, evening hours (18.43) | porch lights as light sources and attractors; night flight |
+| Bee colony | feral hives (18.28), AI bees, balling (9.2), the colony economy (A.4) | a honey economy with no larval protein; the winter cluster; swarming in place of gyne flights; the barbed sting |
+| The line across species | succession (6.7), lineage colonies (18.40), the spring choice (18.24) | the year's turn and its offer |
+
+**World setting: progression.** How far a line can go is part of the world, not the client. It is a feature modifier in the world record (4.8, D-14), so the experience thresholds are tuning values inside the world's tuning hash.
+
+| Setting | Meaning | Where |
+|---|---|---|
+| `earned` | Wasps at the start; hornets and bees through the year's turn | Main (always), offshoot default |
+| `open` | All three species selectable when a line is founded | Personal worlds, test builds, the PoC and network lab |
+| `fixed:<species>` | One species only (a hornet server, a bee server) | Offshoot host choice |
+
+For testing, the PoC and the core run `open`: all three species can be picked on the start screen from the start. In a shared world, players' lines can be different species. A hornet player hunting a wasp player's foragers is the rivalry working as intended (Q-07). Every species' stabs count on the one counter (Q-09).
+
 ---
 
 ## 7. The wasp
@@ -454,7 +531,7 @@ The determinism and netcode rules decide how it can work:
 
 - **Personal instances, solo.** Real slowdown. The sim keeps its 60 Hz tick but the wall clock advances it at a fraction of real time (for example 0.25× for one real second). Outcomes are unchanged because the sim never sees wall time; only the player gets more real time to act per tick.
 - **Shared worlds (personal with friends, offshoot, Main).** No sim slowdown. Peers run free against the wall clock and events commit 30 ticks after they happen (18.2); a peer that slowed itself would fall behind and its events would arrive past their commit tick. Reflex is presentation-only here: a short slow-motion of the *render* of the incoming hand while input stays live, plus the swat's known landing point and tick drawn as a warning. The sim's swat start and volume are already known when the swat is scheduled, so the cue is exact, not a guess.
-- **Tuning.** A skill tree can scale the cue (earlier warning, longer slow-motion in solo, the predicted swat volume shown), never the outcome. The consequence window (7.4, minimum 11 ticks) stays as it is.
+- **Tuning.** The Flight branch of the growth tree (6.8) can scale the cue (earlier warning, longer slow-motion in solo, the predicted swat volume shown), never the outcome. The consequence window (7.4, minimum 11 ticks) stays as it is.
 
 
 ### 7.9 Lock-on and assisted flight **[T1]** (built, 18.45)
@@ -629,6 +706,7 @@ During each tick of a swat window, the volume is transformed from body frame to 
 - Managed hives (beekeepers' boxes in gardens) and feral hives (tree hollows, walls).
 - Bees forage flowers and compete with wasps for nectar.
 - Wasps can prey on bees and rob hives: a large protein and sugar reward at high risk.
+- A line can be offered a bee colony to play (6.8). The hives, the bees and balling are then the player's own: the same systems, from the other side.
 
 ### 9.2 Hive defense **[T0]**
 
@@ -885,6 +963,7 @@ On Main the entity count is dominated by AI wasps: one player's colony can hold 
 | D-20 | Shared decisions never read live wasp positions; events carry the positions they need | decided (PoC) |
 | D-21 | Biological durations scale with season length (bio = seasonDays / 200) | proposed |
 | D-22 | Every wasp, driven or AI, runs the same flight, contact, sting and swat code | decided (PoC) |
+| D-23 | The line grows a tree from experience; at a year's turn it may wake as hornets (experience and stabs high) or be offered bees (both low); progression is a world setting (earned, open, fixed); all three species are open in test builds | proposed |
 
 ---
 
@@ -909,6 +988,9 @@ On Main the entity count is dominated by AI wasps: one player's colony can hold 
 | Q-11 | Art scope for thousands of distinct humans | Open; modular bodies and clothing driven by traits. For the Unity port, consider licensed low-poly modular human packs (assets, not code; check licenses) over the PoC's capsule figures |
 | Q-16 | Humans outside a peer's interest | Settled (18.9): committed interest windows; humans simulated over the union |
 | Q-17 | Should the colony economy balance stores late in the season (sugar piles up)? | Settled (18.11): stores are capped at a few days of need |
+| Q-18 | What earns experience, how events are weighted, and where the hornet and bee bars sit; does a stab count every sting or only unique humans? | Start from events the sim already emits (6.8); stabs follow the counter (unique humans); tune the bars on play data |
+| Q-19 | Is the change of species one-way? Can a hornet line go back, or a bee line earn its way back to wasps or on to hornets? | Proposal: hornets are one-way; a bee line that runs a strong year is offered wasps again |
+| Q-20 | When a line takes the bee offer, what happens to its wasp queens? | Proposal: they found AI lineage colonies (18.40); the player can return to them at the next spring |
 
 ---
 
@@ -1413,8 +1495,13 @@ Agreed 2026-10-27: Tier 2 is built on the current stack in the order that surviv
 | T2-4 | **Built (18.40).** Lineage colonies as real AI colonies: the queens the player did not wake found colonies of the line, run by AI | 6.7 | L | sim |
 | T2-5 | **Built (18.41).** Town centers and beer gardens: a new land use with dense outdoor seating and drinks | 4.1, 4.3 | M | generator and sim; new art |
 | T2-6 | **Built (18.42, 18.44).** Feature modifiers that need the bigger generator: biome mix, town density, terrain | 4.8 | L | terrain touches all collision |
-| T2-7 | The Reflex skill tree | 7.8 | M | mostly UI and progression: after the Unity move |
+| T2-7 | The Reflex skill tree; now the Flight branch of the growth tree (T2-13) | 7.8 | M | mostly UI and progression: after the Unity move |
 | T2-8 | Colonies of thousands of wasps out at once | 11.12 | L | engine performance: after the Unity move |
+| T2-9 | Species as data: a species table over the one wasp code path, species in the colony record and saves, the `progression` world setting with `open` in test builds and a species pick on the start screen | 6.8 | M | sim; first, everything below needs it |
+| T2-10 | The hornet line: a heavier body, a small colony, yellowjackets and bees as prey, night flight with porch lights | 6.8 | L | sim and generator |
+| T2-11 | The honeybee colony: a perennial colony, honey stores and the winter cluster, swarming, the barbed sting, balling as the player's defence | 6.8, 9.1, 9.2 | L | sim; reuses hives and balling |
+| T2-12 | Experience and the year's turn: experience and stabs from sim events, the bars, the spring offer | 6.8 | M | sim |
+| T2-13 | The growth tree: branches, node effects as colony parameters, the colony-view screen (takes in T2-7) | 6.8, 7.8 | M | node effects sim; the screen after the Unity move |
 
 ### 19.4 Not on the current stack
 
@@ -2093,10 +2180,16 @@ namespace Sting.Core
 | Chunk authority | The one peer that resolves contested objects and writes deltas for a chunk |
 | Consequence window | Time between a sting and its first gameplay consequence; covers network latency |
 | Delta log | Changes recorded on top of a discovered chunk's frozen base |
+| Experience | What a line has done, summed from sim events; spent on the growth tree and tested at the year's turn |
+| Growth tree | The line's progression: Nest, Flight and Line branches |
 | Gyne | An unmated new queen |
 | Line | A founding queen and every colony descended from her |
+| Progression | The world setting for which species a line may play: earned, open or fixed |
 | Reaction plan | The deterministic list of swats and effects produced by a sting |
+| Stab | A sting that moves the counter |
 | Sugar deficit | Share of the colony's adult sugar need not covered by larval secretion |
+| Swarm | A honeybee colony's way of reproducing: the old queen leaves with part of the workers |
+| Year's turn | The spring test of a line that has run a whole year: hornets, wasps or the bee offer |
 
 ---
 
@@ -2120,7 +2213,19 @@ Values the tuning starts from. They are references, not targets; gameplay compre
 | Adult diet | nectar, sweet fruit | same |
 | Larval secretions | workers collect secretions from larvae | same |
 | Heat-balling | ball reaches 46 °C within 5 minutes; hornets die at 44–46 °C | Sugahara et al., *Zoological Science* 2012 (PubMed 22233493) |
+| European hornet in North America | introduced from central Europe, first detected in the 1840s; established across the eastern US | Penn State Extension, *European Hornet* |
+| Hornet size | workers up to about 25 mm, queens up to about 35 mm | same |
+| Hornet colony | peaks mid-September at 200–400 workers, large nests up to 1,000; yellowjacket nests hold 3,000–5,000 | same |
+| Hornet habits | nests in hollow trees and wall voids; nocturnal, drawn to porch lights; hunts grasshoppers, flies and yellowjackets, sometimes honeybees; fallen fruit and bark sap in fall; annual, mated queens winter under bark or in walls | same |
+| Honeybee colony | 2,000–60,000 workers, 0–500 drones in spring and summer | University of Georgia Honey Bee Program, *Honey Bee Biology* |
+| Honeybee year | stores honey and pollen in autumn; winters as a tight cluster eating the stores | same |
+| Swarming | crowded colonies rear daughter queens; the old queen leaves with up to 60% of the workers and moves into a new site within 24 hours | same |
+| Honeybee worker ages | cleaning, fanning, feeding larvae, receiving loads, guarding, then foraging | same |
+| Barbed sting | a worker cannot pull its barbed sting out of a person and dies; the queen stings many times, drones have no sting | UC ANR Bug Squad, *Why Do Honey Bees Die When They Sting?* |
 
 Sources:
 - https://en.wikipedia.org/wiki/Vespula_vulgaris
 - https://pubmed.ncbi.nlm.nih.gov/22233493/
+- https://extension.psu.edu/european-hornet
+- https://bees.caes.uga.edu/beekeeping-resources/getting-started-topics/getting-started-honey-bee-biology.html
+- https://ucanr.edu/blog/bug-squad/article/why-do-honey-bees-die-when-they-sting

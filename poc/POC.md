@@ -147,6 +147,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 - AI wasps in state packets are not checked against solid geometry (their owner does not collide them far from its player).
 - With terrain on, flight does not feel the slope (the sim works in height above the ground), hills block sight lines between people only, and buildings lean slightly with the ground they stand on.
 - The assisted flight goes straight at its waypoints and slides off whatever is in the way; it does not plan round trees or houses, and it does not dodge.
+- Only the common wasp is playable. The growth tree, hornets and honeybee colonies (GDD 6.8, T2-9 to T2-13) are designed, not built; when species land, the PoC runs with progression `open` so all three can be picked from the start.
 - A raid on another player's nest takes one larva at a time, by the player's own wasp; AI workers do not raid other players' nests, as they do not raid rival nests.
 
 ## Controls
