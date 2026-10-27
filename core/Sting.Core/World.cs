@@ -15,7 +15,9 @@ namespace Sting.Core
     public sealed class Fly { public Num x, y, z, r, w1, w2, w3, p1, p2, p3; }
     public sealed class HumanSlot { public int slot; public Num x, z, fx, fz, exit; public string posture; public string act; public Num[] path; }
     public sealed class Box { public Num minx, maxx, miny, maxy, minz, maxz; public bool wood, hive, shed, fence, mall; }
-    public sealed class Cyl { public Num x, z, r, h; public bool wood, grill; }
+    public sealed class Cyl { public Num x, z, r, h; public bool wood, grill, bath; }
+    /// a birdbath (T2-1): a basin on a pedestal; h is the water's surface
+    public sealed class Bath { public Num x, z, r, h; }
     /// A sugar source: a can, a flower, a puddle ('spill') or fallen 'fruit'. i identifies spills and fruit.
     public sealed class SugarNode { public Num x, y, z, rate; public string kind; public int table = -1, i; }
     public sealed class Bee { public bool guard; public Num p, w, tx, ty, tz; public int period, phase; }
@@ -49,6 +51,8 @@ namespace Sting.Core
         public Rival rival; public List<Shed> sheds = new List<Shed>(); public List<Patrol> dragonflies = new List<Patrol>();
         /// land use and the suburban layout (T1-12)
         public string use = "park"; public List<Rect> roads = new List<Rect>(), lots = new List<Rect>(); public List<Loop> loops = new List<Loop>(); public List<Mall> malls = new List<Mall>();
+        /// birdbaths (T2-1)
+        public List<Bath> baths = new List<Bath>();
     }
 
     public sealed class ShedSite { public Num x, y, z, ix, iz, nx, nz; }
@@ -476,6 +480,32 @@ namespace Sting.Core
                 }
             }
             if (forest && Unit(H(6300)) < 0.3) AddActor(6310, ox - 26, oz - 20, 1, 0, "stand", "stroll", new Num[] { ox - 26, oz - 20, ox + 26, oz + 20 });
+            // birdbaths (T2-1, see world.js): some backyards, now and then a park, one in the home park
+            void AddBath(Num x, Num z)
+            {
+                c.baths.Add(new Bath { x = x, z = z, r = T.water.bathR, h = T.water.bathY });
+                c.cylinders.Add(new Cyl { x = x, z = z, r = T.water.bathR, h = T.water.bathY, wood = false, bath = true });
+                occupied.Add(new Occ { x = x, z = z, r = 0.6 });
+            }
+            if (c.use == "yards")
+            {
+                for (int li = 0; li < 4; li++)
+                {
+                    int s = li < 2 ? -1 : 1; Num lx = ox + (li % 2 != 0 ? 16 : -16); long b = 3000 + li * 2000;
+                    if (Unit(H(b + 1500)) >= T.water.bathShare) continue;
+                    Num x = lx + Range(H(b + 1501), -9, 9), z = oz + s * 24.5;
+                    if (Free(x, z, 0.6)) AddBath(x, z);
+                }
+            }
+            else if (c.use == "park")
+            {
+                int n = isOrigin ? 6 : Unit(H(6500)) < T.water.bathPark ? 4 : 0; // tries
+                for (int k = 0; k < n; k++)
+                {
+                    Num x = ox + Range(H(6501 + k * 2), -18, 18), z = oz + Range(H(6502 + k * 2), -18, 18);
+                    if (Free(x, z, 1)) { AddBath(x, z); break; }
+                }
+            }
             for (int i = 0; i < c.trees.Count; i++)
             {
                 var t = c.trees[i];

@@ -187,13 +187,28 @@ namespace Sting.Core
         }
         /// How fast the brood develops at a minute (GDD 6.6, T1-14): full speed in a comfortable nest; cold snaps and heat
         /// slow it, as much as the site lets the weather in. An attic heats up on sunny afternoons.
+        /// Water the colony has fanned over the comb takes the heat's share away (T2-1)
         public Num BroodSpeed(long m)
         {
-            var S = T.sites.Of(nest.site); long d = MinuteOfDay(m);
-            Num air = AirAt(m) + S.heat * Max(0, DSin(TAU * (d - 540) / 1440)) * (IsRaining(seed, m) ? 0 : 1);
-            Num cold = Clamp01((T.thermal.coldFrom - air) / T.thermal.coldSpan), hot = Clamp01((air - T.thermal.hotFrom) / T.thermal.hotSpan) * T.thermal.hotWeight;
+            var S = T.sites.Of(nest.site); Num air = NestAir(m);
+            Num cold = Clamp01((T.thermal.coldFrom - air) / T.thermal.coldSpan), hot = Clamp01((air - T.thermal.hotFrom) / T.thermal.hotSpan) * T.thermal.hotWeight * (1 - Clamp01(colony.cool));
             return Max(T.thermal.minSpeed, 1 - (1 - S.insulation) * (cold + hot));
         }
+        /// the air at the nest: the weather, plus the sun on an attic roof
+        Num NestAir(long m)
+        {
+            var S = T.sites.Of(nest.site); long d = MinuteOfDay(m);
+            return AirAt(m) + S.heat * Max(0, DSin(TAU * (d - 540) / 1440)) * (IsRaining(seed, m) ? 0 : 1);
+        }
+        /// The nest's heat (GDD 6.6, T2-1): past comfort through the site's insulation (0..1), and how far the comb is past
+        /// the temperature that kills brood (0..1)
+        public (Num heat, Num cook, Num nestT) NestHeat(long m)
+        {
+            var S = T.sites.Of(nest.site); Num air = NestAir(m), keep = 1 - S.insulation;
+            Num nestT = T.water.nestBase + Max(0, air - T.water.nestBase) * keep;
+            return (keep * Clamp01((air - T.thermal.hotFrom) / T.thermal.hotSpan), Clamp01((nestT - T.water.lethal) / T.water.lethalSpan), nestT);
+        }
+        public (Num heat, Num cook, Num nestT) NestHeat() => NestHeat(minute);
         public Num BroodSpeed() => BroodSpeed(minute);
         long wcMinute = long.MinValue; V3 wcVal;
         public V3 Wind { get { if (windOverride.HasValue) return windOverride.Value; if (wcMinute != minute) { wcVal = WindAt(seed, minute); wcMinute = minute; } return wcVal; } }
@@ -220,6 +235,7 @@ namespace Sting.Core
             {
                 var a = T.alloc[colony.alloc]; Num s = a.sugar + a.protein + a.pulp, r = H32(id, 77) * s;
                 w.role = r < a.sugar ? "sugar" : r < a.sugar + a.protein ? "protein" : "pulp";
+                if (H32(id, 78) < colony.thirst * T.water.aiShare) w.role = "water"; // a hot nest sends water carriers (T2-1)
                 w.x = nest.entrance.x; w.y = nest.entrance.y - 0.03; w.z = nest.entrance.z;
             }
             wasps.Add(w);
@@ -498,7 +514,7 @@ namespace Sting.Core
             // the colony lives through the skipped time
             Num steps = Floor(skipTicks / 60), dtDay = (Num)60 / dayTicks;
             long m0 = minute; Num frac0 = SeasonFrac;
-            for (int i = 0; i < steps; i++) Colony.Step(colony, dtDay, wasps.Count, false, frac0, bio, BroodSpeed(m0 + i * 60 / tpm));
+            for (int i = 0; i < steps; i++) { long m = m0 + i * 60 / tpm; var nh = NestHeat(m); Colony.Step(colony, dtDay, wasps.Count, false, frac0, bio, BroodSpeed(m), null, (nh.heat, nh.cook)); }
             foreach (var w in new List<Wasp>(wasps)) if (w != d) Despawn(w);
             Minute(ClockMinutes(tick + clockOffset, settings));
             foreach (var hm in active) CatchUpHuman(hm);
@@ -526,7 +542,7 @@ namespace Sting.Core
             f.F(tick); f.F(clockOffset); f.F(drivenId);
             foreach (var w in wasps) { f.F(w.id); f.F(w.x); f.F(w.y); f.F(w.z); f.F(w.vx); f.F(w.vy); f.F(w.vz); f.F(w.energy); f.F(w.venom); f.F(w.bodyT); }
             var c = colony;
-            f.F(c.adults); f.F(c.eggs); f.F(c.larvae); f.F(c.pupae); f.F(c.cells); f.F(c.protein); f.F(c.sugar); f.F(c.pulp); f.F(c.deficit);
+            f.F(c.adults); f.F(c.eggs); f.F(c.larvae); f.F(c.pupae); f.F(c.cells); f.F(c.protein); f.F(c.sugar); f.F(c.pulp); f.F(c.deficit); f.F(c.water); f.F(c.cool); // T2-1
             f.F(c.rEggs); f.F(c.rLarvae); f.F(c.rPupae); f.F(c.gynes); f.F(c.mated); f.F(season.n); f.F(lineage);
             f.F(stung.Count); f.F(stats.stings); f.F(stats.aiStings); f.F(records.Count);
             foreach (var hm in active) { f.F(hm.x); f.F(hm.z); f.F(hm.panic); f.F(hm.posture == "sit" ? 1 : 0); }

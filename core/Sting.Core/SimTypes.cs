@@ -114,7 +114,7 @@ namespace Sting.Core
     public abstract class Msg { public string mk; public int peer, tick; public int to = -1; }
 
     /// A network event: one class holds every field any event type uses (sim.js publishes plain objects)
-    public sealed class WoodSpot { public string key; public int i; }
+    public sealed class WoodSpot { public string key; public int i; public bool water; } // water: a load of water, not pulp (T2-1)
     public sealed class Claim { public int auth, i, hive, tick; public string key, what, carry; }
     public sealed class NetEv : Msg
     {
@@ -164,6 +164,8 @@ namespace Sting.Core
         public override string ToString() => type;
     }
 
+    /// a water source (T2-1): a birdbath, or a puddle after rain
+    public sealed class WaterSrc { public Num x, y, z, r; public string kind; public int i; }
     public sealed class ChunkRec
     {
         public int cx, cz, genVersion, discoveredTick; public uint contentHash; public ChunkContent content;
@@ -173,6 +175,7 @@ namespace Sting.Core
         internal List<Bait> baits; internal int baitsCampaign = -1;
         internal List<Cup> cups; internal int[] beeLoad, flowerIdx; internal List<Hive> hives;
         internal List<Grill> grills; internal List<Cyl> cyls;
+        internal List<WaterSrc> puddles; internal long puddleDay = long.MinValue; // T2-1
         string[] _sub = new string[0];
         /// "cx,cz#i": the key of the i-th hive or hunter in this chunk
         public string Sub(int i)
@@ -225,7 +228,7 @@ namespace Sting.Core
         public Dictionary<string, int> held = new Dictionary<string, int>(); public Dictionary<string, List<SipRec>> sips = new Dictionary<string, List<SipRec>>();
     }
     public sealed class SipRec { public int t; public Num amount; }
-    public sealed class Hint { public string opening, prey, site, hiber; public bool bait, wood, nest, rival, hive; }
+    public sealed class Hint { public string opening, prey, site, hiber; public bool bait, wood, nest, rival, hive, water; }
     /// A hibernation site and the queens waking there (T1-15)
     public sealed class HiberSite { public string kind; public Num x, y, z, q; public int n; public bool scouted; }
     public sealed class Winter { public string why; public List<HiberSite> sites = new List<HiberSite>(); public Num survivors, lineage; public int until; }

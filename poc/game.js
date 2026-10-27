@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import {
   Sim, Act, T, DT, ZONES, ZoneName, SwatKind, SwatKindName, StyleName, TopName, BottomName, Top, Bottom,
   toWorld, toLocal, dirToWorld, chunkKey, chunkOf, hash, Domain, rangeInt, resolveSting, zoneCover, segClosest, classify, predictedKind,
-  NEST, NEST_ENTRANCE, flyPos, beePos, fmtClock, minuteOfDay, isLowerZone, broodTotal, sugarCap, proteinCap, garmentGraph, dayWeather,
+  NEST, NEST_ENTRANCE, flyPos, beePos, fmtClock, minuteOfDay, isLowerZone, broodTotal, sugarCap, proteinCap, waterCap, garmentGraph, dayWeather,
   NetLab, LINKS, birdPos, dragonPos, shedSites, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE,
 } from './sim/index.js';
 
@@ -159,7 +159,15 @@ const webMat = new THREE.LineBasicMaterial({ color: '#f4f4f4', transparent: true
 function buildChunk(rec) {
   const g = new THREE.Group();
   const c = rec.content;
-  const dyn = { lids: [], traps: [], candles: [], cans: [], puddles: [], crowns: [], grills: [], wood: [] };
+  const dyn = { lids: [], traps: [], candles: [], cans: [], puddles: [], crowns: [], grills: [], wood: [], rain: [], rainDay: -2 };
+  // birdbaths (T2-1): a stone basin on a pedestal, water to the brim
+  for (const b of c.baths || []) {
+    const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.11, b.h - 0.08, 10), mat('#a9a49a')); ped.position.set(b.x, (b.h - 0.08) / 2, b.z);
+    const basin = new THREE.Mesh(new THREE.CylinderGeometry(b.r + 0.03, b.r * 0.55, 0.1, 18), mat('#bdb8ad')); basin.position.set(b.x, b.h - 0.055, b.z); // its rim just under the water line
+    const water = new THREE.Mesh(new THREE.CircleGeometry(b.r, 20), WATER_MAT); water.rotation.x = -Math.PI / 2; water.position.set(b.x, b.h + 0.002, b.z);
+    for (const m of [ped, basin]) { m.castShadow = m.receiveShadow = true; }
+    g.add(ped, basin, water);
+  }
   // garden sheds: plank walls, a pitched roof, a crack in one wall and a gap under one eave (nest sites)
   // land use (T1-12): the ground of a yard is a mown lawn, a forest floor is dark; streets, cul-de-sacs, parking lots
   if (c.use === 'yards' || c.use === 'forest' || c.use === 'mall') {
@@ -377,6 +385,18 @@ function updateChunkDynamics() {
       d.puddles[i].visible = down;
     });
     for (const c of d.candles) c.visible = lv >= 2;
+    // puddles after rain (T2-1): laid down when the ground gets wet, taken up when it dries
+    const pd = sim.puddleDay();
+    if (pd !== d.rainDay) {
+      d.rainDay = pd;
+      for (const m of d.rain) g.remove(m);
+      d.rain = [];
+      const rec4 = sim.records.get(k);
+      if (pd >= 0 && rec4) for (const p of sim.puddlesIn(rec4, pd)) {
+        const m = new THREE.Mesh(new THREE.CircleGeometry(p.r, 18), WATER_MAT); m.rotation.x = -Math.PI / 2; m.position.set(p.x, 0.008, p.z);
+        g.add(m); d.rain.push(m);
+      }
+    }
     // flowers by season (T1-8): a green bud before, the colour in bloom, a brown head after
     const rec = d.heads && sim.records.get(k), bk = Math.floor(sim.seasonFrac * 200) + sim.season.n * 1000;
     if (rec && d.bloomKey !== bk) {
@@ -1029,7 +1049,8 @@ const bulge = new THREE.Mesh(new THREE.SphereGeometry(0.013, 12, 8), mat('#888')
 bulge.visible = false;
 scene.add(bulge);
 
-const CARRY_MAT = { fly: mat('#1b1a17'), caterpillar: mat('#6fa83a'), bee: mat('#a7742a'), pulp: mat('#b7ab92') };
+const WATER_MAT = new THREE.MeshLambertMaterial({ color: '#6f93ad', transparent: true, opacity: 0.75, depthWrite: false }); // T2-1
+const CARRY_MAT = { fly: mat('#1b1a17'), caterpillar: mat('#6fa83a'), bee: mat('#a7742a'), pulp: mat('#b7ab92'), water: new THREE.MeshLambertMaterial({ color: '#9cc7e6', transparent: true, opacity: 0.7 }) };
 
 function renderWasps(alpha, t, dt) {
   const seen = new Set();
@@ -1436,7 +1457,7 @@ function logEvent(text) {
 }
 
 // Colony view (GDD 10.3): the workers that are out, nearest first, each one a button to drive her
-const ROLE_NAME = { sugar: 'sugar forager', protein: 'hunter', pulp: 'pulp forager', guard: 'guard' };
+const ROLE_NAME = { sugar: 'sugar forager', protein: 'hunter', pulp: 'pulp forager', guard: 'guard', water: 'water carrier' };
 const MODE_NAME = { pick: 'choosing', search: 'searching', outbound: 'flying out', collect: 'collecting', return: 'flying home', attack: 'attacking', evade: 'getting away', guard: 'guarding', hunt: 'chasing' };
 $('nWorkers').addEventListener('pointerdown', (e) => {
   const b = e.target.closest('button[data-id]');
@@ -1464,6 +1485,8 @@ function updateNest() {
     ['Adults inside / out', `${fmt(Math.max(0, c.adults - out))} / ${out}`],
     ['Young · guards out', `${fmt(c.young || 0)} still nursing · ${sim._own().filter((w) => w.role === 'guard' && w.id !== sim.drivenId).length} at the door`], // T1-13
     ['Protein', `${c.protein.toFixed(1)} / ${proteinCap(c).toFixed(0)}`], ['Sugar', `${c.sugar.toFixed(1)} / ${sugarCap(c).toFixed(0)}`], ['Pulp', c.pulp.toFixed(1)],
+    ['Water', `${(c.water || 0).toFixed(1)} / ${waterCap(c).toFixed(0)}`], // T2-1
+    ...(c.sited !== false ? [['Comb temperature', (() => { const h = sim.nestHeat(); return `${h.nestT.toFixed(1)} °C${h.cook > 0 && (c.cool ?? 1) < 0.95 ? ' · the brood is cooking' : h.heat > 0 ? ((c.cool ?? 1) > 0.95 ? ' · cooled with water' : ' · too hot, short of water') : ''}`; })()]] : []),
     ['Cells used', `${fmt(broodTotal(c))} / ${fmt(c.cells)}`], ['Larvae fed', Math.round(c.fed * 100) + '%'],
     ['Forage this season', (() => { const a = sim.ecoAvail(); return `sugar ${Math.round(a.sugar * 100)}% · protein ${Math.round(a.protein * 100)}%`; })()], // T1-8
     ...(c.sited !== false ? [['Brood speed', (() => { const v = sim.broodSpeed(); return `${Math.round(v * 100)}%${v < 0.98 ? (sim.temperature < T.thermal.coldFrom ? ' · too cold' : ' · too hot') : ''}`; })()]] : []),
@@ -1594,7 +1617,7 @@ function updateHud() {
   else if (w.state === 'stunned') status = 'Stunned';
   else if (w.state === 'balled') status = `Balled by ${w.ball.bees || 0} bees · ${w.ball.temp.toFixed(1)} °C`;
   else if (w.state === 'under') status = 'Under the clothes';
-  else if (w.state === 'chewing') status = `Chewing pulp ${Math.round(w.chew / T.pulp.chewTicks * 100)}%`;
+  else if (w.state === 'chewing') status = w.chewAt && w.chewAt.water ? `Drinking water ${Math.round(w.chew / T.water.fillTicks * 100)}%` : `Chewing pulp ${Math.round(w.chew / T.pulp.chewTicks * 100)}%`;
   else if (w.state === 'trapped') status = 'Stuck in the trap';
   else if (w.state === 'webbed') status = `Stuck in a web · spider in ${Math.max(0, (w.web.spiderAt - sim.tick) / 60).toFixed(1)} s`;
   else if (w.state === 'landed') status = sim.feeding ? 'Feeding' : 'Resting';
@@ -1634,6 +1657,7 @@ function updateHud() {
   else if (h.opening) hint = `${kbd('E')} crawl in at the ${h.opening}`;
   else if (h.prey) hint = h.prey === 'carrion' ? `${kbd('E')} take a load of meat from the carcass` : h.prey === 'meat' ? `${kbd('E')} grab a piece of barbecue meat` : `${kbd('E')} catch the ${h.prey}`;
   else if (h.bait) hint = `${kbd('E')} take the meat from the station`;
+  else if (h.water) hint = `Hold ${kbd('E')} to take water home${sim.nestHeat().heat > 0 ? ' · the nest is hot' : ''}`;
   else if (h.wood) hint = `Hold ${kbd('E')} to chew pulp`;
   else if (h.nest && (md < T.time.dawn || md >= T.time.dusk)) hint = `${kbd('R')} rest until morning`;
   else if (w.carry) hint = 'Bring it to the nest';
@@ -1806,6 +1830,7 @@ function handleEvents(events) {
       case 'exhausted': if (e.id === sim.drivenId) toast('Crop empty · feed on flowers or soda', 'var(--red)', 2.6); break;
       case 'caught': if (e.id === sim.drivenId) { toast(`Caught a ${e.kind}`, 'var(--yellow)', 1.4); blip(900, 600, 0.08, 0.05, 'square'); } break;
       case 'chewed': if (e.id === sim.drivenId) toast('Pulp ready · bring it home', 'var(--yellow)', 1.4); break;
+      case 'watered': if (e.id === sim.drivenId) toast('Water taken · bring it home to cool the comb', 'var(--yellow)', 1.4); break;
       case 'deposit': if (e.id === sim.drivenId) { toast(`Delivered ${e.what}`, 'var(--yellow)', 1.2); blip(500, 750, 0.12, 0.05, 'triangle'); } break;
       case 'underEnter': if (e.id === sim.drivenId) toast(`In at the ${e.key}. Keep moving.`, 'var(--yellow)', 1.8); break;
       case 'rip': toast(`#${e.humanHex.slice(0, 4)} tears the shirt off`, 'var(--orange)', 2); logEvent(`#${e.humanHex.slice(0, 4)} rips the shirt off`); break;

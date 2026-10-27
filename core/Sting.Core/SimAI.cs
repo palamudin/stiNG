@@ -92,6 +92,14 @@ namespace Sting.Core
                     {
                         if (tick > ai.timer) { bool got = TakePulp(w, new WoodSpot { key = t.key, i = t.i }); ai.mode = got ? "return" : "pick"; ai.target = null; }
                     }
+                    else if (t.kind == "water") // drink a load at the surface, then home (T2-1)
+                    {
+                        if (tick > ai.timer - T.ai.collectTicks + T.water.fillTicks)
+                        {
+                            if (w.carry == null && WaterNear(w) != null) { w.carry = new Carry { kind = "water", amount = T.water.amount, what = "water" }; Emit("watered", ("id", w.id)); ai.mode = "return"; ai.target = null; }
+                            else if (tick > ai.timer) { ai.mode = "pick"; ai.target = null; }
+                        }
+                    }
                     else if (ai.cargo >= 0.95 || tick > ai.timer + 300) { ai.mode = "return"; ai.target = null; }
                     break;
                 }
@@ -227,6 +235,23 @@ namespace Sting.Core
         internal void AiPick(Wasp w, V3 home)
         {
             var ai = w.ai;
+            if (w.role == "water")
+            {
+                // water carriers know the baths and puddles round the nest (T2-1)
+                AiTarget best = null; Num bs = Num.MaxValue, R2 = T.water.range * T.water.range;
+                for (int ri = 0; ri < activeChunks.Count; ri++)
+                {
+                    var rec = activeChunks[ri];
+                    foreach (var s in WaterIn(rec))
+                    {
+                        if (Sq(s.x - home.x) + Sq(s.z - home.z) > R2) continue;
+                        Num sc = Sqrt(D2(w, new V3(s.x, s.y, s.z))) + H32(w.id, s.i, ri + 60, day) * 6;
+                        if (sc < bs) { bs = sc; best = new AiTarget { kind = "water", key = rec.key, i = s.i }; }
+                    }
+                }
+                if (best != null) { ai.target = best; ai.mode = "outbound"; } else ai.mode = "return";
+                return;
+            }
             if (w.role != "sugar" && w.role != "protein")
             {
                 // wood is a landmark: a wasp knows the sheds and fences around its nest
@@ -299,6 +324,13 @@ namespace Sting.Core
             if (t.kind == "fruit") { foreach (var f in FruitIn(rec)) if (f.i == t.i) return new V3(f.x, f.y + 0.015, f.z); return null; }
             if (t.kind == "spill") { foreach (var sp in SpillsIn(t.key)) if (sp.i == t.i) return new V3(sp.x, sp.y + 0.012, sp.z); return null; }
             if (t.kind == "bait") { var bs = BaitsIn(t.key); return t.i < bs.Count ? new V3(bs[t.i].x, bs[t.i].y, bs[t.i].z) : (V3?)null; }
+            if (t.kind == "water")
+            {
+                foreach (var s in WaterIn(rec))
+                    if (s.i == t.i && (t.i >= 16 ? s.kind == "puddle" : s.kind == "bath"))
+                        return new V3(s.x + s.r * 0.4 * (H32(w.id, t.i, 61) - 0.5), s.y + T.wasp.radius + 0.006, s.z + s.r * 0.4 * (H32(w.id, t.i, 62) - 0.5));
+                return null;
+            }
             if (t.kind == "wood") { var b = c.boxes[t.i]; return new V3((b.minx + b.maxx) / 2 + 0.2 * (H32(w.id, t.i) - 0.5), b.maxy + T.wasp.radius + 0.008, (b.minz + b.maxz) / 2); }
             // a fly already taken: its table still draws flies, so go there and take whatever is about (T1-16)
             if (t.sub == "fly") { if (!FlyActive(rec, t.i)) return null; var fl = c.flies[t.i]; return (st.caughtFly.TryGetValue(t.i, out var cf) ? cf : 0) > tick ? new V3(fl.x, fl.y, fl.z) : FlyPos(fl, tick); }

@@ -459,6 +459,8 @@ namespace Sting.Core
             var prey = w.carry == null ? PreyNear(w) : null; // one load at a time (T1-20)
             if (prey != null) { Catch(w, prey); return; }
             if (w.carry == null && BaitNear(w) != null) { TakeBait(w); return; }
+            var wet = w.carry == null ? WaterNear(w) : null; // T2-1
+            if (wet != null) { w.state = "chewing"; w.chew = 0; w.chewAt = new WoodSpot { key = wet.Value.key, i = wet.Value.i, water = true }; w.vx = w.vy = w.vz = 0; Emit("drinkStart", ("id", w.id)); return; }
             var wood = w.carry == null ? WoodNear(w) : null;
             if (wood != null) { w.state = "chewing"; w.chew = 0; w.chewAt = wood; w.vx = w.vy = w.vz = 0; Emit("chewStart", ("id", w.id)); return; }
             if (w.carry != null) Emit("carrying", ("kind", w.carry.kind));
@@ -474,6 +476,7 @@ namespace Sting.Core
                 prey = pn?.kind,
                 bait = w.carry == null && BaitNear(w) != null,
                 wood = w.carry == null && c == null && WoodNear(w) != null,
+                water = w.carry == null && c == null && WaterNear(w) != null,
                 nest = D2(w, nest.entrance) < 0.4 * 0.4,
                 site = w.caste == "queen" && !colony.sited ? SiteNear(w)?.type : null,
                 rival = w.carry == null && RivalNestNear(w) != null,
@@ -553,13 +556,74 @@ namespace Sting.Core
                 }
                 foreach (var cy in rec.content.cylinders)
                 {
-                    if (w.y > cy.h) continue;
+                    if (!cy.wood || w.y > cy.h) continue; // a birdbath is not wood (T2-1)
                     Num dx = w.x - cy.x, dz = w.z - cy.z, d = Sqrt(dx * dx + dz * dz) - cy.r;
                     if (d <= reach) return new WoodSpot { key = rec.key, i = -1 };
                 }
             }
             return null;
         }
+        // ---------------- water (GDD 6.2, T2-1); see sim.js
+
+        /// the rainy day whose puddles lie at a minute, or -1
+        public long PuddleDay(long m)
+        {
+            for (long d = DayOf(m); d >= DayOf(m) - 1; d--)
+            {
+                if (d < 0) continue;
+                var w = World.Weather(seed, d); long t0 = d * 1440;
+                if (w.rain && m >= t0 + w.rainStart + T.water.wetAfter && m < t0 + w.rainEnd + T.water.dryMinutes) return d;
+            }
+            return -1;
+        }
+        public long PuddleDay() => PuddleDay(minute);
+        /// the puddles a rainy day leaves in a chunk: i = day * 16 + k
+        public List<WaterSrc> PuddlesIn(ChunkRec rec, long d)
+        {
+            if (rec.puddles != null && rec.puddleDay == d) return rec.puddles;
+            var c = rec.content; long sd = (long)(seed & 0xffffffffUL); Num CSz = T.chunk.size; var list = new List<WaterSrc>();
+            var paved = new List<Rect>(c.roads); paved.AddRange(c.lots);
+            for (int k = 0; k < T.water.puddles; k++)
+            {
+                Num U(int j) => HSeq(sd, rec.cx, rec.cz, d, k, 990 + j);
+                Num x, z;
+                if (paved.Count > 0) { var p = paved[(int)Floor(U(0) * paved.Count)]; x = p.minx + (p.maxx - p.minx) * U(1); z = p.minz + (p.maxz - p.minz) * U(2); }
+                else { x = (rec.cx + (U(1) - 0.5) * 0.9) * CSz; z = (rec.cz + (U(2) - 0.5) * 0.9) * CSz; }
+                Num r = T.water.puddleRMin + (T.water.puddleRMax - T.water.puddleRMin) * U(3);
+                bool blocked = false;
+                foreach (var b in c.boxes) if (x > b.minx - r && x < b.maxx + r && z > b.minz - r && z < b.maxz + r) { blocked = true; break; }
+                if (!blocked) foreach (var cy in c.cylinders) if (Sq(x - cy.x) + Sq(z - cy.z) < Sq(cy.r + r)) { blocked = true; break; }
+                if (blocked) continue;
+                list.Add(new WaterSrc { x = x, y = 0.003, z = z, r = r, kind = "puddle", i = (int)(d * 16 + k) });
+            }
+            rec.puddleDay = d; rec.puddles = list;
+            return list;
+        }
+        /// every water source in a chunk now: its birdbaths, and puddles while the ground is wet
+        public List<WaterSrc> WaterIn(ChunkRec rec) => WaterIn(rec, minute);
+        public List<WaterSrc> WaterIn(ChunkRec rec, long m)
+        {
+            var o = new List<WaterSrc>();
+            for (int i = 0; i < rec.content.baths.Count; i++) { var b = rec.content.baths[i]; o.Add(new WaterSrc { x = b.x, y = b.h, z = b.z, r = b.r, kind = "bath", i = i }); }
+            long d = PuddleDay(m);
+            if (d >= 0) o.AddRange(PuddlesIn(rec, d));
+            return o;
+        }
+        /// water a wasp can drink from where it is: over the surface, close to it
+        internal (string key, int i, string kind)? WaterNear(V3 w)
+        {
+            Num reach = T.wasp.radius + T.water.reach;
+            foreach (var rec in activeChunks)
+                foreach (var s in WaterIn(rec))
+                {
+                    Num dy = w.y - s.y;
+                    if (dy < -0.005 || dy > reach || Sq(w.x - s.x) + Sq(w.z - s.z) > s.r * s.r) continue;
+                    return (rec.key, s.i, s.kind);
+                }
+            return null;
+        }
+        internal (string key, int i, string kind)? WaterNear(Wasp w) => WaterNear(new V3(w.x, w.y, w.z));
+
         /// pulp in a wooden box (T1-12): by its longest side, less what wasps have taken
         public int PulpLoads(Box b) => System.Math.Max(T.pulp.minLoads, (int)Rnd(Max(b.maxx - b.minx, b.maxz - b.minz) * T.pulp.perMeter));
         public int PulpLeft(string key, int i)
@@ -591,6 +655,14 @@ namespace Sting.Core
             if (!holding) { w.state = "fly"; Emit("chewCancel", ("id", w.id)); return; }
             w.chew++;
             w.energy -= T.energy.cruisePerSec * T.DT * T.energy.hoverShare;
+            if (w.chewAt != null && w.chewAt.water) // a load of water (T2-1)
+            {
+                if (w.chew < T.water.fillTicks) return;
+                w.state = "fly"; w.chewAt = null;
+                w.carry = new Carry { kind = "water", amount = T.water.amount, what = "water" };
+                Emit("watered", ("id", w.id));
+                return;
+            }
             if (w.chew >= T.pulp.chewTicks)
             {
                 w.state = "fly";
@@ -937,7 +1009,7 @@ namespace Sting.Core
         void AddDeposited(string kind, Num amt)
         {
             var s = colony.stats;
-            if (kind == "sugar") s.depSugar += amt; else if (kind == "protein") s.depProtein += amt; else s.depPulp += amt;
+            if (kind == "sugar") s.depSugar += amt; else if (kind == "protein") s.depProtein += amt; else if (kind == "water") s.depWater += amt; else s.depPulp += amt;
         }
 
         internal void NestTouch(Wasp w)

@@ -6,7 +6,7 @@ import { applyTuning } from '../sim/tunefile.js';
 applyTuning(T, readFileSync(new URL('../../tuning/sting.tune', import.meta.url), 'utf8')); // T1-22: the shipped tuning
 import { generateChunk, dayWeather, windAt, humanWindow, flyPos, beePos, birdPos, dragonPos, makeNest, shedSites } from '../sim/world.js';
 import { hash, Domain, u64, datan2, dsin, h32 } from '../sim/rng.js';
-import { newColony, colonyStep, destroyNest, colonyFinished, seasonPhase, sugarCap, proteinCap } from '../sim/colony.js';
+import { newColony, colonyStep, destroyNest, colonyFinished, seasonPhase, sugarCap, proteinCap, waterCap } from '../sim/colony.js';
 import { Sim } from '../sim/sim.js';
 import { NetLab, MeshLab } from '../sim/net.js';
 import { snapshot, restore } from '../sim/persist.js';
@@ -51,6 +51,7 @@ export function digestChunk(c, d) {
   for (const list of [c.roads, c.lots]) { f(list.length); for (const t of list) for (const k of ['minx', 'maxx', 'minz', 'maxz']) f(t[k]); }
   f(c.loops.length); for (const t of c.loops) { f(t.x); f(t.z); f(t.r); }
   f(c.malls.length); for (const t of c.malls) for (const k of ['x', 'z', 'hw', 'hd', 'h']) f(t[k]);
+  f(c.baths.length); for (const t of c.baths) for (const k of ['x', 'z', 'r', 'h']) f(t[k]); // T2-1
 }
 
 const lines = [];
@@ -134,8 +135,8 @@ for (const seed of seeds) {
 // colony economy over long runs with changing inputs
 {
   const d = Digest();
-  const dc = (c) => { for (const k of ['adults', 'eggs', 'larvae', 'pupae', 'cells', 'protein', 'sugar', 'pulp', 'rEggs', 'rLarvae', 'rPupae', 'gynes', 'males', 'mated', 'deficit', 'fed', 'sugarlessDays']) d.f(c[k]); d.f(c.queenAlive); d.f(c.nestAlive); for (const k of ['emerged', 'laid', 'starvedLarvae', 'died', 'gynesRaised', 'sugarSpilled', 'proteinSpilled']) d.f(c.stats[k]); };
-  for (const variant of [0, 1, 2, 3]) {
+  const dc = (c) => { for (const k of ['adults', 'eggs', 'larvae', 'pupae', 'cells', 'protein', 'sugar', 'pulp', 'rEggs', 'rLarvae', 'rPupae', 'gynes', 'males', 'mated', 'deficit', 'fed', 'sugarlessDays', 'water', 'cool', 'thirst']) d.f(c[k]); d.f(c.queenAlive); d.f(c.nestAlive); for (const k of ['emerged', 'laid', 'starvedLarvae', 'died', 'gynesRaised', 'sugarSpilled', 'proteinSpilled', 'cooked']) d.f(c.stats[k] || 0); };
+  for (const variant of [0, 1, 2, 3, 4]) {
     const c = newColony(variant === 1);
     if (variant === 1) { c.pulp = 3; c.protein = 2; c.sugar = 4; c.adults = 1; }
     if (variant === 2) c.maxCells = 1800;
@@ -144,8 +145,10 @@ for (const seed of seeds) {
       if (variant === 3 && i === 9000) { c.protein = 0; c.sugar = 0; }
       if (variant === 2 && i % 500 === 0) c.pulp += 20;
       const frac = Math.min(1, 0.3 + i / 24000 * 0.75);
-      colonyStep(c, 1 / 120, i % 7, (i % 1440) < 900, frac, variant === 0 ? 0.2 : 1);
-      if (i % 200 === 0) { dc(c); d.f(sugarCap(c)); d.f(proteinCap(c)); d.f(colonyFinished(c, i % 3)); d.s(seasonPhase(frac)); }
+      // variant 4: a nest that runs hot every afternoon, past the lethal heat at its peak (T2-1)
+      const hot = variant === 4 ? { heat: Math.max(0, dsin((i % 1440) / 1440 * 6.283185307179586)), cook: (i % 1440) > 300 && (i % 1440) < 420 ? 0.6 : 0 } : null;
+      colonyStep(c, 1 / 120, i % 7, (i % 1440) < 900, frac, variant === 0 ? 0.2 : 1, 1, null, hot);
+      if (i % 200 === 0) { dc(c); d.f(sugarCap(c)); d.f(proteinCap(c)); d.f(waterCap(c)); d.f(colonyFinished(c, i % 3)); d.s(seasonPhase(frac)); }
     }
     destroyNest(c); dc(c);
   }

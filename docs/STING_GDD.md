@@ -333,7 +333,7 @@ Model species: *Vespula* (common wasp and German wasp, the yellowjackets in the 
 | Protein (P) | Prey: caterpillars, flies, spiders, bees; carrion; meat at barbecues | Feeding larvae |
 | Sugar (S) | Nectar, ripe and fallen fruit, human food and drink, larval secretion | Adult energy, flight fuel |
 | Pulp (W) | Untreated wood: fences, sheds, dead branches | Nest cells and envelope |
-| Water (H₂O) *(tier 2)* | Puddles, birdbaths, drips | Nest cooling in heat |
+| Water (H₂O) *(tier 2, built: 18.37)* | Puddles after rain, birdbaths | Nest cooling in heat |
 
 ### 6.3 The sugar crisis **[T0]**
 
@@ -1223,6 +1223,20 @@ These complete 11.8. Like the earlier checks, each reads only the event and the 
 
 **Limits.** Fences and table tops are thinner than the 8 cm margin, so passing through one is not caught; houses, sheds and trunks are. A cheat that takes things within reach and only within its own carry limit (honest-looking play with an aimbot) is not something these checks can see.
 
+### 18.37 Water as built (T2-1)
+
+**Sources.** Birdbaths stand in about a third of backyards, now and then in a park, and one in the home park: a stone basin on a pedestal, water to the brim at 72 cm, solid for collision and never wood. On a rainy day puddles lie on a chunk's streets and parking lots (on open ground where it has none, never under anything), from 20 minutes after the rain starts until six hours after it stops, which can run past midnight. Both are pure functions of the seed and the clock, so every peer has the same water. The generator version is 6.
+
+**Carrying water.** A wasp over the water (hovering just above it, or standing on it) holds E for a second to take a load, which it carries home like pulp; delivered, it goes into the colony's water store, capped at 2 loads plus 0.06 per adult. Water loads are not contested and leave no chunk delta.
+
+**Cooling.** Wasps cool the comb on hot days by spreading water and fanning it. The nest's heat is how far the air at the nest (the weather, plus the sun on an attic roof) is past 31 °C, through the site's insulation. A hot nest uses up to six loads a day at full heat. While the store covers the need, the heat no longer slows the brood (the T1-14 slowdown goes away); short of water it slows as before. The comb itself warms from 30 °C by the insulated share of the outside heat; past 34 °C the brood the water does not save starts to cook, more the hotter it gets (at 38 °C with no water, about half of it a day).
+
+**Who fetches it.** A hot nest with a low store diverts up to 40% of its abstract foragers from food to water, so a heat spell costs sugar and protein even when the comb is saved. Workers launched near the player become water carriers in the same proportion: they go to the nearest bath or puddle within 45 m of the nest, drink a load and bring it home. A player who brings water frees foragers for food.
+
+**Checks.** JS and C# check the birdbaths in the home region, the puddle window and placement, taking a load at a bath and delivering it, a day of lethal heat with and without water (with water no brood is lost; dry, about half the brood cooks), the forager diversion, and an AI water carrier's round trip. The colony digest has a fifth run with a nest that runs hot every afternoon, and the state hash now includes the water store and the cooling. The save format is 18.
+
+**Limits.** In ordinary summer weather the abstract foragers keep up, so water matters mostly in attics and on the hottest afternoons; heatwaves (T2-2) are where it decides things.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1231,7 +1245,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (87 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (88 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -1263,9 +1277,20 @@ Everything in `POC.md` (87 features) and its C# port (18.18), including the Tier
 
 Sizes: S a day or less, M a few days, L a week or more. Order agreed 2026-10-23: the small mechanics first (T1-1 to T1-5, then the other S items: T1-14, T1-17, T1-18, T1-23, all done; T1-20 waits on regions), then the M items (T1-6 to T1-10, T1-12, T1-13, T1-15, T1-16, T1-19, T1-21 and T1-22 done, then T1-11 human days and T1-20; Tier 1 is complete); each batch is built in the PoC and then ported to the core with parity.
 
-### 19.3 Tier 2: later
+### 19.3 Tier 2: next, ordered by how cleanly each ports to Unity
 
-Water as a resource (6.2); extreme weather; town centers and beer gardens; lineage colonies played by AI as real colonies (6.7); males as wasps; the Reflex skill tree (7.8); feature modifiers that need the bigger generator (biome mix, town density, terrain); colonies of thousands of wasps out at once.
+Agreed 2026-10-27: Tier 2 is built on the current stack in the order that survives a straight conversion to Unity. Sim systems that live in the C# core come first; items that are mostly presentation, UI or engine performance wait for the Unity move. Multiplayer over a real network also waits for Unity and dedicated hardware (11.13).
+
+| # | Feature | GDD | Size | Notes |
+|---|---|---|---|---|
+| T2-1 | **Built (18.37).** Water as a resource: birdbaths and rain puddles, water loads carried home, a hot nest cooled by water, brood that cooks without it | 6.2, 6.6 | M | sim and generator |
+| T2-2 | Extreme weather: heatwaves, storms (gusts and downpours), cold snaps | 5.3 | M | sim; makes T2-1 matter |
+| T2-3 | Males as wasps: drones fly physically late in the season, no sting, mating flights with gynes | 6.5, 6.7 | M | sim |
+| T2-4 | Lineage colonies as real AI colonies: the queens the player did not wake found colonies of the line, run by AI | 6.7 | L | sim |
+| T2-5 | Town centers and beer gardens: a new land use with dense outdoor seating and drinks | 4.1, 4.3 | M | generator and sim; new art |
+| T2-6 | Feature modifiers that need the bigger generator: biome mix, town density, terrain | 4.8 | L | terrain touches all collision |
+| T2-7 | The Reflex skill tree | 7.8 | M | mostly UI and progression: after the Unity move |
+| T2-8 | Colonies of thousands of wasps out at once | 11.12 | L | engine performance: after the Unity move |
 
 ### 19.4 Not on the current stack
 

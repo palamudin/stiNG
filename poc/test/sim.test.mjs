@@ -949,7 +949,10 @@ function seated(sim, pred) {
   const sp = Object.fromEntries(['branch', 'trunk', 'ground', 'hollow'].map((k) => [k, at(k, cold)]));
   ok(cold > 0 && sp.branch < sp.trunk && sp.trunk < sp.ground && sp.ground < sp.hollow && sp.hollow < 1,
     `on a cold morning (${s.airAt(cold).toFixed(1)} °C) the brood slows most in an open nest and least in a hollow tree (branch ${sp.branch.toFixed(2)}, trunk ${sp.trunk.toFixed(2)}, burrow ${sp.ground.toFixed(2)}, hollow ${sp.hollow.toFixed(2)})`);
-  ok(hot > 0 && at('attic', hot) < at('wall', hot), `a sunny afternoon (${s.airAt(hot).toFixed(1)} °C) bakes an attic nest (${at('attic', hot).toFixed(2)} vs ${at('wall', hot).toFixed(2)} in a wall)`);
+  s.colony.cool = 0; // a nest with no water to cool it (T2-1)
+  ok(hot > 0 && at('attic', hot) < at('wall', hot), `a sunny afternoon (${s.airAt(hot).toFixed(1)} °C) bakes a dry attic nest (${at('attic', hot).toFixed(2)} vs ${at('wall', hot).toFixed(2)} in a wall)`);
+  s.colony.cool = 1;
+  ok(at('attic', hot) === 1, 'with water fanned over the comb the same attic keeps the brood at full speed');
   const grow = (k) => { const c = newColony(); for (let i = 0; i < 120 * 6; i++) { c.protein = 1e3; c.sugar = 1e3; colonyStep(c, 1 / 120, 0, false, 0.3, 1, k); } return c.stats.emerged; };
   ok(grow(0.5) < grow(1) * 0.8, `a slowed brood brings fewer workers out (${grow(0.5).toFixed(0)} vs ${grow(1).toFixed(0)} in six days)`);
 }
@@ -1352,6 +1355,55 @@ function seated(sim, pred) {
     const pt = s._aiStingPoint(w, hm), wp = pt && toWorld(hm, pt.p);
     ok(wp && wp.y < 0.6 && Math.hypot(wp.x - hm.x, wp.z - hm.z) < 2, 'there is skin to sting on a sunbather, low on the lawn');
   }
+}
+
+// Water (GDD 6.2, T2-1): birdbaths and puddles, loads of water carried home, a hot nest cooled by water
+{
+  let baths = 0, yb = 0;
+  for (let z = -4; z < 4; z++) for (let x = -4; x < 4; x++) { const c = generateChunk(1234n, x, z); baths += c.baths.length; if (c.use === 'yards') yb += c.baths.length; }
+  const home = generateChunk(1234n, 0, 0);
+  ok(home.baths.length === 1 && baths >= 30 && yb >= 20 && home.cylinders.some((q) => q.bath && !q.wood), `birdbaths in backyards and parks (${baths} in the home region, ${yb} in yards, one in the home park), solid but not wood`);
+  // puddles from a little after rain starts until hours after it stops
+  const s = new Sim({ seed: 1234, birds: false, dayMinutes: 20 }, { noAI: true });
+  run(s, 2);
+  let rd = 1; while (!dayWeather(s.seed, rd).rain) rd++;
+  const w0 = dayWeather(s.seed, rd), t0 = rd * 1440;
+  const rec = s.records.get('0,1');
+  const ps = s.puddlesIn(rec, rd);
+  ok(s.puddleDay(t0 + w0.rainStart - 1) < 0 && s.puddleDay(t0 + w0.rainStart + T.water.wetAfter) === rd && s.puddleDay(t0 + w0.rainEnd + T.water.dryMinutes - 1) === rd && s.puddleDay(t0 + w0.rainEnd + T.water.dryMinutes) < 0,
+    `puddles lie from ${T.water.wetAfter} min after the rain starts until ${T.water.dryMinutes / 60} h after it stops (day ${rd})`);
+  ok(ps.length > 0 && ps.every((p) => rec.content.roads.concat(rec.content.lots).some((r) => p.x >= r.minx && p.x <= r.maxx && p.z >= r.minz && p.z <= r.maxz)) && ps.every((p) => !rec.content.boxes.some((b) => p.x > b.minx && p.x < b.maxx && p.z > b.minz && p.z < b.maxz)),
+    `in a yards chunk they lie on the street (${ps.length} puddles), never under anything`);
+  // the player takes a load from the home park's bath and delivers it
+  const b = home.baths[0], w = s.wasp;
+  const hint = () => { place(w, { x: b.x + 0.05, y: b.h + T.wasp.radius + 0.004, z: b.z }); w.state = 'fly'; w.carry = null; };
+  hint(); run(s, 1, () => idle());
+  ok(s.hint.water && !s.hint.wood, 'over a birdbath the wasp can take water, and it is not wood');
+  let ev = run(s, T.water.fillTicks + 2, () => { if (w.state === 'fly') place(w, { x: b.x + 0.05, y: b.h + T.wasp.radius + 0.004, z: b.z }); return idle({ act: Act.Interact }); });
+  ok(w.carry && w.carry.kind === 'water' && count(ev, 'watered') === 1, `holding E for ${T.water.fillTicks / 60} s at the water takes a load`);
+  const before = s.colony.water;
+  place(w, s.nest.entrance); ev = run(s, 2, () => idle());
+  ok(!w.carry && s.colony.stats.deposited.water === 1 && ev.some((e) => e.type === 'deposit' && e.what === 'water'), `delivered at the nest it goes into the store (${before.toFixed(2)} -> ${s.colony.water.toFixed(2)})`);
+  // the colony: a hot nest drinks its store; without water the heat slows the brood and past the lethal heat cooks it
+  const hotRun = (water) => {
+    const c = newColony(); c.water = water;
+    const brood0 = c.eggs + c.larvae + c.pupae;
+    for (let i = 0; i < 120; i++) { if (water) c.water = 50; colonyStep(c, 1 / 120, 0, false, 0.3, 0.2, 1, null, { heat: 1, cook: 1 }); }
+    return { c, lost: c.stats.cooked, brood0 };
+  };
+  const wet = hotRun(50), dry = hotRun(0);
+  ok(wet.c.cool > 0.99 && wet.lost === 0 && dry.c.cool < 0.05 && dry.lost > dry.brood0 * 0.2, `a day of lethal heat: with water the comb stays cool and no brood is lost; dry, ${dry.lost.toFixed(0)} of ${dry.brood0} brood cook`);
+  const fed = (heat, water) => { const c = newColony(); c.water = water; c.sugar = 0; c.protein = 0; colonyStep(c, 0.01, 0, true, 0.3, 0.2, 1, null, { heat, cook: 0 }); return c; };
+  const cool = fed(0, 0), thirsty = fed(1, 0);
+  ok(thirsty.cool > 0.8 && thirsty.sugar < cool.sugar && thirsty.thirst > 0.9, // it drank what they brought: cool would fall to 0.8 with none
+     `a hot nest with an empty store sends foragers for water at the cost of food (sugar ${thirsty.sugar.toFixed(3)} vs ${cool.sugar.toFixed(3)})`);
+  // an AI water carrier
+  const a = new Sim({ seed: 1234, birds: false }, { noAI: true });
+  run(a, 2);
+  const c = a._spawnWasp(false); c.role = 'water';
+  let got = null;
+  for (let i = 0; i < 4000 && !got; i++) { a.step(idle()); for (const e of a.drainEvents()) if (e.type === 'deposit' && e.id === c.id && e.what === 'water') got = e; if (!a.wasps.includes(c)) break; }
+  ok(!!got, 'a water carrier flies to the water, drinks a load and brings it home');
 }
 
 // Tuning as data (GDD 13, T1-22): one plain-text file feeds both sims

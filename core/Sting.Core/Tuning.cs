@@ -10,7 +10,7 @@ namespace Sting.Core
     {
         public const int TICK_RATE = 60;
         public static readonly Num DT = 1.0 / TICK_RATE;
-        public const int GEN_VERSION = 5; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11)
+        public const int GEN_VERSION = 6; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11); 6: birdbaths (T2-1)
 
         public static Num population = 8200000000;
         public static class chunk { public static Num size = 64; public static int activeRadius = 1, discoverRadius = 2; }
@@ -56,7 +56,7 @@ namespace Sting.Core
         }
         public static class colony
         {
-            public static class start { public static Num adults = 30, eggs = 30, larvae = 45, pupae = 30, cells = 160, protein = 6, sugar = 8, pulp = 2; }
+            public static class start { public static Num adults = 30, eggs = 30, larvae = 45, pupae = 30, cells = 160, protein = 6, sugar = 8, pulp = 2, water = 1; }
             public static Num adultSugar = 0.10, larvaProtein = 0.12, larvaSecretion = 0.06, eggDays = 5, larvaDays = 13, pupaDays = 12,
                 larvaStarve = 0.25, adultMortality = 1.0 / 22, layBase = 20, layPerAdult = 0.8, layMax = 250, cellsPerPulp = 8, buildPerDay = 1.5,
                 forageShare = 0.55, deficitSmoothing = 0.1, queenStarveDays = 1, youngDays = 4,
@@ -149,6 +149,16 @@ namespace Sting.Core
             public static int grillLoads = 4, plateLoads = 6;
             public static Num meatProtein = 1.5, reach = 0.04;
             public static Num burnH = 0.012, plumeR = 0.35, plumeH = 0.6, plumeTemp = 70, heatRate = 1.0 / 150, lethal = 46, guardR = 0.3, noticeMul = 0.8;
+        }
+        /// Water (GDD 6.2, T2-1): birdbaths and puddles, loads carried home, a hot nest cooled by water (see tuning.js)
+        public static class water
+        {
+            public static Num bathShare = 0.35, bathPark = 0.5, bathR = 0.22, bathY = 0.72;
+            public static int puddles = 5; public static Num puddleRMin = 0.25, puddleRMax = 0.9, wetAfter = 20, dryMinutes = 360;
+            public static int fillTicks = 60; public static Num amount = 1, reach = 0.025;
+            public static Num capBase = 2, capPerAdult = 0.06, coolPerDay = 6, smoothing = 0.2;
+            public static Num nestBase = 30, lethal = 34, lethalSpan = 4, broodCook = 0.6;
+            public static Num divert = 0.4, income = 0.5, aiShare = 0.6, range = 45;
         }
         public static class fruit { public static Num treeShare = 0.3, startFrac = 0.55, rate = 0.8, spread = 1.6; public static int perTree = 6, rotDays = 6; }
         public static class muni

@@ -49,6 +49,7 @@ namespace Sting.Core.Tests
             foreach (var list in new[] { c.roads, c.lots }) { F(list.Count); foreach (var t in list) { F(t.minx); F(t.maxx); F(t.minz); F(t.maxz); } }
             F(c.loops.Count); foreach (var t in c.loops) { F(t.x); F(t.z); F(t.r); }
             F(c.malls.Count); foreach (var t in c.malls) { F(t.x); F(t.z); F(t.hw); F(t.hd); F(t.h); }
+            F(c.baths.Count); foreach (var t in c.baths) { F(t.x); F(t.z); F(t.r); F(t.h); } // T2-1
         }
     }
 }

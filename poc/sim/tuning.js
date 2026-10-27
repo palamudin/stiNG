@@ -5,7 +5,7 @@ import { TUNE } from './tunefile.js';
 
 export const TICK_RATE = 60;
 export const DT = 1 / TICK_RATE;
-export const GEN_VERSION = 5; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11)
+export const GEN_VERSION = 6; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11); 6: birdbaths (T2-1)
 
 export const T = {
   population: 8200000000,
@@ -59,7 +59,7 @@ export const T = {
 
   // Colony economy (GDD 6). Rates are per in-game day.
   colony: {
-    start: { adults: 30, eggs: 30, larvae: 45, pupae: 30, cells: 160, protein: 6, sugar: 8, pulp: 2 },
+    start: { adults: 30, eggs: 30, larvae: 45, pupae: 30, cells: 160, protein: 6, sugar: 8, pulp: 2, water: 1 },
     adultSugar: 0.10, larvaProtein: 0.12, larvaSecretion: 0.06,
     eggDays: 5, larvaDays: 13, pupaDays: 12,                      // bio: ~30 days egg to adult
     larvaStarve: 0.25, adultMortality: 1 / 22,                     // bio: worker life ~14 days when foraging
@@ -166,6 +166,20 @@ export const T = {
     dayChance: 0.5, minTemp: 19, from: 750, to: 930, jitter: 40, serve: 40, plateEnd: 60, settle: 20, minLength: 60,
     grillLoads: 4, plateLoads: 6, meatProtein: 1.5, reach: 0.04,
     burnH: 0.012, plumeR: 0.35, plumeH: 0.6, plumeTemp: 70, heatRate: 1 / 150, lethal: 46, guardR: 0.3, noticeMul: 0.8,
+  },
+  // Water (GDD 6.2, T2-1). bio: Vespula and Polistes carry water home on hot days and fan it to cool the comb by
+  // evaporation; brood suffers above about 34 °C in the nest. Birdbaths stand in some backyards and parks; puddles
+  // lie on streets, lots and lawns from a little after rain starts until some hours after it stops. A wasp holds E at
+  // water for fillTicks to take a load home. A hot nest uses up to coolPerDay loads a day; while the store covers it
+  // the heat does not slow the brood, and past `lethal` in the nest the brood starts to cook. Abstract foragers go
+  // for water when the nest is hot and the store low, at the cost of food (divert).
+  water: {
+    bathShare: 0.35, bathPark: 0.5, bathR: 0.22, bathY: 0.72,
+    puddles: 5, puddleRMin: 0.25, puddleRMax: 0.9, wetAfter: 20, dryMinutes: 360,
+    fillTicks: 60, amount: 1, reach: 0.025,
+    capBase: 2, capPerAdult: 0.06, coolPerDay: 6, smoothing: 0.2,
+    nestBase: 30, lethal: 34, lethalSpan: 4, broodCook: 0.6,
+    divert: 0.4, income: 0.5, aiShare: 0.6, range: 45,
   },
   fruit: { treeShare: 0.3, startFrac: 0.55, perTree: 6, rate: 0.8, spread: 1.6, rotDays: 6 },
   // Level 5: municipal pest control (GDD 8.10). Poisoned protein bait stations across the area for a few days.

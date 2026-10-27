@@ -134,11 +134,23 @@ export class Sim {
   }
   // How fast the brood develops at a minute (GDD 6.6, T1-14): full speed in a comfortable nest; cold snaps and heat
   // slow it, as much as the site lets the weather in. An attic heats up on sunny afternoons.
+  // Water the colony has fanned over the comb takes the heat's share away (T2-1)
   broodSpeed(m = this.minute) {
-    const H = T.thermal, S = T.sites[this.nest.site || 'trunk'], d = minuteOfDay(m);
-    const air = this.airAt(m) + S.heat * Math.max(0, dsin(TAU * (d - 540) / 1440)) * (isRaining(this.seed, m) ? 0 : 1);
-    const cold = clamp01((H.coldFrom - air) / H.coldSpan), hot = clamp01((air - H.hotFrom) / H.hotSpan) * H.hotWeight;
+    const H = T.thermal, S = T.sites[this.nest.site || 'trunk'], air = this._nestAir(m);
+    const cold = clamp01((H.coldFrom - air) / H.coldSpan), hot = clamp01((air - H.hotFrom) / H.hotSpan) * H.hotWeight * (1 - clamp01(this.colony.cool ?? 1));
     return Math.max(H.minSpeed, 1 - (1 - S.insulation) * (cold + hot));
+  }
+  // the air at the nest: the weather, plus the sun on an attic roof
+  _nestAir(m) {
+    const S = T.sites[this.nest.site || 'trunk'], d = minuteOfDay(m);
+    return this.airAt(m) + S.heat * Math.max(0, dsin(TAU * (d - 540) / 1440)) * (isRaining(this.seed, m) ? 0 : 1);
+  }
+  // The nest's heat (GDD 6.6, T2-1): how hot it is past comfort through the site's insulation (0..1), and how far the
+  // comb is past the temperature that kills brood (0..1)
+  nestHeat(m = this.minute) {
+    const H = T.thermal, W = T.water, S = T.sites[this.nest.site || 'trunk'], air = this._nestAir(m), keep = 1 - S.insulation;
+    const nestT = W.nestBase + Math.max(0, air - W.nestBase) * keep;
+    return { heat: keep * clamp01((air - H.hotFrom) / H.hotSpan), cook: clamp01((nestT - W.lethal) / W.lethalSpan), nestT };
   }
   get wind() {
     const c = this._wc;
@@ -164,6 +176,7 @@ export class Sim {
     if (!driven) {
       const a = T.alloc[this.colony.alloc], s = a.sugar + a.protein + a.pulp, r = h32(id, 77) * s;
       w.role = r < a.sugar ? 'sugar' : r < a.sugar + a.protein ? 'protein' : 'pulp';
+      if (h32(id, 78) < (this.colony.thirst || 0) * T.water.aiShare) w.role = 'water'; // a hot nest sends water carriers (T2-1)
       w.x = this.nest.entrance.x; w.y = this.nest.entrance.y - 0.03; w.z = this.nest.entrance.z;
     }
     this.wasps.push(w);
@@ -830,7 +843,7 @@ export class Sim {
     // the colony lives through the skipped time
     const steps = Math.floor(skipTicks / 60), dtDay = 60 / this.dayTicks;
     const m0 = this.minute, frac0 = this.seasonFrac;
-    for (let i = 0; i < steps; i++) colonyStep(this.colony, dtDay, this.wasps.length, false, frac0, this.bio, this.broodSpeed(m0 + Math.floor(i * 60 / this.tpm)));
+    for (let i = 0; i < steps; i++) { const m = m0 + Math.floor(i * 60 / this.tpm); colonyStep(this.colony, dtDay, this.wasps.length, false, frac0, this.bio, this.broodSpeed(m), null, this.nestHeat(m)); }
     for (const w of this.wasps.slice()) if (w !== d) this._despawn(w);
     this._minute(clockMinutes(this.tick + this.clockOffset, this.settings));
     for (const hm of this.active) this._catchUpHuman(hm);
@@ -1225,6 +1238,8 @@ export class Sim {
     const prey = !w.carry ? this._preyNear(w) : null; // one load at a time (T1-20)
     if (prey) { this._catch(w, prey); return; }
     if (!w.carry && this._baitNear(w)) { this._takeBait(w); return; }
+    const wet = !w.carry ? this._waterNear(w) : null; // T2-1
+    if (wet) { w.state = 'chewing'; w.chew = 0; w.chewAt = { key: wet.key, i: wet.i, water: true }; w.vx = w.vy = w.vz = 0; this.emit('drinkStart', { id: w.id }); return; }
     const wood = !w.carry && this._woodNear(w);
     if (wood) { w.state = 'chewing'; w.chew = 0; w.chewAt = wood; w.vx = w.vy = w.vz = 0; this.emit('chewStart', { id: w.id }); return; }
     if (w.carry) this.emit('carrying', { kind: w.carry.kind });
@@ -1237,6 +1252,7 @@ export class Sim {
       prey: !w.carry && this._preyNear(w) ? this._preyNear(w).kind : null,
       bait: !w.carry && !!this._baitNear(w),
       wood: !w.carry && !c && !!this._woodNear(w),
+      water: !w.carry && !c && !!this._waterNear(w),
       nest: dist2(w, this.nest.entrance) < 0.4 * 0.4,
       site: w.caste === 'queen' && !this.colony.sited ? (this._siteNear(w) || {}).type || null : null,
       rival: !w.carry && !!this._rivalNestNear(w),
@@ -1460,7 +1476,7 @@ export class Sim {
         if (dx * dx + dy * dy + dz * dz <= reach * reach && this.pulpLeft(key, i) > 0) return { key, i };
       }
       for (const cy of rec.content.cylinders) {
-        if (w.y > cy.h) continue;
+        if (!cy.wood || w.y > cy.h) continue; // a birdbath is not wood (T2-1)
         const dx = w.x - cy.x, dz = w.z - cy.z, d = Math.sqrt(dx * dx + dz * dz) - cy.r;
         if (d <= reach) return { key, i: -1 };
       }
@@ -1475,6 +1491,58 @@ export class Sim {
     const st = this.chunkState.get(key);
     return this.pulpLoads(b) - ((st && st.pulp && st.pulp[i]) || 0);
   }
+  // ---------------- water (GDD 6.2, T2-1)
+
+  // Is there standing water from rain at a minute? From a little after the rain starts on a rainy day until some hours
+  // after it stops, which can run past midnight into the next day. A pure function of the seed and the clock.
+  puddleDay(m = this.minute) {
+    const W = T.water;
+    for (const d of [dayOf(m), dayOf(m) - 1]) {
+      if (d < 0) continue;
+      const w = dayWeather(this.seed, d), t0 = d * 1440;
+      if (w.rain && m >= t0 + w.rainStart + W.wetAfter && m < t0 + w.rainEnd + W.dryMinutes) return d;
+    }
+    return -1;
+  }
+  // The puddles a rainy day leaves in a chunk: on its streets and lots where it has them, else on open ground, never
+  // under a box or a trunk. A pure function of the seed, the chunk and the day; i = day * 16 + k.
+  puddlesIn(rec, d) {
+    const cache = rec._puddles || (rec._puddles = {});
+    if (cache.d === d) return cache.list;
+    const W = T.water, c = rec.content, sd = Number(this.seed & 0xffffffffn), CS = T.chunk.size, list = [];
+    const paved = c.roads.concat(c.lots);
+    for (let k = 0; k < W.puddles; k++) {
+      const u = (j) => hseq(sd, rec.cx, rec.cz, d, k, 990 + j);
+      let x, z;
+      if (paved.length) { const p = paved[Math.floor(u(0) * paved.length)]; x = p.minx + (p.maxx - p.minx) * u(1); z = p.minz + (p.maxz - p.minz) * u(2); }
+      else { x = (rec.cx + (u(1) - 0.5) * 0.9) * CS; z = (rec.cz + (u(2) - 0.5) * 0.9) * CS; }
+      const r = W.puddleRMin + (W.puddleRMax - W.puddleRMin) * u(3);
+      if (c.boxes.some((b) => x > b.minx - r && x < b.maxx + r && z > b.minz - r && z < b.maxz + r)) continue;
+      if (c.cylinders.some((cy) => sq(x - cy.x) + sq(z - cy.z) < sq(cy.r + r))) continue;
+      list.push({ x, y: 0.003, z, r, kind: 'puddle', i: d * 16 + k });
+    }
+    cache.d = d; cache.list = list;
+    return list;
+  }
+  // Every water source in a chunk now: its birdbaths, and puddles while the ground is wet
+  waterIn(rec, m = this.minute) {
+    const out = rec.content.baths.map((b, i) => ({ x: b.x, y: b.h, z: b.z, r: b.r, kind: 'bath', i }));
+    const d = this.puddleDay(m);
+    return d < 0 ? out : out.concat(this.puddlesIn(rec, d));
+  }
+  // Water a wasp can drink from where it is: over the surface, close to it
+  _waterNear(w) {
+    const reach = T.wasp.radius + T.water.reach;
+    for (const rec of this.activeChunks) {
+      for (const s of this.waterIn(rec)) {
+        const dy = w.y - s.y;
+        if (dy < -0.005 || dy > reach || sq(w.x - s.x) + sq(w.z - s.z) > s.r * s.r) continue;
+        return { key: chunkKey(rec.cx, rec.cz), i: s.i, kind: s.kind };
+      }
+    }
+    return null;
+  }
+
   // a load of pulp chewed off: from a box it is taken through the chunk authority like any pickup (T1-19)
   _takePulp(w, at) {
     if (at && at.i >= 0) {
@@ -1494,6 +1562,13 @@ export class Sim {
     if (!holding) { w.state = 'fly'; this.emit('chewCancel', { id: w.id }); return; }
     w.chew++;
     w.energy -= T.energy.cruisePerSec * DT * T.energy.hoverShare;
+    if (w.chewAt && w.chewAt.water) { // a load of water (T2-1)
+      if (w.chew < T.water.fillTicks) return;
+      w.state = 'fly'; w.chewAt = null;
+      w.carry = { kind: 'water', amount: T.water.amount, what: 'water' };
+      this.emit('watered', { id: w.id });
+      return;
+    }
     if (w.chew >= T.pulp.chewTicks) {
       w.state = 'fly';
       this._takePulp(w, w.chewAt || null);
@@ -3472,7 +3547,7 @@ export class Sim {
       this.colony.maxCells = T.sites[this.nest.site].maxCells;
       this.emit('nestFounded', { x: this.nest.x, y: this.nest.y, z: this.nest.z, key: this.nest.key, auto: true });
     }
-    colonyStep(col, 60 / this.dayTicks, this._own().filter((w) => w.caste !== 'queen').length, daylight, frac, this.bio, this.broodSpeed(), this.ecoAvail());
+    colonyStep(col, 60 / this.dayTicks, this._own().filter((w) => w.caste !== 'queen').length, daylight, frac, this.bio, this.broodSpeed(), this.ecoAvail(), this.nestHeat());
     if (this.raining && col.nestAlive && col.sited) {
       // the site decides what rain costs: burrows flood, open nests chill (GDD 6.6)
       const st = T.sites[this.nest.site || 'trunk'], dt = 60 / this.dayTicks;
@@ -3558,6 +3633,11 @@ export class Sim {
           ai.mode = 'return'; ai.target = null;
         } else if (t.kind === 'wood') {
           if (this.tick > ai.timer) { const got = this._takePulp(w, { key: t.key, i: t.i }); ai.mode = got ? 'return' : 'pick'; ai.target = null; }
+        } else if (t.kind === 'water') { // drink a load at the surface, then home (T2-1)
+          if (this.tick > ai.timer - T.ai.collectTicks + T.water.fillTicks) {
+            if (!w.carry && this._waterNear(w)) { w.carry = { kind: 'water', amount: T.water.amount, what: 'water' }; this.emit('watered', { id: w.id }); ai.mode = 'return'; ai.target = null; }
+            else if (this.tick > ai.timer) { ai.mode = 'pick'; ai.target = null; }
+          }
         } else if ((ai.cargo || 0) >= 0.95 || this.tick > ai.timer + 300) { ai.mode = 'return'; ai.target = null; }
         break;
       }
@@ -3724,6 +3804,18 @@ export class Sim {
 
   _aiPick(w, home = this.nest.entrance) {
     const ai = w.ai, S = T.sense;
+    if (w.role === 'water') {
+      // water carriers know the baths and puddles round the nest (T2-1)
+      let best = null, bs = Infinity;
+      const R2 = T.water.range * T.water.range;
+      this.activeChunks.forEach((rec, ri) => this.waterIn(rec).forEach((s) => {
+        if (sq(s.x - home.x) + sq(s.z - home.z) > R2) return;
+        const sc = Math.sqrt(dist2(w, s)) + h32(w.id, s.i, ri + 60, this.day) * 6;
+        if (sc < bs) { bs = sc; best = { kind: 'water', key: chunkKey(rec.cx, rec.cz), i: s.i }; }
+      }));
+      if (best) { ai.target = best; ai.mode = 'outbound'; } else ai.mode = 'return';
+      return;
+    }
     if (w.role !== 'sugar' && w.role !== 'protein') {
       // wood is a landmark: a wasp knows the sheds and fences around its nest
       let best = null, bs = Infinity;
@@ -3786,6 +3878,10 @@ export class Sim {
     if (t.kind === 'fruit') { const f = this.fruitIn(rec).find((x) => x.i === t.i); return f ? { x: f.x, y: f.y + 0.015, z: f.z } : null; }
     if (t.kind === 'spill') { const sp = this.spillsIn(t.key).find((x) => x.i === t.i); return sp ? { x: sp.x, y: sp.y + 0.012, z: sp.z } : null; }
     if (t.kind === 'bait') return this._baitsIn(t.key)[t.i] || null;
+    if (t.kind === 'water') {
+      const s = this.waterIn(rec).find((q) => q.i === t.i && (t.i >= 16 ? q.kind === 'puddle' : q.kind === 'bath'));
+      return s ? { x: s.x + s.r * 0.4 * (h32(w.id, t.i, 61) - 0.5), y: s.y + T.wasp.radius + 0.006, z: s.z + s.r * 0.4 * (h32(w.id, t.i, 62) - 0.5) } : null;
+    }
     if (t.kind === 'wood') { const b = c.boxes[t.i]; return { x: (b.minx + b.maxx) / 2 + 0.2 * (h32(w.id, t.i) - 0.5), y: b.maxy + T.wasp.radius + 0.008, z: (b.minz + b.maxz) / 2 }; }
     // a fly already taken: its table still draws flies, so go there and take whatever is about (T1-16)
     if (t.sub === 'fly') return !this.flyActive(rec, t.i) ? null : (st.caughtFly[t.i] || 0) > this.tick ? c.flies[t.i] : flyPos(c.flies[t.i], this.tick);
@@ -3840,7 +3936,7 @@ export class Sim {
     f(this.tick); f(this.clockOffset); f(this.drivenId);
     for (const w of this.wasps) { f(w.id); f(w.x); f(w.y); f(w.z); f(w.vx); f(w.vy); f(w.vz); f(w.energy); f(w.venom); f(w.bodyT); }
     const c = this.colony;
-    f(c.adults); f(c.eggs); f(c.larvae); f(c.pupae); f(c.cells); f(c.protein); f(c.sugar); f(c.pulp); f(c.deficit);
+    f(c.adults); f(c.eggs); f(c.larvae); f(c.pupae); f(c.cells); f(c.protein); f(c.sugar); f(c.pulp); f(c.deficit); f(c.water || 0); f(c.cool ?? 1); // T2-1
     f(c.rEggs); f(c.rLarvae); f(c.rPupae); f(c.gynes); f(c.mated); f(this.season.n); f(this.lineage);
     f(this.stung.size); f(this.stats.stings); f(this.stats.aiStings); f(this.records.size);
     for (const hm of this.active) { f(hm.x); f(hm.z); f(hm.panic); f(hm.posture === 'sit' ? 1 : 0); }

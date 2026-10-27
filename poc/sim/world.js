@@ -172,6 +172,7 @@ export function generateChunk(seed, cx, cz) {
     humans: [], boxes: [], cylinders: [], sugar: [], hives: [], traps: [], nest: null,
     webs: [], birds: [], rival: null, sheds: [], dragonflies: [],
     use: 'park', roads: [], loops: [], lots: [], malls: [], // T1-12: land use, streets, cul-de-sacs, parking lots, mall buildings
+    baths: [], // T2-1: birdbaths
   };
   const occupied = [];
   const isOrigin = cx === 0 && cz === 0;
@@ -392,6 +393,28 @@ export function generateChunk(seed, cx, cz) {
     }
   }
   if (c.use === 'forest' && unit(H(6300)) < 0.3) addActor(6310, ox - 26, oz - 20, 1, 0, 'stand', 'stroll', [ox - 26, oz - 20, ox + 26, oz + 20]);
+  // Birdbaths (GDD 6.2, T2-1): a basin on a pedestal in some backyards, now and then in a park, and one in the home
+  // park. A solid drum for collision; its top is the water.
+  const Wt = T.water;
+  const addBath = (x, z) => {
+    c.baths.push({ x, z, r: Wt.bathR, h: Wt.bathY });
+    c.cylinders.push({ x, z, r: Wt.bathR, h: Wt.bathY, wood: false, bath: true });
+    occupied.push({ x, z, r: 0.6 });
+  };
+  if (c.use === 'yards') {
+    for (let li = 0; li < 4; li++) {
+      const s = li < 2 ? -1 : 1, lx = ox + (li % 2 ? 16 : -16), base = 3000 + li * 2000;
+      if (unit(H(base + 1500)) >= Wt.bathShare) continue;
+      const x = lx + range(H(base + 1501), -9, 9), z = oz + s * 24.5;
+      if (free(x, z, 0.6)) addBath(x, z);
+    }
+  } else if (c.use === 'park') {
+    const n = isOrigin ? 6 : unit(H(6500)) < Wt.bathPark ? 4 : 0; // tries
+    for (let k = 0; k < n; k++) {
+      const x = ox + range(H(6501 + k * 2), -18, 18), z = oz + range(H(6502 + k * 2), -18, 18);
+      if (free(x, z, 1)) { addBath(x, z); break; }
+    }
+  }
   // Spider webs: vertical discs beside tree trunks (GDD 9.3)
   c.trees.forEach((t, i) => {
     if (unit(H(700 + i)) > 0.45) return;

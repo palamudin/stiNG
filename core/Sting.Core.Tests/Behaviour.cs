@@ -717,6 +717,48 @@ namespace Sting.Core.Tests
                 var r = Persist.Restore(Persist.Snapshot(s));
                 Ok(r.HumanHash() == s.HumanHash() && r.HumanByHex(st.hex).wp == st.wp && r.HumanByHex(st.hex).home.path.Length == st.home.path.Length, "a walk in progress survives save and restore");
             }
+            // 41. water (T2-1): birdbaths and puddles, loads carried home, a hot nest cooled by water
+            {
+                int baths = 0, yb = 0;
+                for (int z = -4; z < 4; z++) for (int x = -4; x < 4; x++) { var cc = World.GenerateChunk(1234, x, z); baths += cc.baths.Count; if (cc.use == "yards") yb += cc.baths.Count; }
+                var home = World.GenerateChunk(1234, 0, 0);
+                Ok(home.baths.Count == 1 && baths >= 30 && yb >= 20 && home.cylinders.Any(q => q.bath && !q.wood), $"birdbaths in backyards and parks ({baths} in the home region, {yb} in yards, one in the home park), solid but not wood");
+                var s = new Sim(new Settings { seed = 1234, birds = false, dayMinutes = 20 }, new SimOpts { noAI = true });
+                RunS(s, 2);
+                long rd = 1; while (!World.Weather(s.seed, rd).rain) rd++;
+                var w0 = World.Weather(s.seed, rd); long t0 = rd * 1440;
+                Ok(s.PuddleDay(t0 + (long)w0.rainStart - 1) < 0 && s.PuddleDay(t0 + (long)w0.rainStart + (long)T.water.wetAfter) == rd && s.PuddleDay(t0 + (long)w0.rainEnd + (long)T.water.dryMinutes - 1) == rd && s.PuddleDay(t0 + (long)w0.rainEnd + (long)T.water.dryMinutes) < 0,
+                    $"puddles lie from {D(T.water.wetAfter)} min after the rain starts until {D(T.water.dryMinutes) / 60} h after it stops (day {rd})");
+                var rec = s.records.Get("0,1"); var ps = s.PuddlesIn(rec, rd);
+                var paved = rec.content.roads.Concat(rec.content.lots).ToList();
+                Ok(ps.Count > 0 && ps.All(p => paved.Any(r => p.x >= r.minx && p.x <= r.maxx && p.z >= r.minz && p.z <= r.maxz)) && ps.All(p => !rec.content.boxes.Any(b => p.x > b.minx && p.x < b.maxx && p.z > b.minz && p.z < b.maxz)),
+                    $"in a yards chunk they lie on the street ({ps.Count} puddles), never under anything");
+                var bb = home.baths[0]; var w = s.wasp;
+                Place(w, P(bb.x + 0.05, bb.h + T.wasp.radius + 0.004, bb.z)); w.state = "fly"; w.carry = null;
+                RunS(s, 1);
+                Ok(s.hint.water && !s.hint.wood, "over a birdbath the wasp can take water, and it is not wood");
+                var ev = RunS(s, T.water.fillTicks + 2, (sim, i) => { if (w.state == "fly") Place(w, P(bb.x + 0.05, bb.h + T.wasp.radius + 0.004, bb.z)); return Idle(c => c.act = Act.Interact); });
+                Ok(w.carry != null && w.carry.kind == "water" && Count(ev, "watered") == 1, "holding E at the water takes a load");
+                Place(w, s.nest.entrance); ev = RunS(s, 2);
+                Ok(w.carry == null && s.colony.stats.depWater == 1 && ev.Any(e => e.type == "deposit" && (string)e["what"] == "water"), $"delivered at the nest it goes into the store ({D(s.colony.water):0.00})");
+                (ColonyState c, Num lost, Num brood0) HotRun(bool wet)
+                {
+                    var c = Colony.New(); c.water = wet ? 50 : 0; Num b0 = c.eggs + c.larvae + c.pupae;
+                    for (int i = 0; i < 120; i++) { if (wet) c.water = 50; Colony.Step(c, (Num)1 / 120, 0, false, 0.3, 0.2, 1, null, ((Num)1, (Num)1)); }
+                    return (c, c.stats.cooked, b0);
+                }
+                var wr = HotRun(true); var dr = HotRun(false);
+                Ok(wr.c.cool > 0.99 && wr.lost == 0 && dr.c.cool < 0.05 && dr.lost > dr.brood0 * 0.2, $"a day of lethal heat: with water no brood is lost; dry, {D(dr.lost):0} of {D(dr.brood0):0} brood cook");
+                ColonyState Fed(Num heat) { var c = Colony.New(); c.water = 0; c.sugar = 0; c.protein = 0; Colony.Step(c, 0.01, 0, true, 0.3, 0.2, 1, null, (heat, (Num)0)); return c; }
+                var coolC = Fed(0); var thirsty = Fed(1);
+                Ok(thirsty.cool > 0.8 && thirsty.sugar < coolC.sugar && thirsty.thirst > 0.9, $"a hot nest with an empty store sends foragers for water at the cost of food (sugar {D(thirsty.sugar):0.000} vs {D(coolC.sugar):0.000})");
+                var a = new Sim(new Settings { seed = 1234, birds = false }, new SimOpts { noAI = true });
+                RunS(a, 2);
+                var cw = a.SpawnWasp(false); cw.role = "water";
+                bool got = false;
+                for (int i = 0; i < 4000 && !got; i++) { foreach (var e in RunS(a, 1)) if (e.type == "deposit" && (int)e["id"] == cw.id && (string)e["what"] == "water") got = true; if (!a.wasps.Contains(cw)) break; }
+                Ok(got, "a water carrier flies to the water, drinks a load and brings it home");
+            }
         }
 
         // 26. Tier 1, batch 1: wind, cold, drowning, clothes by the weather, shaking and flailing
@@ -901,7 +943,10 @@ namespace Sting.Core.Tests
             Num At(string site, long m) { s.nest.site = site; return s.BroodSpeed(m); }
             Num br = At("branch", cold), tk = At("trunk", cold), gr = At("ground", cold), ho = At("hollow", cold);
             Ok(cold > 0 && br < tk && tk < gr && gr < ho && ho < 1, $"on a cold morning the brood slows most in an open nest and least in a hollow tree (branch {D(br):0.00}, trunk {D(tk):0.00}, burrow {D(gr):0.00}, hollow {D(ho):0.00})");
-            Ok(hot > 0 && At("attic", hot) < At("wall", hot), $"a sunny afternoon bakes an attic nest ({D(At("attic", hot)):0.00} vs {D(At("wall", hot)):0.00})");
+            s.colony.cool = 0; // a nest with no water to cool it (T2-1)
+            Ok(hot > 0 && At("attic", hot) < At("wall", hot), $"a sunny afternoon bakes a dry attic nest ({D(At("attic", hot)):0.00} vs {D(At("wall", hot)):0.00})");
+            s.colony.cool = 1;
+            Ok(At("attic", hot) == 1, "with water fanned over the comb the same attic keeps the brood at full speed");
             Num Grow(Num k) { var c = Colony.New(); for (int i = 0; i < 120 * 6; i++) { c.protein = 1e3; c.sugar = 1e3; Colony.Step(c, (Num)1 / 120, 0, false, 0.3, 1, k); } return c.stats.emerged; }
             Ok(Grow(0.5) < Grow(1) * 0.8, $"a slowed brood brings fewer workers out ({D(Grow(0.5)):0} vs {D(Grow(1)):0} in six days)");
         }

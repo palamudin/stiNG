@@ -7,7 +7,7 @@ namespace Sting.Core
     public sealed class ColonyStats
     {
         public Num emerged, laid, starvedLarvae, died, gynesRaised, sugarSpilled, proteinSpilled, poisoned;
-        public Num depSugar, depProtein, depPulp;
+        public Num depSugar, depProtein, depPulp, depWater, cooked;
         public ColonyStats Clone() => (ColonyStats)MemberwiseClone();
     }
 
@@ -19,14 +19,16 @@ namespace Sting.Core
         /// new workers who nurse and build inside before they forage (T1-13)
         public Num young;
         public Num deficit, fed = 1, sugarlessDays;
+        /// water (T2-1): the store, how well the comb's heat was met with it (1 when cool), how short the nest is of it
+        public Num water, cool = 1, thirst;
         public int alloc;
         public Num maxCells = Num.MaxValue;
         public ColonyStats stats = new ColonyStats();
         public ColonyState Clone() { var c = (ColonyState)MemberwiseClone(); c.stats = stats.Clone(); return c; }
         public Num this[string k]
         {
-            get => k switch { "sugar" => sugar, "protein" => protein, "pulp" => pulp, _ => throw new System.ArgumentException(k) };
-            set { switch (k) { case "sugar": sugar = value; break; case "protein": protein = value; break; case "pulp": pulp = value; break; default: throw new System.ArgumentException(k); } }
+            get => k switch { "sugar" => sugar, "protein" => protein, "pulp" => pulp, "water" => water, _ => throw new System.ArgumentException(k) };
+            set { switch (k) { case "sugar": sugar = value; break; case "protein": protein = value; break; case "pulp": pulp = value; break; case "water": water = value; break; default: throw new System.ArgumentException(k); } }
         }
     }
 
@@ -36,11 +38,12 @@ namespace Sting.Core
         {
             adults = founding ? 0 : T.colony.start.adults, eggs = founding ? 0 : T.colony.start.eggs, larvae = founding ? 0 : T.colony.start.larvae,
             pupae = founding ? 0 : T.colony.start.pupae, cells = founding ? 0 : T.colony.start.cells, protein = founding ? 0 : T.colony.start.protein,
-            sugar = founding ? 0.5 : T.colony.start.sugar, pulp = founding ? 0 : T.colony.start.pulp,
+            sugar = founding ? 0.5 : T.colony.start.sugar, pulp = founding ? 0 : T.colony.start.pulp, water = founding ? 0 : T.colony.start.water,
         };
 
         public static Num ProteinCap(ColonyState c) => T.colony.proteinCapBase + (c.larvae + c.rLarvae * T.season.reproProtein) * T.colony.larvaProtein * T.colony.proteinCapDays;
         public static Num SugarCap(ColonyState c) => T.colony.sugarCapBase + c.adults * T.colony.adultSugar * T.colony.sugarCapDays;
+        public static Num WaterCap(ColonyState c) => T.water.capBase + c.adults * T.water.capPerAdult; // T2-1
         public static Num BroodTotal(ColonyState c) => c.eggs + c.larvae + c.pupae + c.rEggs + c.rLarvae + c.rPupae;
 
         static readonly (Num from, string name)[] PHASES = { (0, "Founding"), (0.15, "Growth"), (0.55, "Peak"), (0.8, "Collapse") };
@@ -54,17 +57,39 @@ namespace Sting.Core
         /// thermal: brood development speed from the nest's temperature (T1-14), 1 when comfortable
         public static void Step(ColonyState c, Num dtDay, Num physical, bool foraging, Num frac, Num bio, Num thermal) => Step(c, dtDay, physical, foraging, frac, bio, thermal, null);
         /// avail: what the season offers foragers (T1-8), sugar and protein multipliers
-        public static void Step(ColonyState c, Num dtDay, Num physical, bool foraging, Num frac, Num bio, Num thermal, (Num sugar, Num protein)? avail)
+        public static void Step(ColonyState c, Num dtDay, Num physical, bool foraging, Num frac, Num bio, Num thermal, (Num sugar, Num protein)? avail) => Step(c, dtDay, physical, foraging, frac, bio, thermal, avail, null);
+        /// hot: the nest's heat (T2-1), heat 0..1 through the site's insulation and cook 0..1 past the brood's lethal temperature
+        public static void Step(ColonyState c, Num dtDay, Num physical, bool foraging, Num frac, Num bio, Num thermal, (Num sugar, Num protein)? avail, (Num heat, Num cook)? hot)
         {
             if (!c.nestAlive) return;
             Num inside = Max(0, c.adults - physical);
+            Num heat = hot.HasValue ? hot.Value.heat : 0, wcap = WaterCap(c);
+            // a hot nest with a low store sends some foragers for water instead of food
+            c.thirst = heat * (1 - Clamp01(c.water / wcap));
+            Num divert = T.water.divert * c.thirst;
             if (foraging)
             {
                 var a = T.alloc[c.alloc]; Num wsum = (a.sugar + a.protein + a.pulp) / 3;
                 Num f = Max(0, inside - c.young) * T.colony.forageShare * a.traffic * dtDay; // 'Lie low' sends fewer out (T1-7); the young stay in (T1-13)
-                c.sugar += f * T.colony.income.sugar * a.sugar / wsum * (avail.HasValue ? avail.Value.sugar : 1);
-                c.protein += f * T.colony.income.protein * a.protein / wsum * (avail.HasValue ? avail.Value.protein : 1);
-                c.pulp += f * T.colony.income.pulp * a.pulp / wsum;
+                Num food = f * (1 - divert);
+                c.sugar += food * T.colony.income.sugar * a.sugar / wsum * (avail.HasValue ? avail.Value.sugar : 1);
+                c.protein += food * T.colony.income.protein * a.protein / wsum * (avail.HasValue ? avail.Value.protein : 1);
+                c.pulp += food * T.colony.income.pulp * a.pulp / wsum;
+                c.water += f * divert * T.water.income;
+            }
+            if (c.water > wcap) c.water = wcap;
+            // cooling: the heat uses water; how much of the need was met decides how much the heat still slows the brood
+            Num demand = heat * T.water.coolPerDay * dtDay;
+            if (demand > 0) { Num wp = Min(c.water, demand); c.water -= wp; c.cool += (wp / demand - c.cool) * T.water.smoothing; }
+            else c.cool += (1 - c.cool) * T.water.smoothing;
+            // past the lethal temperature the brood the water does not save cooks
+            Num cook = (hot.HasValue ? hot.Value.cook : 0) * (1 - c.cool) * T.water.broodCook * dtDay;
+            if (cook > 0)
+            {
+                Num k = Min(1, cook), lost = 0;
+                Num Cut(ref Num x) { Num y = x * k; x -= y; return y; }
+                lost += Cut(ref c.eggs); lost += Cut(ref c.larvae); lost += Cut(ref c.pupae); lost += Cut(ref c.rEggs); lost += Cut(ref c.rLarvae); lost += Cut(ref c.rPupae);
+                c.stats.cooked += lost;
             }
             Num cap = SugarCap(c);
             if (c.sugar > cap) { c.stats.sugarSpilled = c.stats.sugarSpilled + c.sugar - cap; c.sugar = cap; }

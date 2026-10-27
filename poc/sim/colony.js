@@ -11,15 +11,17 @@ export function newColony(founding = false) {
     queenAlive: true, nestAlive: true, sited: true,
     adults: founding ? 0 : s.adults, eggs: founding ? 0 : s.eggs, larvae: founding ? 0 : s.larvae, pupae: founding ? 0 : s.pupae,
     cells: founding ? 0 : s.cells, protein: founding ? 0 : s.protein, sugar: founding ? 0.5 : s.sugar, pulp: founding ? 0 : s.pulp,
+    water: founding ? 0 : s.water, cool: 1, thirst: 0, // T2-1
     rEggs: 0, rLarvae: 0, rPupae: 0, gynes: 0, males: 0, mated: 0, young: 0,
     deficit: 0, fed: 1, alloc: 0, sugarlessDays: 0,
-    stats: { emerged: 0, laid: 0, starvedLarvae: 0, died: 0, gynesRaised: 0, deposited: { sugar: 0, protein: 0, pulp: 0 } },
+    stats: { emerged: 0, laid: 0, starvedLarvae: 0, died: 0, gynesRaised: 0, deposited: { sugar: 0, protein: 0, pulp: 0, water: 0 }, cooked: 0 },
   };
   return c;
 }
 
 export const proteinCap = (c) => T.colony.proteinCapBase + (c.larvae + c.rLarvae * T.season.reproProtein) * T.colony.larvaProtein * T.colony.proteinCapDays;
 export const sugarCap = (c) => T.colony.sugarCapBase + c.adults * T.colony.adultSugar * T.colony.sugarCapDays;
+export const waterCap = (c) => T.water.capBase + c.adults * T.water.capPerAdult; // T2-1
 export const broodTotal = (c) => c.eggs + c.larvae + c.pupae + c.rEggs + c.rLarvae + c.rPupae;
 
 // Season phase from the season fraction (GDD 5.2)
@@ -36,17 +38,37 @@ export function reproShare(frac) { const C = T.season; return clamp01((frac - C.
 // `foraging` = abstract foragers can work now. `frac` = season fraction. `bio` = biological time scale.
 // thermal: brood development speed from the nest's temperature (T1-14), 1 when comfortable
 // avail: what the season offers foragers (T1-8), { sugar, protein } multipliers, 1 when absent
-export function colonyStep(c, dtDay, physical, foraging, frac = 0.3, bio = 1, thermal = 1, avail = null) {
-  const C = T.colony, S = T.season;
+// hot: the nest's heat (T2-1), { heat: 0..1 through the site's insulation, cook: 0..1 past the brood's lethal temperature }
+export function colonyStep(c, dtDay, physical, foraging, frac = 0.3, bio = 1, thermal = 1, avail = null, hot = null) {
+  const C = T.colony, S = T.season, W = T.water;
   if (!c.nestAlive) return;
   const inside = Math.max(0, c.adults - physical);
+  if (c.water === undefined) { c.water = 0; c.cool = 1; c.thirst = 0; } // saves from before water (T2-1)
+  const heat = hot ? hot.heat : 0, wcap = waterCap(c);
+  // a hot nest with a low store sends some foragers for water instead of food
+  c.thirst = heat * (1 - clamp01(c.water / wcap));
+  const divert = W.divert * c.thirst;
 
   if (foraging) {
     const a = T.alloc[c.alloc], wsum = (a.sugar + a.protein + a.pulp) / 3;
     const f = Math.max(0, inside - c.young) * C.forageShare * a.traffic * dtDay; // 'Lie low' sends fewer out (T1-7); the young stay in (T1-13)
-    c.sugar += f * C.income.sugar * a.sugar / wsum * (avail ? avail.sugar : 1);
-    c.protein += f * C.income.protein * a.protein / wsum * (avail ? avail.protein : 1);
-    c.pulp += f * C.income.pulp * a.pulp / wsum;
+    const food = f * (1 - divert);
+    c.sugar += food * C.income.sugar * a.sugar / wsum * (avail ? avail.sugar : 1);
+    c.protein += food * C.income.protein * a.protein / wsum * (avail ? avail.protein : 1);
+    c.pulp += food * C.income.pulp * a.pulp / wsum;
+    c.water += f * divert * W.income;
+  }
+  if (c.water > wcap) c.water = wcap;
+  // cooling: the heat uses water; how much of the need was met decides how much the heat still slows the brood
+  const demand = heat * W.coolPerDay * dtDay;
+  if (demand > 0) { const paid = Math.min(c.water, demand); c.water -= paid; c.cool += (paid / demand - c.cool) * W.smoothing; }
+  else c.cool += (1 - c.cool) * W.smoothing;
+  // past the lethal temperature the brood the water does not save cooks
+  const cook = (hot ? hot.cook : 0) * (1 - c.cool) * W.broodCook * dtDay;
+  if (cook > 0) {
+    let lost = 0;
+    for (const k of ['eggs', 'larvae', 'pupae', 'rEggs', 'rLarvae', 'rPupae']) { const x = c[k] * Math.min(1, cook); c[k] -= x; lost += x; }
+    c.stats.cooked = (c.stats.cooked || 0) + lost;
   }
 
   // Wasps keep only a small sugar store: what does not fit is not collected
