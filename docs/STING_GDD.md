@@ -2199,9 +2199,9 @@ namespace Sting.Core
 | Growth tree | The line's progression: Nest, Flight and Line branches |
 | Gyne | An unmated new queen |
 | Line | A founding queen and every colony descended from her |
+| Player gauge | The player's measured rates from in-hand play; sets how auto-managed colonies earn and play |
 | Progression | The world setting for which species a line may play: earned, open or fixed |
 | Reaction plan | The deterministic list of swats and effects produced by a sting |
-| Player gauge | The player's measured rates from in-hand play; sets how auto-managed colonies earn and play |
 | Stab | A sting that moves the counter |
 | Sugar deficit | Share of the colony's adult sugar need not covered by larval secretion |
 | Swarm | A honeybee colony's way of reproducing: the old queen leaves with part of the workers |
