@@ -63,6 +63,30 @@ export function targetPos(sim, t) {
   return null;
 }
 
+// How fast a target is moving, m/s (zero for anything that stays put). Prey positions are functions of the tick, so this
+// is exact: where it will be next tick, less where it is now. Chasing it, the pilots lead it and keep closing speed on top
+// of its own instead of slowing to its pace.
+export function targetVel(sim, t) {
+  const Z = { x: 0, y: 0, z: 0 };
+  if (!t) return Z;
+  if (t.kind === 'wasp') { const x = sim.waspById(t.id) || sim.remote.get(t.id); return x ? { x: x.vx || 0, y: x.vy || 0, z: x.vz || 0 } : Z; }
+  if (t.kind !== 'fly' && t.kind !== 'bee' && t.kind !== 'bird' && t.kind !== 'dragonfly') return Z;
+  const rec = sim.records.get(t.key);
+  if (!rec) return Z;
+  const c = rec.content, k = sim.tick;
+  let a = null, b = null;
+  if (t.kind === 'fly') { const f = c.flies[t.i]; if (f) { a = flyPos(f, k); b = flyPos(f, k + 1); } }
+  else if (t.kind === 'bee') { const hv = sim.hivesIn(rec)[t.h]; if (hv) { a = beePos(hv, t.i, k); b = beePos(hv, t.i, k + 1); } }
+  else {
+    const list = t.kind === 'bird' ? c.birds : c.dragonflies, s = (t.kind === 'bird' ? sim.birdState : sim.dragonState).get(t.key + '#' + t.i);
+    if (s) return { x: s.vx || 0, y: s.vy || 0, z: s.vz || 0 };
+    const f = t.kind === 'bird' ? birdPos : dragonPos;
+    if (list[t.i]) { a = f(list[t.i], k); b = f(list[t.i], k + 1); }
+  }
+  return a && b ? { x: (b.x - a.x) * 60, y: (b.y - a.y) * 60, z: (b.z - a.z) * 60 } : Z;
+}
+export const CHASE = { moving: 0.05, lead: 0.5, close: 0.35, closeMin: 1 }; // m/s that counts as moving; the most lead, s; extra throttle share over its pace (manual); the least closing speed, m/s (pilot)
+
 // Everything the wasp could lock on to round it, with where it is
 function candidates(sim, w) {
   const out = [], R = LOCK.range * sim._mul(w, 'landR'); // the landing reach skill reaches further (GDD 6.8)
@@ -170,20 +194,28 @@ export function assistPilot(sim, w, t, cmd) {
   const p = targetPos(sim, t);
   if (!p) return { cmd, done: K.prey && w.carry ? 'caught' : 'gone' };
   if (K.prey && w.carry) return { cmd, done: 'caught' };
-  const g = goalOf(sim, t, p);
-  if (!g) return { cmd, done: 'gone' };
+  const g0 = goalOf(sim, t, p);
+  if (!g0) return { cmd, done: 'gone' };
+  const top = T.wasp.cruise * (w.carry ? T.wasp.carrySpeedMul : 1);
+  // a moving target: aim where it will be, and fly at its pace plus closing speed (with burst when it is quick)
+  const v = targetVel(sim, t), vs = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z), moving = vs > CHASE.moving;
+  let g = g0;
+  if (moving) { const lead = Math.min(CHASE.lead, Math.sqrt(d2(w, g0)) / top); g = { ...g0, x: g0.x + v.x * lead, y: g0.y + v.y * lead, z: g0.z + v.z * lead }; }
   // come in from above for anything to land on, along the outward side for a person
   const hd = Math.sqrt(sq(g.x - w.x) + sq(g.z - w.z));
   let wp = g;
   if (g.above && hd > 0.06) wp = { x: g.x, y: g.y + Math.min(0.4, 0.3 * hd + 0.04), z: g.z };
   else if (g.n && Math.sqrt(d2(w, g)) > 0.2) wp = { x: g.x + g.n.x * 0.15, y: g.y + g.n.y * 0.15, z: g.z + g.n.z * 0.15 };
-  const dx = wp.x - w.x, dy = wp.y - w.y, dz = wp.z - w.z, d = Math.sqrt(dx * dx + dy * dy + dz * dz), dg = Math.sqrt(d2(w, g));
+  const dx = wp.x - w.x, dy = wp.y - w.y, dz = wp.z - w.z, d = Math.sqrt(dx * dx + dy * dy + dz * dz), dg = Math.sqrt(d2(w, g0)); // how near it really is
   const out = { ...cmd, mx: 0, my: 0, burst: 0, sting: 0 };
   if (K.prey && dg < T.prey.catchDist * 0.9) { out.mz = 0; out.act = (sim.tick & 1) ? 1 : 0; return { cmd: out, done: null }; } // grab it
   if (dg < 0.004 && !K.prey) { out.mz = 0; return { cmd: out, done: null }; } // hold still: it settles on its own
-  const top = T.wasp.cruise * (w.carry ? T.wasp.carrySpeedMul : 1);
   const want = clamp(Math.min(d, dg) * 2.2, K.prey ? 0.3 : 0.06, top) * (dg < 0.15 && !K.prey ? 0.6 : 1);
-  out.mz = Math.round(clamp(want / top, 0, 1) * 100);
+  if (moving) { // its pace plus closing speed; burst when that is past cruising
+    const close = Math.max(want, CHASE.closeMin), fast = vs + close > top, cap = fast ? T.wasp.burst * (w.carry ? T.wasp.carrySpeedMul : 1) : top;
+    out.burst = fast ? 1 : 0;
+    out.mz = Math.round(clamp((vs + close) / cap, 0, 1) * 100);
+  } else out.mz = Math.round(clamp(want / top, 0, 1) * 100);
   out.yawQ = Math.round(datan2(dx, dz) * 1e4);
   out.pitchQ = Math.round(clamp(datan2(dy, Math.sqrt(dx * dx + dz * dz)), -1.45, 1.45) * 1e4);
   out.act = 0;
@@ -206,9 +238,11 @@ export function swoopPilot(sim, w, t, cmd, first) {
   } else {
     const g = goalOf(sim, t, p) || p;
     dx = g.x - w.x; dy = g.y - w.y; dz = g.z - w.z;
-    // full speed in, braking over the last half metre so it can turn onto the spot
-    const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
-    out.mz = Math.round(clamp(d * 12, 1.5, T.swoop.speed) / T.swoop.speed * 100);
+    // full speed in, braking over the last half metre so it can turn onto the spot; a moving target is led, and the
+    // braking keeps its pace on top
+    const d = Math.sqrt(dx * dx + dy * dy + dz * dz), v = targetVel(sim, t), vs = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+    if (vs > CHASE.moving) { const lead = Math.min(CHASE.lead, d / T.swoop.speed); dx += v.x * lead; dy += v.y * lead; dz += v.z * lead; }
+    out.mz = Math.round(clamp(d * 12 + (vs > CHASE.moving ? vs : 0), 1.5, T.swoop.speed) / T.swoop.speed * 100);
   }
   out.yawQ = Math.round(datan2(dx, dz) * 1e4);
   out.pitchQ = Math.round(clamp(datan2(dy, Math.sqrt(dx * dx + dz * dz)), -1.45, 1.45) * 1e4);

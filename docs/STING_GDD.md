@@ -1623,6 +1623,24 @@ A good player's colonies prosper while they are away. Nothing the AI does feeds 
 - **Bees:** an exposed honeybee colony winters to 41 against 53 in a warm one.
 - **Parity:** a new digest (a fed colony in a house through two winters, staying in each spring) matches bit for bit: 29 digests. 379 properties hold in both builds (C# save version 28).
 
+### 18.51 Chasing moving prey; a colony view you can click (7.9, 10.3)
+
+**Found in play (2026-10-28).** Locked on a fly or a bee, the wasp could not catch it. Closing in under a lock eased the throttle down near the target (down to 12% within the last 0.6 m), and the pilots braked the same way, so the wasp settled at the prey's pace a hand's width behind. Flies drift at 0.5 to 1.3 m/s; commuting forager bees fly at up to 5.8 m/s, against the wasp's 3 m/s cruise and 6 m/s burst.
+
+**The fix.** `targetVel` gives a target's velocity. Prey positions are functions of the tick, so it is exact: next tick's position less this one's, or the hunter's own velocity for a bird or dragonfly on the hunt.
+- **By hand under a lock:** W is never eased below the prey's pace plus 35% of cruising.
+- **Assisted flight:** it aims where the prey will be (lead up to half a second) and flies at its pace plus at least 1 m/s of closing speed, with burst when that is past cruising. It grabs by distance to the prey itself, not the led point.
+- **The locked swoop:** it leads the target too, and its braking keeps the prey's pace on top.
+- Targets that stay put (flowers, drinks, people at rest, caterpillars) are flown to exactly as before.
+
+**The colony view (N).**
+- It frees the mouse: a cursor to click with, and the panel scrolls. Closing it, with N or Esc, takes the mouse back; a click on the game does too.
+- Clicks on the game while it is open do not sting.
+- The panel is twice as wide, with the skills in two columns.
+- The colony-view time speed moved to the pause menu (Esc).
+
+**Checks.** JS and C# agree: locked on a fly drifting at 0.47 m/s, assisted flight catches it in 0.55 s. Locked on a forager bee commuting at 3.8 m/s, it runs it down with burst in 2.15 s. The static-target timings of 18.45 are unchanged. 381 properties hold in both builds, and the 29 digests are unchanged.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1631,7 +1649,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (101 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony; the T0 of progression (18.48): XP, unit and hive skills, the year's turn; multi-colony play with the player gauge (18.49); and wintering in somewhere warm (18.50). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (102 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony; the T0 of progression (18.48): XP, unit and hive skills, the year's turn; multi-colony play with the player gauge (18.49); wintering in somewhere warm (18.50); and chasing moving prey with a lock, with a colony view you can click (18.51). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 

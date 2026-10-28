@@ -5,7 +5,7 @@ import {
   Sim, Act, T, DT, ZONES, ZoneName, SwatKind, SwatKindName, StyleName, TopName, BottomName, Top, Bottom,
   toWorld, toLocal, dirToWorld, chunkKey, chunkOf, hash, Domain, rangeInt, resolveSting, zoneCover, segClosest, classify, predictedKind,
   NEST, NEST_ENTRANCE, flyPos, beePos, fmtClock, minuteOfDay, isLowerZone, broodTotal, sugarCap, proteinCap, waterCap, garmentGraph, dayWeather,
-  NetLab, LINKS, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetLabel, assistPilot, swoopPilot, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE, SKILLS, SKILL_UNLOCKS, SKILL_RANKED, SKILL_HIVE, skillCost,
+  NetLab, LINKS, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetVel, CHASE, targetLabel, assistPilot, swoopPilot, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE, SKILLS, SKILL_UNLOCKS, SKILL_RANKED, SKILL_HIVE, skillCost,
 } from './sim/index.js';
 
 // Tuning as data (GDD 13, T1-22): read tuning/sting.tune, served next to the page, before anything uses T. Without it
@@ -1573,10 +1573,15 @@ function buildCmd() {
     alloc: input.alloc,
     pick: input.switchTo ? (input.switchTo = 0, -(1000 + switchOnce)) : input.learn ? (input.learn = 0, -(learnOnce + 1)) : input.pick ? (input.pick = 0, pickOnce) : 0, // negative picks: take a colony in hand, learn a skill (GDD 6.8)
   };
-  // locked on: closing in slows near the target, so W brings you up to it rather than past it
+  // locked on: closing in slows near the target, so W brings you up to it rather than past it; a moving target is not
+  // slowed for: you keep its pace plus closing speed, so you can catch it
   if (input.lock && !input.pilot && cmd.mz > 0) {
     const w = sim._driven(), p = w && targetPos(sim, input.lock);
-    if (p) cmd.mz = Math.max(1, Math.round(cmd.mz * Math.max(0.12, Math.min(1, Math.hypot(p.x - w.x, p.y - w.y, p.z - w.z) / 0.6))));
+    if (p) {
+      const v = targetVel(sim, input.lock), vs = Math.hypot(v.x, v.y, v.z);
+      const floor = vs > CHASE.moving ? Math.min(1, vs / T.wasp.cruise + CHASE.close) : 0.12;
+      cmd.mz = Math.max(1, Math.round(cmd.mz * Math.max(floor, Math.min(1, Math.hypot(p.x - w.x, p.y - w.y, p.z - w.z) / 0.6))));
+    }
   }
   // a locked swoop: the dash homes on the target and the slam fits it (GDD 7.9); move keys steer it as any dash
   if (input.swoopLock) {
@@ -1691,6 +1696,7 @@ addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   if (e.code === 'Tab') { e.preventDefault(); toggleLab(); return; }
   if (e.code === 'KeyN' && !e.repeat) { toggleNest(); return; }
+  if (e.code === 'Escape' && ui.nest) { toggleNest(); return; } // Esc closes the colony view first
   if (e.code === 'KeyT' && !e.repeat && ui.nest && solo()) { setSpeed(SPEEDS[(SPEEDS.indexOf(ui.speed) + 1) % SPEEDS.length]); return; }
   if (e.code === 'KeyV' && !e.repeat && running && !paused) { toggleLock(); return; }
   if (e.code === 'KeyX' && !e.repeat && running && !paused) { swoop(); return; }
@@ -1708,7 +1714,8 @@ document.addEventListener('pointerlockerror', () => { lockFailed = true; toast('
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('mousedown', (e) => {
   if (!running || paused) return;
-  if (document.pointerLockElement !== canvas && !lockFailed && !pointerLockWorked) { lock(); return; }
+  if (ui.nest && document.pointerLockElement !== canvas) return; // clicking about in the colony view does not sting
+  if (document.pointerLockElement !== canvas && !lockFailed) { lock(); return; } // a click takes the mouse back (after the colony view, say)
   if (e.button === 0) input.lmb = true;
   if (e.button === 1) { e.preventDefault(); toggleLock(); } // middle button: lock on
   if (e.button === 2 && document.pointerLockElement === canvas) input.free.held = true; // free look
@@ -1733,7 +1740,7 @@ function lock() { try { const p = canvas.requestPointerLock(); if (p && p.catch)
 document.addEventListener('pointerlockchange', () => {
   if (!running) return;
   const locked = document.pointerLockElement === canvas;
-  if (!locked && pointerLockWorked && $('winterScreen').hidden && $('extinctScreen').hidden) setPaused(true);
+  if (!locked && pointerLockWorked && !ui.nest && $('winterScreen').hidden && $('extinctScreen').hidden) setPaused(true); // the colony view frees the mouse on purpose
   if (locked) { pointerLockWorked = true; setPaused(false); }
 });
 function setPaused(p) { paused = p; if (p && sim) $('pauseTag').textContent = `${tagText(sim.settings)} · rules ${rulesHash(sim.settings)} · tuning ${TUNE.hash}`; input.free.held = false; $('pauseScreen').hidden = !p; input.lmb = false; input.keys.clear(); if (p) { $('saveNote').textContent = ''; saveWorld(false); } }
@@ -1773,7 +1780,12 @@ function toggleLab() {
   document.body.classList.toggle('lab-open', ui.lab);
   try { localStorage.setItem('sting.lab', ui.lab ? '1' : '0'); } catch { /* optional */ }
 }
-function toggleNest() { ui.nest = !ui.nest; $('nest').hidden = !ui.nest; document.body.classList.toggle('nest-open', ui.nest); }
+// The colony view frees the mouse so its buttons can be clicked and the panel scrolled; closing it takes the mouse back
+function toggleNest() {
+  ui.nest = !ui.nest; $('nest').hidden = !ui.nest; document.body.classList.toggle('nest-open', ui.nest);
+  if (ui.nest) { input.lmb = false; input.free.held = false; if (document.pointerLockElement === canvas) document.exitPointerLock?.(); }
+  else if (running && !paused) lock();
+}
 $('bZones').addEventListener('click', (e) => { ui.zones = !ui.zones; e.currentTarget.setAttribute('aria-pressed', ui.zones); });
 $('bSwats').addEventListener('click', (e) => { ui.swats = !ui.swats; e.currentTarget.setAttribute('aria-pressed', ui.swats); });
 $('bVerify').addEventListener('click', () => {

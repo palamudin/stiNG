@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, humanParts, malesAbout, chunkOf, toLocal, dirToWorld, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, pickTarget, assistPilot, swoopPilot, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, CMD_FIELDS,
+  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, pickTarget, assistPilot, swoopPilot, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS,
 } from '../sim/index.js';
 import { applyTuning, parseTuning, tuningHash, tuningLeaves, TUNE } from '../sim/tunefile.js';
 
@@ -2019,6 +2019,27 @@ function seated(sim, pred) {
   { const a = newColony(false, 'bee'), b = newColony(false, 'bee'); b.warm = true; a.sugar = b.sugar = 500;
     s0: { const s = mk(); s._cluster(a, 20, 'trunk'); s._cluster(b, 20, 'trunk'); }
     ok(b.adults > a.adults && a.queenAlive, `a honeybee colony winters anywhere, but one in an exposed nest loses more (${a.adults.toFixed(0)} against ${b.adults.toFixed(0)} bees)`); }
+}
+
+// 53. Chasing moving prey with a lock (GDD 7.9): the pilots lead it and keep closing speed on top of its pace
+{
+  const chase = (s, t, n) => { let r = null, k = 0; for (; k < n; k++) { r = assistPilot(s, s.wasp, t, idle()); if (r.done) break; s.step(r.cmd); s.drainEvents(); } return { done: r && r.done, ticks: k }; };
+  { const s = new Sim({ seed: 1234, birds: false }, { noAI: true }); run(s, 1);
+    let t = null, fp = null;
+    for (const rec of s.activeChunks) { const c = rec.content, key = chunkKey(rec.cx, rec.cz); for (let i = 0; i < c.flies.length && !t; i++) if (s.flyActive(rec, i)) { t = { kind: 'fly', key, i }; fp = flyPos(c.flies[i], s.tick); } if (t) break; }
+    place(s.wasp, { x: fp.x + 1.2, y: fp.y + 0.3, z: fp.z }); const v = targetVel(s, t);
+    const r = chase(s, t, 600);
+    ok(r.done === 'caught', `locked on a fly drifting at ${Math.hypot(v.x, v.y, v.z).toFixed(2)} m/s, assisted flight catches it (${r.done} in ${(r.ticks / 60).toFixed(2)} s)`); }
+  { const s = new Sim({ seed: 1234, birds: false }, { noAI: true }); run(s, 1);
+    let t = null;
+    for (let k = 0; k < 2400 && !t; k++) {
+      for (const rec of s.activeChunks) { const hv = s.hivesIn(rec); for (let h = 0; h < hv.length && !t; h++) for (let i = T.bees.guards; i < hv[h].bees.length && !t; i++) { const c = { kind: 'bee', key: chunkKey(rec.cx, rec.cz), h, i }, v = targetVel(s, c); if (Math.hypot(v.x, v.y, v.z) > 2 && Math.hypot(v.x, v.y, v.z) < 4) t = c; } if (t) break; }
+      if (!t) run(s, 1);
+    }
+    const bp = targetPos(s, t), v = targetVel(s, t), vs = Math.hypot(v.x, v.y, v.z);
+    place(s.wasp, { x: bp.x - v.x / vs * 0.8, y: bp.y, z: bp.z - v.z / vs * 0.8 });
+    const r = chase(s, t, 600);
+    ok(r.done === 'caught', `locked on a forager bee commuting at ${vs.toFixed(1)} m/s, assisted flight runs it down with burst (${r.done} in ${(r.ticks / 60).toFixed(2)} s)`); }
 }
 
 // Tuning as data (GDD 13, T1-22): one plain-text file feeds both sims

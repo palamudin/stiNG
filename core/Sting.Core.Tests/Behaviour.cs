@@ -1349,6 +1349,31 @@ namespace Sting.Core.Tests
                     Ok(b.adults > a.adults && a.queenAlive, $"a honeybee colony winters anywhere, but one in an exposed nest loses more ({D(a.adults):0} against {D(b.adults):0} bees)");
                 }
             }
+            // 53. chasing moving prey with a lock (GDD 7.9): the pilots lead it and keep closing speed on top of its pace
+            {
+                (string done, int ticks) Chase(Sim s, LockTarget t, int n) { (Cmd cmd, string done) r = (null, null); int k = 0; for (; k < n; k++) { r = Assist.Pilot(s, s.wasp, t, Idle()); if (r.done != null) break; s.Step(r.cmd); s.DrainEvents(); } return (r.done, k); }
+                {
+                    var s = new Sim(new Settings { seed = 1234, birds = false }, new SimOpts { noAI = true }); RunS(s, 1);
+                    LockTarget t = null; V3 fp = default;
+                    foreach (var rec in s.activeChunks) { var c = rec.content; for (int i = 0; i < c.flies.Count && t == null; i++) if (s.FlyActive(rec, i)) { t = new LockTarget { kind = "fly", key = rec.key, i = i }; fp = World.FlyPos(c.flies[i], s.tick); } if (t != null) break; }
+                    Place(s.wasp, P(fp.x + 1.2, fp.y + 0.3, fp.z)); var v = Assist.TargetVel(s, t);
+                    var r = Chase(s, t, 600);
+                    Ok(r.done == "caught", $"locked on a fly drifting at {Hypot(Sqrt(v.x * v.x + v.y * v.y), v.z):0.00} m/s, assisted flight catches it ({r.done} in {r.ticks / 60.0:0.00} s)");
+                }
+                {
+                    var s = new Sim(new Settings { seed = 1234, birds = false }, new SimOpts { noAI = true }); RunS(s, 1);
+                    LockTarget t = null;
+                    for (int k = 0; k < 2400 && t == null; k++)
+                    {
+                        foreach (var rec in s.activeChunks) { var hv = s.HivesIn(rec); for (int h = 0; h < hv.Count && t == null; h++) for (int i = T.bees.guards; i < hv[h].bees.Count && t == null; i++) { var c = new LockTarget { kind = "bee", key = rec.key, h = h, i = i }; var vv = Assist.TargetVel(s, c); double sp = Math.Sqrt(D(vv.x * vv.x + vv.y * vv.y + vv.z * vv.z)); if (sp > 2 && sp < 4) t = c; } if (t != null) break; }
+                        if (t == null) RunS(s, 1);
+                    }
+                    var bp = Assist.TargetPos(s, t).Value; var v = Assist.TargetVel(s, t); Num vs = Sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+                    Place(s.wasp, P(bp.x - v.x / vs * 0.8, bp.y, bp.z - v.z / vs * 0.8));
+                    var r = Chase(s, t, 600);
+                    Ok(r.done == "caught", $"locked on a forager bee commuting at {D(vs):0.0} m/s, assisted flight runs it down with burst ({r.done} in {r.ticks / 60.0:0.00} s)");
+                }
+            }
             // 46. feature modifiers (T2-6): woods, towns, water and hives set at world creation act on generation
             {
                 (int forest, int town, int baths, int hives, bool apart) Census(Settings st)

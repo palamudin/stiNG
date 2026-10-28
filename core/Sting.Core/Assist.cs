@@ -186,6 +186,29 @@ namespace Sting.Core
             return new Goal { p = p };
         }
 
+        /// how far a moving target counts as moving (m/s), the most lead (s), the extra throttle share over its pace when
+        /// steering by hand, and the least closing speed the pilot keeps (m/s); see assist.js
+        public static readonly Num chaseMoving = 0.05, chaseLead = 0.5, chaseClose = 0.35, chaseCloseMin = 1;
+        /// how fast a target is moving, m/s (zero for anything that stays put); prey positions are functions of the tick
+        public static V3 TargetVel(Sim sim, LockTarget t)
+        {
+            var Z = new V3(0, 0, 0);
+            if (t == null) return Z;
+            if (t.kind == "wasp") { WaspBase x = (WaspBase)sim.WaspById(t.id) ?? sim.remote.Get(t.id); return x != null ? new V3(x.vx, x.vy, x.vz) : Z; }
+            if (t.kind != "fly" && t.kind != "bee" && t.kind != "bird" && t.kind != "dragonfly") return Z;
+            if (!sim.records.TryGet(t.key, out var rec)) return Z;
+            var c = rec.content; int k = sim.tick; V3? a = null, b = null;
+            if (t.kind == "fly") { if (t.i < c.flies.Count) { a = World.FlyPos(c.flies[t.i], k); b = World.FlyPos(c.flies[t.i], k + 1); } }
+            else if (t.kind == "bee") { var hv = sim.HivesIn(rec); if (t.h < hv.Count) { a = World.BeePos(hv[t.h], t.i, k); b = World.BeePos(hv[t.h], t.i, k + 1); } }
+            else
+            {
+                var list = t.kind == "bird" ? c.birds : c.dragonflies; var states = t.kind == "bird" ? sim.birdState : sim.dragonState;
+                if (states.TryGet(t.key + "#" + t.i, out var st)) return new V3(st.vx, st.vy, st.vz);
+                if (t.i < list.Count) { a = t.kind == "bird" ? World.BirdPos(list[t.i], k) : World.DragonPos(list[t.i], k); b = t.kind == "bird" ? World.BirdPos(list[t.i], k + 1) : World.DragonPos(list[t.i], k + 1); }
+            }
+            return a != null && b != null ? new V3((b.Value.x - a.Value.x) * 60, (b.Value.y - a.Value.y) * 60, (b.Value.z - a.Value.z) * 60) : Z;
+        }
+
         /// one tick of the pilot: the command that takes the wasp to the target and settles it there or catches it;
         /// done says why the flight is over ("landed", "perched", "caught", "gone", "no"), null while it goes on
         public static (Cmd cmd, string done) Pilot(Sim sim, Wasp w, LockTarget t, Cmd cmd)
@@ -208,19 +231,29 @@ namespace Sting.Core
             var p = TargetPos(sim, t);
             if (p == null) return (cmd, K.prey && w.carry != null ? "caught" : "gone");
             if (K.prey && w.carry != null) return (cmd, "caught");
-            var g = GoalOf(sim, t, p.Value);
-            if (g == null) return (cmd, "gone");
+            var g0 = GoalOf(sim, t, p.Value);
+            if (g0 == null) return (cmd, "gone");
+            Num top = T.wasp.cruise * (w.carry != null ? T.wasp.carrySpeedMul : 1);
+            // a moving target: aim where it will be, and fly at its pace plus closing speed (with burst when it is quick)
+            var v = TargetVel(sim, t); Num vs = Sqrt(v.x * v.x + v.y * v.y + v.z * v.z); bool moving = vs > chaseMoving;
+            var g = g0;
+            if (moving) { Num lead = Min(chaseLead, Sqrt(D2(w, g0.p)) / top); g = new Goal { p = new V3(g0.p.x + v.x * lead, g0.p.y + v.y * lead, g0.p.z + v.z * lead), above = g0.above, n = g0.n }; }
             Num hd = Sqrt(Sq(g.p.x - w.x) + Sq(g.p.z - w.z));
             V3 wp = g.p;
             if (g.above && hd > 0.06) wp = new V3(g.p.x, g.p.y + Min(0.4, 0.3 * hd + 0.04), g.p.z);
             else if (g.n != null && Sqrt(D2(w, g.p)) > 0.2) { var n = g.n.Value; wp = new V3(g.p.x + n.x * 0.15, g.p.y + n.y * 0.15, g.p.z + n.z * 0.15); }
-            Num dx = wp.x - w.x, dy = wp.y - w.y, dz = wp.z - w.z, d = Sqrt(dx * dx + dy * dy + dz * dz), dg = Sqrt(D2(w, g.p));
+            Num dx = wp.x - w.x, dy = wp.y - w.y, dz = wp.z - w.z, d = Sqrt(dx * dx + dy * dy + dz * dz), dg = Sqrt(D2(w, g0.p)); // how near it really is
             var o = Copy();
             if (K.prey && dg < T.prey.catchDist * 0.9) { o.mz = 0; o.act = (sim.tick & 1) != 0 ? 1 : 0; return (o, null); } // grab it
             if (dg < 0.004 && !K.prey) { o.mz = 0; return (o, null); } // hold still: it settles on its own
-            Num top = T.wasp.cruise * (w.carry != null ? T.wasp.carrySpeedMul : 1);
             Num want = Clamp(Min(d, dg) * 2.2, K.prey ? 0.3 : 0.06, top) * (dg < 0.15 && !K.prey ? 0.6 : 1);
-            o.mz = RndI(Clamp(want / top, 0, 1) * 100);
+            if (moving)
+            { // its pace plus closing speed; burst when that is past cruising
+                Num close = Max(want, chaseCloseMin); bool fast = vs + close > top; Num cap = fast ? T.wasp.burst * (w.carry != null ? T.wasp.carrySpeedMul : 1) : top;
+                o.burst = fast ? 1 : 0;
+                o.mz = RndI(Clamp((vs + close) / cap, 0, 1) * 100);
+            }
+            else o.mz = RndI(Clamp(want / top, 0, 1) * 100);
             o.yawQ = RndI(DAtan2(dx, dz) * 1e4);
             o.pitchQ = RndI(Clamp(DAtan2(dy, Sqrt(dx * dx + dz * dz)), -1.45, 1.45) * 1e4);
             o.act = 0;
@@ -246,9 +279,11 @@ namespace Sting.Core
             {
                 var g = GoalOf(sim, t, p.Value); V3 gp = g != null ? g.p : p.Value;
                 dx = gp.x - w.x; dy = gp.y - w.y; dz = gp.z - w.z;
-                // full speed in, braking over the last half metre so it can turn onto the spot
-                Num d = Sqrt(dx * dx + dy * dy + dz * dz);
-                o.mz = RndI(Clamp(d * 12, 1.5, T.swoop.speed) / T.swoop.speed * 100);
+                // full speed in, braking over the last half metre so it can turn onto the spot; a moving target is led, and
+                // the braking keeps its pace on top
+                Num d = Sqrt(dx * dx + dy * dy + dz * dz); var v = TargetVel(sim, t); Num vs = Sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+                if (vs > chaseMoving) { Num lead = Min(chaseLead, d / T.swoop.speed); dx += v.x * lead; dy += v.y * lead; dz += v.z * lead; }
+                o.mz = RndI(Clamp(d * 12 + (vs > chaseMoving ? vs : 0), 1.5, T.swoop.speed) / T.swoop.speed * 100);
             }
             o.yawQ = RndI(DAtan2(dx, dz) * 1e4);
             o.pitchQ = RndI(Clamp(DAtan2(dy, Sqrt(dx * dx + dz * dz)), -1.45, 1.45) * 1e4);
