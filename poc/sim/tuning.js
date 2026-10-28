@@ -250,6 +250,16 @@ export const T = {
   // the AI earns hive XP times the gauge, uses the hive skills scaled by it, and forages at effMin..1 of full by it.
   gauge: { window: 3, ref: 40, floor: 0.25, minDays: 1, effMin: 0.8 },
 
+  // Wintering in (GDD 6.8): a colony nested somewhere warm comes through the winter, as some yellowjacket nests do in mild
+  // places (perennial nests; Appendix C). Warm: inside a house (its wall or attic; a garden shed is not) or the hollow of
+  // a giant tree (trunk radius megaR m or more). A wasp or hornet colony there does not die with the autumn: its queen
+  // lives on, and at the year's end it loses loss of its adults and keeps going if minAdults are left. A honeybee colony
+  // winters on its honey anywhere, but an exposed one loses up to exposedBeeLoss more, by how little its site insulates.
+  // A warm wasp or hornet colony raises at most reproMax of its eggs as queens and males in autumn, so it keeps workers to
+  // winter with. A colony in a house that grows to houseNotice adults is found by the people living there: they call the
+  // exterminator, show him the nest, and do not forget it.
+  warm: { megaR: 0.32, loss: 0.35, minAdults: 20, exposedBeeLoss: 0.25, houseNotice: 150, reproMax: 0.5 },
+
   // Hornets at night (T2-10): a porch light on each house burns from dusk to dawn and draws moths, perLight of them
   // circling it at orbit m; a hornet takes one as protein. bio: European hornets hunt at night and come to lights.
   // A hornet that wins a wrestle with another colony's wasp keeps it as prey (waspProtein).

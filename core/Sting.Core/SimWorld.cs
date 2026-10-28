@@ -321,18 +321,19 @@ namespace Sting.Core
             if (!settings.exterminator) return;
             var e = ext; var col = colony;
             if (!col.nestAlive) return;
+            bool crowded = Crowded(col); // a colony too big for the house it lives in is found (GDD 6.8)
             if (e.state == "none" || e.state == "cancelled")
             {
-                if (NestAreaLevel() >= T.ext.level)
+                if (NestAreaLevel() >= T.ext.level || crowded)
                 {
                     e.visit++;
                     long md = MinuteOfDay(minute);
                     e.arriveMinute = md < 15 * 60 && md >= T.time.dawn ? minute + 120 : (md >= T.time.dawn ? day + 1 : day) * 1440 + T.ext.arriveMinute;
                     e.state = "scheduled";
-                    Emit("extScheduled", ("visit", e.visit), ("arriveMinute", e.arriveMinute));
+                    Emit("extScheduled", ("visit", e.visit), ("arriveMinute", e.arriveMinute), ("why", crowded ? "house" : "stings"));
                 }
             }
-            else if (e.state == "scheduled" && NestAreaLevel() < 3)
+            else if (e.state == "scheduled" && NestAreaLevel() < 3 && !crowded)
             {
                 e.state = "cancelled";
                 Emit("extCancelled", ("visit", e.visit));
@@ -346,7 +347,7 @@ namespace Sting.Core
                 var n = nest; Num dxn = n.x - n.treeX, dzn = n.z - n.treeZ, dn = Sqrt(dxn * dxn + dzn * dzn); if (dn == 0) dn = 1;
                 Num gx = n.x + dxn / dn * 0.45, gz = n.z + dzn / dn * 0.45;
                 // he starts where people were stung, or where he left off yesterday (T1-7), and parks nearby
-                var (sx, sz) = ExtStart(n.treeX + 30 * DCos(ang), n.treeZ + 30 * DSin(ang));
+                var (sx, sz) = colony.found ? (n.x, n.z) : ExtStart(n.treeX + 30 * DCos(ang), n.treeZ + 30 * DSin(ang)); // the household shows him the nest (GDD 6.8)
                 Num ax = sx + T.ext.parkDist * DCos(ang), az = sz + T.ext.parkDist * DSin(ang);
                 bool near = Sq(sx - n.x) + Sq(sz - n.z) <= T.ext.findDist * T.ext.findDist;
                 e.hm = new Human
@@ -794,7 +795,7 @@ namespace Sting.Core
                 {
                     var ss = ShedSites(rec.content.sheds[si]);
                     foreach (var (type, p) in new[] { ("wall", ss.wall), ("attic", ss.attic) })
-                        if (!(type == "wall" && FeralWall(rec, si)) && D2(w, new V3(p.x, p.y, p.z)) < 0.14 * 0.14) return new SiteHit { type = type, x = p.x, y = p.y, z = p.z, ix = p.ix, iz = p.iz, nx = p.nx, nz = p.nz };
+                        if (!(type == "wall" && FeralWall(rec, si)) && D2(w, new V3(p.x, p.y, p.z)) < 0.14 * 0.14) return new SiteHit { type = type, x = p.x, y = p.y, z = p.z, ix = p.ix, iz = p.iz, nx = p.nx, nz = p.nz, house = rec.content.sheds[si].house };
                 }
             }
             var tr = TrunkNear(w);
@@ -818,8 +819,11 @@ namespace Sting.Core
             }
             colony.sited = true;
             colony.maxCells = MaxCells(nest.site);
+            // somewhere warm the colony can winter through (GDD 6.8): inside a house, or the hollow of a giant tree
+            colony.house = (site.type == "wall" || site.type == "attic") && site.house;
+            colony.warm = colony.house || (site.type == "hollow" && site.t.r >= T.warm.megaR);
             w.x = nest.spawn.x; w.y = nest.spawn.y; w.z = nest.spawn.z; w.vx = w.vy = w.vz = 0;
-            Emit("nestFounded", ("x", nest.x), ("y", nest.y), ("z", nest.z), ("key", nest.key), ("site", nest.site));
+            Emit("nestFounded", ("x", nest.x), ("y", nest.y), ("z", nest.z), ("key", nest.key), ("site", nest.site), ("warm", colony.warm), ("house", colony.house));
         }
 
         // ---------------- predators (GDD 9.3)

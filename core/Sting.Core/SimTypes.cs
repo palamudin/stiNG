@@ -256,12 +256,12 @@ namespace Sting.Core
     /// a colony of the line run by the AI (T2-4)
     public sealed class LineColony { public int id, season; public Nest nest; public ColonyState colony; /** when the exterminator comes for it (0: not called) */ public long ext; }
     public sealed class HiberSite { public string kind; public Num x, y, z, q; public int n; public bool scouted; }
-    public sealed class Winter { public string why; public List<HiberSite> sites = new List<HiberSite>(); public Num survivors, lineage; public int until; /** the year's turn (GDD 6.8): "hornet", "bee" or null */ public string offer; /** the line's hives, wintering as clusters */ public List<LineColony> keep; }
+    public sealed class Winter { public string why; public List<HiberSite> sites = new List<HiberSite>(); public Num survivors, lineage; public int until; /** the year's turn (GDD 6.8): "hornet", "bee" or null */ public string offer; /** the line's hives, wintering as clusters */ public List<LineColony> keep; /** the player's own nest wintered in (GDD 6.8) */ public bool home; }
     /// the line's XP and skills (GDD 6.8)
     public sealed class Prog { public Num unit, unitTotal, hive, hiveTotal; public int stabs; public int[] ranks = new int[Skills.ALL.Length]; /** the player gauge: XP earned in hand, the part counted, the smoothed rate per day, days measured */ public Num hand, handSeen, gaugeRate, gaugeDays; }
     public sealed class HiberPick { public int season; public Num x, z; public string kind; }
     public sealed class Spot { public Num x, z; }
-    public sealed class SiteHit { public string type; public Num x, y, z, ix, iz, nx, nz; public Tree t; }
+    public sealed class SiteHit { public string type; public Num x, y, z, ix, iz, nx, nz; public Tree t; public bool house; }
     public sealed class Bait { public Num x, y, z; public string key; }
     public sealed class PreyHit { public string kind, key; public int i, hive, id; public Num protein; } // id: a wasp taken by a hornet (T2-10)
     public sealed class Food { public Num x, y, z, rate; public string kind; public int i; public SugarNode node; }

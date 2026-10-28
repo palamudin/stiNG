@@ -187,6 +187,12 @@ export const SIM_SCENARIOS = [
     if (sim.line.length && sim.colony.sited && sim.tick % 2000 === 1999) c.pick = -(1000 + sim.line[0].id);
     return c;
   } },
+  // wintering in (GDD 6.8): a fed wasp colony in a house, through two winters, staying in the nest each spring
+  { name: 'warm', settings: { seed: 99, dayMinutes: 0.4, seasonDays: 10 }, ticks: 36000, prog: true, bot: () => (sim) => {
+    if (sim.tick === 0) { sim.colony.warm = true; sim.colony.house = true; sim.colony.adults = 120; }
+    if (sim.tick % 600 === 0 && sim.colony.nestAlive) { sim.colony.sugar = Math.max(sim.colony.sugar, 60); sim.colony.protein = Math.max(sim.colony.protein, 60); } // fed, so it reaches the winter
+    return idleCmd();
+  } },
 ];
 for (const sc of SIM_SCENARIOS) {
   const d = Digest(), sim = new Sim(sc.settings), bot = sc.bot();

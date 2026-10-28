@@ -659,6 +659,14 @@ floor = 0.25
 minDays = 1
 effMin = 0.8
 
+[warm]
+megaR = 0.32
+loss = 0.35
+minAdults = 20
+exposedBeeLoss = 0.25
+houseNotice = 150
+reproMax = 0.5
+
 [moths]
 perLight = 3
 orbit = 0.3

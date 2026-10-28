@@ -1298,6 +1298,57 @@ namespace Sting.Core.Tests
                     var r = Persist.Restore(Persist.Snapshot(t)); Ok(r.line.Count == t.line.Count && r.prog.gaugeDays == t.prog.gaugeDays, "a save keeps the line's colonies and the gauge");
                 }
             }
+            // 52. wintering in somewhere warm, and a house that finds the nest (GDD 6.8)
+            {
+                Sim Mk() => new Sim(new Settings { seed = 1234, birds = false });
+                {
+                    Sim SpringB() { var t = Mk(); t.colony.mated = 200; t.season.startMinute -= 0.71 * t.settings.seasonDays * 1440; RunS(t, 120); RunS(t, 1, (sim, i) => Idle(c => c.pick = 1)); return t; }
+                    ColonyState FoundAt(Func<Sim, ChunkRec, V3?> pick)
+                    {
+                        var t = SpringB(); V3? site = null;
+                        foreach (var r in t.activeChunks) { site = pick(t, r); if (site != null) break; }
+                        if (site == null) return null;
+                        Place(t.wasp, site.Value); RunS(t, 2, (sim, i) => Idle(c => c.act = i == 1 ? Act.Interact : 0)); return t.colony;
+                    }
+                    Func<Sim, ChunkRec, V3?> ShedOf(bool house) => (t, r) => { foreach (var sh in r.content.sheds) if (sh.house == house) { var p = World.ShedSites(sh).attic; return P(p.x, p.y, p.z); } return null; };
+                    Func<Sim, ChunkRec, V3?> HollowOf(bool mega) => (t, r) => { var hs = t.SitesIn(r).hollows; for (int j = 0; j < hs.Count; j++) if (!t.FeralHollow(r, j) && (hs[j].t.r >= T.warm.megaR) == mega) return hs[j].p; return null; };
+                    var h = FoundAt(ShedOf(true)); var g = FoundAt(ShedOf(false)); var m = FoundAt(HollowOf(true)); var o = FoundAt(HollowOf(false));
+                    Ok(h != null && h.sited && h.warm && h.house && g != null && g.sited && !g.warm && o != null && o.sited && !o.warm && (m == null || (m.warm && !m.house)),
+                        $"a nest inside a house{(m != null ? " or a giant tree's hollow" : "")} is warm; one in a garden shed or an ordinary hollow is not");
+                }
+                {
+                    var a = Colony.New(); var b = Colony.New(); b.warm = true;
+                    foreach (var c in new[] { a, b }) for (int i = 0; i < 10; i++) Colony.Step(c, 0.1, 0, false, 0.97, 0.2);
+                    Ok(!a.queenAlive && b.queenAlive && b.adults > a.adults, $"in a warm nest the queen lives past the autumn and the colony does not collapse ({D(b.adults):0} adults against {D(a.adults):0})");
+                }
+                (Sim t, List<SimEvent> ev) YearEnd(bool warm) { var t = Mk(); t.colony.warm = warm; t.colony.house = warm; t.colony.adults = 120; t.colony.mated = 200; t.season.startMinute -= 0.71 * t.settings.seasonDays * 1440; return (t, RunS(t, 120)); }
+                {
+                    var (t, ev) = YearEnd(true); var col = t.colony; var e = ev.FirstOrDefault(x => x.type == "winter");
+                    RunS(t, 1, (sim, i) => Idle(c => c.pick = 2000));
+                    Num a0 = col.adults;
+                    Ok(e != null && (bool)e["home"] && t.colony == col && col.queenAlive && col.sited && t.line.Count > 0 && t.wasp.caste == "worker" && t.season.n == 2,
+                        $"a warm nest comes through the winter ({D(a0):0} adults in spring, its queen alive): stay in it, and the young queens found {t.line.Count} colonies of the line");
+                    var r = Persist.Restore(Persist.Snapshot(t)); Ok(r.colony.warm && r.colony.house, "a save keeps where the nest is warm");
+                }
+                { var (t, _) = YearEnd(true); var col = t.colony; RunS(t, T.hiber.chooseTicks + 5); Ok(t.colony == col && t.winter == null, "left to itself, the winter screen keeps the nest that wintered in"); }
+                { var (t, _) = YearEnd(true); var col = t.colony; RunS(t, 1, (sim, i) => Idle(c => c.pick = 1)); Ok(t.colony != col && t.wasp.caste == "queen" && t.line.Any(x => x.colony == col), "waking as a young queen instead, the nest that wintered in goes on under the AI"); }
+                { var (t, ev) = YearEnd(false); var e = ev.FirstOrDefault(x => x.type == "winter"); Ok(e != null && !(bool)e["home"] && !t.winter.home, "an exposed nest dies with the autumn as before"); }
+                {
+                    var s = Mk(); s.colony.warm = s.colony.house = true; s.colony.adults = T.warm.houseNotice + 10;
+                    var ev = RunS(s, 120); var x = ev.FirstOrDefault(e => e.type == "extScheduled");
+                    Ok(x != null && (string)x["why"] == "house" && s.stats.stings == 0, $"a colony of {D(T.warm.houseNotice)}+ in a house is found by the people living there: the exterminator is booked with no one stung");
+                }
+                {
+                    var s = new Sim(new Settings { seed = 99, dayMinutes = 0.4, seasonDays = 10 }); s.colony.warm = s.colony.house = true; s.colony.adults = 160;
+                    var ev = RunS(s, 4000, (sim, i) => { if (sim.tick % 600 == 0 && sim.colony.nestAlive) { sim.colony.sugar = Max(sim.colony.sugar, 60); sim.colony.protein = Max(sim.colony.protein, 60); } return Idle(); });
+                    Ok(Count(ev, "extGiveUp") == 0 && !s.colony.nestAlive && s.colony.found, "the household shows him the nest: he does not have to search for it, and it is destroyed");
+                }
+                {
+                    var a = Colony.New(false, "bee"); var b = Colony.New(false, "bee"); b.warm = true; a.sugar = b.sugar = 500;
+                    var s = Mk(); s.ClusterForTest(a, 20, "trunk"); s.ClusterForTest(b, 20, "trunk");
+                    Ok(b.adults > a.adults && a.queenAlive, $"a honeybee colony winters anywhere, but one in an exposed nest loses more ({D(a.adults):0} against {D(b.adults):0} bees)");
+                }
+            }
             // 46. feature modifiers (T2-6): woods, towns, water and hives set at world creation act on generation
             {
                 (int forest, int town, int baths, int hives, bool apart) Census(Settings st)

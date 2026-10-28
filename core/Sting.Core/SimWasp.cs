@@ -1593,17 +1593,18 @@ namespace Sting.Core
             sites.Sort((a, b) => a.n != b.n ? b.n.CompareTo(a.n) : a.q != b.q ? (b.q < a.q ? -1 : 1) : a.x != b.x ? (a.x < b.x ? -1 : 1) : a.z != b.z ? (a.z < b.z ? -1 : 1) : 0);
             foreach (var w in new List<Wasp>(wasps)) if (w.colony != "own" && !IsRival(w)) Despawn(w);
             // a honeybee colony of the line winters as a cluster and goes on in spring (GDD 6.8, multi-colony play)
-            Num days = Rnd(settings.seasonDays * T.season.winterShare); var keep = line.FindAll(sc => Colony.Sp(sc.colony).perennial != 0 && Cluster(sc.colony, days));
+            Num days = Rnd(settings.seasonDays * T.season.winterShare); var keep = line.FindAll(sc => (Colony.Sp(sc.colony).perennial != 0 || sc.colony.warm) && Cluster(sc.colony, days, sc.nest.site));
+            Num mated0 = col.mated; bool home = why != "colony lost" && col.sited && Cluster(col, days, nest.site);
             line = new List<LineColony>();
             Num lin = Floor(lineage * T.season.lineageSurvival + H32(sn, 32)); // queens of the line beyond the colonies that were real
-            Emit("winter", ("why", why), ("mated", col.mated), ("survivors", survivors), ("lineage", lin), ("season", sn), ("sites", sites.Count));
-            if (survivors + lin < 1 && keep.Count > 0) { foreach (var w in new List<Wasp>(wasps)) Despawn(w); line = keep; HiveSpring(days, sn, false); return; } // no queen made it, a hive did
+            Emit("winter", ("why", why), ("mated", mated0), ("survivors", survivors), ("lineage", lin), ("season", sn), ("home", home), ("adults", Floor(home ? col.adults : 0)), ("sites", sites.Count));
+            if (survivors + lin < 1 && (home || keep.Count > 0)) { foreach (var w in new List<Wasp>(wasps)) Despawn(w); line = keep; HiveSpring(days, sn, home); return; } // no queen made it, a colony that wintered in did
             if (survivors + lin < 1) { extinct = true; foreach (var w in new List<Wasp>(wasps)) Despawn(w); Emit("lineExtinct", ("nestAlive", col.nestAlive)); return; }
             // only sister nests made it: you wake in one of them
             if (sites.Count == 0) sites.Add(new HiberSite { kind = "sister", x = nest.spawn.x, y = nest.spawn.y, z = nest.spawn.z, q = T.hiber.Q("sister"), n = 0 });
             foreach (var w in new List<Wasp>(wasps)) Despawn(w);
             ghost = null;
-            winter = new Winter { why = why, sites = sites, survivors = survivors, lineage = lin, until = tick + T.hiber.chooseTicks, offer = Offer(), keep = keep };
+            winter = new Winter { why = why, sites = sites, survivors = survivors, lineage = lin, until = tick + T.hiber.chooseTicks, offer = Offer(), keep = keep, home = home };
             if (winter.offer != null) Emit("offer", ("species", winter.offer));
         }
 
@@ -1611,26 +1612,30 @@ namespace Sting.Core
         /// on its honey; what the store covers lives, less the winter's losses, and a cluster too small dies. In spring
         /// the colony goes on in the same hive; with yours gone, you go on in the strongest of the line's. See sim.js.
         /// a honeybee colony's winter on its honey: what the store covers lives, less the winter's losses; too small dies
-        bool Cluster(ColonyState c, Num days)
+        /// a wasp or hornet colony nested somewhere warm sits the winter out: no store to eat, a share of it lost (GDD 6.8)
+        internal bool ClusterForTest(ColonyState c, Num days, string site) => Cluster(c, days, site);
+        bool Cluster(ColonyState c, Num days, string site = "trunk")
         {
-            if (!c.nestAlive || !c.queenAlive) return false;
-            Num need = c.adults * T.hive.winterNeed * days, fed = need > 0 ? Clamp01(c.sugar / need) : 1;
+            bool bee = Colony.Sp(c).perennial != 0;
+            if (!c.nestAlive || !c.queenAlive || (!bee && !c.warm)) return false;
+            Num need = bee ? c.adults * T.hive.winterNeed * days : 0, fed = need > 0 ? Clamp01(c.sugar / need) : 1;
+            Num loss = bee ? T.hive.winterLoss + (c.warm ? 0 : T.warm.exposedBeeLoss * (1 - T.sites.Of(site ?? "trunk").insulation)) : T.warm.loss;
             c.sugar = Max(0, c.sugar - need);
-            c.adults *= (1 - T.hive.winterLoss) * fed;
+            c.adults *= (1 - loss) * fed;
             c.eggs = c.larvae = c.pupae = c.rEggs = c.rLarvae = c.rPupae = 0; c.young = 0; c.gynes = 0; c.males = 0; c.mated = 0;
             c.deficit = 0; c.sugarlessDays = 0; c.water = 0; c.cool = 1; c.thirst = 0;
-            if (c.adults < T.hive.minCluster) { c.adults = 0; c.queenAlive = false; return false; }
+            if (c.adults < (bee ? T.hive.minCluster : T.warm.minAdults)) { c.adults = 0; c.queenAlive = false; return false; }
             return true;
         }
         void BeeWinter(string why)
         {
             int n = season.n; Num days = Rnd(settings.seasonDays * T.season.winterShare);
             foreach (var w in new List<Wasp>(wasps)) Despawn(w);
-            bool mine = why != "colony lost" && Cluster(colony, days);
-            // the line's bee colonies cluster; a wasp colony of the line dies with the autumn and its queens winter elsewhere
+            bool mine = why != "colony lost" && Cluster(colony, days, nest.site);
+            // the line's bee colonies cluster, and a wasp colony nested somewhere warm sits it out; the rest die with the autumn
             line = line.FindAll(sc =>
             {
-                if (Colony.Sp(sc.colony).perennial != 0) return Cluster(sc.colony, days);
+                if (Colony.Sp(sc.colony).perennial != 0 || sc.colony.warm) return Cluster(sc.colony, days, sc.nest.site);
                 lineage += Floor(sc.colony.mated * T.hiber.survival * T.hiber.Q("sister") + H32(n, sc.id, 953));
                 return false;
             });
@@ -1663,7 +1668,7 @@ namespace Sting.Core
             drivenId = q.id;
             foreach (var hm in active) CatchUpHuman(hm);
             UpdateChunks(true);
-            Emit("spring", ("season", season.n), ("lineage", lineage), ("id", q.id), ("kind", "hive"), ("bee", true), ("took", !mine));
+            Emit("spring", ("season", season.n), ("lineage", lineage), ("id", q.id), ("kind", "hive"), ("bee", Colony.Sp(colony).perennial != 0), ("home", Colony.Sp(colony).perennial == 0), ("took", !mine));
         }
 
         /// A crowded honeybee colony with a daughter queen raised swarms (T2-11): the old queen leaves with most of the
@@ -1688,17 +1693,46 @@ namespace Sting.Core
         }
 
         /// a pick of 1..n wakes that queen; 1001..1000+n wakes her as the species the year's turn offers (GDD 6.8)
+        /// 2000 stays in the nest that wintered in, the default when it did (GDD 6.8)
         void WinterStep(int k)
         {
-            var W = winter; bool morph = k > 1000 && W.offer != null;
+            var W = winter;
+            if (W.home && (k == 2000 || (k == 0 && tick >= W.until))) { WakeHome(); return; }
+            bool morph = k > 1000 && k < 2000 && W.offer != null;
             if (morph) k -= 1000;
             bool ok = k >= 1 && k <= W.sites.Count;
             if (ok || tick >= W.until) Spring(ok ? k - 1 : 0, ok && morph);
         }
 
+        /// spring in the nest that wintered in: the same colony, its queen, a worker of it in hand; the young queens found
+        /// colonies of the line as usual
+        void WakeHome()
+        {
+            var W = winter; int n = season.n;
+            winter = null;
+            Num winterDays = Rnd(settings.seasonDays * T.season.winterShare);
+            Num target = (day + 1 + winterDays) * 1440 + T.time.dawn;
+            clockOffset += (long)((target - minute) * tpm);
+            Minute(ClockMinutes(tick + clockOffset, settings));
+            season = new Season { n = n + 1, startMinute = target, phase = "Founding" };
+            foreach (var w in new List<Wasp>(wasps)) Despawn(w);
+            foreach (var s in chunkState.Values) s.esc = 0;
+            swats = new List<Swat>(); sprays = new List<Spray>(); alarms = new List<Alarm>(); hiveAlarms.Clear(); homeScent = null; hiberPick = null;
+            ext = new Ext();
+            ghost = null;
+            lineage = FoundLine(W.sites, -1, W.survivors + W.lineage, species);
+            if (W.keep != null) line.AddRange(W.keep);
+            var dw = SpawnWasp(true);
+            drivenId = dw.id;
+            foreach (var hm in active) CatchUpHuman(hm);
+            UpdateChunks(true);
+            Emit("spring", ("season", season.n), ("lineage", lineage), ("id", dw.id), ("kind", "home"), ("home", true));
+        }
+
         void Spring(int choice, bool morph = false)
         {
             var W = winter; var site = W.sites[choice]; Num survivors = W.survivors, lin = W.lineage; string was = species;
+            var oldNest = nest; var oldColony = colony;
             winter = null;
             if (morph) { species = W.offer; settings.species = W.offer; } // the line changes species with this queen
             // the queen that continues is yours; the rest found lineage colonies (Q-10), real ones first (T2-4)
@@ -1715,7 +1749,7 @@ namespace Sting.Core
             if (Colony.Sp(colony).perennial != 0) { colony.adults = T.xp.beeSwarm; colony.stats.emerged = 0; } // a honeybee queen comes with a swarm
             springAt = new Spot { x = site.x, z = site.z };
             hiberPick = null;
-            oldNests.Add(nest);
+            if (!W.home) oldNests.Add(nest); // a nest that wintered in goes on, under the AI
             foreach (var w in new List<Wasp>(wasps)) Despawn(w);
             foreach (var s in chunkState.Values) s.esc = 0;
             swats = new List<Swat>(); sprays = new List<Spray>(); alarms = new List<Alarm>(); hiveAlarms.Clear(); homeScent = null;
@@ -1726,6 +1760,7 @@ namespace Sting.Core
             drivenId = q.id;
             lineage = FoundLine(W.sites, choice, survivors + lin - 1, was); // the other queens wake as they were
             if (W.keep != null) line.AddRange(W.keep); // and the line's hives come through the winter
+            if (W.home) line.Add(new LineColony { id = ++lineSeq, nest = oldNest, colony = oldColony, season = season.n }); // and yours, left to the AI
             foreach (var hm in active) CatchUpHuman(hm);
             UpdateChunks(true);
             Emit("spring", ("season", season.n), ("lineage", lineage), ("id", q.id), ("kind", site.kind), ("species", morph ? species : null));

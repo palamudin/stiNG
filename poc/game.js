@@ -1882,7 +1882,8 @@ function updateNest() {
   const c = sim.colony, out = sim.wasps.length;
   $('nStores').innerHTML = [
     ['Queen', c.queenAlive ? 'laying' : c.nestAlive ? 'dead' : 'nest destroyed'],
-    ...(c.sited !== false ? [['Site', `${T.sites[sim.nest.site || 'trunk'].name} · up to ${fmt(c.maxCells || T.sites.trunk.maxCells)} cells`]] : []),
+    ...(c.sited !== false ? [['Site', `${T.sites[sim.nest.site || 'trunk'].name}${c.house ? ' of a house' : c.warm ? ' of a giant tree' : ''} · up to ${fmt(c.maxCells || T.sites.trunk.maxCells)} cells`]] : []),
+    ...(c.sited !== false && c.species !== 'bee' ? [['Winter', c.warm ? `warm: the colony can winter through${c.house ? ` · the household finds it at ${T.warm.houseNotice} adults` : ''}` : 'exposed: the colony dies with the autumn; its young queens carry the line']] : []), // GDD 6.8
     ['Adults inside / out', `${fmt(Math.max(0, c.adults - out))} / ${out}`],
     ['Young · guards out', `${fmt(c.young || 0)} still nursing · ${sim._own().filter((w) => w.role === 'guard' && w.id !== sim.drivenId).length} at the door`], // T1-13
     ...(c.species === 'bee' // a bee colony keeps pollen and honey, and builds wax from honey (T2-11)
@@ -2291,7 +2292,7 @@ function handleEvents(events) {
       case 'ballEscape': if (e.id === sim.drivenId) toast('Broke free', 'var(--yellow)', 1.4); break;
       case 'aiAttack': logEvent(`worker ${e.id} attacks #${e.humanHex.slice(0, 4)}`); break;
       case 'alarm': logEvent('alarm pheromone'); break;
-      case 'extScheduled': toast(`Exterminator booked for ${dayLabel(e.arriveMinute)}`, 'var(--red)', 3); logEvent('exterminator booked'); break;
+      case 'extScheduled': toast(e.why === 'house' ? `The people in the house found the nest. Exterminator booked for ${dayLabel(e.arriveMinute)}` : `Exterminator booked for ${dayLabel(e.arriveMinute)}`, 'var(--red)', 3); logEvent(e.why === 'house' ? 'the household found the nest · exterminator booked' : 'exterminator booked'); break;
       case 'spill': logEvent('a drink went over · open sugar on the table'); break;
       case 'quarantine': toast('Player 2 failed the plausibility checks and was cut off', 'var(--red)', 3); logEvent(`peer ${e.peer} quarantined`); break;
       case 'implausible': logEvent(`rejected ${e.evType} from peer ${e.peer}: ${e.why}`); break;
@@ -2360,12 +2361,12 @@ function handleEvents(events) {
         break;
       case 'perch': if (sim.wasp && e.id === sim.drivenId) logEvent(`perched on #${e.humanHex.slice(0, 4)}`); break;
       case 'knockedOff': if (e.id === sim.drivenId) toast('Knocked off', 'var(--yellow)', 1.2); break;
-      case 'nestFounded': toast(e.auto ? 'The queen settled in a tree near where she wintered' : 'Nest founded', 'var(--yellow)', 2.4); logEvent('nest founded'); break;
+      case 'nestFounded': toast(e.auto ? 'The queen settled in a tree near where she wintered' : e.house ? `Nest founded inside a house: warm enough to winter through, but grow past ${T.warm.houseNotice} and the people will find it` : e.warm ? 'Nest founded in a giant tree\'s hollow: warm enough to winter through' : 'Nest founded', 'var(--yellow)', e.warm ? 4 : 2.4); logEvent('nest founded'); break; // GDD 6.8
       case 'winter':
         if (e.bee) { toast(e.survivors ? `Winter. The cluster ate its honey and came through: ${fmt(e.adults)} bees.${e.sisters ? ` ${e.sisters} colon${e.sisters === 1 ? 'y' : 'ies'} of the line too.` : ''}` : e.sisters ? 'Your hive did not survive the winter. The line goes on in one of its swarms.' : 'No colony of the line made it through the winter.', e.survivors || e.sisters ? 'var(--yellow)' : 'var(--red)', 5); break; } // T2-11
         {
           const total = e.survivors + e.lineage;
-          if (!lab && sim.winter) showWinter(`${e.why === 'autumn' ? 'The colony died with the autumn, as colonies do.' : 'Your colony did not make it through the season.'} ${fmt(e.mated)} young queen${Math.round(e.mated) === 1 ? '' : 's'} mated and went into hibernation; ${e.survivors} survived the cold.${e.lineage ? ` ${e.lineage} older sister nest${e.lineage === 1 ? '' : 's'} of your line also made it.` : ''} ${total > 1 ? 'Choose which queen you wake as; the others found sister nests.' : 'You wake as the last queen of the line.'}`);
+          if (!lab && sim.winter) showWinter(`${e.home ? `The nest was warm enough: the colony came through the winter (${fmt(e.adults)} adults) and its queen lives on. Stay in it, or wake as one of the young queens and leave it to the AI.` : e.why === 'autumn' ? 'The colony died with the autumn, as colonies do.' : 'Your colony did not make it through the season.'} ${fmt(e.mated)} young queen${Math.round(e.mated) === 1 ? '' : 's'} mated and went into hibernation; ${e.survivors} survived the cold.${e.lineage ? ` ${e.lineage} older sister nest${e.lineage === 1 ? '' : 's'} of your line also made it.` : ''} ${total > 1 ? 'Choose which queen you wake as; the others found sister nests.' : 'You wake as the last queen of the line.'}`);
         }
         break;
       case 'learned': toast(`Learned: ${SKILL_INFO[e.id][0]}${SKILL_RANKED.includes(e.id) || SKILL_HIVE.includes(e.id) ? ` (rank ${e.rank})` : ''}`, 'var(--yellow)', 1.6); logEvent(`learned ${SKILL_INFO[e.id][0].toLowerCase()}`); skillSig = ''; break; // GDD 6.8
@@ -2378,7 +2379,8 @@ function handleEvents(events) {
       case 'sisterTakeover': toast(`Your colony is gone. The line goes on: you are now a worker of a sister colony (${e.adults} adults).`, 'var(--yellow)', 4); syncNests(); break;
       case 'hiberScouted': toast(`Winter site scouted: ${T.hiber.name[e.kind]}. Most of the young queens will winter here.`, 'var(--yellow)', 3); break;
       case 'spring':
-        logEvent(e.bee ? `season ${e.season} · spring in the hive` : `season ${e.season} · you are the queen, waking ${T.hiber.name[e.kind] || ''}`);
+        logEvent(e.bee ? `season ${e.season} · spring in the hive` : e.home ? `season ${e.season} · spring in the nest that wintered in` : `season ${e.season} · you are the queen, waking ${T.hiber.name[e.kind] || ''}`);
+        if (e.home) syncNests();
         if (e.species) toast(e.species === 'hornet' ? 'The line wakes as hornets' : 'A honeybee queen and her swarm: find a tree to settle', 'var(--yellow)', 4); // GDD 6.8
         if (e.bee) syncNests();
         waspSwitched(e.id, 0.98);
@@ -2721,6 +2723,7 @@ function showWinter(text) {
   $('winterText').textContent = text;
   const offer = sim.winter.offer; // the year's turn (GDD 6.8)
   $('winterOffer').hidden = !offer; $('morph').checked = false;
+  $('bStay').hidden = !sim.winter.home; // GDD 6.8: the nest wintered in
   if (offer === 'hornet') { $('morphLabel').textContent = 'Wake as a hornet queen'; $('morphNote').textContent = 'The line has done enough this year: the queen you wake founds a hornet colony. The other queens stay wasps.'; }
   if (offer === 'bee') { $('morphLabel').textContent = 'Try a honeybee colony'; $('morphNote').textContent = 'The line did little this year. The queen you wake can lead a swarm of honeybees instead; the other queens stay wasps.'; }
   $('winterSites').innerHTML = sim.winter.sites.map((s, i) => {
@@ -2739,6 +2742,7 @@ function wake(i) {
   toast('Spring. Find a nest site and press E: a trunk, a burrow, under a branch, a gap in a shed or a hollow tree.', 'var(--yellow)', 4);
 }
 $('bSpring').addEventListener('click', () => wake(1));
+$('bStay').addEventListener('click', () => { pickOnce = 2000; input.pick = 1; $('winterScreen').hidden = true; setPaused(false); lock(); toast('Spring in the nest that came through the winter', 'var(--yellow)', 3); });
 $('winterSites').addEventListener('click', (e) => { const b = e.target.closest('button[data-i]'); if (b) wake(+b.dataset.i); });
 $('bNewLine').addEventListener('click', () => { $('extinctScreen').hidden = true; newWorld(settings); running = true; lock(); });
 try { if (localStorage.getItem('sting.lab') === '1') toggleLab(); } catch { /* optional */ }

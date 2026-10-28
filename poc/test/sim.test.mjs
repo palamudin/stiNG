@@ -1983,6 +1983,44 @@ function seated(sim, pred) {
     const r = restore(snapshot(t)); ok(r.line.length === t.line.length && r.prog.gaugeDays === t.prog.gaugeDays, 'a save keeps the line\'s colonies and the gauge'); }
 }
 
+// 52. Wintering in somewhere warm, and a house that finds the nest (GDD 6.8)
+{
+  const mk = (o = {}) => new Sim({ seed: 1234, birds: false, ...o });
+  // founding: a house's wall or attic and a giant tree's hollow are warm; a garden shed and an ordinary hollow are not
+  { const spring = () => { const t = mk(); t.colony.mated = 200; t.season.startMinute -= 0.71 * t.settings.seasonDays * 1440; run(t, 120); run(t, 1, () => idle({ pick: 1 })); return t; };
+    const foundAt = (pick) => { const t = spring(); let site = null;
+      for (const r of t.activeChunks) { site = pick(t, r); if (site) break; }
+      if (!site) return null; place(t.wasp, site); run(t, 2, (sim, i) => idle({ act: i === 1 ? Act.Interact : 0 })); return t.colony; };
+    const shedOf = (house) => (t, r) => { for (let si = 0; si < r.content.sheds.length; si++) { const sh = r.content.sheds[si]; if (!!sh.house === house) { const p = shedSites(sh).attic; return { x: p.x, y: p.y, z: p.z }; } } return null; };
+    const hollowOf = (mega) => (t, r) => { const hs = t.sitesIn(r).hollows; for (let j = 0; j < hs.length; j++) if (!t.feralHollow(r, j) && (hs[j].t.r >= T.warm.megaR) === mega) return { x: hs[j].x, y: hs[j].y, z: hs[j].z }; return null; };
+    const h = foundAt(shedOf(true)), g = foundAt(shedOf(false)), m = foundAt(hollowOf(true)), o = foundAt(hollowOf(false));
+    ok(h && h.sited && h.warm && h.house && g && g.sited && !g.warm && o && o.sited && !o.warm && (!m || (m.warm && !m.house)),
+      `a nest inside a house${m ? ' or a giant tree\'s hollow' : ''} is warm; one in a garden shed or an ordinary hollow is not`); }
+  { const a = newColony(), b = newColony(); b.warm = true;
+    for (const c of [a, b]) for (let i = 0; i < 10; i++) colonyStep(c, 0.1, 0, false, 0.97, 0.2);
+    ok(!a.queenAlive && b.queenAlive && b.adults > a.adults, `in a warm nest the queen lives past the autumn and the colony does not collapse (${b.adults.toFixed(0)} adults against ${a.adults.toFixed(0)})`); }
+  const yearEnd = (warm) => { const t = mk(); t.colony.warm = warm; t.colony.house = warm; t.colony.adults = 120; t.colony.mated = 200; t.season.startMinute -= 0.71 * t.settings.seasonDays * 1440; const ev = run(t, 120); return { t, ev }; };
+  { const { t, ev } = yearEnd(true), col = t.colony, a0 = col.adults, e = ev.find((x) => x.type === 'winter');
+    run(t, 1, () => idle({ pick: 2000 }));
+    ok(e && e.home && t.colony === col && col.queenAlive && col.sited && t.line.length > 0 && t.wasp.caste === 'worker' && t.season.n === 2,
+      `a warm nest comes through the winter (${a0.toFixed(0)} adults in spring, its queen alive): stay in it, and the young queens found ${t.line.length} colonies of the line`);
+    const r = restore(snapshot(t)); ok(r.colony.warm && r.colony.house, 'a save keeps where the nest is warm'); }
+  { const { t } = yearEnd(true), col = t.colony; run(t, T.hiber.chooseTicks + 5);
+    ok(t.colony === col && !t.winter, 'left to itself, the winter screen keeps the nest that wintered in'); }
+  { const { t } = yearEnd(true), col = t.colony; run(t, 1, () => idle({ pick: 1 }));
+    ok(t.colony !== col && t.wasp.caste === 'queen' && t.line.some((x) => x.colony === col), 'waking as a young queen instead, the nest that wintered in goes on under the AI'); }
+  { const { t, ev } = yearEnd(false); const e = ev.find((x) => x.type === 'winter'); ok(e && !e.home && !t.winter.home, 'an exposed nest dies with the autumn as before'); }
+  { const s = mk(); s.colony.warm = s.colony.house = true; s.colony.adults = T.warm.houseNotice + 10;
+    const ev = run(s, 120); const x = ev.find((e) => e.type === 'extScheduled');
+    ok(x && x.why === 'house' && s.stats.stings === 0, `a colony of ${T.warm.houseNotice}+ in a house is found by the people living there: the exterminator is booked with no one stung`); }
+  { const s = new Sim({ seed: 99, dayMinutes: 0.4, seasonDays: 10 }); s.colony.warm = s.colony.house = true; s.colony.adults = 160;
+    const ev = run(s, 4000, (sim) => { if (sim.tick % 600 === 0 && sim.colony.nestAlive) { sim.colony.sugar = Math.max(sim.colony.sugar, 60); sim.colony.protein = Math.max(sim.colony.protein, 60); } return idle(); });
+    ok(count(ev, 'extGiveUp') === 0 && !s.colony.nestAlive && s.colony.found, 'the household shows him the nest: he does not have to search for it, and it is destroyed'); }
+  { const a = newColony(false, 'bee'), b = newColony(false, 'bee'); b.warm = true; a.sugar = b.sugar = 500;
+    s0: { const s = mk(); s._cluster(a, 20, 'trunk'); s._cluster(b, 20, 'trunk'); }
+    ok(b.adults > a.adults && a.queenAlive, `a honeybee colony winters anywhere, but one in an exposed nest loses more (${a.adults.toFixed(0)} against ${b.adults.toFixed(0)} bees)`); }
+}
+
 // Tuning as data (GDD 13, T1-22): one plain-text file feeds both sims
 {
   const { unknown, missing } = TUNE_RESULT;

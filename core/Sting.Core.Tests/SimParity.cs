@@ -71,6 +71,13 @@ namespace Sting.Core.Tests
                 if (sim.line.Count > 0 && sim.colony.sited && sim.tick % 2000 == 1999) c.pick = -(1000 + sim.line[0].id);
                 return c;
             }, true);
+            // wintering in (GDD 6.8): a fed wasp colony in a house, through two winters, staying in the nest each spring
+            Run("warm", new Settings { seed = 99, dayMinutes = 0.4, seasonDays = 10 }, 36000, () => sim =>
+            {
+                if (sim.tick == 0) { sim.colony.warm = true; sim.colony.house = true; sim.colony.adults = 120; }
+                if (sim.tick % 600 == 0 && sim.colony.nestAlive) { sim.colony.sugar = R.Max(sim.colony.sugar, 60); sim.colony.protein = R.Max(sim.colony.protein, 60); } // fed, so it reaches the winter
+                return Bots.IdleCmd();
+            }, true);
             // a save restored mid-run must carry on exactly like the run that was never saved
             {
                 string Go(bool save)

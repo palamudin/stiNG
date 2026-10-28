@@ -260,9 +260,10 @@ namespace Sting.Core
         // ---------------- lineage colonies (GDD 6.7, T2-4); see sim.js
 
         internal Num FoundLine(List<HiberSite> sites, int choice, Num queens) => FoundLine(sites, choice, queens, species);
+        /// choice -1: every queen founds a colony (the player stays in a nest that wintered in)
         internal Num FoundLine(List<HiberSite> sites, int choice, Num queens, string sp)
         {
-            int sn = season.n; var used = new List<(Num x, Num z)> { (sites[choice].x, sites[choice].z) };
+            int sn = season.n; var used = new List<(Num x, Num z)> { choice >= 0 ? (sites[choice].x, sites[choice].z) : (nest.treeX, nest.treeZ) };
             line = new List<LineColony>();
             Num left = queens;
             for (int si = 0; si < sites.Count; si++)
@@ -317,13 +318,13 @@ namespace Sting.Core
                 if (settings.exterminator && c.nestAlive)
                 {
                     int lv = NestAreaLevel(sc.nest.key);
-                    if (!(sc.ext > 0) && lv >= T.ext.level)
+                    if (!(sc.ext > 0) && (lv >= T.ext.level || Crowded(c)))
                     {
                         long md = MinuteOfDay(minute);
                         sc.ext = md < 15 * 60 && md >= (long)T.time.dawn ? minute + 120 : (md >= (long)T.time.dawn ? day + 1 : day) * 1440 + (long)T.ext.arriveMinute;
                         Emit("sisterExtScheduled", ("id", sc.id), ("arriveMinute", sc.ext));
                     }
-                    else if (sc.ext > 0 && lv < 3) sc.ext = 0;
+                    else if (sc.ext > 0 && lv < 3 && !Crowded(c)) sc.ext = 0;
                     else if (sc.ext > 0 && minute >= sc.ext)
                     {
                         sc.ext = 0; Colony.DestroyNest(c);

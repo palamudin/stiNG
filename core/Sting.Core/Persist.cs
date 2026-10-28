@@ -86,7 +86,7 @@ namespace Sting.Core
 
     public static class Persist
     {
-        public const int SAVE_VERSION = 27; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home); 14: barbecue meat taken; 15: regions, pulp taken from wood; 16: strolls and garden rounds; 17: the carry ledger and sips (T1-20); 18: water (T2-1); 19: young queens on their mating flight (T2-3); 20: lineage colonies (T2-4); 21: feature modifiers (T2-6); 22: the exterminator called to a sister colony; 23: terrain; 24: the swoop; 25: species (wasps, hornets, honeybees); 26: XP and skills; 27: the player gauge, hives kept over a wasp winter
+        public const int SAVE_VERSION = 28; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home); 14: barbecue meat taken; 15: regions, pulp taken from wood; 16: strolls and garden rounds; 17: the carry ledger and sips (T1-20); 18: water (T2-1); 19: young queens on their mating flight (T2-3); 20: lineage colonies (T2-4); 21: feature modifiers (T2-6); 22: the exterminator called to a sister colony; 23: terrain; 24: the swoop; 25: species (wasps, hornets, honeybees); 26: XP and skills; 27: the player gauge, hives kept over a wasp winter; 28: wintering in somewhere warm
         const uint MAGIC = 0x474E4953; // "SING"
 
         // ---------------------------------------------------------------- one Io per type
@@ -219,7 +219,7 @@ namespace Sting.Core
             a.D(ref s.emerged); a.D(ref s.laid); a.D(ref s.starvedLarvae); a.D(ref s.died); a.D(ref s.gynesRaised); a.D(ref s.sugarSpilled); a.D(ref s.proteinSpilled); a.D(ref s.poisoned);
             a.D(ref s.depSugar); a.D(ref s.depProtein); a.D(ref s.depPulp);
             a.D(ref c.water); a.D(ref c.cool); a.D(ref c.thirst); a.D(ref s.depWater); a.D(ref s.cooked); // T2-1
-            a.S(ref c.species); a.I(ref c.swarmed); a.D(ref c.xpSeen); // GDD 6.8
+            a.S(ref c.species); a.I(ref c.swarmed); a.D(ref c.xpSeen); a.B(ref c.warm); a.B(ref c.house); a.B(ref c.found); // GDD 6.8
         }
 
         static ChunkState IoChunkState(Archive a, ChunkState s)
@@ -322,7 +322,7 @@ namespace Sting.Core
             a.List(ref s.line, () => new LineColony(), x => { a.I(ref x.id); a.I(ref x.season); if (a.Reading) { x.nest = new Nest(); x.colony = new ColonyState(); } IoNest(a, x.nest); IoColony(a, x.colony); a.L(ref x.ext); }); a.I(ref s.lineSeq); // T2-4
             if (a.Opt(ref s.winter))
             {
-                var W = s.winter; a.S(ref W.why); a.D(ref W.survivors); a.D(ref W.lineage); a.I(ref W.until); a.S(ref W.offer);
+                var W = s.winter; a.S(ref W.why); a.D(ref W.survivors); a.D(ref W.lineage); a.I(ref W.until); a.S(ref W.offer); a.B(ref W.home);
                 a.List(ref W.sites, () => new HiberSite(), h => { a.S(ref h.kind); a.D(ref h.x); a.D(ref h.y); a.D(ref h.z); a.D(ref h.q); a.I(ref h.n); a.B(ref h.scouted); });
                 a.List(ref W.keep, () => new LineColony(), x => { a.I(ref x.id); a.I(ref x.season); if (a.Reading) { x.nest = new Nest(); x.colony = new ColonyState(); } IoNest(a, x.nest); IoColony(a, x.colony); a.L(ref x.ext); }); // GDD 6.8
             }

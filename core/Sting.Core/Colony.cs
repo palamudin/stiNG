@@ -27,6 +27,8 @@ namespace Sting.Core
         public string species = "wasp"; public int swarmed;
         /// the hive XP already counted from this colony's work (GDD 6.8)
         public Num xpSeen;
+        /// nested somewhere warm (a house, a giant tree's hollow), inside a house, and found by the household there (GDD 6.8)
+        public bool warm, house, found;
         public ColonyStats stats = new ColonyStats();
         public ColonyState Clone() { var c = (ColonyState)MemberwiseClone(); c.stats = stats.Clone(); return c; }
         public Num this[string k]
@@ -158,11 +160,11 @@ namespace Sting.Core
 
             if (foraging && c.gynes > 0 && SP.perennial == 0) { Num m = c.gynes * T.season.matePerDay * dtDay; c.gynes -= m; c.mated += m * T.season.mateSuccess * MalesAbout(c, frac); } // T2-3
 
-            Num late = frac > T.season.collapseFrom && SP.perennial == 0 ? 1 + T.season.collapseMul * (frac - T.season.collapseFrom) / (1 - T.season.collapseFrom) : 1;
+            Num late = frac > T.season.collapseFrom && SP.perennial == 0 && !c.warm ? 1 + T.season.collapseMul * (frac - T.season.collapseFrom) / (1 - T.season.collapseFrom) : 1;
             Num die = inside * T.colony.adultMortality / bio * late * dtDay;
             c.adults -= die; c.stats.died += die;
             c.males -= c.males * 0.2 * dtDay / bio;
-            if (frac >= T.season.queenDiesAt && SP.perennial == 0) c.queenAlive = false;
+            if (frac >= T.season.queenDiesAt && SP.perennial == 0 && !c.warm) c.queenAlive = false; // a colony nested somewhere warm keeps its queen (GDD 6.8)
 
             Num use;
             if (SP.wood != 0) { use = Min(c.pulp, T.colony.buildPerDay * dtDay * (1 + inside / 40)); c.pulp -= use; }
@@ -178,7 +180,7 @@ namespace Sting.Core
             {
                 Num free = Max(0, c.cells - BroodTotal(c));
                 Num lay = Min(free, Min(T.colony.layMax * SP.lay * K.lay, (T.colony.layBase + c.adults * T.colony.layPerAdult) * SP.lay * K.lay) * dtDay);
-                Num r = SP.perennial != 0 ? BeeRepro(c, frac) : ReproShare(frac);
+                Num r = SP.perennial != 0 ? BeeRepro(c, frac) : c.warm ? Min(ReproShare(frac), T.warm.reproMax) : ReproShare(frac); // a warm nest keeps raising workers to winter with (GDD 6.8)
                 c.eggs += lay * (1 - r); c.rEggs += lay * r; c.stats.laid += lay;
             }
             if (c.adults < 0) c.adults = 0;

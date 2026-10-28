@@ -16,7 +16,7 @@ export function newColony(founding = false, species = 'wasp') {
     cells: founding ? 0 : s.cells * k, protein: founding ? 0 : s.protein, sugar: founding ? 0.5 : s.sugar, pulp: founding ? 0 : s.pulp,
     water: founding ? 0 : s.water, cool: 1, thirst: 0, // T2-1
     rEggs: 0, rLarvae: 0, rPupae: 0, gynes: 0, males: 0, mated: 0, young: 0,
-    deficit: 0, fed: 1, alloc: 0, sugarlessDays: 0, xpSeen: 0,
+    deficit: 0, fed: 1, alloc: 0, sugarlessDays: 0, xpSeen: 0, warm: false, house: false, found: false,
     stats: { emerged: 0, laid: 0, starvedLarvae: 0, died: 0, gynesRaised: 0, deposited: { sugar: 0, protein: 0, pulp: 0, water: 0 }, cooked: 0 },
   };
   return c;
@@ -130,11 +130,11 @@ export function colonyStep(c, dtDay, physical, foraging, frac = 0.3, bio = 1, th
   if (foraging && c.gynes > 0 && !SP.perennial) { const m = c.gynes * S.matePerDay * dtDay; c.gynes -= m; c.mated += m * S.mateSuccess * malesAbout(c, frac); }
 
   // Adult mortality rises as the colony collapses in autumn
-  const late = frac > S.collapseFrom && !SP.perennial ? 1 + S.collapseMul * (frac - S.collapseFrom) / (1 - S.collapseFrom) : 1; // a bee colony does not collapse
+  const late = frac > S.collapseFrom && !SP.perennial && !c.warm ? 1 + S.collapseMul * (frac - S.collapseFrom) / (1 - S.collapseFrom) : 1; // a bee colony does not collapse
   const die = inside * C.adultMortality / bio * late * dtDay;
   c.adults -= die; c.stats.died += die;
   c.males -= c.males * 0.2 * dtDay / bio;
-  if (frac >= S.queenDiesAt && !SP.perennial) c.queenAlive = false;
+  if (frac >= S.queenDiesAt && !SP.perennial && !c.warm) c.queenAlive = false; // a colony nested somewhere warm keeps its queen (GDD 6.8)
 
   let use;
   if (SP.wood) { use = Math.min(c.pulp, C.buildPerDay * dtDay * (1 + inside / 40)); c.pulp -= use; }
@@ -148,7 +148,7 @@ export function colonyStep(c, dtDay, physical, foraging, frac = 0.3, bio = 1, th
   if (c.queenAlive && c.protein > 0) {
     const free = Math.max(0, c.cells - broodTotal(c));
     const lay = Math.min(free, Math.min(C.layMax * SP.lay * K.lay, (C.layBase + c.adults * C.layPerAdult) * SP.lay * K.lay) * dtDay);
-    const r = SP.perennial ? beeRepro(c, frac) : reproShare(frac);
+    const r = SP.perennial ? beeRepro(c, frac) : c.warm ? Math.min(reproShare(frac), T.warm.reproMax) : reproShare(frac); // a warm nest keeps raising workers to winter with (GDD 6.8)
     c.eggs += lay * (1 - r); c.rEggs += lay * r; c.stats.laid += lay;
   }
   if (c.adults < 0) c.adults = 0;

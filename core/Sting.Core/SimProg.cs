@@ -80,6 +80,13 @@ namespace Sting.Core
             if (xp < T.xp.beeXp && prog.stabs < T.xp.beeStabs) return "bee";
             return null;
         }
+        /// a colony in a house that has grown too big is found by the people living there; once found, they know where it is
+        bool Crowded(ColonyState c)
+        {
+            if (!c.house || !c.nestAlive) return false;
+            if (c.adults >= T.warm.houseNotice) c.found = true;
+            return c.found;
+        }
         /// quick release: an insect of the line stinging a person pulls out and away when a hand is about to land on it
         void QuickRelease()
         {

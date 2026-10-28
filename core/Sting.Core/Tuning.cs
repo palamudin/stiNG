@@ -243,6 +243,8 @@ namespace Sting.Core
             public static int ranks = 3, releaseLead = 8, focusMs = 3000, focusCooldownMs = 15000;
             public static Num Of(string k) => k switch { "swoop" => swoop, "assist" => assist, "reflex" => reflex, "focus" => focus, "release" => release, "landR" => landR, "feedR" => feedR, "grabR" => grabR, "speed" => speed, "forage" => forage, "brood" => brood, "lay" => lay, "build" => build, _ => 0 };
         }
+        /// Wintering in somewhere warm, and the household that finds a nest (GDD 6.8); see tuning.js
+        public static class warm { public static Num megaR = 0.32, loss = 0.35, minAdults = 20, exposedBeeLoss = 0.25, houseNotice = 150, reproMax = 0.5; }
         /// The player gauge (GDD 6.8); see tuning.js
         public static class gauge { public static Num window = 3, @ref = 40, floor = 0.25, minDays = 1, effMin = 0.8; }
         /// Hornets at night (T2-10): porch lights and moths; see tuning.js

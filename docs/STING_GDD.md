@@ -379,6 +379,8 @@ Economy step in Appendix A.4.
 - Each site type has: exposure to weather, thermal stability, human discovery chance, flood risk and maximum size.
 - Nest growth: builders turn pulp into cells and envelope layers. Size caps the colony.
 
+A nest can be **warm**: inside a house, or in the hollow of a giant tree. A warm colony can winter through (18.50), and one in a house that grows too big is found by the household.
+
 ### 6.7 Succession and the line **[D] D-05** **[T0] [T2]** (lineage colonies as real AI colonies T2)
 
 - Gynes leave in autumn, mate with males present in the mating area, then search for a hibernation site. As built (18.39): the mating area is the crown of a tall tree near the nest, and the males present are the colony's own and the neighbourhood's.
@@ -1117,7 +1119,7 @@ A dragonfly patrols a low loop (0.6–1.4 m) in about half the chunks. It darts 
 
 ### 18.18 The C# core, ported (D-11, R-04)
 
-`core/Sting.Core` is the whole PoC simulation in C#: world generation, weather, bodies and the sting resolver, colony economy, the `Sim` itself (wasps, humans, bees, hunters, rivals, the exterminator, pest control, the yearly cycle, the AI), the network lab with its wire format and plausibility checks, and saves. It is bit-identical to the JS reference: `core/fixtures/parity.txt` holds 28 digests written by `poc/test/parity.mjs` (world, bodies, colony, ten whole-game scenarios (three of them the species of 18.47, one the skills of 18.48, one multi-colony play of 18.49), a save and restore mid-run, two-peer labs on good and awful links and one well past the window with late-event corrections, a late joiner, a cheater, and a three-peer mesh where the host rules), and the C# runner reproduces every one. The scenario digests cover every sim event and the state and human hashes once a second, so a single differing bit anywhere fails the run.
+`core/Sting.Core` is the whole PoC simulation in C#: world generation, weather, bodies and the sting resolver, colony economy, the `Sim` itself (wasps, humans, bees, hunters, rivals, the exterminator, pest control, the yearly cycle, the AI), the network lab with its wire format and plausibility checks, and saves. It is bit-identical to the JS reference: `core/fixtures/parity.txt` holds 29 digests written by `poc/test/parity.mjs` (world, bodies, colony, eleven whole-game scenarios (three of them the species of 18.47, one the skills of 18.48, one multi-colony play of 18.49, one a nest wintering in, 18.50), a save and restore mid-run, two-peer labs on good and awful links and one well past the window with late-event corrections, a late joiner, a cheater, and a three-peer mesh where the host rules), and the C# runner reproduces every one. The scenario digests cover every sim event and the state and human hashes once a second, so a single differing bit anywhere fails the run.
 
 Two rules made the port mechanical: the JS sim may use only operations that are exact in IEEE doubles (its own sine, arctangent and rounding, no `Math.round`, `hypot` or `atan2`), and every map whose order can change a result is an insertion-ordered map in C# (`OrderedMap`), every sort is stable, every string sort is ordinal.
 
@@ -1593,6 +1595,34 @@ A good player's colonies prosper while they are away. Nothing the AI does feeds 
 - **Mixed winters:** a bee colony of a wasp line winters from 75 to 53 bees and is there in spring beside the new wasp colonies. A save keeps the line and the gauge (C# save version 27).
 - **Parity:** a new digest (a bee season with a swarm, switching colony every 2000 ticks, the line's colonies and the gauge digested once a second) matches bit for bit: 28 digests. 369 properties hold in both builds.
 
+### 18.50 Wintering in somewhere warm as built (6.6, 6.7, 6.8)
+
+**Agreed 2026-10-28.** A colony of any species can come through the winter if its nest is warm: inside a house, or the hollow of a giant tree. A house comes with a danger: grow too big there and the people living in it find the nest. Biology: in the southern US a small share of yellowjacket nests survive the winter as perennial nests and grow very large (Appendix C). The game turns that into shelter.
+
+**Warm nests** (`T.warm`).
+- A nest founded in the wall or attic of a house (not a garden shed), or in the hollow of a tree with a trunk radius of 0.32 m or more, is warm. These are the thickest trunks in the generator, about one in ten.
+- A warm wasp or hornet colony keeps its queen past the autumn and does not collapse. It raises at most half its autumn eggs as queens and males, so it keeps workers to winter with.
+- At the year's end it loses 35% of its adults and goes on if 20 are left. Its young queens still mate and winter as usual.
+- A honeybee colony still winters on its honey anywhere, but an exposed one loses up to 25% more, by how little its site insulates.
+- The colony panel says whether the nest can winter through.
+
+**The spring choice.**
+- When the nest the player holds wintered in, the winter screen offers to stay in it: the same colony, its queen, a worker in hand. All the young queens found colonies of the line.
+- Left alone, the screen keeps the nest.
+- Waking as a young queen instead leaves the wintered nest to the AI as a colony of the line.
+- If no queen survived but the nest did, the line goes on in it.
+- Warm colonies of the line winter in the same way.
+
+**The household.** A colony in a house that reaches 150 adults is found by the people living there, whatever the stings. They call the exterminator, show him the nest (he does not search) and do not forget it, even if the colony shrinks. A sister colony in a house is found the same way.
+
+**Checks.** JS and C# agree on every figure:
+- **Warm sites:** a nest in a house is warm; one in a garden shed or an ordinary hollow is not.
+- **Autumn:** in a warm nest the queen outlives the autumn, with 36 adults left against 17.
+- **Winter:** a warm nest of 120 comes through with 78, the queen alive, and three colonies of the line beside it. The screen keeps the nest by default; waking a young queen leaves it to the AI. An exposed nest dies as before.
+- **The household:** a colony of 150 in a house books the exterminator with no one stung, and he is shown the nest and destroys it.
+- **Bees:** an exposed honeybee colony winters to 41 against 53 in a warm one.
+- **Parity:** a new digest (a fed colony in a house through two winters, staying in each spring) matches bit for bit: 29 digests. 379 properties hold in both builds (C# save version 28).
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1601,7 +1631,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (100 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony; the T0 of progression (18.48): XP, unit and hive skills, the year's turn; and multi-colony play with the player gauge (18.49). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (101 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony; the T0 of progression (18.48): XP, unit and hive skills, the year's turn; multi-colony play with the player gauge (18.49); and wintering in somewhere warm (18.50). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -2373,6 +2403,7 @@ Values the tuning starts from. They are references, not targets; gameplay compre
 | Swarming | crowded colonies rear daughter queens; the old queen leaves with up to 60% of the workers and moves into a new site within 24 hours | same |
 | Honeybee worker ages | cleaning, fanning, feeding larvae, receiving loads, guarding, then foraging | same |
 | Barbed sting | a worker cannot pull its barbed sting out of a person and dies; the queen stings many times, drones have no sting | UC ANR Bug Squad, *Why Do Honey Bees Die When They Sting?* |
+| Perennial yellowjacket nests | in the south a small share of southern yellowjacket nests survive the winter as perennial nests, which can grow very large; most die at the first freeze | Mississippi State University Extension, *Southern Yellowjackets* (Bug's Eye View, vol. 2 no. 32) |
 
 Sources:
 - https://en.wikipedia.org/wiki/Vespula_vulgaris
@@ -2380,3 +2411,4 @@ Sources:
 - https://extension.psu.edu/european-hornet
 - https://bees.caes.uga.edu/beekeeping-resources/getting-started-topics/getting-started-honey-bee-biology.html
 - https://ucanr.edu/blog/bug-squad/article/why-do-honey-bees-die-when-they-sting
+- https://extension.msstate.edu/taxonomy/term/4171/2016/southern-yellowjackets-vol-2-no-32
