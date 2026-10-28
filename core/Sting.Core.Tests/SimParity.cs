@@ -64,6 +64,13 @@ namespace Sting.Core.Tests
                 var b = Bots.StingBot("full", null, 60); var order = new[] { "speed", "grabR", "forage", "landR", "feedR", "brood", "lay", "build" };
                 return sim => { var c = b(sim); if (sim.tick % 1500 == 1499) c.pick = -(Skills.Index(order[sim.tick / 1500 % order.Length]) + 1); return c; };
             }, true);
+            // multi-colony play (GDD 6.8): a honeybee season with a swarm; every 2000 ticks the colony in hand changes to the line's first
+            Run("multi", new Settings { seed = 99, dayMinutes = 0.4, seasonDays = 10, species = "bee" }, 36000, () => sim =>
+            {
+                var c = Bots.IdleCmd();
+                if (sim.line.Count > 0 && sim.colony.sited && sim.tick % 2000 == 1999) c.pick = -(1000 + sim.line[0].id);
+                return c;
+            }, true);
             // a save restored mid-run must carry on exactly like the run that was never saved
             {
                 string Go(bool save)
@@ -95,7 +102,7 @@ namespace Sting.Core.Tests
                     var w = sim.wasp; double x = w != null ? (double)w.x : 0, y = w != null ? (double)w.y : 0, z = w != null ? (double)w.z : 0;
                     trace.Add(string.Join(" ", sim.tick, kinds.ToString("x8"), x.ToString("R", CultureInfo.InvariantCulture), y.ToString("R", CultureInfo.InvariantCulture), z.ToString("R", CultureInfo.InvariantCulture), ((double)sim.colony.adults).ToString("R", CultureInfo.InvariantCulture)));
                 }
-                if (prog && sim.tick % 60 == 0) { var P = sim.prog; d.F(P.unit); d.F(P.unitTotal); d.F(P.hive); d.F(P.hiveTotal); d.F(P.stabs); foreach (int r in P.ranks) d.F(r); }
+                if (prog && sim.tick % 60 == 0) { var P = sim.prog; d.F(P.unit); d.F(P.unitTotal); d.F(P.hive); d.F(P.hiveTotal); d.F(P.stabs); foreach (int r in P.ranks) d.F(r); d.F(P.hand); d.F(P.gaugeRate); d.F(P.gaugeDays); d.F(sim.line.Count); d.F(sim.colony.adults); foreach (var x in sim.line) { d.F(x.id); d.F(x.colony.adults); d.F(x.colony.sugar); } }
             }
             traces[name] = trace;
             d.S(sim.StateHash()); d.S(sim.HumanHash());

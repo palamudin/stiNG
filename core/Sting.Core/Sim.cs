@@ -413,7 +413,8 @@ namespace Sting.Core
             prevAct = act;
             if (cmd.alloc > 0 && cmd.alloc <= T.alloc.Length && colony.alloc != cmd.alloc - 1) { colony.alloc = cmd.alloc - 1; Emit("alloc", ("preset", colony.alloc)); }
             int pick = cmd.pick;
-            if (pick < 0) { Learn(-pick - 1); pick = 0; } // a negative pick learns a skill (GDD 6.8)
+            if (pick <= -1000) { SwitchColony(-pick - 1000); pick = 0; } // take another colony of the line in hand (GDD 6.8)
+            else if (pick < 0) { Learn(-pick - 1); pick = 0; } // a negative pick learns a skill (GDD 6.8)
             if (winter != null) { WinterStep(pick); pick = 0; } // in winter a pick chooses the queen (T1-15)
             if ((edge & Act.Switch) != 0) PossessNearest();
             else if (pick > 0 && pick != drivenId) PossessNearest(pick);

@@ -1571,7 +1571,7 @@ function buildCmd() {
     yawQ: Math.round(input.yaw * 1e4), pitchQ: Math.round(input.pitch * 1e4),
     act: (k.has('KeyE') || (gp && gp.b(0)) ? Act.Interact : 0) | (k.has('KeyQ') || (gp && gp.b(3)) ? Act.Switch : 0) | (k.has('KeyR') || (gp && gp.b(2)) ? Act.Rest : 0) | (input.swoopOnce ? (input.swoopOnce = false, Act.Swoop) : 0),
     alloc: input.alloc,
-    pick: input.learn ? (input.learn = 0, -(learnOnce + 1)) : input.pick ? (input.pick = 0, pickOnce) : 0, // a negative pick learns a skill (GDD 6.8)
+    pick: input.switchTo ? (input.switchTo = 0, -(1000 + switchOnce)) : input.learn ? (input.learn = 0, -(learnOnce + 1)) : input.pick ? (input.pick = 0, pickOnce) : 0, // negative picks: take a colony in hand, learn a skill (GDD 6.8)
   };
   // locked on: closing in slows near the target, so W brings you up to it rather than past it
   if (input.lock && !input.pilot && cmd.mz > 0) {
@@ -1837,7 +1837,24 @@ const SKILL_INFO = {
   feedR: ['Feeding reach', 'feed from further off'], grabR: ['Grab reach', 'catch prey from further off'], speed: ['Flight speed', 'faster in the air'],
   forage: ['Foraging yield', 'more from every load'], brood: ['Brood growth', 'brood develops faster'], lay: ['Population', 'the queen lays more'], build: ['Comb building', 'more cells from each load'],
 };
-let learnOnce = 0, skillSig = '';
+let learnOnce = 0, skillSig = '', switchOnce = 0, lineSig = '';
+const SPECIES_NAME = { wasp: 'wasps', hornet: 'hornets', bee: 'honeybees' };
+// Colonies of the line (GDD 6.8, multi-colony play): one in hand, the rest on the AI at the player's gauge
+function updateLine() {
+  const g = sim.gauge(), P = sim.prog, measured = P.gaugeDays >= T.gauge.minDays;
+  $('nGauge').innerHTML = [
+    ['In hand', `${SPECIES_NAME[sim.species]} · ${fmt(sim.colony.adults)} adults`],
+    ['Your gauge', measured ? `${Math.round(g * 100)}% · ${P.gaugeRate.toFixed(0)} XP a day in hand (full at ${T.gauge.ref})` : `not measured yet (${P.gaugeDays.toFixed(1)} of ${T.gauge.minDays} days played); the AI works at ${Math.round(g * 100)}%`],
+  ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+  const sig = sim.line.map((x) => `${x.id}:${Math.round(x.colony.adults)}:${x.colony.nestAlive}`).join(',') + '|' + sim.colony.sited;
+  if (sig === lineSig) return;
+  lineSig = sig;
+  $('nLine').innerHTML = sim.line.length ? sim.line.map((x) => {
+    const d = Math.round(Math.hypot(x.nest.x - sim.nest.x, x.nest.z - sim.nest.z)), ok = x.colony.nestAlive && sim.colony.sited;
+    return `<button class="ghost" data-sw="${x.id}"${ok ? '' : ' disabled'}><b>Take in hand: ${SPECIES_NAME[x.colony.species || 'wasp']}</b><span>${fmt(x.colony.adults)} adults, ${fmt(broodTotal(x.colony))} brood, ${d} m off${x.colony.nestAlive ? '' : ' · destroyed'}</span></button>`;
+  }).join('') : '<span class="label">No other colony of the line yet. Queens that winter well found them in spring; honeybees swarm.</span>';
+}
+$('nLine').addEventListener('click', (e) => { const b = e.target.closest('button[data-sw]'); if (b && !b.disabled) { switchOnce = +b.dataset.sw; input.switchTo = 1; } });
 function updateSkills() {
   const P = sim.prog, X = T.xp, all = sim.settings.skills === 'all', xp = P.unitTotal + P.hiveTotal;
   $('nXp').innerHTML = [
@@ -1860,6 +1877,7 @@ $('nSkills').addEventListener('click', (e) => { const b = e.target.closest('butt
 
 function updateNest() {
   updateWorkers();
+  updateLine();
   updateSkills();
   const c = sim.colony, out = sim.wasps.length;
   $('nStores').innerHTML = [
@@ -2352,6 +2370,8 @@ function handleEvents(events) {
         break;
       case 'learned': toast(`Learned: ${SKILL_INFO[e.id][0]}${SKILL_RANKED.includes(e.id) || SKILL_HIVE.includes(e.id) ? ` (rank ${e.rank})` : ''}`, 'var(--yellow)', 1.6); logEvent(`learned ${SKILL_INFO[e.id][0].toLowerCase()}`); skillSig = ''; break; // GDD 6.8
       case 'learnDenied': toast('Not enough XP', 'var(--muted)', 1); break;
+      case 'colonySwitch': toast(`You take the ${SPECIES_NAME[e.species]} in hand. The colony you left goes on under the AI.`, 'var(--yellow)', 3); lineSig = ''; skillSig = ''; syncNests(); waspSwitched(sim.drivenId, 0.98); syncChunks(); break; // GDD 6.8
+      case 'switchDenied': toast('That colony cannot be taken in hand now', 'var(--muted)', 1.4); break;
       case 'quickRelease': if (e.driven) toast('Pulled out just in time', 'var(--yellow)', 1); break;
       case 'sisterFounded': logEvent(`a sister colony of the line was founded ${Math.round(Math.hypot(e.x - sim.nest.x, e.z - sim.nest.z))} m away`); break; // T2-4
       case 'sisterLost': toast('A sister colony of the line has died out', 'var(--red)', 2); break;

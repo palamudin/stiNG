@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, humanParts, malesAbout, chunkOf, toLocal, dirToWorld, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, pickTarget, assistPilot, swoopPilot, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, CMD_FIELDS,
+  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, pickTarget, assistPilot, swoopPilot, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, CMD_FIELDS,
 } from '../sim/index.js';
 import { applyTuning, parseTuning, tuningHash, tuningLeaves, TUNE } from '../sim/tunefile.js';
 
@@ -1944,6 +1944,43 @@ function seated(sim, pred) {
     ok(t.species === 'bee' && t.colony.adults === T.xp.beeSwarm && !t.colony.sited, `a weak line can try a honeybee colony: a queen with a swarm of ${t.colony.adults}`); }
   { const { t } = yearEnd(0, 0); run(t, 1, () => idle({ pick: 1 }));
     ok(t.species === 'wasp' && t.colony.species === 'wasp', 'declining the offer, the line goes on as wasps'); }
+}
+
+// 51. Multi-colony play and the player gauge (GDD 6.8)
+{
+  const mk = (o = {}) => new Sim({ seed: 1234, birds: false, ...o });
+  const addLine = (s, sp, dx) => {
+    const c = newColony(false, sp); c.sited = true; c.maxCells = s._maxCells('trunk', sp);
+    const nest = makeNest(s.nest.treeX + dx, s.nest.treeZ, s.nest.x + dx, s.nest.y, s.nest.z, 0.14, 'trunk');
+    const sc = { id: ++s.lineSeq, nest, colony: c, season: s.season.n, ext: 0 }; s.line.push(sc); return sc;
+  };
+  { const s = mk(), G = T.gauge, g0 = s.gauge(), dt = 0.05;
+    for (let i = 0; i < 180; i++) { s.prog.hand += G.ref * dt; s._gaugeTick(dt); }
+    const g1 = s.gauge();
+    for (let i = 0; i < 60; i++) s._gaugeTick(dt);
+    const g2 = s.gauge();
+    ok(g0 === G.floor && g1 > 0.9 && g2 < 0.5 && g2 >= G.floor, `the gauge: ${g0} until measured, ${g1.toFixed(2)} after nine days at full rate, ${g2.toFixed(2)} after three idle days`); }
+  { const lineXp = (good) => {
+      const s = mk(); const sc = addLine(s, 'wasp', 6); if (good) { s.prog.gaugeDays = 5; s.prog.gaugeRate = T.gauge.ref; }
+      run(s, 3600, (sim) => { if (sim.wasp) place(sim.wasp, { x: sim.nest.entrance.x + 1, y: 1.5, z: sim.nest.entrance.z }); if (good) { sim.prog.gaugeRate = T.gauge.ref; sim.prog.gaugeDays = 5; } return idle(); });
+      return { xp: s.prog.hiveTotal - s.prog.hand, food: sc.colony.sugar + sc.colony.protein + sc.colony.pulp };
+    };
+    const lo = lineXp(false), hi = lineXp(true);
+    ok(hi.xp > lo.xp * 3 && hi.food > lo.food, `a colony on the AI earns hive XP and forages at the player's gauge (${hi.xp.toFixed(2)} XP at full, ${lo.xp.toFixed(2)} at the floor)`); }
+  { const s = mk(); const own = s.colony, ownNest = s.nest, sc = addLine(s, 'bee', 8);
+    const ev = run(s, 2, (sim, i) => idle({ pick: i === 0 ? -(1000 + sc.id) : 0 }));
+    const back = s.line.find((x) => x.colony === own);
+    ok(count(ev, 'colonySwitch') === 1 && s.colony === sc.colony && s.nest === sc.nest && back && back.nest === ownNest && s.species === 'bee' && s.wasp.sp === 'bee' && Math.hypot(s.wasp.x - sc.nest.x, s.wasp.z - sc.nest.z) < 1,
+      'taking a bee colony of the line in hand: you fly a bee from its hive, and your wasp colony goes on under the AI');
+    run(s, 1, () => idle({ pick: -(1000 + back.id) }));
+    ok(s.colony === own && s.species === 'wasp' && s.wasp.sp === 'wasp', 'and back to the wasps'); }
+  { const s = mk(); s.colony.sited = false; const sc = addLine(s, 'wasp', 6); const ev = run(s, 1, () => idle({ pick: -(1000 + sc.id) }));
+    ok(count(ev, 'switchDenied') === 1 && s.colony !== sc.colony, 'a founding queen without a nest cannot leave it to the AI'); }
+  { const t = mk(); const hv = addLine(t, 'bee', 8); hv.colony.sugar = 400; t.colony.mated = 200; t.season.startMinute -= 0.71 * t.settings.seasonDays * 1440;
+    const a0 = hv.colony.adults; run(t, 120); run(t, 1, () => idle({ pick: 1 }));
+    ok(t.line.includes(hv) && hv.colony.queenAlive && hv.colony.adults < a0 && t.line.some((x) => x.colony.species === 'wasp'),
+      `a honeybee colony of a wasp line winters as a cluster and is still there in spring (${a0.toFixed(0)} -> ${hv.colony.adults.toFixed(0)} bees), beside the new wasp colonies`);
+    const r = restore(snapshot(t)); ok(r.line.length === t.line.length && r.prog.gaugeDays === t.prog.gaugeDays, 'a save keeps the line\'s colonies and the gauge'); }
 }
 
 // Tuning as data (GDD 13, T1-22): one plain-text file feeds both sims

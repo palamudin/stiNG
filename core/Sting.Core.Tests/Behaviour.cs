@@ -1253,6 +1253,51 @@ namespace Sting.Core.Tests
                 { var (t, _) = YearEnd(0, 0); RunS(t, 1, (sim, i) => Idle(c => c.pick = 1001)); Ok(t.species == "bee" && t.colony.adults == T.xp.beeSwarm && !t.colony.sited, $"a weak line can try a honeybee colony: a queen with a swarm of {D(t.colony.adults)}"); }
                 { var (t, _) = YearEnd(0, 0); RunS(t, 1, (sim, i) => Idle(c => c.pick = 1)); Ok(t.species == "wasp" && t.colony.species == "wasp", "declining the offer, the line goes on as wasps"); }
             }
+            // 51. multi-colony play and the player gauge (GDD 6.8)
+            {
+                Sim Mk() => new Sim(new Settings { seed = 1234, birds = false });
+                LineColony AddLine(Sim s, string sp, Num dx)
+                {
+                    var c = Colony.New(false, sp); c.sited = true; c.maxCells = s.MaxCells("trunk", sp);
+                    var nn = World.MakeNest(s.nest.treeX + dx, s.nest.treeZ, s.nest.x + dx, s.nest.y, s.nest.z, 0.14, "trunk");
+                    var sc = new LineColony { id = ++s.lineSeq, nest = nn, colony = c, season = s.season.n }; s.line.Add(sc); return sc;
+                }
+                {
+                    var s = Mk(); Num dt = 0.05, g0 = s.Gauge();
+                    for (int i = 0; i < 180; i++) { s.prog.hand += T.gauge.@ref * dt; s.GaugeTick(dt); }
+                    Num g1 = s.Gauge();
+                    for (int i = 0; i < 60; i++) s.GaugeTick(dt);
+                    Num g2 = s.Gauge();
+                    Ok(g0 == T.gauge.floor && g1 > 0.9 && g2 < 0.5 && g2 >= T.gauge.floor, $"the gauge: {D(g0)} until measured, {D(g1):0.00} after nine days at full rate, {D(g2):0.00} after three idle days");
+                }
+                {
+                    (double xp, double food) LineXp(bool good)
+                    {
+                        var s = Mk(); var sc = AddLine(s, "wasp", 6); if (good) { s.prog.gaugeDays = 5; s.prog.gaugeRate = T.gauge.@ref; }
+                        RunS(s, 3600, (sim, i) => { if (sim.wasp != null) Place(sim.wasp, P(sim.nest.entrance.x + 1, 1.5, sim.nest.entrance.z)); if (good) { sim.prog.gaugeRate = T.gauge.@ref; sim.prog.gaugeDays = 5; } return Idle(); });
+                        return (D(s.prog.hiveTotal - s.prog.hand), D(sc.colony.sugar + sc.colony.protein + sc.colony.pulp));
+                    }
+                    var lo = LineXp(false); var hi = LineXp(true);
+                    Ok(hi.xp > lo.xp * 3 && hi.food > lo.food, $"a colony on the AI earns hive XP and forages at the player's gauge ({hi.xp:0.00} XP at full, {lo.xp:0.00} at the floor)");
+                }
+                {
+                    var s = Mk(); var own = s.colony; var ownNest = s.nest; var sc = AddLine(s, "bee", 8);
+                    var ev = RunS(s, 2, (sim, i) => Idle(c => c.pick = i == 0 ? -(1000 + sc.id) : 0));
+                    var back = s.line.FirstOrDefault(x => x.colony == own);
+                    Ok(Count(ev, "colonySwitch") == 1 && s.colony == sc.colony && s.nest == sc.nest && back != null && back.nest == ownNest && s.species == "bee" && s.wasp.sp == "bee" && Hypot(s.wasp.x - sc.nest.x, s.wasp.z - sc.nest.z) < 1,
+                        "taking a bee colony of the line in hand: you fly a bee from its hive, and your wasp colony goes on under the AI");
+                    RunS(s, 1, (sim, i) => Idle(c => c.pick = -(1000 + back.id)));
+                    Ok(s.colony == own && s.species == "wasp" && s.wasp.sp == "wasp", "and back to the wasps");
+                }
+                { var s = Mk(); s.colony.sited = false; var sc = AddLine(s, "wasp", 6); var ev = RunS(s, 1, (sim, i) => Idle(c => c.pick = -(1000 + sc.id))); Ok(Count(ev, "switchDenied") == 1 && s.colony != sc.colony, "a founding queen without a nest cannot leave it to the AI"); }
+                {
+                    var t = Mk(); var hv = AddLine(t, "bee", 8); hv.colony.sugar = 400; t.colony.mated = 200; t.season.startMinute -= 0.71 * t.settings.seasonDays * 1440;
+                    Num a0 = hv.colony.adults; RunS(t, 120); RunS(t, 1, (sim, i) => Idle(c => c.pick = 1));
+                    Ok(t.line.Contains(hv) && hv.colony.queenAlive && hv.colony.adults < a0 && t.line.Any(x => x.colony.species == "wasp"),
+                        $"a honeybee colony of a wasp line winters as a cluster and is still there in spring ({D(a0):0} -> {D(hv.colony.adults):0} bees), beside the new wasp colonies");
+                    var r = Persist.Restore(Persist.Snapshot(t)); Ok(r.line.Count == t.line.Count && r.prog.gaugeDays == t.prog.gaugeDays, "a save keeps the line's colonies and the gauge");
+                }
+            }
             // 46. feature modifiers (T2-6): woods, towns, water and hives set at world creation act on generation
             {
                 (int forest, int town, int baths, int hives, bool apart) Census(Settings st)

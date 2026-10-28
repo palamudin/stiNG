@@ -652,6 +652,13 @@ releaseKick = 2.5
 focusMs = 3000
 focusCooldownMs = 15000
 
+[gauge]
+window = 3
+ref = 40
+floor = 0.25
+minDays = 1
+effMin = 0.8
+
 [moths]
 perLight = 3
 orbit = 0.3

@@ -244,6 +244,12 @@ export const T = {
   skills: { swoop: 40, assist: 40, reflex: 30, focus: 50, release: 60, ranks: 3, rankCost: 30, landR: 0.4, feedR: 0.2, grabR: 0.2, speed: 0.05,
     hiveCost: 40, forage: 0.08, brood: 0.08, lay: 0.1, build: 0.1, releaseLead: 8, releaseMargin: 0.03, releaseKick: 2.5, focusMs: 3000, focusCooldownMs: 15000 },
 
+  // The player gauge (GDD 6.8): how well the player plays, measured, so colonies on the AI progress at the player's
+  // level and no higher. rate: XP earned in hand (unit XP, and hive XP of the colony in hand) per in-game day, smoothed
+  // over window days; gauge = rate / ref, between floor and 1, and floor until minDays of play are measured. A colony on
+  // the AI earns hive XP times the gauge, uses the hive skills scaled by it, and forages at effMin..1 of full by it.
+  gauge: { window: 3, ref: 40, floor: 0.25, minDays: 1, effMin: 0.8 },
+
   // Hornets at night (T2-10): a porch light on each house burns from dusk to dawn and draws moths, perLight of them
   // circling it at orbit m; a hornet takes one as protein. bio: European hornets hunt at night and come to lights.
   // A hornet that wins a wrestle with another colony's wasp keeps it as prey (waspProtein).

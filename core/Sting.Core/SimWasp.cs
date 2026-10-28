@@ -1592,40 +1592,55 @@ namespace Sting.Core
             }
             sites.Sort((a, b) => a.n != b.n ? b.n.CompareTo(a.n) : a.q != b.q ? (b.q < a.q ? -1 : 1) : a.x != b.x ? (a.x < b.x ? -1 : 1) : a.z != b.z ? (a.z < b.z ? -1 : 1) : 0);
             foreach (var w in new List<Wasp>(wasps)) if (w.colony != "own" && !IsRival(w)) Despawn(w);
+            // a honeybee colony of the line winters as a cluster and goes on in spring (GDD 6.8, multi-colony play)
+            Num days = Rnd(settings.seasonDays * T.season.winterShare); var keep = line.FindAll(sc => Colony.Sp(sc.colony).perennial != 0 && Cluster(sc.colony, days));
             line = new List<LineColony>();
             Num lin = Floor(lineage * T.season.lineageSurvival + H32(sn, 32)); // queens of the line beyond the colonies that were real
             Emit("winter", ("why", why), ("mated", col.mated), ("survivors", survivors), ("lineage", lin), ("season", sn), ("sites", sites.Count));
+            if (survivors + lin < 1 && keep.Count > 0) { foreach (var w in new List<Wasp>(wasps)) Despawn(w); line = keep; HiveSpring(days, sn, false); return; } // no queen made it, a hive did
             if (survivors + lin < 1) { extinct = true; foreach (var w in new List<Wasp>(wasps)) Despawn(w); Emit("lineExtinct", ("nestAlive", col.nestAlive)); return; }
             // only sister nests made it: you wake in one of them
             if (sites.Count == 0) sites.Add(new HiberSite { kind = "sister", x = nest.spawn.x, y = nest.spawn.y, z = nest.spawn.z, q = T.hiber.Q("sister"), n = 0 });
             foreach (var w in new List<Wasp>(wasps)) Despawn(w);
             ghost = null;
-            winter = new Winter { why = why, sites = sites, survivors = survivors, lineage = lin, until = tick + T.hiber.chooseTicks, offer = Offer() };
+            winter = new Winter { why = why, sites = sites, survivors = survivors, lineage = lin, until = tick + T.hiber.chooseTicks, offer = Offer(), keep = keep };
             if (winter.offer != null) Emit("offer", ("species", winter.offer));
         }
 
         /// A honeybee colony's winter (T2-11): no queens to choose. Each colony of the line, yours and its swarms, clusters
         /// on its honey; what the store covers lives, less the winter's losses, and a cluster too small dies. In spring
         /// the colony goes on in the same hive; with yours gone, you go on in the strongest of the line's. See sim.js.
+        /// a honeybee colony's winter on its honey: what the store covers lives, less the winter's losses; too small dies
+        bool Cluster(ColonyState c, Num days)
+        {
+            if (!c.nestAlive || !c.queenAlive) return false;
+            Num need = c.adults * T.hive.winterNeed * days, fed = need > 0 ? Clamp01(c.sugar / need) : 1;
+            c.sugar = Max(0, c.sugar - need);
+            c.adults *= (1 - T.hive.winterLoss) * fed;
+            c.eggs = c.larvae = c.pupae = c.rEggs = c.rLarvae = c.rPupae = 0; c.young = 0; c.gynes = 0; c.males = 0; c.mated = 0;
+            c.deficit = 0; c.sugarlessDays = 0; c.water = 0; c.cool = 1; c.thirst = 0;
+            if (c.adults < T.hive.minCluster) { c.adults = 0; c.queenAlive = false; return false; }
+            return true;
+        }
         void BeeWinter(string why)
         {
             int n = season.n; Num days = Rnd(settings.seasonDays * T.season.winterShare);
-            bool WinterOf(ColonyState c)
-            {
-                if (!c.nestAlive || !c.queenAlive) return false;
-                Num need = c.adults * T.hive.winterNeed * days, fed = need > 0 ? Clamp01(c.sugar / need) : 1;
-                c.sugar = Max(0, c.sugar - need);
-                c.adults *= (1 - T.hive.winterLoss) * fed;
-                c.eggs = c.larvae = c.pupae = c.rEggs = c.rLarvae = c.rPupae = 0; c.young = 0; c.gynes = 0; c.males = 0; c.mated = 0;
-                c.deficit = 0; c.sugarlessDays = 0; c.water = 0; c.cool = 1; c.thirst = 0;
-                if (c.adults < T.hive.minCluster) { c.adults = 0; c.queenAlive = false; return false; }
-                return true;
-            }
             foreach (var w in new List<Wasp>(wasps)) Despawn(w);
-            bool mine = why != "colony lost" && WinterOf(colony);
-            line = line.FindAll(sc => WinterOf(sc.colony));
+            bool mine = why != "colony lost" && Cluster(colony, days);
+            // the line's bee colonies cluster; a wasp colony of the line dies with the autumn and its queens winter elsewhere
+            line = line.FindAll(sc =>
+            {
+                if (Colony.Sp(sc.colony).perennial != 0) return Cluster(sc.colony, days);
+                lineage += Floor(sc.colony.mated * T.hiber.survival * T.hiber.Q("sister") + H32(n, sc.id, 953));
+                return false;
+            });
             Emit("winter", ("why", why), ("bee", true), ("adults", Floor(mine ? colony.adults : 0)), ("honey", colony.sugar), ("sisters", line.Count), ("season", n), ("mated", (Num)0), ("survivors", (Num)(mine ? 1 : 0)), ("lineage", (Num)line.Count), ("sites", 0));
             if (!mine && line.Count == 0) { extinct = true; Emit("lineExtinct", ("nestAlive", colony.nestAlive)); return; }
+            HiveSpring(days, n, mine);
+        }
+        /// spring after a winter in the hive: the same hive, or with yours gone the strongest colony of the line's
+        void HiveSpring(Num days, int n, bool mine)
+        {
             Num target = (day + 1 + days) * 1440 + T.time.dawn;
             clockOffset += (long)((target - minute) * tpm);
             Minute(ClockMinutes(tick + clockOffset, settings));
@@ -1638,6 +1653,7 @@ namespace Sting.Core
                 int alloc = colony.alloc;
                 oldNests.Add(nest); nest = best.nest; colony = best.colony; colony.alloc = alloc;
                 colony.xpSeen = HiveScore(colony);
+                species = colony.species ?? "wasp"; settings.species = species;
             }
             foreach (var st in chunkState.Values) st.esc = 0;
             swats = new List<Swat>(); sprays = new List<Spray>(); alarms = new List<Alarm>(); hiveAlarms.Clear(); homeScent = null; hiberPick = null;
@@ -1709,6 +1725,7 @@ namespace Sting.Core
             q.x = site.x; q.y = site.y + 0.05; q.z = site.z;
             drivenId = q.id;
             lineage = FoundLine(W.sites, choice, survivors + lin - 1, was); // the other queens wake as they were
+            if (W.keep != null) line.AddRange(W.keep); // and the line's hives come through the winter
             foreach (var hm in active) CatchUpHuman(hm);
             UpdateChunks(true);
             Emit("spring", ("season", season.n), ("lineage", lineage), ("id", q.id), ("kind", site.kind), ("species", morph ? species : null));

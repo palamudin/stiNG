@@ -180,6 +180,13 @@ export const SIM_SCENARIOS = [
     const b = stingBot({ plan: 'full', rest: 60 }), order = ['speed', 'grabR', 'forage', 'landR', 'feedR', 'brood', 'lay', 'build'];
     return (sim) => { const c = b(sim); if (sim.tick % 1500 === 1499) c.pick = -(SKILLS.indexOf(order[Math.floor(sim.tick / 1500) % order.length]) + 1); return c; };
   } },
+  // multi-colony play (GDD 6.8): a honeybee season with a swarm; once the line has a second colony, every 2000 ticks the
+  // colony in hand changes to the line's first (the one left goes on under the AI at the gauge)
+  { name: 'multi', settings: { seed: 99, dayMinutes: 0.4, seasonDays: 10, species: 'bee' }, ticks: 36000, prog: true, bot: () => (sim) => {
+    const c = idleCmd();
+    if (sim.line.length && sim.colony.sited && sim.tick % 2000 === 1999) c.pick = -(1000 + sim.line[0].id);
+    return c;
+  } },
 ];
 for (const sc of SIM_SCENARIOS) {
   const d = Digest(), sim = new Sim(sc.settings), bot = sc.bot();
@@ -187,7 +194,7 @@ for (const sc of SIM_SCENARIOS) {
     sim.step(bot(sim));
     for (const e of sim.drainEvents()) { d.s(e.type); d.f(e.t); }
     if (sim.tick % 60 === 0) { d.s(sim.stateHash()); d.s(sim.humanHash()); }
-    if (sc.prog && sim.tick % 60 === 0) { const P = sim.prog; d.f(P.unit); d.f(P.unitTotal); d.f(P.hive); d.f(P.hiveTotal); d.f(P.stabs); for (const r of P.ranks) d.f(r); }
+    if (sc.prog && sim.tick % 60 === 0) { const P = sim.prog; d.f(P.unit); d.f(P.unitTotal); d.f(P.hive); d.f(P.hiveTotal); d.f(P.stabs); for (const r of P.ranks) d.f(r); d.f(P.hand); d.f(P.gaugeRate); d.f(P.gaugeDays); d.f(sim.line.length); d.f(sim.colony.adults); for (const x of sim.line) { d.f(x.id); d.f(x.colony.adults); d.f(x.colony.sugar); } }
   }
   d.s(sim.stateHash()); d.s(sim.humanHash());
   out(`sim.${sc.name}`, d.hex());

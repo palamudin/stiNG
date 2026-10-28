@@ -86,7 +86,7 @@ namespace Sting.Core
 
     public static class Persist
     {
-        public const int SAVE_VERSION = 26; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home); 14: barbecue meat taken; 15: regions, pulp taken from wood; 16: strolls and garden rounds; 17: the carry ledger and sips (T1-20); 18: water (T2-1); 19: young queens on their mating flight (T2-3); 20: lineage colonies (T2-4); 21: feature modifiers (T2-6); 22: the exterminator called to a sister colony; 23: terrain; 24: the swoop; 25: species (wasps, hornets, honeybees); 26: XP and skills
+        public const int SAVE_VERSION = 27; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home); 14: barbecue meat taken; 15: regions, pulp taken from wood; 16: strolls and garden rounds; 17: the carry ledger and sips (T1-20); 18: water (T2-1); 19: young queens on their mating flight (T2-3); 20: lineage colonies (T2-4); 21: feature modifiers (T2-6); 22: the exterminator called to a sister colony; 23: terrain; 24: the swoop; 25: species (wasps, hornets, honeybees); 26: XP and skills; 27: the player gauge, hives kept over a wasp winter
         const uint MAGIC = 0x474E4953; // "SING"
 
         // ---------------------------------------------------------------- one Io per type
@@ -324,11 +324,12 @@ namespace Sting.Core
             {
                 var W = s.winter; a.S(ref W.why); a.D(ref W.survivors); a.D(ref W.lineage); a.I(ref W.until); a.S(ref W.offer);
                 a.List(ref W.sites, () => new HiberSite(), h => { a.S(ref h.kind); a.D(ref h.x); a.D(ref h.y); a.D(ref h.z); a.D(ref h.q); a.I(ref h.n); a.B(ref h.scouted); });
+                a.List(ref W.keep, () => new LineColony(), x => { a.I(ref x.id); a.I(ref x.season); if (a.Reading) { x.nest = new Nest(); x.colony = new ColonyState(); } IoNest(a, x.nest); IoColony(a, x.colony); a.L(ref x.ext); }); // GDD 6.8
             }
             if (a.Opt(ref s.hiberPick)) { a.I(ref s.hiberPick.season); a.D(ref s.hiberPick.x); a.D(ref s.hiberPick.z); a.S(ref s.hiberPick.kind); }
             if (a.Opt(ref s.springAt)) { a.D(ref s.springAt.x); a.D(ref s.springAt.z); }
             if (a.Opt(ref s.homeScent)) IoKnown(a, s.homeScent);
-            { var P = s.prog; a.D(ref P.unit); a.D(ref P.unitTotal); a.D(ref P.hive); a.D(ref P.hiveTotal); a.I(ref P.stabs); for (int k = 0; k < P.ranks.Length; k++) a.I(ref P.ranks[k]); } // GDD 6.8
+            { var P = s.prog; a.D(ref P.unit); a.D(ref P.unitTotal); a.D(ref P.hive); a.D(ref P.hiveTotal); a.I(ref P.stabs); for (int k = 0; k < P.ranks.Length; k++) a.I(ref P.ranks[k]); a.D(ref P.hand); a.D(ref P.handSeen); a.D(ref P.gaugeRate); a.D(ref P.gaugeDays); } // GDD 6.8
             if (a.Opt(ref s.pendingSwitch)) { a.I(ref s.pendingSwitch.at); a.I(ref s.pendingSwitch.target); }
             if (a.Opt(ref s.muni))
             {

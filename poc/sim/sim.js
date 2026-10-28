@@ -335,7 +335,8 @@ export class Sim {
     this.prevAct = act;
     if (cmd.alloc > 0 && cmd.alloc <= T.alloc.length && this.colony.alloc !== cmd.alloc - 1) { this.colony.alloc = cmd.alloc - 1; this.emit('alloc', { preset: this.colony.alloc }); }
     let pick = cmd.pick | 0;
-    if (pick < 0) { this._learn(-pick - 1); pick = 0; } // a negative pick learns a skill (GDD 6.8)
+    if (pick <= -1000) { this._switchColony(-pick - 1000); pick = 0; } // take another colony of the line in hand (GDD 6.8)
+    else if (pick < 0) { this._learn(-pick - 1); pick = 0; } // a negative pick learns a skill (GDD 6.8)
     if (this.winter) { this._winterStep(pick); pick = 0; } // in winter a pick chooses the queen (T1-15)
     if (edge & Act.Switch) this._possessNearest();
     else if (pick > 0 && pick !== this.drivenId) this._possessNearest(pick);
@@ -2295,38 +2296,52 @@ export class Sim {
     }
     sites.sort((a, b) => b.n - a.n || b.q - a.q || a.x - b.x || a.z - b.z);
     for (const w of this.wasps.slice()) if (w.colony !== 'own' && !this.isRival(w)) this._despawn(w);
+    // a honeybee colony of the line winters as a cluster and goes on in spring (GDD 6.8, multi-colony play)
+    const days = rnd(this.settings.seasonDays * T.season.winterShare), keep = this.line.filter((sc) => spOf(sc.colony).perennial && this._cluster(sc.colony, days));
     this.line = [];
     const lineage = Math.floor(this.lineage * S.lineageSurvival + h32(n, 32)); // queens of the line beyond the colonies that were real
     this.emit('winter', { why, mated: col.mated, survivors, lineage, season: n, sites: sites.map((s) => ({ kind: s.kind, n: s.n, q: s.q, scouted: s.scouted, dist: Math.sqrt(sq(s.x - this.nest.x) + sq(s.z - this.nest.z)) })) });
+    if (survivors + lineage < 1 && keep.length) { for (const w of this.wasps.slice()) this._despawn(w); this.line = keep; this._hiveSpring(days, n, false); return; } // no queen made it, a hive did
     if (survivors + lineage < 1) { this.extinct = true; for (const w of this.wasps.slice()) this._despawn(w); this.emit('lineExtinct', { nestAlive: col.nestAlive }); return; }
     // only sister nests made it: you wake in one of them
     if (!sites.length) sites.push({ kind: 'sister', x: this.nest.spawn.x, y: this.nest.spawn.y, z: this.nest.spawn.z, q: H.q.sister, n: 0, scouted: false });
     for (const w of this.wasps.slice()) this._despawn(w);
     this.ghost = null;
-    this.winter = { why, sites, survivors, lineage, until: this.tick + H.chooseTicks, offer: this._offer() };
+    this.winter = { why, sites, survivors, lineage, until: this.tick + H.chooseTicks, offer: this._offer(), keep };
     if (this.winter.offer) this.emit('offer', { species: this.winter.offer });
   }
 
   // A honeybee colony's winter (T2-11): no queens to choose. Each colony of the line, yours and its swarms, clusters on
   // its honey; what the store covers lives, less the winter's losses, and a cluster too small dies. In spring the
   // colony goes on in the same hive; with yours gone, you go on in the strongest of the line's.
+  // A honeybee colony's winter on its honey: what the store covers lives, less the winter's losses; too small dies
+  _cluster(c, days) {
+    const H = T.hive;
+    if (!c.nestAlive || !c.queenAlive) return false;
+    const need = c.adults * H.winterNeed * days, fed = need > 0 ? clamp01(c.sugar / need) : 1;
+    c.sugar = Math.max(0, c.sugar - need);
+    c.adults *= (1 - H.winterLoss) * fed;
+    c.eggs = c.larvae = c.pupae = c.rEggs = c.rLarvae = c.rPupae = 0; c.young = 0; c.gynes = 0; c.males = 0; c.mated = 0;
+    c.deficit = 0; c.sugarlessDays = 0; c.water = 0; c.cool = 1; c.thirst = 0;
+    if (c.adults < H.minCluster) { c.adults = 0; c.queenAlive = false; return false; }
+    return true;
+  }
   _beeWinter(why) {
-    const H = T.hive, n = this.season.n, days = rnd(this.settings.seasonDays * T.season.winterShare);
-    const winterOf = (c) => {
-      if (!c.nestAlive || !c.queenAlive) return false;
-      const need = c.adults * H.winterNeed * days, fed = need > 0 ? clamp01(c.sugar / need) : 1;
-      c.sugar = Math.max(0, c.sugar - need);
-      c.adults *= (1 - H.winterLoss) * fed;
-      c.eggs = c.larvae = c.pupae = c.rEggs = c.rLarvae = c.rPupae = 0; c.young = 0; c.gynes = 0; c.males = 0; c.mated = 0;
-      c.deficit = 0; c.sugarlessDays = 0; c.water = 0; c.cool = 1; c.thirst = 0;
-      if (c.adults < H.minCluster) { c.adults = 0; c.queenAlive = false; return false; }
-      return true;
-    };
+    const n = this.season.n, days = rnd(this.settings.seasonDays * T.season.winterShare), Q = T.hiber;
     for (const w of this.wasps.slice()) this._despawn(w);
-    const mine = why !== 'colony lost' && winterOf(this.colony);
-    this.line = this.line.filter((sc) => winterOf(sc.colony));
+    const mine = why !== 'colony lost' && this._cluster(this.colony, days);
+    // the line's bee colonies cluster; a wasp colony of the line dies with the autumn and its queens winter elsewhere
+    this.line = this.line.filter((sc) => {
+      if (spOf(sc.colony).perennial) return this._cluster(sc.colony, days);
+      this.lineage += Math.floor(sc.colony.mated * Q.survival * Q.q.sister + h32(n, sc.id, 953));
+      return false;
+    });
     this.emit('winter', { why, bee: true, adults: Math.floor(mine ? this.colony.adults : 0), honey: this.colony.sugar, sisters: this.line.length, season: n, mated: 0, survivors: mine ? 1 : 0, lineage: this.line.length, sites: [] });
     if (!mine && !this.line.length) { this.extinct = true; this.emit('lineExtinct', { nestAlive: this.colony.nestAlive }); return; }
+    this._hiveSpring(days, n, mine);
+  }
+  // Spring after a winter in the hive: the same hive, or with yours gone the strongest colony of the line's
+  _hiveSpring(days, n, mine) {
     const target = (this.day + 1 + days) * 1440 + T.time.dawn;
     this.clockOffset += (target - this.minute) * this.tpm;
     this._minute(clockMinutes(this.tick + this.clockOffset, this.settings));
@@ -2338,6 +2353,7 @@ export class Sim {
       const alloc = this.colony.alloc;
       this.oldNests.push(this.nest); this.nest = best.nest; this.colony = best.colony; this.colony.alloc = alloc;
       this.colony.xpSeen = this._hiveScore(this.colony);
+      this.species = this.colony.species || 'wasp'; this.settings.species = this.species;
     }
     for (const s of this.chunkState.values()) s.esc = 0;
     this.swats = []; this.sprays = []; this.alarms = []; this.hiveAlarms.clear(); this.homeScent = null; this.hiberPick = null;
@@ -2406,6 +2422,7 @@ export class Sim {
     q.x = site.x; q.y = site.y + 0.05; q.z = site.z;
     this.drivenId = q.id;
     this.lineage = this._foundLine(W.sites, choice, survivors + lineage - 1, was); // the other queens wake as they were
+    for (const sc of W.keep || []) this.line.push(sc); // and the line's hives come through the winter
     for (const hm of this.active) this._catchUpHuman(hm);
     this._updateChunks(true);
     this.emit('spring', { season: this.season.n, lineage: this.lineage, id: q.id, kind: site.kind, species: morph ? this.species : undefined });
@@ -2413,7 +2430,7 @@ export class Sim {
 
   // ---------------- progression (GDD 6.8): XP, skills, the year's turn
 
-  _newProg() { return { unit: 0, unitTotal: 0, hive: 0, hiveTotal: 0, stabs: 0, ranks: SKILLS.map(() => 0) }; }
+  _newProg() { return { unit: 0, unitTotal: 0, hive: 0, hiveTotal: 0, stabs: 0, ranks: SKILLS.map(() => 0), hand: 0, handSeen: 0, gaugeRate: 0, gaugeDays: 0 }; }
   rank(id) { return this.prog.ranks[SKILLS.indexOf(id)] | 0; }
   // An insect of the player's line has a skill once the line learned it ('all': every unlock from the start)
   hasSkill(w, id) {
@@ -2424,16 +2441,46 @@ export class Sim {
   _mul(w, id) { return w && w.colony === 'own' ? 1 + T.skills[id] * this.rank(id) : 1; }
   // the hive skills' multipliers for the player's colony
   boost() { const K = T.skills; return { forage: 1 + K.forage * this.rank('forage'), brood: 1 + K.brood * this.rank('brood'), lay: 1 + K.lay * this.rank('lay'), build: 1 + K.build * this.rank('build') }; }
-  _gain(pool, v) { const P = this.prog; P[pool] += v; P[pool + 'Total'] += v; }
+  // hand: earned by the player's own play (the gauge counts only that)
+  _gain(pool, v, hand = true) { const P = this.prog; P[pool] += v; P[pool + 'Total'] += v; if (hand) P.hand += v; }
   // unit XP for what the insect the player flies does
   _xp(w, k) { if (w.id === this.drivenId && w.colony === 'own') this._gain('unit', T.xp[k]); }
   _hiveScore(c) { const X = T.xp, d = c.stats.deposited; return c.stats.emerged * X.emerged + (d.sugar + d.protein + d.pulp + d.water) * X.load + c.stats.gynesRaised * X.raised; }
   // hive XP: what the colony did since the last colony tick
-  _hiveXp(c) {
+  _hiveXp(c, k = 1, hand = true) {
     const v = this._hiveScore(c);
     if (c.xpSeen === undefined) c.xpSeen = v; // a save from before XP
-    if (v > c.xpSeen) this._gain('hive', v - c.xpSeen);
+    if (v > c.xpSeen) this._gain('hive', (v - c.xpSeen) * k, hand);
     c.xpSeen = v;
+  }
+  // The player gauge (GDD 6.8): the XP the player earns in hand per in-game day, smoothed; idling lets it fall
+  _gaugeTick(dt) {
+    const P = this.prog, G = T.gauge, d = P.hand - P.handSeen;
+    P.handSeen = P.hand;
+    P.gaugeRate += (d / dt - P.gaugeRate) * Math.min(1, dt / G.window);
+    P.gaugeDays += dt;
+  }
+  gauge() { const P = this.prog, G = T.gauge; return P.gaugeDays < G.minDays ? G.floor : clamp(P.gaugeRate / G.ref, G.floor, 1); }
+  // how a colony on the AI works: the hive skills scaled by the gauge, and foraging from effMin to full
+  lineBoost() {
+    const g = this.gauge(), G = T.gauge, B = this.boost(), e = G.effMin + (1 - G.effMin) * g;
+    return { forage: e * (1 + (B.forage - 1) * g), brood: 1 + (B.brood - 1) * g, lay: 1 + (B.lay - 1) * g, build: 1 + (B.build - 1) * g };
+  }
+  // Take another colony of the line in hand (GDD 6.8, multi-colony play): yours goes on under the AI at your gauge
+  _switchColony(id) {
+    const sc = this.line.find((x) => x.id === id);
+    if (!sc || this.winter || this.extinct || !this.colony.sited || !this.colony.nestAlive || !sc.colony.nestAlive) { this.emit('switchDenied', { id }); return; }
+    for (const w of this.wasps.slice()) if (w.colony === 'own' || w.colony === 'line:' + sc.id) this._despawn(w);
+    this.line = this.line.filter((x) => x !== sc);
+    this.line.push({ id: ++this.lineSeq, nest: this.nest, colony: this.colony, season: this.season.n, ext: 0 });
+    this.nest = sc.nest; this.colony = sc.colony;
+    this.species = this.colony.species || 'wasp'; this.settings.species = this.species;
+    this.ext = { visit: 0, state: 'none', arriveMinute: 0, hm: null, lead: null };
+    this.hiberPick = null; this.homeScent = null; this.ghost = null;
+    const w = this._spawnWasp(true);
+    this.drivenId = w.id;
+    this._updateChunks(true);
+    this.emit('colonySwitch', { id: this.lineSeq, to: id, species: this.species });
   }
   _learn(i) {
     const id = SKILLS[i], c = skillCost(i, this.prog.ranks);
@@ -4129,6 +4176,7 @@ export class Sim {
     }
     colonyStep(col, 60 / this.dayTicks, this._own().filter((w) => w.caste === 'worker').length, daylight, frac, this.bio, this.broodSpeed(), this.ecoAvail(), this.nestHeat(), this.boost());
     this._hiveXp(col);
+    this._gaugeTick(60 / this.dayTicks);
     if (this.raining && col.nestAlive && col.sited) {
       // the site decides what rain costs: burrows flood, open nests chill (GDD 6.6)
       const st = T.sites[this.nest.site || 'trunk'], dt = 60 / this.dayTicks;
@@ -4209,14 +4257,15 @@ export class Sim {
   // Each sister colony lives through the season like yours, run by the AI; a founding queen forages alone
   _lineTick(daylight, frac) {
     if (!this.line.length) return;
-    const L = T.line, dt = 60 / this.dayTicks, av = this.ecoAvail();
+    const L = T.line, dt = 60 / this.dayTicks, av = this.ecoAvail(), lb = this.lineBoost(), g = this.gauge();
     for (const sc of this.line.slice()) {
       const c = sc.colony, out = this.wasps.filter((w) => w.colony === 'line:' + sc.id).length;
       if (c.adults < 1 && c.queenAlive && daylight) {
         const q = L.queenForage; c.sugar += q.sugar * dt * av.sugar; c.protein += q.protein * dt * av.protein; c.pulp += q.pulp * dt;
       }
       const h = this.nestHeat(this.minute, sc.nest.site);
-      colonyStep(c, dt, out, daylight, frac, this.bio, this.broodSpeed(this.minute, sc.nest.site, c.cool), av, h);
+      colonyStep(c, dt, out, daylight, frac, this.bio, this.broodSpeed(this.minute, sc.nest.site, c.cool), av, h, lb);
+      this._hiveXp(c, g, false); // a colony on the AI earns at the player's gauge (GDD 6.8)
       if (spOf(c).perennial) this._swarm(c, sc.nest);
       // the exterminator (abstract; he is drawn only for the player's own nest): called to a sister nest's neighbourhood,
       // he comes the next morning, or in two hours before mid-afternoon, and destroys it unless things calm down first

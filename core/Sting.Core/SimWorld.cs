@@ -1562,6 +1562,7 @@ namespace Sting.Core
             var nheat = NestHeat();
             Colony.Step(col, (Num)60 / dayTicks, OwnWorkers(), daylight, frac, bio, BroodSpeed(), EcoAvail(), (nheat.heat, nheat.cook), BoostNow());
             HiveXp(col);
+            GaugeTick((Num)60 / dayTicks);
             if (Raining && col.nestAlive && col.sited)
             {
                 // the site decides what rain costs: burrows flood, open nests chill (GDD 6.6)
