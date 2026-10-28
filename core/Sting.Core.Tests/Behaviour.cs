@@ -1373,6 +1373,18 @@ namespace Sting.Core.Tests
                     var r = Chase(s, t, 600);
                     Ok(r.done == "caught", $"locked on a forager bee commuting at {D(vs):0.0} m/s, assisted flight runs it down with burst ({r.done} in {r.ticks / 60.0:0.00} s)");
                 }
+                for (int side = 0; side < 2; side++)
+                {
+                    var s = new Sim(new Settings { seed = 1234, birds = false }, new SimOpts { noAI = true }); RunS(s, 1);
+                    Human hm = null;
+                    for (int k = 0; k < 60 * 60 * 20 && hm == null; k += 30) { RunS(s, 30); hm = s.active.Find(h => h.state == "stroll" && Hypot(h.vx, h.vz) > 0.5 && !h.special); }
+                    Num sp = Sqrt(Sq(hm.vx) + Sq(hm.vz)), ux = hm.vx / sp, uz = hm.vz / sp; Num ox = side == 1 ? -uz * 2 : -ux * 2, oz = side == 1 ? ux * 2 : -uz * 2;
+                    Place(s.wasp, P(hm.x + ox, 1.3, hm.z + oz));
+                    Num dx = hm.x - s.wasp.x, dy = (Num)1.25 - 1.3, dz = hm.z - s.wasp.z, dd = Sqrt(dx * dx + dy * dy + dz * dz);
+                    var t = Assist.PickTarget(s, s.wasp, new V3(dx / dd, dy / dd, dz / dd)); var v = Assist.TargetVel(s, t);
+                    var r = Chase(s, t, 900);
+                    Ok(t.kind == "human" && Math.Abs(Hypot(v.x, v.z) - D(sp)) < 1e-6 && r.done == "perched", $"locked on a person strolling at {D(sp):0.00} m/s from {(side == 1 ? "the side" : "behind")}, assisted flight comes up at their pace and settles on them ({r.done} in {r.ticks / 60.0:0.00} s)");
+                }
             }
             // 54. obstacle avoidance in assisted flight (GDD 7.9): round a trunk and over a fence rather than into them
             {

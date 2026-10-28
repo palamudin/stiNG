@@ -1087,12 +1087,7 @@ export class Sim {
     if (powered) {
       const sw = w.swoopUntil > this.tick; // the swoop: a dash along the heading, steered at speed (GDD 7.9)
       if (sw && dx === 0 && dy === 0 && dz === 0) { const sy = dsin(w.yaw), cy = dcos(w.yaw), sp = dsin(w.pitch), cp = dcos(w.pitch); dx = sy * cp; dy = sp; dz = cy * cp; }
-      let top = sw ? T.swoop.speed : burst ? W.burst : W.cruise;
-      if (w.carry) top *= W.carrySpeedMul;
-      if (w.caste === 'queen') top *= T.queen.speedMul;
-      else if (w.caste === 'male') top *= T.males.speedMul;
-      if (rain) top *= T.weather.rainSpeedMul;
-      top *= spw(w).speed * this._mul(w, 'speed'); // a hornet is quicker, a bee slower (GDD 6.8); the speed skill
+      const top = this.topSpeed(w, burst, sw);
       // The wasp flies in moving air (GDD 5.3): its airspeed is capped at its top speed and the wind adds to it, so it
       // is faster downwind and slower upwind. With no input it leans into the wind and holds its place, which is flying
       // all the same; with full input it flies its course at top airspeed. A wind stronger than it can fly carries it off.
@@ -1310,12 +1305,14 @@ export class Sim {
       const dx = w.x - hm.x, dz = w.z - hm.z;
       if (dx * dx + dz * dz > 4) continue;
       const lp = toLocal(hm, w);
+      // a walker moves in steps (20 Hz): their pace over one step is how far off they may be between them (GDD 7.9)
+      const slack = Math.sqrt(sq(hm.vx || 0) + sq(hm.vz || 0)) * 3 * DT;
       for (const part of hm.parts[hm.posture]) {
         const q = segClosest(part.a, part.b, lp);
         const ex = lp.x - q.x, ey = lp.y - q.y, ez = lp.z - q.z;
         const d = Math.sqrt(ex * ex + ey * ey + ez * ez);
         if (d === 0) continue;
-        const gap = d - part.r - R;
+        const gap = d - part.r - R - slack;
         if (gap <= bestGap) {
           bestGap = gap;
           const n = { x: ex / d, y: ey / d, z: ez / d };
@@ -2616,12 +2613,24 @@ export class Sim {
     return false;
   }
 
+  // A wasp's top airspeed now, m/s: cruising, with burst, or in a swoop; slower carrying, as a queen or a male, in the
+  // rain; then the species and the speed skill (GDD 6.8)
+  topSpeed(w, burst, sw) {
+    const W = T.wasp;
+    let top = sw ? T.swoop.speed : burst ? W.burst : W.cruise;
+    if (w.carry) top *= W.carrySpeedMul;
+    if (w.caste === 'queen') top *= T.queen.speedMul;
+    else if (w.caste === 'male') top *= T.males.speedMul;
+    if (this.raining) top *= T.weather.rainSpeedMul;
+    top *= spw(w).speed * this._mul(w, 'speed'); // a hornet is quicker, a bee slower (GDD 6.8); the speed skill
+    return top;
+  }
   _humans() {
     const P = T.panic;
     // a snapshot: the exterminator leaving rebuilds the list mid-step, and he leaves on different ticks on different
     // peers (his search is his colony's own business, T1-7), so no one else's step may depend on it
     const list = this.active.slice();
-    const old = list.map((h) => h.panic);
+    const old = list.map((h) => h.panic), ox = list.map((h) => h.x), oz = list.map((h) => h.z);
     const r2 = P.contagionRadius * P.contagionRadius;
     const md = minuteOfDay(this.minute);
     for (let i = 0; i < list.length; i++) {
@@ -2670,6 +2679,11 @@ export class Sim {
         else if (hm.home.act === 'stroll' || hm.home.act === 'garden') { hm.state = hm.home.act; hm.wp = 1 % (hm.home.path.length / 2); hm.until = 0; hm.walking = true; }
         else this._annoyance(hm);
       }
+    }
+    // how fast each one is going, m/s, for a wasp locked on to them (GDD 7.9); a jump (arriving, sitting down) is not a pace
+    for (let i = 0; i < list.length; i++) {
+      const hm = list[i], vx = (hm.x - ox[i]) * 20, vz = (hm.z - oz[i]) * 20, fast = vx * vx + vz * vz > T.panic.fleeSpeed * T.panic.fleeSpeed * 4;
+      hm.vx = fast ? 0 : vx; hm.vz = fast ? 0 : vz;
     }
   }
 
@@ -3836,7 +3850,9 @@ export class Sim {
 
   _maybeLand(w, cmd) {
     if (cmd.mx || cmd.my || cmd.mz || cmd.burst || cmd.sting || this.tick < (w.noLandUntil || 0)) return;
-    if (w.vx * w.vx + w.vy * w.vy + w.vz * w.vz > T.land.maxSpeed * T.land.maxSpeed) return;
+    // settling on a person who is walking is matching their pace, not stopping dead (GDD 7.9)
+    const ch = w.contact && !w.contact.blockedPerch ? this.humanByHex(w.contact.humanHex) : null, rx = w.vx - (ch && ch.vx || 0), rz = w.vz - (ch && ch.vz || 0);
+    if (rx * rx + w.vy * w.vy + rz * rz > T.land.maxSpeed * T.land.maxSpeed) return;
     if (w.contact && !w.contact.blockedPerch) { this._perch(w, w.contact); return; }
     const s = this._staticSurface(w, T.land.reach * this._mul(w, 'landR')); // the landing reach skill (GDD 6.8)
     if (!s) return;

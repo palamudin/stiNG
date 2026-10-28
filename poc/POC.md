@@ -129,6 +129,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 101 | Wintering in (6.8): a nest inside a house (its wall or attic, not a garden shed) or in a giant tree's hollow is warm; the colony keeps its queen and workers past the autumn and comes through the winter, and the winter screen offers to stay in it (the default), with the young queens founding colonies of the line. A colony in a house that grows to 150 is found by the household, who call the exterminator and show him the nest. Honeybees in exposed nests lose more over winter | 6.6, 6.7, 6.8 | 22 |
 | 102 | Chasing moving prey: locked on a fly or a bee, W keeps the prey's pace plus closing speed instead of easing off, and assisted flight and the locked swoop lead it (with burst for a quick bee). The colony view (N) frees the mouse to click and scroll, is twice as wide with skills in two columns, and closes with N or Esc; its time speed moved to the pause menu | 7.9, 10.3 | 23 |
 | 103 | Obstacle avoidance: assisted flight looks up to a metre ahead and, when a trunk, fence, wall or roof is in the way, takes the smallest clear turn (up, sideways, wider) that keeps the goal in sight, so it goes round the home tree and over a garden fence instead of pressing into them | 7.9 | 24 |
+| 104 | Reaching what moves: people have a pace, and under a lock W and assisted flight fly the target's velocity plus closing speed instead of slowing near it, so a walker or a bee can be reached; letting go against a walker settles on them at their pace | 7.9 | 24 |
 
 ## Verified
 

@@ -1573,14 +1573,20 @@ function buildCmd() {
     alloc: input.alloc,
     pick: input.switchTo ? (input.switchTo = 0, -(1000 + switchOnce)) : input.learn ? (input.learn = 0, -(learnOnce + 1)) : input.pick ? (input.pick = 0, pickOnce) : 0, // negative picks: take a colony in hand, learn a skill (GDD 6.8)
   };
-  // locked on: closing in slows near the target, so W brings you up to it rather than past it; a moving target is not
-  // slowed for: you keep its pace plus closing speed, so you can catch it
+  // locked on: closing in on something that stays put slows near it, so W brings you up to it rather than past it. A
+  // moving target (prey, a walker) is never slowed for: W flies its velocity plus closing speed toward it, so the gap
+  // shrinks whichever way it goes and you match its pace when you reach it (Shift for more when it is quick)
   if (input.lock && !input.pilot && cmd.mz > 0) {
     const w = sim._driven(), p = w && targetPos(sim, input.lock);
     if (p) {
-      const v = targetVel(sim, input.lock), vs = Math.hypot(v.x, v.y, v.z);
-      const floor = vs > CHASE.moving ? Math.min(1, vs / T.wasp.cruise + CHASE.close) : 0.12;
-      cmd.mz = Math.max(1, Math.round(cmd.mz * Math.max(floor, Math.min(1, Math.hypot(p.x - w.x, p.y - w.y, p.z - w.z) / 0.6))));
+      const v = targetVel(sim, input.lock), vs = Math.hypot(v.x, v.y, v.z), dx = p.x - w.x, dy = p.y - w.y, dz = p.z - w.z, dist = Math.hypot(dx, dy, dz);
+      if (vs > CHASE.moving && !cmd.mx && !cmd.my && dist > 1e-6) {
+        const top = sim.topSpeed(w, cmd.burst, false), prey = TARGET_KIND[input.lock.kind] && TARGET_KIND[input.lock.kind].prey;
+        const close = (prey ? Math.max(CHASE.closeMin, dist * 2.2) : Math.min(top, Math.max(0.15, dist * 2.2))) * cmd.mz / 100 / dist;
+        const fx = v.x + dx * close, fy = v.y + dy * close, fz = v.z + dz * close;
+        cmd.mz = Math.max(1, Math.min(100, Math.round(Math.hypot(fx, fy, fz) / top * 100)));
+        cmd.yawQ = Math.round(Math.atan2(fx, fz) * 1e4); cmd.pitchQ = Math.round(Math.max(-1.45, Math.min(1.45, Math.atan2(fy, Math.hypot(fx, fz)))) * 1e4);
+      } else if (vs <= CHASE.moving) cmd.mz = Math.max(1, Math.round(cmd.mz * Math.max(0.12, Math.min(1, dist / 0.6))));
     }
   }
   // a locked swoop: the dash homes on the target and the slam fits it (GDD 7.9); move keys steer it as any dash

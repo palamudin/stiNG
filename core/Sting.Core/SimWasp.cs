@@ -343,13 +343,15 @@ namespace Sting.Core
                 Num dx = w.x - hm.x, dz = w.z - hm.z;
                 if (dx * dx + dz * dz > 4) continue;
                 var lp = Body.ToLocal(hm.F, w.P);
+                // a walker moves in steps (20 Hz): their pace over one step is how far off they may be between them (GDD 7.9)
+                Num slack = Sqrt(Sq(hm.vx) + Sq(hm.vz)) * 3 * T.DT;
                 foreach (var part in hm.PartsNow)
                 {
                     var q = Body.SegClosest(part.a, part.b, lp);
                     Num ex = lp.x - q.x, ey = lp.y - q.y, ez = lp.z - q.z;
                     Num d = Sqrt(ex * ex + ey * ey + ez * ez);
                     if (d == 0) continue;
-                    Num gap = d - part.r - R;
+                    Num gap = d - part.r - R - slack;
                     if (gap <= bestGap)
                     {
                         bestGap = gap;

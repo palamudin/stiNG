@@ -70,6 +70,7 @@ export function targetVel(sim, t) {
   const Z = { x: 0, y: 0, z: 0 };
   if (!t) return Z;
   if (t.kind === 'wasp') { const x = sim.waspById(t.id) || sim.remote.get(t.id); return x ? { x: x.vx || 0, y: x.vy || 0, z: x.vz || 0 } : Z; }
+  if (t.kind === 'human') { const hm = sim.humanByHex(t.hex); return hm && hm.state !== 'away' ? { x: hm.vx || 0, y: 0, z: hm.vz || 0 } : Z; } // a person's pace over their last step
   if (t.kind !== 'fly' && t.kind !== 'bee' && t.kind !== 'bird' && t.kind !== 'dragonfly') return Z;
   const rec = sim.records.get(t.key);
   if (!rec) return Z;
@@ -85,7 +86,7 @@ export function targetVel(sim, t) {
   }
   return a && b ? { x: (b.x - a.x) * 60, y: (b.y - a.y) * 60, z: (b.z - a.z) * 60 } : Z;
 }
-export const CHASE = { moving: 0.05, lead: 0.5, close: 0.35, closeMin: 1 }; // m/s that counts as moving; the most lead, s; extra throttle share over its pace (manual); the least closing speed, m/s (pilot)
+export const CHASE = { moving: 0.05, lead: 0.5, close: 0.35, closeMin: 2 }; // m/s that counts as moving; the most lead, s; extra throttle share over its pace (manual); the least closing speed, m/s (pilot)
 
 // Obstacle avoidance for the assisted flight: a short look ahead along the line it means to fly, against what a wasp
 // collides with (boxes: fences, tables, walls; cylinders: trunks, poles, birdbaths; pitched roofs), each grown by a
@@ -257,10 +258,10 @@ export function assistPilot(sim, w, t, cmd) {
   const g0 = goalOf(sim, t, p);
   if (!g0) return { cmd, done: 'gone' };
   const top = T.wasp.cruise * (w.carry ? T.wasp.carrySpeedMul : 1);
-  // a moving target: aim where it will be, and fly at its pace plus closing speed (with burst when it is quick)
+  // a moving target: fly its velocity plus closing speed toward it (with burst when that is quick), so the gap shrinks
+  // whichever way it goes
   const v = targetVel(sim, t), vs = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z), moving = vs > CHASE.moving;
-  let g = g0;
-  if (moving) { const lead = Math.min(CHASE.lead, Math.sqrt(d2(w, g0)) / top); g = { ...g0, x: g0.x + v.x * lead, y: g0.y + v.y * lead, z: g0.z + v.z * lead }; }
+  const g = g0;
   // come in from above for anything to land on, along the outward side for a person
   const hd = Math.sqrt(sq(g.x - w.x) + sq(g.z - w.z));
   let wp = g;
@@ -270,16 +271,21 @@ export function assistPilot(sim, w, t, cmd) {
   const out = { ...cmd, mx: 0, my: 0, burst: 0, sting: 0 };
   if (K.prey && dg < T.prey.catchDist * 0.9) { out.mz = 0; out.act = (sim.tick & 1) ? 1 : 0; return { cmd: out, done: null }; } // grab it
   if (dg < 0.004 && !K.prey) { out.mz = 0; return { cmd: out, done: null }; } // hold still: it settles on its own
+  // touching the person at their pace: let go of the controls and it settles on them (a walker too)
+  if (moving && t.kind === 'human' && w.contact && w.contact.humanHex === t.hex && sq(w.vx - v.x) + sq(w.vy) + sq(w.vz - v.z) < sq(T.land.maxSpeed)) { out.mz = 0; return { cmd: out, done: null }; }
   const want = clamp(Math.min(d, dg) * 2.2, K.prey ? 0.3 : 0.06, top) * (dg < 0.15 && !K.prey ? 0.6 : 1);
-  if (moving) { // its pace plus closing speed; burst when that is past cruising
-    const close = Math.max(want, CHASE.closeMin), fast = vs + close > top, cap = fast ? T.wasp.burst * (w.carry ? T.wasp.carrySpeedMul : 1) : top;
+  let fx = dx, fy = dy, fz = dz; // the way to fly
+  if (moving) { // its velocity plus closing speed (prey is run down; a person is come up to gently); burst when that is past cruising
+    const close = (K.prey ? Math.max(want, CHASE.closeMin) : want) / Math.max(d, 1e-6);
+    fx = v.x + dx * close; fy = v.y + dy * close; fz = v.z + dz * close;
+    const sp = Math.sqrt(fx * fx + fy * fy + fz * fz), fast = sp > top, cap = fast ? T.wasp.burst * (w.carry ? T.wasp.carrySpeedMul : 1) : top;
     out.burst = fast ? 1 : 0;
-    out.mz = Math.round(clamp((vs + close) / cap, 0, 1) * 100);
+    out.mz = Math.round(clamp(sp / cap, 0, 1) * 100);
   } else out.mz = Math.round(clamp(want / top, 0, 1) * 100);
   const h = avoidHeading(sim, w, dx, dy, dz, d); // round what is in the way
   if (!h.turned) {
-    out.yawQ = Math.round(datan2(dx, dz) * 1e4);
-    out.pitchQ = Math.round(clamp(datan2(dy, Math.sqrt(dx * dx + dz * dz)), -1.45, 1.45) * 1e4);
+    out.yawQ = Math.round(datan2(fx, fz) * 1e4);
+    out.pitchQ = Math.round(clamp(datan2(fy, Math.sqrt(fx * fx + fz * fz)), -1.45, 1.45) * 1e4);
   } else {
     out.yawQ = Math.round(h.yaw * 1e4);
     out.pitchQ = Math.round(clamp(h.pitch, -1.45, 1.45) * 1e4);

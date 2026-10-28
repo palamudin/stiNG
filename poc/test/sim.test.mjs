@@ -2040,6 +2040,13 @@ function seated(sim, pred) {
     place(s.wasp, { x: bp.x - v.x / vs * 0.8, y: bp.y, z: bp.z - v.z / vs * 0.8 });
     const r = chase(s, t, 600);
     ok(r.done === 'caught', `locked on a forager bee commuting at ${vs.toFixed(1)} m/s, assisted flight runs it down with burst (${r.done} in ${(r.ticks / 60).toFixed(2)} s)`); }
+  for (const side of [0, 1]) { const s = new Sim({ seed: 1234, birds: false }, { noAI: true }); run(s, 1);
+    let hm = null; for (let k = 0; k < 60 * 60 * 20 && !hm; k += 30) { run(s, 30); hm = s.active.find((h) => h.state === 'stroll' && Math.hypot(h.vx, h.vz) > 0.5 && !h.special); }
+    const sp = Math.hypot(hm.vx, hm.vz), ux = hm.vx / sp, uz = hm.vz / sp, off = side ? { x: -uz * 2, z: ux * 2 } : { x: -ux * 2, z: -uz * 2 };
+    place(s.wasp, { x: hm.x + off.x, y: 1.3, z: hm.z + off.z });
+    const dx = hm.x - s.wasp.x, dy = 1.25 - 1.3, dz = hm.z - s.wasp.z, dd = Math.hypot(dx, dy, dz), t = pickTarget(s, s.wasp, { x: dx / dd, y: dy / dd, z: dz / dd }), v = targetVel(s, t);
+    const r = chase(s, t, 900);
+    ok(t.kind === 'human' && Math.abs(Math.hypot(v.x, v.z) - sp) < 1e-6 && r.done === 'perched', `locked on a person strolling at ${sp.toFixed(2)} m/s from ${side ? 'the side' : 'behind'}, assisted flight comes up at their pace and settles on them (${r.done} in ${(r.ticks / 60).toFixed(2)} s)`); }
 }
 
 // 54. Obstacle avoidance in assisted flight (GDD 7.9): round a trunk and over a fence rather than into them

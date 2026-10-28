@@ -86,7 +86,7 @@ namespace Sting.Core
 
     public static class Persist
     {
-        public const int SAVE_VERSION = 28; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home); 14: barbecue meat taken; 15: regions, pulp taken from wood; 16: strolls and garden rounds; 17: the carry ledger and sips (T1-20); 18: water (T2-1); 19: young queens on their mating flight (T2-3); 20: lineage colonies (T2-4); 21: feature modifiers (T2-6); 22: the exterminator called to a sister colony; 23: terrain; 24: the swoop; 25: species (wasps, hornets, honeybees); 26: XP and skills; 27: the player gauge, hives kept over a wasp winter; 28: wintering in somewhere warm
+        public const int SAVE_VERSION = 29; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home); 14: barbecue meat taken; 15: regions, pulp taken from wood; 16: strolls and garden rounds; 17: the carry ledger and sips (T1-20); 18: water (T2-1); 19: young queens on their mating flight (T2-3); 20: lineage colonies (T2-4); 21: feature modifiers (T2-6); 22: the exterminator called to a sister colony; 23: terrain; 24: the swoop; 25: species (wasps, hornets, honeybees); 26: XP and skills; 27: the player gauge, hives kept over a wasp winter; 28: wintering in somewhere warm; 29: a person's pace, for a lock
         const uint MAGIC = 0x474E4953; // "SING"
 
         // ---------------------------------------------------------------- one Io per type
@@ -186,7 +186,7 @@ namespace Sting.Core
         static void IoHumanState(Archive a, Human h)
         {
             IoClothing(a, ref h.clothing);
-            a.D(ref h.x); a.D(ref h.z); a.D(ref h.fx); a.D(ref h.fz); a.S(ref h.posture); a.S(ref h.state);
+            a.D(ref h.x); a.D(ref h.z); a.D(ref h.fx); a.D(ref h.fz); a.D(ref h.vx); a.D(ref h.vz); a.S(ref h.posture); a.S(ref h.state);
             a.D(ref h.panic); a.D(ref h.fleeSteps); a.D(ref h.dirX); a.D(ref h.dirZ); a.D(ref h.stungCount);
             a.L(ref h.winDay);
             if (a.Opt(ref h.win)) { a.D(ref h.win.arrive); a.D(ref h.win.leave); }

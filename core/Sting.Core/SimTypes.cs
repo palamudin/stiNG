@@ -99,7 +99,7 @@ namespace Sting.Core
     public sealed class Human
     {
         public ulong id; public string hex, @short; public Traits tr; public Clothing clothing; public string chunk; public Home home;
-        public Num x, z, fx, fz; public string posture; public string state = "idle";
+        public Num x, z, fx, fz, vx, vz; public string posture; public string state = "idle"; // vx, vz: pace over the last step (GDD 7.9)
         public Num panic, fleeSteps, dirX, dirZ, stungCount; public long winDay = -1; public HumanWin win;
         public int annoyId; public Num annoy, cooldown, sprayCount, treat; public long clothesDay; public bool special;
         public List<Part> sit, stand;

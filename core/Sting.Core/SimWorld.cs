@@ -76,8 +76,8 @@ namespace Sting.Core
             // a snapshot: the exterminator leaving rebuilds the list mid-step, and he leaves on different ticks on different
             // peers (his search is his colony's own business, T1-7), so no one else's step may depend on it
             var list = new List<Human>(active);
-            var old = new Num[list.Count];
-            for (int i = 0; i < old.Length; i++) old[i] = list[i].panic;
+            var old = new Num[list.Count]; var ox = new Num[list.Count]; var oz = new Num[list.Count];
+            for (int i = 0; i < old.Length; i++) { old[i] = list[i].panic; ox[i] = list[i].x; oz[i] = list[i].z; }
             Num r2 = T.panic.contagionRadius * T.panic.contagionRadius;
             long md = MinuteOfDay(minute);
             for (int i = 0; i < list.Count; i++)
@@ -139,6 +139,12 @@ namespace Sting.Core
                     else if (hm.home.act == "stroll" || hm.home.act == "garden") { hm.state = hm.home.act; hm.wp = 1 % (hm.home.path.Length / 2); hm.until = 0; hm.walking = true; }
                     else Annoyance(hm);
                 }
+            }
+            // how fast each one is going, m/s, for a wasp locked on to them (GDD 7.9); a jump (arriving, sitting down) is not a pace
+            for (int i = 0; i < list.Count; i++)
+            {
+                var hm = list[i]; Num vx = (hm.x - ox[i]) * 20, vz = (hm.z - oz[i]) * 20; bool fast = vx * vx + vz * vz > T.panic.fleeSpeed * T.panic.fleeSpeed * 4;
+                hm.vx = fast ? 0 : vx; hm.vz = fast ? 0 : vz;
             }
         }
 
@@ -1119,7 +1125,9 @@ namespace Sting.Core
         void MaybeLand(Wasp w, Cmd cmd)
         {
             if (cmd.mx != 0 || cmd.my != 0 || cmd.mz != 0 || cmd.burst != 0 || cmd.sting != 0 || tick < w.noLandUntil) return;
-            if (w.vx * w.vx + w.vy * w.vy + w.vz * w.vz > T.land.maxSpeed * T.land.maxSpeed) return;
+            // settling on a person who is walking is matching their pace, not stopping dead (GDD 7.9)
+            var ch = w.contact != null ? HumanByHex(w.contact.humanHex) : null; Num rx = w.vx - (ch != null ? ch.vx : 0), rz = w.vz - (ch != null ? ch.vz : 0);
+            if (rx * rx + w.vy * w.vy + rz * rz > T.land.maxSpeed * T.land.maxSpeed) return;
             if (w.contact != null) { var c = w.contact; PerchOn(w, c.humanHex, c.zone, c.surf, c.n, c.part); return; }
             var s = StaticSurface(w.P, T.land.reach * Mul(w, "landR")); // the landing reach skill (GDD 6.8)
             if (s == null) return;
