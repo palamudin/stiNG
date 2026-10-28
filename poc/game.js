@@ -1606,6 +1606,7 @@ function buildCmd() {
       input.pilot = null;
       const say = { landed: 'Landed', perched: 'On them', caught: 'Got it', gone: 'It is gone' }[r.done];
       if (say) toast(say, 'var(--yellow)', 1);
+      if (say) input.lock = null; // there, or gone: the lock has done its job
       return cmd;
     }
     return r.cmd; // the camera keeps watching the target meanwhile (updateAssist)
@@ -1623,7 +1624,8 @@ function toggleLock() {
   if (input.lock) { input.lock = null; input.pilot = null; toast('Lock released', 'var(--muted)', 0.9); return; }
   const t = pickTarget(sim, w, aimDir());
   if (!t) { toast('Nothing to lock on to', 'var(--muted)', 1.1); return; }
-  input.lock = t;
+  input.lock = { ...t, carry0: !!w.carry }; // carrying already: a catch is not what ends this lock
+  input.lock.armed = !lockArrived(w, input.lock); // locked on what it is already at: it ends once it has left and come back
   toast(`Locked on: ${targetLabel(sim, t)}`, 'var(--yellow)', 1.2);
 }
 // X (d-pad up): the swoop, a short dash along the heading; locked on, it homes and slams the way the target calls for
@@ -1652,12 +1654,28 @@ function eyeTurnUp() {
   if (!input.gLong) input.turning = true;
   input.gDown = 0;
 }
+// Has the wasp got to the locked target? The words to say when it has, else null
+function lockArrived(w, t) {
+  const K = TARGET_KIND[t.kind] || {};
+  if (K.prey) return w.carry && !t.carry0 ? 'Got it' : null;
+  if (t.kind === 'human') return w.state === 'perched' && w.perch && w.perch.hex === t.hex ? 'On them' : w.state === 'under' && w.under && w.under.hex === t.hex ? 'Under their clothes' : null;
+  if (!K.go) return null; // a hazard is watched, never reached
+  const p = targetPos(sim, t);
+  if (!p) return null;
+  const d = Math.hypot(p.x - w.x, p.y - w.y, p.z - w.z);
+  if (t.kind === 'nest') return d < 0.08 ? 'Home' : null;
+  return (w.state === 'landed' || (w.state === 'fly' && sim.feeding)) && d < 0.1 ? (t.kind === 'flower' ? 'Landed on the flower' : t.kind === 'cup' ? 'At the drink' : 'At the water') : null;
+}
 function updateAssist(dt) {
   const w = sim && sim._driven(), f = input.free;
   if (input.gDown && !input.gLong && performance.now() - input.gDown >= 1000) {
     input.gLong = true; input.autoTurn = !input.autoTurn;
     toast(input.autoTurn ? 'Auto turn on · the wasp follows your gaze' : 'Auto turn off', 'var(--muted)', 1.4);
   }
+  // like a satnav: reaching what you locked on to ends the lock, with no need to let go of it by hand
+  const arrived = input.lock && w && lockArrived(w, input.lock);
+  if (input.lock && !input.lock.armed) { if (!arrived) input.lock.armed = true; }
+  else if (arrived) { toast(arrived, 'var(--yellow)', 1); input.lock = null; input.pilot = null; }
   if (input.lock) {
     const p = targetPos(sim, input.lock);
     if (!w || !p || (p.x - w.x) ** 2 + (p.y - w.y) ** 2 + (p.z - w.z) ** 2 > LOCK.lostRange ** 2) {
