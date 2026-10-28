@@ -131,6 +131,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 103 | Obstacle avoidance: assisted flight looks up to a metre ahead and, when a trunk, fence, wall or roof is in the way, takes the smallest clear turn (up, sideways, wider) that keeps the goal in sight, so it goes round the home tree and over a garden fence instead of pressing into them | 7.9 | 24 |
 | 104 | Reaching what moves: people have a pace, and under a lock W and assisted flight fly the target's velocity plus closing speed instead of slowing near it, so a walker or a bee can be reached; letting go against a walker settles on them at their pace | 7.9 | 24 |
 | 105 | The lock ends on arrival, like a satnav: landed on the flower, drink or water, perched on (or under the clothes of) the person, the prey caught, at the nest; a lock on what the wasp already sits on waits until it has left and come back | 7.9 | 24 |
+| 106 | Shift on an assisted flight (to land, perch or snatch prey) hurries it at burst speed instead of taking the controls back; it still slows to settle, and Shift still held on arrival does not take off again until let go | 7.9 | 24 |
 
 ## Verified
 

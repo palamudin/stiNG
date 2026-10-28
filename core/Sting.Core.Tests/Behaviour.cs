@@ -1385,6 +1385,20 @@ namespace Sting.Core.Tests
                     var r = Chase(s, t, 900);
                     Ok(t.kind == "human" && Math.Abs(Hypot(v.x, v.z) - D(sp)) < 1e-6 && r.done == "perched", $"locked on a person strolling at {D(sp):0.00} m/s from {(side == 1 ? "the side" : "behind")}, assisted flight comes up at their pace and settles on them ({r.done} in {r.ticks / 60.0:0.00} s)");
                 }
+                {
+                    (string done, int ticks, int bursts, double at) Go(bool hurry)
+                    {
+                        var s = new Sim(new Settings { seed = 1234, birds = false }, new SimOpts { noAI = true }); RunS(s, 1);
+                        s.records.TryGet("0,0", out var rec); int fi = -1; for (int k = 0; k < rec.content.flowers.Count && fi < 0; k++) if (s.InBloom(rec, k) && s.NectarAt(rec, k) > 0) fi = k; var f = rec.content.flowers[fi];
+                        Place(s.wasp, P(f.x + 3, f.y + 0.8, f.z - 2));
+                        var t = new LockTarget { kind = "flower", key = "0,0", i = fi };
+                        (Cmd cmd, string done) r = (null, null); int n = 0, bursts = 0;
+                        for (; n < 900; n++) { var c = Idle(); c.burst = hurry ? 1 : 0; r = Assist.Pilot(s, s.wasp, t, c); if (r.done != null) break; bursts += r.cmd.burst; s.Step(r.cmd); s.DrainEvents(); }
+                        return (r.done, n, bursts, Hypot(s.wasp.x - f.x, s.wasp.z - f.z));
+                    }
+                    var a = Go(false); var b = Go(true);
+                    Ok(a.done == "landed" && b.done == "landed" && b.bursts > 0 && b.ticks < a.ticks && b.at < 0.04, $"Shift held on an assisted flight to a flower 3.7 m off hurries it at burst speed and it still lands ({b.ticks / 60.0:0.00} s against {a.ticks / 60.0:0.00} s)");
+                }
             }
             // 54. obstacle avoidance in assisted flight (GDD 7.9): round a trunk and over a fence rather than into them
             {

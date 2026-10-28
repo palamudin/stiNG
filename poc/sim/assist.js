@@ -257,7 +257,8 @@ export function assistPilot(sim, w, t, cmd) {
   if (K.prey && w.carry) return { cmd, done: 'caught' };
   const g0 = goalOf(sim, t, p);
   if (!g0) return { cmd, done: 'gone' };
-  const top = T.wasp.cruise * (w.carry ? T.wasp.carrySpeedMul : 1);
+  const hurry = !!cmd.burst; // Shift held on an assisted flight: it flies there at burst speed (and still slows to settle)
+  const top = (hurry ? T.wasp.burst : T.wasp.cruise) * (w.carry ? T.wasp.carrySpeedMul : 1);
   // a moving target: fly its velocity plus closing speed toward it (with burst when that is quick), so the gap shrinks
   // whichever way it goes
   const v = targetVel(sim, t), vs = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z), moving = vs > CHASE.moving;
@@ -268,18 +269,18 @@ export function assistPilot(sim, w, t, cmd) {
   if (g.above && hd > 0.06) wp = { x: g.x, y: g.y + Math.min(0.4, 0.3 * hd + 0.04), z: g.z };
   else if (g.n && Math.sqrt(d2(w, g)) > 0.2) wp = { x: g.x + g.n.x * 0.15, y: g.y + g.n.y * 0.15, z: g.z + g.n.z * 0.15 };
   const dx = wp.x - w.x, dy = wp.y - w.y, dz = wp.z - w.z, d = Math.sqrt(dx * dx + dy * dy + dz * dz), dg = Math.sqrt(d2(w, g0)); // how near it really is
-  const out = { ...cmd, mx: 0, my: 0, burst: 0, sting: 0 };
+  const out = { ...cmd, mx: 0, my: 0, burst: hurry ? 1 : 0, sting: 0 };
   if (K.prey && dg < T.prey.catchDist * 0.9) { out.mz = 0; out.act = (sim.tick & 1) ? 1 : 0; return { cmd: out, done: null }; } // grab it
-  if (dg < 0.004 && !K.prey) { out.mz = 0; return { cmd: out, done: null }; } // hold still: it settles on its own
+  if (dg < 0.004 && !K.prey) { out.mz = 0; out.burst = 0; return { cmd: out, done: null }; } // hold still: it settles on its own
   // touching the person at their pace: let go of the controls and it settles on them (a walker too)
-  if (moving && t.kind === 'human' && w.contact && w.contact.humanHex === t.hex && sq(w.vx - v.x) + sq(w.vy) + sq(w.vz - v.z) < sq(T.land.maxSpeed)) { out.mz = 0; return { cmd: out, done: null }; }
+  if (moving && t.kind === 'human' && w.contact && w.contact.humanHex === t.hex && sq(w.vx - v.x) + sq(w.vy) + sq(w.vz - v.z) < sq(T.land.maxSpeed)) { out.mz = 0; out.burst = 0; return { cmd: out, done: null }; }
   const want = clamp(Math.min(d, dg) * 2.2, K.prey ? 0.3 : 0.06, top) * (dg < 0.15 && !K.prey ? 0.6 : 1);
   let fx = dx, fy = dy, fz = dz; // the way to fly
   if (moving) { // its velocity plus closing speed (prey is run down; a person is come up to gently); burst when that is past cruising
     const close = (K.prey ? Math.max(want, CHASE.closeMin) : want) / Math.max(d, 1e-6);
     fx = v.x + dx * close; fy = v.y + dy * close; fz = v.z + dz * close;
     const sp = Math.sqrt(fx * fx + fy * fy + fz * fz), fast = sp > top, cap = fast ? T.wasp.burst * (w.carry ? T.wasp.carrySpeedMul : 1) : top;
-    out.burst = fast ? 1 : 0;
+    out.burst = fast || hurry ? 1 : 0;
     out.mz = Math.round(clamp(sp / cap, 0, 1) * 100);
   } else out.mz = Math.round(clamp(want / top, 0, 1) * 100);
   const h = avoidHeading(sim, w, dx, dy, dz, d); // round what is in the way

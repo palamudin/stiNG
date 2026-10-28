@@ -303,7 +303,8 @@ namespace Sting.Core
             if (K.prey && w.carry != null) return (cmd, "caught");
             var g0 = GoalOf(sim, t, p.Value);
             if (g0 == null) return (cmd, "gone");
-            Num top = T.wasp.cruise * (w.carry != null ? T.wasp.carrySpeedMul : 1);
+            bool hurry = cmd.burst != 0; // Shift held on an assisted flight: it flies there at burst speed (and still slows to settle)
+            Num top = (hurry ? T.wasp.burst : T.wasp.cruise) * (w.carry != null ? T.wasp.carrySpeedMul : 1);
             // a moving target: fly its velocity plus closing speed toward it (with burst when that is quick), so the gap shrinks
             // whichever way it goes
             var v = TargetVel(sim, t); Num vs = Sqrt(v.x * v.x + v.y * v.y + v.z * v.z); bool moving = vs > chaseMoving;
@@ -313,11 +314,11 @@ namespace Sting.Core
             if (g.above && hd > 0.06) wp = new V3(g.p.x, g.p.y + Min(0.4, 0.3 * hd + 0.04), g.p.z);
             else if (g.n != null && Sqrt(D2(w, g.p)) > 0.2) { var n = g.n.Value; wp = new V3(g.p.x + n.x * 0.15, g.p.y + n.y * 0.15, g.p.z + n.z * 0.15); }
             Num dx = wp.x - w.x, dy = wp.y - w.y, dz = wp.z - w.z, d = Sqrt(dx * dx + dy * dy + dz * dz), dg = Sqrt(D2(w, g0.p)); // how near it really is
-            var o = Copy();
+            var o = Copy(); o.burst = hurry ? 1 : 0;
             if (K.prey && dg < T.prey.catchDist * 0.9) { o.mz = 0; o.act = (sim.tick & 1) != 0 ? 1 : 0; return (o, null); } // grab it
-            if (dg < 0.004 && !K.prey) { o.mz = 0; return (o, null); } // hold still: it settles on its own
+            if (dg < 0.004 && !K.prey) { o.mz = 0; o.burst = 0; return (o, null); } // hold still: it settles on its own
             // touching the person at their pace: let go of the controls and it settles on them (a walker too)
-            if (moving && t.kind == "human" && w.contact != null && w.contact.humanHex == t.hex && Sq(w.vx - v.x) + Sq(w.vy) + Sq(w.vz - v.z) < Sq(T.land.maxSpeed)) { o.mz = 0; return (o, null); }
+            if (moving && t.kind == "human" && w.contact != null && w.contact.humanHex == t.hex && Sq(w.vx - v.x) + Sq(w.vy) + Sq(w.vz - v.z) < Sq(T.land.maxSpeed)) { o.mz = 0; o.burst = 0; return (o, null); }
             Num want = Clamp(Min(d, dg) * 2.2, K.prey ? 0.3 : 0.06, top) * (dg < 0.15 && !K.prey ? 0.6 : 1);
             Num fx = dx, fy = dy, fz = dz; // the way to fly
             if (moving)
@@ -325,7 +326,7 @@ namespace Sting.Core
                 Num close = (K.prey ? Max(want, chaseCloseMin) : want) / Max(d, 1e-6);
                 fx = v.x + dx * close; fy = v.y + dy * close; fz = v.z + dz * close;
                 Num sp = Sqrt(fx * fx + fy * fy + fz * fz); bool fast = sp > top; Num cap = fast ? T.wasp.burst * (w.carry != null ? T.wasp.carrySpeedMul : 1) : top;
-                o.burst = fast ? 1 : 0;
+                o.burst = fast || hurry ? 1 : 0;
                 o.mz = RndI(Clamp(sp / cap, 0, 1) * 100);
             }
             else o.mz = RndI(Clamp(want / top, 0, 1) * 100);

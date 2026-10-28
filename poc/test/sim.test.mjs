@@ -2047,6 +2047,14 @@ function seated(sim, pred) {
     const dx = hm.x - s.wasp.x, dy = 1.25 - 1.3, dz = hm.z - s.wasp.z, dd = Math.hypot(dx, dy, dz), t = pickTarget(s, s.wasp, { x: dx / dd, y: dy / dd, z: dz / dd }), v = targetVel(s, t);
     const r = chase(s, t, 900);
     ok(t.kind === 'human' && Math.abs(Math.hypot(v.x, v.z) - sp) < 1e-6 && r.done === 'perched', `locked on a person strolling at ${sp.toFixed(2)} m/s from ${side ? 'the side' : 'behind'}, assisted flight comes up at their pace and settles on them (${r.done} in ${(r.ticks / 60).toFixed(2)} s)`); }
+  // Shift held on an assisted flight hurries it at burst speed instead of taking the controls back, and it still settles
+  { const go = (hurry) => { const s = new Sim({ seed: 1234, birds: false }, { noAI: true }); run(s, 1);
+      const rec = s.records.get('0,0'), fi = rec.content.flowers.findIndex((f, k) => s.inBloom(rec, k) && s.nectarAt(rec, k) > 0), f = rec.content.flowers[fi];
+      place(s.wasp, { x: f.x + 3, y: f.y + 0.8, z: f.z - 2 });
+      let r = null, k = 0, bursts = 0; for (; k < 900; k++) { r = assistPilot(s, s.wasp, { kind: 'flower', key: '0,0', i: fi }, { ...idle(), burst: hurry ? 1 : 0 }); if (r.done) break; bursts += r.cmd.burst; s.step(r.cmd); s.drainEvents(); }
+      return { done: r && r.done, ticks: k, bursts, at: Math.hypot(s.wasp.x - f.x, s.wasp.z - f.z) }; };
+    const a = go(false), b = go(true);
+    ok(a.done === 'landed' && b.done === 'landed' && b.bursts > 0 && b.ticks < a.ticks && b.at < 0.04, `Shift held on an assisted flight to a flower 3.7 m off hurries it at burst speed and it still lands (${(b.ticks / 60).toFixed(2)} s against ${(a.ticks / 60).toFixed(2)} s)`); }
 }
 
 // 54. Obstacle avoidance in assisted flight (GDD 7.9): round a trunk and over a fence rather than into them

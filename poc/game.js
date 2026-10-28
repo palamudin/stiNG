@@ -1573,6 +1573,7 @@ function buildCmd() {
     alloc: input.alloc,
     pick: input.switchTo ? (input.switchTo = 0, -(1000 + switchOnce)) : input.learn ? (input.learn = 0, -(learnOnce + 1)) : input.pick ? (input.pick = 0, pickOnce) : 0, // negative picks: take a colony in hand, learn a skill (GDD 6.8)
   };
+  if (input.eatBurst) { if (cmd.burst) cmd.burst = 0; else input.eatBurst = false; }
   // locked on: closing in on something that stays put slows near it, so W brings you up to it rather than past it. A
   // moving target (prey, a walker) is never slowed for: W flies its velocity plus closing speed toward it, so the gap
   // shrinks whichever way it goes and you match its pace when you reach it (Shift for more when it is quick)
@@ -1600,13 +1601,15 @@ function buildCmd() {
   // assisted flight: the wasp flies itself to the locked target until you touch the controls (GDD 7.9)
   if (input.pilot) {
     const w = sim._driven();
-    if (!w || cmd.mx || cmd.my || cmd.mz || cmd.burst || cmd.sting) { input.pilot = null; if (w) toast('You have it', 'var(--muted)', 0.8); return cmd; }
+    // a move key or the sting takes the controls back; Shift does not: it hurries the flight (burst speed)
+    if (!w || cmd.mx || cmd.my || cmd.mz || cmd.sting) { input.pilot = null; if (w) toast('You have it', 'var(--muted)', 0.8); return cmd; }
     const r = assistPilot(sim, w, input.pilot, cmd);
     if (r.done) {
       input.pilot = null;
       const say = { landed: 'Landed', perched: 'On them', caught: 'Got it', gone: 'It is gone' }[r.done];
       if (say) toast(say, 'var(--yellow)', 1);
       if (say) input.lock = null; // there, or gone: the lock has done its job
+      if (cmd.burst) { input.eatBurst = true; cmd.burst = 0; } // Shift still held from hurrying: not a take-off until let go
       return cmd;
     }
     return r.cmd; // the camera keeps watching the target meanwhile (updateAssist)
@@ -2089,7 +2092,7 @@ function updateHud() {
   else if (w.state === 'fighting') hint = `Mash ${kbd('LMB')} to sting it first`;
   else if (w.state === 'landed') hint = w.walking ? 'Walking · it follows the surface round edges, up trunks and under tables · look where you want to go' : `Resting costs no sugar in the warmth · mouse turns · ${kbd('W')}${kbd('A')}${kbd('S')}${kbd('D')} walk on any surface · ${kbd('LMB')} sting someone within reach · ${kbd('Space')} or ${kbd('Shift')} take off`;
   else if (w.state === 'perched') hint = `${kbd('W')}${kbd('A')}${kbd('S')}${kbd('D')} crawl (look up or down to climb) · ${kbd('LMB')} sting · ${kbd('Space')} take off · ${kbd('E')} crawl under at an opening`;
-  else if (input.pilot) hint = `Flying to the ${targetLabel(sim, input.pilot)} · any move key takes over`;
+  else if (input.pilot) hint = `Flying to the ${targetLabel(sim, input.pilot)} · ${kbd("Shift")} faster · any move key takes over`;
   else if (input.lock && !h.prey && !h.opening && !h.water && !h.wood) hint = `Locked on the ${targetLabel(sim, input.lock)} · ${kbd('W')} close in · ${kbd('S')} back off · ${kbd('A')}${kbd('D')} circle${TARGET_KIND[input.lock.kind].go ? ` · ${kbd('E')} ${TARGET_KIND[input.lock.kind].go}` : ''} · ${kbd('V')} release`;
   else if (h.rival) hint = `${kbd('E')} steal a larva from the rival nest`;
   else if (h.raid !== null && h.raid !== undefined) hint = `${kbd('E')} steal a larva from player ${h.raid + 1}'s nest · their guards will come after you`;
