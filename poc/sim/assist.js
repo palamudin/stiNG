@@ -5,7 +5,7 @@
 import { T } from './tuning.js';
 import { chunkKey, flyPos, beePos, birdPos, dragonPos } from './world.js';
 import { toWorld, toLocal, segClosest } from './body.js';
-import { datan2, clamp } from './rng.js';
+import { datan2, clamp, dsin, dcos } from './rng.js';
 import { Act } from './sim.js';
 
 const sq = (v) => v * v;
@@ -86,6 +86,66 @@ export function targetVel(sim, t) {
   return a && b ? { x: (b.x - a.x) * 60, y: (b.y - a.y) * 60, z: (b.z - a.z) * 60 } : Z;
 }
 export const CHASE = { moving: 0.05, lead: 0.5, close: 0.35, closeMin: 1 }; // m/s that counts as moving; the most lead, s; extra throttle share over its pace (manual); the least closing speed, m/s (pilot)
+
+// Obstacle avoidance for the assisted flight: a short look ahead along the line it means to fly, against what a wasp
+// collides with (boxes: fences, tables, walls; cylinders: trunks, poles, birdbaths; pitched roofs), each grown by a
+// clearance. Sampled every step m from step on (so a surface it is just leaving does not count), up to look m, which
+// grows with speed (lookT s) between lookMin and lookMax; never closer than stopShort to where it is going, so the
+// spot it lands on is not an obstacle. Blocked, it tries headings turned and climbing (turns: [yaw, pitch] off the
+// line, radians), scores each by how far it strays plus keep times how far it leaves its present course (so it does not
+// flip between sides), and flies the best clear one. With none clear (pinned against a fence, say) it takes the one
+// that stays clear longest: straight up, or back and up, to get round. The ground is not an obstacle.
+export const AVOID = { clear: 0.03, step: 0.05, lookMin: 0.3, lookMax: 1, lookT: 0.35, stopShort: 0.12, keep: 0.6, maxPitch: 1.45, seeMax: 2, blind: 2,
+  turns: [[0, 0.5], [0.5, 0], [-0.5, 0], [0.5, 0.5], [-0.5, 0.5], [0, 1], [1, 0], [-1, 0], [1, 0.5], [-1, 0.5], [1.5, 0], [-1.5, 0], [0, 1.3], [0, 3], [3.14159, 1.6]] };
+// Is there anything solid near point (x, y, z), within c? recs: the chunks to look in
+function solidAt(sim, recs, x, y, z, c) {
+  for (const rec of recs) {
+    for (const b of rec.content.boxes) if (x > b.minx - c && x < b.maxx + c && y > b.miny - c && y < b.maxy + c && z > b.minz - c && z < b.maxz + c) return true;
+    for (const cy of sim._cylsOf(rec)) if (y < cy.h + c && sq(x - cy.x) + sq(z - cy.z) < sq(cy.r + c)) return true;
+    for (const f of sim._roofsOf(rec)) {
+      const r = sim._roofLocal(f, { x, y, z }), au = Math.abs(r.u), av = Math.abs(r.v);
+      if (av > f.half + c || au > f.S + c || r.y < -c || r.y > f.rise + c) continue;
+      if ((f.rise * (au - f.S) + f.S * r.y) / f.L < c && av - f.half < c) return true;
+    }
+  }
+  return false;
+}
+// How far the way from (x, y, z) along unit d is clear, up to len m (len when it all is)
+export function clearLen(sim, x, y, z, d, len) {
+  const A = AVOID, c = T.wasp.radius + A.clear, ex = x + d.x * len, ez = z + d.z * len, CS = T.chunk.size;
+  const lox = Math.min(x, ex) - c, hix = Math.max(x, ex) + c, loz = Math.min(z, ez) - c, hiz = Math.max(z, ez) + c;
+  const recs = sim.activeChunks.filter((r) => r.cx * CS + CS / 2 >= lox - 2 && r.cx * CS - CS / 2 <= hix + 2 && r.cz * CS + CS / 2 >= loz - 2 && r.cz * CS - CS / 2 <= hiz + 2);
+  const n = Math.floor(len / A.step);
+  for (let k = 1; k <= n; k++) {
+    const s = k * A.step, py = y + d.y * s;
+    if (py < c) continue; // the ground is not in the way
+    if (solidAt(sim, recs, x + d.x * s, py, z + d.z * s, c)) return (k - 1) * A.step;
+  }
+  return len;
+}
+// The heading to fly toward (dx, dy, dz) from the wasp, round whatever is in the way: { yaw, pitch, turned }
+export function avoidHeading(sim, w, dx, dy, dz, dist) {
+  const A = AVOID, hd = Math.sqrt(dx * dx + dz * dz), yaw0 = datan2(dx, dz), pitch0 = datan2(dy, hd);
+  const sp = Math.sqrt(w.vx * w.vx + w.vy * w.vy + w.vz * w.vz), len = Math.min(clamp(sp * A.lookT + A.lookMin, A.lookMin, A.lookMax), dist - A.stopShort);
+  const dir = (yaw, pitch) => ({ x: dsin(yaw) * dcos(pitch), y: dsin(pitch), z: dcos(yaw) * dcos(pitch) });
+  if (len < A.step || clearLen(sim, w.x, w.y, w.z, dir(yaw0, pitch0), len) >= len) return { yaw: yaw0, pitch: pitch0, turned: false };
+  let best = null, bs = Infinity, far = null, fl = A.step;
+  for (const [yo, po] of A.turns) {
+    const yaw = yaw0 + yo, pitch = clamp(pitch0 + po, -A.maxPitch, A.maxPitch), d = dir(yaw, pitch);
+    let sc = Math.abs(yo) + Math.abs(po);
+    if (sp > 0.3) sc += A.keep * (1 - (d.x * w.vx + d.y * w.vy + d.z * w.vz) / sp);
+    if (sc >= bs && best) continue;
+    const cl = clearLen(sim, w.x, w.y, w.z, d, len);
+    if (cl >= len) {
+      // a way that only runs along the obstacle (a long fence) gets nowhere: rather one from whose end the goal shows
+      const ex = dx - d.x * len, ey = dy - d.y * len, ez = dz - d.z * len, el = Math.sqrt(ex * ex + ey * ey + ez * ez), m = Math.min(el - A.stopShort, A.seeMax);
+      if (m >= A.step && clearLen(sim, w.x + d.x * len, w.y + d.y * len, w.z + d.z * len, { x: ex / el, y: ey / el, z: ez / el }, m) < m) sc += A.blind;
+      if (sc < bs) { bs = sc; best = { yaw, pitch, turned: true }; }
+    }
+    else if (cl > fl) { fl = cl; far = { yaw, pitch, turned: true }; } // none clear yet: the one that gets furthest
+  }
+  return best || far || { yaw: yaw0, pitch: pitch0, turned: false }; // boxed in: straight on, and slide as before
+}
 
 // Everything the wasp could lock on to round it, with where it is
 function candidates(sim, w) {
@@ -216,8 +276,15 @@ export function assistPilot(sim, w, t, cmd) {
     out.burst = fast ? 1 : 0;
     out.mz = Math.round(clamp((vs + close) / cap, 0, 1) * 100);
   } else out.mz = Math.round(clamp(want / top, 0, 1) * 100);
-  out.yawQ = Math.round(datan2(dx, dz) * 1e4);
-  out.pitchQ = Math.round(clamp(datan2(dy, Math.sqrt(dx * dx + dz * dz)), -1.45, 1.45) * 1e4);
+  const h = avoidHeading(sim, w, dx, dy, dz, d); // round what is in the way
+  if (!h.turned) {
+    out.yawQ = Math.round(datan2(dx, dz) * 1e4);
+    out.pitchQ = Math.round(clamp(datan2(dy, Math.sqrt(dx * dx + dz * dz)), -1.45, 1.45) * 1e4);
+  } else {
+    out.yawQ = Math.round(h.yaw * 1e4);
+    out.pitchQ = Math.round(clamp(h.pitch, -1.45, 1.45) * 1e4);
+    if (!moving) out.mz = Math.max(out.mz, 50); // keep moving round it
+  }
   out.act = 0;
   return { cmd: out, done: null };
 }

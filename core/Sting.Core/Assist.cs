@@ -211,6 +211,75 @@ namespace Sting.Core
 
         /// one tick of the pilot: the command that takes the wasp to the target and settles it there or catches it;
         /// done says why the flight is over ("landed", "perched", "caught", "gone", "no"), null while it goes on
+        // Obstacle avoidance (GDD 7.9): before flying straight at the goal, look a short way ahead (further the faster it
+        // goes) for anything solid; if the way is blocked, try a fan of turns (up first, then the sides, then wider, a
+        // little in favour of the way it is already going so it does not flip between sides), and fly the best clear one.
+        // A way that only runs along the obstacle scores worse than one from whose end the goal shows. With none clear it
+        // takes the one that stays clear longest. The ground is not an obstacle. Matches poc/sim/assist.js AVOID.
+        public static readonly Num avClear = 0.03, avStep = 0.05, avLookMin = 0.3, avLookMax = 1, avLookT = 0.35, avStopShort = 0.12, avKeep = 0.6, avMaxPitch = 1.45, avSeeMax = 2, avBlind = 2;
+        public static readonly Num[][] avTurns = {
+            new Num[] { 0, 0.5 }, new Num[] { 0.5, 0 }, new Num[] { -0.5, 0 }, new Num[] { 0.5, 0.5 }, new Num[] { -0.5, 0.5 }, new Num[] { 0, 1 }, new Num[] { 1, 0 }, new Num[] { -1, 0 },
+            new Num[] { 1, 0.5 }, new Num[] { -1, 0.5 }, new Num[] { 1.5, 0 }, new Num[] { -1.5, 0 }, new Num[] { 0, 1.3 }, new Num[] { 0, 3 }, new Num[] { 3.14159, 1.6 } };
+        static bool SolidAt(Sim sim, List<ChunkRec> recs, Num x, Num y, Num z, Num c)
+        {
+            foreach (var rec in recs)
+            {
+                foreach (var b in rec.content.boxes) if (x > b.minx - c && x < b.maxx + c && y > b.miny - c && y < b.maxy + c && z > b.minz - c && z < b.maxz + c) return true;
+                foreach (var cy in sim.CylsOf(rec)) if (y < cy.h + c && Sq(x - cy.x) + Sq(z - cy.z) < Sq(cy.r + c)) return true;
+                foreach (var f in sim.RoofsOf(rec))
+                {
+                    var r = Sim.RoofLocal(f, x, y, z); Num au = Abs(r.u), av = Abs(r.v);
+                    if (av > f.half + c || au > f.S + c || r.y < -c || r.y > f.rise + c) continue;
+                    if ((f.rise * (au - f.S) + f.S * r.y) / f.L < c && av - f.half < c) return true;
+                }
+            }
+            return false;
+        }
+        /// how far the way from (x, y, z) along unit d is clear, up to len m (len when it all is)
+        public static Num ClearLen(Sim sim, Num x, Num y, Num z, V3 d, Num len)
+        {
+            Num c = T.wasp.radius + avClear, ex = x + d.x * len, ez = z + d.z * len, CS = T.chunk.size;
+            Num lox = Min(x, ex) - c, hix = Max(x, ex) + c, loz = Min(z, ez) - c, hiz = Max(z, ez) + c;
+            var recs = new List<ChunkRec>();
+            foreach (var r in sim.activeChunks) if (r.cx * CS + CS / 2 >= lox - 2 && r.cx * CS - CS / 2 <= hix + 2 && r.cz * CS + CS / 2 >= loz - 2 && r.cz * CS - CS / 2 <= hiz + 2) recs.Add(r);
+            int n = (int)Floor(len / avStep);
+            for (int k = 1; k <= n; k++)
+            {
+                Num s = k * avStep, py = y + d.y * s;
+                if (py < c) continue; // the ground is not in the way
+                if (SolidAt(sim, recs, x + d.x * s, py, z + d.z * s, c)) return (k - 1) * avStep;
+            }
+            return len;
+        }
+        static V3 Dir(Num yaw, Num pitch) => new V3(DSin(yaw) * DCos(pitch), DSin(pitch), DCos(yaw) * DCos(pitch));
+        /// the heading to fly toward (dx, dy, dz) from the wasp, round whatever is in the way
+        public static (Num yaw, Num pitch, bool turned) AvoidHeading(Sim sim, Wasp w, Num dx, Num dy, Num dz, Num dist)
+        {
+            Num hd = Sqrt(dx * dx + dz * dz), yaw0 = DAtan2(dx, dz), pitch0 = DAtan2(dy, hd);
+            Num sp = Sqrt(w.vx * w.vx + w.vy * w.vy + w.vz * w.vz), len = Min(Clamp(sp * avLookT + avLookMin, avLookMin, avLookMax), dist - avStopShort);
+            if (len < avStep || ClearLen(sim, w.x, w.y, w.z, Dir(yaw0, pitch0), len) >= len) return (yaw0, pitch0, false);
+            bool has = false, hasFar = false; Num bs = 0, fl = avStep; (Num, Num) best = (0, 0), far = (0, 0);
+            foreach (var tn in avTurns)
+            {
+                Num yo = tn[0], po = tn[1], yaw = yaw0 + yo, pitch = Clamp(pitch0 + po, -avMaxPitch, avMaxPitch); var d = Dir(yaw, pitch);
+                Num sc = Abs(yo) + Abs(po);
+                if (sp > 0.3) sc += avKeep * (1 - (d.x * w.vx + d.y * w.vy + d.z * w.vz) / sp);
+                if (has && sc >= bs) continue;
+                Num cl = ClearLen(sim, w.x, w.y, w.z, d, len);
+                if (cl >= len)
+                {
+                    // a way that only runs along the obstacle (a long fence) gets nowhere: rather one from whose end the goal shows
+                    Num ex = dx - d.x * len, ey = dy - d.y * len, ez = dz - d.z * len, el = Sqrt(ex * ex + ey * ey + ez * ez), m = Min(el - avStopShort, avSeeMax);
+                    if (m >= avStep && ClearLen(sim, w.x + d.x * len, w.y + d.y * len, w.z + d.z * len, new V3(ex / el, ey / el, ez / el), m) < m) sc += avBlind;
+                    if (!has || sc < bs) { has = true; bs = sc; best = (yaw, pitch); }
+                }
+                else if (cl > fl) { fl = cl; hasFar = true; far = (yaw, pitch); } // none clear yet: the one that gets furthest
+            }
+            if (has) return (best.Item1, best.Item2, true);
+            if (hasFar) return (far.Item1, far.Item2, true);
+            return (yaw0, pitch0, false); // boxed in: straight on, and slide as before
+        }
+
         public static (Cmd cmd, string done) Pilot(Sim sim, Wasp w, LockTarget t, Cmd cmd)
         {
             var K = Kinds.TryGetValue(t.kind, out var kk) ? kk : null;
@@ -254,8 +323,9 @@ namespace Sting.Core
                 o.mz = RndI(Clamp((vs + close) / cap, 0, 1) * 100);
             }
             else o.mz = RndI(Clamp(want / top, 0, 1) * 100);
-            o.yawQ = RndI(DAtan2(dx, dz) * 1e4);
-            o.pitchQ = RndI(Clamp(DAtan2(dy, Sqrt(dx * dx + dz * dz)), -1.45, 1.45) * 1e4);
+            var h = AvoidHeading(sim, w, dx, dy, dz, d);
+            if (!h.turned) { o.yawQ = RndI(DAtan2(dx, dz) * 1e4); o.pitchQ = RndI(Clamp(DAtan2(dy, Sqrt(dx * dx + dz * dz)), -1.45, 1.45) * 1e4); }
+            else { o.yawQ = RndI(h.yaw * 1e4); o.pitchQ = RndI(Clamp(h.pitch, -1.45, 1.45) * 1e4); if (!moving) o.mz = o.mz > 50 ? o.mz : 50; }
             o.act = 0;
             return (o, null);
         }

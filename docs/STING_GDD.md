@@ -552,12 +552,12 @@ The determinism and netcode rules decide how it can work:
 - **Tuning.** The Flight branch of the growth tree (6.8) can scale the cue (earlier warning, longer slow-motion in solo, the predicted swat volume shown), never the outcome. The consequence window (7.4, minimum 11 ticks) stays as it is.
 
 
-### 7.9 Lock-on, assisted flight and the swoop **[T1]** (built, 18.45, 18.46)
+### 7.9 Lock-on, assisted flight and the swoop **[T1]** (built, 18.45, 18.46, 18.52)
 
 The player directs the wasp; the wasp flies. A wasp is a few centimetres long and a flower head two, and landing on one by hand is a test of input precision the animal itself never faces, so the assistance stands in for what the wasp has by instinct.
 
 - **Lock on** (V, the middle mouse button, R3). On a person it takes the spot on the body the aim passes nearest, as a part, a place along it and its outward side, so it follows the person as they move, sit or stand. Otherwise it takes whatever lies closest to the aim within a narrow cone (prey, a flower, a drink, water, the nest, a hazard); with nothing under the aim, the nearest prey or hazard. Locked, the camera faces the target: W closes in (slowing as it gets near), S backs off, A and D circle it.
-- **Assisted flight** (E while locked on something the wasp can go to, with nothing to act on right here). The wasp flies itself there: in from above to a flower, a drink or water, along the outward side to a spot on a person. It lands, perches, or catches its prey. Standing somewhere else, it takes off first. Any move key takes the controls back.
+- **Assisted flight** (E while locked on something the wasp can go to, with nothing to act on right here). The wasp flies itself there: in from above to a flower, a drink or water, along the outward side to a spot on a person. It lands, perches, or catches its prey. Standing somewhere else, it takes off first. It goes round a trunk, over a fence or up past an eave rather than into them (18.52). Any move key takes the controls back.
 - **The swoop** (X, d-pad up). A movement move, not a lock-on feature: a short dash of about 9 m/s for a third of a second, steered at speed, costing a little energy, once every two thirds of a second. Whatever the dash reaches, it slams onto. Prey is caught, a surface flown into (not grazed) is landed on, a person is perched on and feels it at once (a notice, a startle that can send them running). Anyone close to a slam is startled too. With a lock it is dynamic: it homes on the target and does what the target calls for. It snatches prey, dives onto a flower, a drink or water (an escape from the air), slams onto the locked spot on a person, makes for the nest, and dashes away from a danger.
 - **Turn to the gaze** (G, L3). In the eye view (hold RMB) a tap turns the wasp to where the player is looking, and the gaze stays where it was. Held for a second it toggles auto turn, which brings the wasp round after the gaze once the player has looked away for a second.
 - **Later: automatic focus.** With the Reflex slowdown (7.8), a perilous moment (a swat about to land, a bird diving) can lock on to the danger by itself.
@@ -1460,7 +1460,7 @@ Agreed 2026-10-27: the PoC's known limits are worked through before terrain is t
 
 **Checks.** JS and C# agree: the lock picks the aimed flower; aimed at the sky it takes the nearest danger (a bee); the pilot lands the wasp on a flower from 1.6 m in 3.5 s and it feeds; from that flower it takes off and lands on the next in 4.0 s; aimed at a seated person it locks the torso and perches on that spot in 3.2 s; locked on a caterpillar it catches it in 1.3 s; a wasp landed under a flower head feeds; a wasp hovering to feed never settles on the stalk or the grass.
 
-**Limits.** The pilot flies straight at its waypoints and slides off whatever is in the way; it does not plan round trees or houses. It does not dodge: a swat or a bird during an assisted flight is the player's to answer with a move key.
+**Limits.** The pilot flies straight at its waypoints and slides off whatever is in the way; it does not plan round trees or houses (since 18.52 it steers round what is close ahead). It does not dodge: a swat or a bird during an assisted flight is the player's to answer with a move key.
 
 ### 18.46 The swoop as built (7.9)
 
@@ -1641,6 +1641,24 @@ A good player's colonies prosper while they are away. Nothing the AI does feeds 
 
 **Checks.** JS and C# agree: locked on a fly drifting at 0.47 m/s, assisted flight catches it in 0.55 s. Locked on a forager bee commuting at 3.8 m/s, it runs it down with burst in 2.15 s. The static-target timings of 18.45 are unchanged. 381 properties hold in both builds, and the 29 digests are unchanged.
 
+### 18.52 Obstacle avoidance in assisted flight (7.9)
+
+**Found in play.** Assisted flight went straight at its waypoint and slid along whatever was in the way. Locked on the nest from the far side of the home tree, the wasp scraped round the trunk. Locked on a flower behind a garden fence, it pressed into the fence and never arrived.
+
+**The fix.** `avoidHeading` in `sim/assist.js` (and `Assist.AvoidHeading`) runs before the pilot sets its heading.
+- **Look ahead.** It checks the way to the waypoint for a short distance: 0.3 m at rest, up to 1 m at speed, stopping short of the goal itself. A point is in the way if it is within the wasp's radius plus 3 cm of a box (fences, tables, walls), a cylinder (trunks, birdbaths, grills) or a pitched roof. The ground is not an obstacle.
+- **A fan of turns.** If the way is blocked, it tries turns in order: up, the sides, up and to the sides, then wider. It scores each by how far it turns, and a little by how far it leaves the way the wasp is already going, so it does not flip between sides.
+- **Getting somewhere.** A turn whose end still has no clear line to the goal scores worse. Without that, a long fence kept the wasp running along it, both ways in turn. With it, the wasp climbs straight up, or back and up, and over the top.
+- **Boxed in.** If no turn is clear, it takes the one that stays clear longest. A turn keeps at least half throttle, so the wasp does not stall at the obstacle.
+- Targets with nothing in the way are flown to exactly as before.
+
+**Checks.** JS and both C# builds agree:
+- Locked on the nest from 1.2 m behind the home tree, the wasp goes round the trunk without touching it. It arrives in 2.52 s and comes no nearer than 0.149 m. Before, it arrived in 2.33 s, scraping the trunk for 17 ticks.
+- Locked on a flower behind a 1.5 m fence from 0.8 m on the other side, it climbs over and lands in 3.43 s. Before, it never arrived.
+- The timings of 18.45 and 18.51 are unchanged. 383 properties hold in both builds, and the 29 digests are unchanged.
+
+**Limits.** It looks at most 1 m ahead and plans no route. A hedge or a house wall longer than it can see past still needs the player.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1649,7 +1667,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (102 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony; the T0 of progression (18.48): XP, unit and hive skills, the year's turn; multi-colony play with the player gauge (18.49); wintering in somewhere warm (18.50); and chasing moving prey with a lock, with a colony view you can click (18.51). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (103 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony; the T0 of progression (18.48): XP, unit and hive skills, the year's turn; multi-colony play with the player gauge (18.49); wintering in somewhere warm (18.50); chasing moving prey with a lock, with a colony view you can click (18.51); and obstacle avoidance in assisted flight (18.52). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 

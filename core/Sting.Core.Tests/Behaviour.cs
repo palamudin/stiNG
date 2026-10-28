@@ -1374,6 +1374,54 @@ namespace Sting.Core.Tests
                     Ok(r.done == "caught", $"locked on a forager bee commuting at {D(vs):0.0} m/s, assisted flight runs it down with burst ({r.done} in {r.ticks / 60.0:0.00} s)");
                 }
             }
+            // 54. obstacle avoidance in assisted flight (GDD 7.9): round a trunk and over a fence rather than into them
+            {
+                (string done, int arrive, double gap) Fly(Sim s, LockTarget t, V3 goal, int n, Cyl trunk)
+                {
+                    (Cmd cmd, string done) r = (null, null); int k = 0, arrive = -1; double gap = double.PositiveInfinity;
+                    for (; k < n; k++)
+                    {
+                        r = Assist.Pilot(s, s.wasp, t, Idle()); if (r.done != null) break; s.Step(r.cmd); s.DrainEvents(); var w = s.wasp;
+                        if (trunk != null && w.y < trunk.h) gap = Math.Min(gap, Hypot(w.x - trunk.x, w.z - trunk.z) - D(trunk.r) - D(T.wasp.radius));
+                        if (arrive < 0 && Math.Sqrt(D(Sq(w.x - goal.x) + Sq(w.y - goal.y) + Sq(w.z - goal.z))) < 0.06) arrive = k;
+                    }
+                    return (r.done, arrive, gap);
+                }
+                {
+                    var s = new Sim(new Settings { seed = 1234, birds = false }, new SimOpts { noAI = true }); RunS(s, 1);
+                    Cyl trunk = null;
+                    foreach (var rec in s.activeChunks) { foreach (var c in s.CylsOf(rec)) if (Hypot(c.x - World.NEST.treeX, c.z - World.NEST.treeZ) < 0.01) { trunk = c; break; } if (trunk != null) break; }
+                    var e = s.nest.entrance; Num ul = Sqrt(Sq(e.x - trunk.x) + Sq(e.z - trunk.z));
+                    Place(s.wasp, P(trunk.x - (e.x - trunk.x) / ul * 1.2, e.y, trunk.z - (e.z - trunk.z) / ul * 1.2));
+                    var r = Fly(s, new LockTarget { kind = "nest" }, e, 900, trunk);
+                    Ok(r.arrive > 0 && r.gap > 0.05, $"locked on the nest from behind the home tree, assisted flight goes round the trunk without touching it (there in {r.arrive / 60.0:0.00} s, nearest {r.gap:0.000} m)");
+                }
+                {
+                    var s = new Sim(new Settings { seed = 1234, birds = false }, new SimOpts { noAI = true }); RunS(s, 1);
+                    LockTarget ft = null; V3 fpos = default, start = default; double fh = 0;
+                    foreach (var rec in s.activeChunks)
+                    {
+                        var c = rec.content;
+                        for (int i = 0; i < c.flowers.Count && ft == null; i++)
+                        {
+                            if (!s.InBloom(rec, i)) continue; var f = c.flowers[i];
+                            foreach (var b in c.boxes)
+                            {
+                                if (!(Min(b.maxx - b.minx, b.maxz - b.minz) < 0.1 && b.maxy - b.miny > 0.8 && b.maxy < 2.2)) continue;
+                                bool alongX = b.maxx - b.minx > b.maxz - b.minz; Num mid = alongX ? (b.minz + b.maxz) / 2 : (b.minx + b.maxx) / 2, fd = alongX ? f.z - mid : f.x - mid;
+                                bool inSpan = alongX ? f.x > b.minx + 0.6 && f.x < b.maxx - 0.6 : f.z > b.minz + 0.6 && f.z < b.maxz - 0.6;
+                                if (!inSpan || Abs(fd) > 2 || Abs(fd) < 0.15) continue;
+                                Num sd = -(fd > 0 ? 1 : -1) * 0.8;
+                                ft = new LockTarget { kind = "flower", key = rec.key, i = i }; fpos = new V3(f.x, f.y, f.z); start = alongX ? P(f.x, 0.5, mid + sd) : P(mid + sd, 0.5, f.z); fh = D(b.maxy - b.miny); break;
+                            }
+                        }
+                        if (ft != null) break;
+                    }
+                    Place(s.wasp, start);
+                    var r = Fly(s, ft, fpos, 900, null);
+                    Ok(r.done == "landed", $"locked on a flower behind a {fh:0.0} m fence, assisted flight climbs over it and lands ({r.done} in {r.arrive / 60.0:0.00} s)");
+                }
+            }
             // 46. feature modifiers (T2-6): woods, towns, water and hives set at world creation act on generation
             {
                 (int forest, int town, int baths, int hives, bool apart) Census(Settings st)

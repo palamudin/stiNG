@@ -2042,6 +2042,33 @@ function seated(sim, pred) {
     ok(r.done === 'caught', `locked on a forager bee commuting at ${vs.toFixed(1)} m/s, assisted flight runs it down with burst (${r.done} in ${(r.ticks / 60).toFixed(2)} s)`); }
 }
 
+// 54. Obstacle avoidance in assisted flight (GDD 7.9): round a trunk and over a fence rather than into them
+{
+  const fly = (s, t, goal, n, trunk) => { let r = null, k = 0, arrive = -1, gap = Infinity;
+    for (; k < n; k++) { r = assistPilot(s, s.wasp, t, idle()); if (r.done) break; s.step(r.cmd); s.drainEvents(); const w = s.wasp;
+      if (trunk && w.y < trunk.h) gap = Math.min(gap, Math.hypot(w.x - trunk.x, w.z - trunk.z) - trunk.r - T.wasp.radius);
+      if (arrive < 0 && Math.hypot(w.x - goal.x, w.y - goal.y, w.z - goal.z) < 0.06) arrive = k; }
+    return { done: r && r.done, arrive, gap };
+  };
+  { const s = new Sim({ seed: 1234, birds: false }, { noAI: true }); run(s, 1);
+    const rec = s.activeChunks.find((r) => s._cylsOf(r).some((c) => Math.hypot(c.x - NEST.treeX, c.z - NEST.treeZ) < 0.01));
+    const trunk = s._cylsOf(rec).find((c) => Math.hypot(c.x - NEST.treeX, c.z - NEST.treeZ) < 0.01), e = s.nest.entrance, ul = Math.hypot(e.x - trunk.x, e.z - trunk.z);
+    place(s.wasp, { x: trunk.x - (e.x - trunk.x) / ul * 1.2, y: e.y, z: trunk.z - (e.z - trunk.z) / ul * 1.2 });
+    const r = fly(s, { kind: 'nest' }, e, 900, trunk);
+    ok(r.arrive > 0 && r.gap > 0.05, `locked on the nest from behind the home tree, assisted flight goes round the trunk without touching it (there in ${(r.arrive / 60).toFixed(2)} s, nearest ${r.gap.toFixed(3)} m)`); }
+  { const s = new Sim({ seed: 1234, birds: false }, { noAI: true }); run(s, 1);
+    let found = null;
+    for (const rec of s.activeChunks) { const c = rec.content; for (let i = 0; i < c.flowers.length && !found; i++) { if (!s.inBloom(rec, i)) continue; const f = c.flowers[i];
+      for (const b of c.boxes) { if (!(Math.min(b.maxx - b.minx, b.maxz - b.minz) < 0.1 && b.maxy - b.miny > 0.8 && b.maxy < 2.2)) continue;
+        const alongX = b.maxx - b.minx > b.maxz - b.minz, mid = alongX ? (b.minz + b.maxz) / 2 : (b.minx + b.maxx) / 2, fd = alongX ? f.z - mid : f.x - mid;
+        const inSpan = alongX ? f.x > b.minx + 0.6 && f.x < b.maxx - 0.6 : f.z > b.minz + 0.6 && f.z < b.maxz - 0.6;
+        if (!inSpan || Math.abs(fd) > 2 || Math.abs(fd) < 0.15) continue;
+        const sd = -Math.sign(fd) * 0.8; found = { t: { kind: 'flower', key: chunkKey(rec.cx, rec.cz), i }, f, p: alongX ? { x: f.x, y: 0.5, z: mid + sd } : { x: mid + sd, y: 0.5, z: f.z }, h: b.maxy - b.miny }; break; } } if (found) break; }
+    place(s.wasp, found.p);
+    const r = fly(s, found.t, found.f, 900);
+    ok(r.done === 'landed', `locked on a flower behind a ${found.h.toFixed(1)} m fence, assisted flight climbs over it and lands (${r.done} in ${(r.arrive / 60).toFixed(2)} s)`); }
+}
+
 // Tuning as data (GDD 13, T1-22): one plain-text file feeds both sims
 {
   const { unknown, missing } = TUNE_RESULT;
