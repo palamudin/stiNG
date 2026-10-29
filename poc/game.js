@@ -1567,7 +1567,7 @@ function readPad() {
 const touch = { on: false, lx: 0, ly: 0, stickId: null, lookId: null, lx0: 0, ly0: 0 };
 function useTouch() {
   if (touch.on) return;
-  touch.on = true; document.body.classList.add('touch');
+  touch.on = true; document.body.classList.add('touch'); if (typeof applyMapView === 'function') applyMapView();
   try { if (!localStorage.getItem('sting.display')) { $('gfx').value = 'low'; applyDisplaySettings(); } } catch { /* optional */ }
 }
 addEventListener('touchstart', () => useTouch(), { passive: true, once: true });
@@ -1672,12 +1672,7 @@ function padUI(now) {
     padNav.dir = dir;
     if (edge(0)) navPress();
     if (edge(1)) navBack(root);
-    if (root.id === 'atlas') { // the right stick moves the map, the triggers zoom, d-pad left closes it
-      const rx = gp.axes[2] || 0, ry = gp.axes[3] || 0, CSZ = T.chunk.size;
-      if (Math.abs(rx) > 0.15 || Math.abs(ry) > 0.15) { atlas.ox -= rx * 8 / atlas.cell * CSZ; atlas.oz -= ry * 8 / atlas.cell * CSZ; drawAtlas(); }
-      if (b(7)) atlasZoom(1.03); if (b(6)) atlasZoom(1 / 1.03);
-      if (edge(14)) closeAtlas();
-    }
+    if (root.id === 'atlas' && edge(14)) closeAtlas(); // d-pad left closes it (the sticks and triggers move it: atlasControls)
     if (edge(9) && root.id === 'pauseScreen') navBack(root);
   } else if (padNav.at) navFocus(null);
   padNav.prev = gp.buttons.map((x) => !!(x && (x.pressed || x.value > 0.5)));
@@ -1695,6 +1690,7 @@ addEventListener('keydown', (e) => {
 
 function buildCmd() {
   if (input.autopilot) return input.autopilot(sim); // test hook: scripted pilots use the same input path
+  if (atlas.open) { readPad(); return { mx: 0, my: 0, mz: 0, burst: 0, sting: 0, yawQ: Math.round(input.yaw * 1e4), pitchQ: Math.round(input.pitch * 1e4), act: 0, alloc: input.alloc, pick: 0 }; } // the big map has the controls: the wasp holds
   const gp = readPad();
   if (gp) {
     input.yaw -= gp.rx * 2.4 * opts.sens * DT;
@@ -2320,8 +2316,10 @@ function fitCanvas(cv, w, h) {
   return r;
 }
 function applyMapView() {
-  const m = $('map'), sz = document.body.classList.contains('touch') && mapView.size > 168 ? 168 : mapView.size;
+  // on a touch screen the map stays clear of the buttons: at most 168 px, and less on a short screen
+  const touchUI = document.body.classList.contains('touch'), sz = touchUI ? Math.max(72, Math.min(mapView.size, 168, innerHeight - 230)) : mapView.size, m = $('map');
   m.style.width = m.style.height = sz + 'px';
+  document.body.style.setProperty('--mapW', sz + 'px');
   try { localStorage.setItem('sting.map', JSON.stringify(mapView)); } catch { /* optional */ }
 }
 function mapStep(kind, d) {
@@ -2423,19 +2421,40 @@ for (const b of document.querySelectorAll('#mapTools button')) b.addEventListene
   if (m === 'atlas') openAtlas(); else mapStep(m.startsWith('size') ? 'size' : 'zoom', m.endsWith('+') ? 1 : -1);
 });
 applyMapView();
+addEventListener('resize', applyMapView);
 
 // The atlas: the whole map full screen. Drag to move, wheel or pinch to zoom, a tap or click on an area tells what is
 // there. M, the Atlas button, a double tap or double click on the minimap, or the d-pad left open and close it.
+
 const atlas = { open: false, ox: 0, oz: 0, cell: 40, sel: null, pts: new Map(), pinch: 0, moved: 0, frame: 0 };
 const atlasCtx = $('atlasMap').getContext('2d');
 function openAtlas() {
   const w = sim && (sim.wasp || sim.nest);
   if (!w) return;
-  atlas.open = true; atlas.ox = w.x; atlas.oz = w.z; $('atlas').hidden = false;
+  atlas.open = true; atlas.ox = w.x; atlas.oz = w.z; atlas.sel = null; $('atlas').hidden = false; $('atlasCard').hidden = true;
   const cv = $('atlasMap'); atlas.cell = Math.max(32, Math.min(cv.clientWidth, cv.clientHeight) / 9); // about nine areas across
   input.lmb = false; input.free.held = false;
   if (document.pointerLockElement === canvas) document.exitPointerLock?.();
   drawAtlas();
+}
+// While the big map is open, the keys and the pad move it: WASD or the arrows (or either stick) pan, Q and E (or the
+// triggers) zoom; it redraws as it goes and every few frames for the markers
+function atlasControls(dt) {
+  const k = input.keys, CSZ = T.chunk.size, sp = 600 * dt; // screen pixels a second
+  let dx = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
+  let dy = (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0) - (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0);
+  let zoom = (k.has('KeyE') ? 1 : 0) - (k.has('KeyQ') ? 1 : 0);
+  const gp = navigator.getGamepads ? [...navigator.getGamepads()].find((g) => g && g.connected) : null;
+  if (gp) {
+    const ax = (i) => (Math.abs(gp.axes[i] || 0) > 0.15 ? gp.axes[i] : 0);
+    dx += ax(0) + ax(2); dy += ax(1) + ax(3);
+    const t = (i) => (gp.buttons[i] ? gp.buttons[i].value || (gp.buttons[i].pressed ? 1 : 0) : 0);
+    zoom += t(7) - t(6);
+  }
+  let moved = false;
+  if (dx || dy) { atlas.ox -= dx * sp / atlas.cell * CSZ; atlas.oz -= dy * sp / atlas.cell * CSZ; moved = true; }
+  if (zoom) { atlas.cell = Math.max(6, Math.min(220, atlas.cell * Math.pow(2, zoom * dt * 1.5))); moved = true; }
+  if (moved || ++atlas.frame % 6 === 0) drawAtlas();
 }
 function closeAtlas() { atlas.open = false; $('atlas').hidden = true; atlas.pts.clear(); if (running && !paused && !ui.nest) lock(); }
 function toggleAtlas() { if (atlas.open) closeAtlas(); else openAtlas(); }
@@ -2446,33 +2465,39 @@ function drawAtlas() {
   drawMapTo(atlasCtx, W, H, atlas.ox, atlas.oz, atlas.cell, { detail: atlas.cell >= 24, sel: atlas.sel });
 }
 const USE_NAME = { yards: 'Backyards', forest: 'Woods', mall: 'Strip mall', town: 'Town square', park: 'Park' };
-function atlasInfo(key) {
+// A card on the area under the pointer (or the tap): what it is, and how much of what is there, as low, mid or high
+const lvl = (v, a, b) => v <= 0 ? '<span class="lv low">none</span>' : `<span class="lv ${v < a ? 'low' : v < b ? 'mid' : 'high'}">${v < a ? 'low' : v < b ? 'mid' : 'high'}</span>`;
+function atlasCard(key, px, py, card = $('atlasCard'), box = $('atlas').getBoundingClientRect(), top = 46) {
+  if (!key) { card.hidden = true; return; }
   const rec = sim.records.get(key), [cx, cz] = key.split(',').map(Number), CSZ = T.chunk.size;
   const d = Math.round(Math.hypot((cx * CSZ) - sim.nest.x, (cz * CSZ) - sim.nest.z));
-  if (!rec) { $('atlasInfo').innerHTML = `<h4>Unexplored</h4><dl><dt>Area</dt><dd>${cx}, ${cz}</dd><dt>From the nest</dt><dd>${d} m</dd></dl><p>Fly over it to map it.</p>`; return; }
-  const c = rec.content, ppl = sim.active.filter((h) => h.chunk === key && h.state !== 'away' && !h.special), stung = ppl.filter((h) => sim.stung.has(h.hex)).length;
-  const bloom = c.flowers.filter((f, i) => sim.inBloom(rec, i)).length, hives = sim.hivesIn(rec).length, lv = sim.escLevel(key);
-  const houses = (c.sheds || []).filter((x) => x.house).length, sheds = (c.sheds || []).length - houses;
-  const here = [];
-  if (chunkKey(chunkOf(sim.nest.x), chunkOf(sim.nest.z)) === key) here.push(sim.colony.nestAlive ? 'your nest' : 'your nest (destroyed)');
-  for (const x of sim.line) if (chunkKey(chunkOf(x.nest.x), chunkOf(x.nest.z)) === key) here.push(`a ${SPECIES_NAME[x.colony.species || 'wasp']} colony of your line`);
-  if (c.rival) here.push('a rival nest');
-  for (const [, n] of sim.peerNests) if (n.alive && n.key === key) here.push("another player's nest");
-  if (sim.ext && sim.ext.hm && sim.ext.hm.chunk === key) here.push('the exterminator');
-  const rows = [
-    ['Area', `${cx}, ${cz} · ${d} m from the nest`],
-    ['Alert', lv ? `level ${lv} of 5${lv >= 3 ? ' · people are fetching spray' : ''}` : 'calm'],
-    ['People now', ppl.length ? `${ppl.length}${stung ? ` · ${stung} already stung` : ''}` : 'none'],
-    ['Flowers', `${bloom} in bloom of ${c.flowers.length}`],
-    ['Tables', String(c.tables.length)],
-    ['Trees', String(c.trees.length)],
-    ...(houses || sheds ? [['Buildings', `${houses ? `${houses} house${houses > 1 ? 's' : ''}` : ''}${houses && sheds ? ', ' : ''}${sheds ? `${sheds} shed${sheds > 1 ? 's' : ''}` : ''}`]] : []),
-    ...((c.baths || []).length ? [['Water', `${c.baths.length} birdbath${c.baths.length > 1 ? 's' : ''}`]] : []),
-    ...(hives ? [['Beehives', String(hives)]] : []),
-    ...((c.webs || []).length ? [['Spider webs', String(c.webs.length)]] : []),
-    ...((c.birds || []).length ? [['Birds', String(c.birds.length)]] : []),
-  ];
-  $('atlasInfo').innerHTML = `<h4>${USE_NAME[c.use || 'park'] || 'Park'}</h4>${here.length ? `<p><b>${here.join(' · ')}</b></p>` : ''}<dl>${rows.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join('')}</dl>`;
+  let html;
+  if (!rec) html = `<b>Unexplored</b>${d} m from the nest<br>Fly over it to map it.`;
+  else {
+    const c = rec.content, ppl = sim.active.filter((h) => h.chunk === key && h.state !== 'away' && !h.special), stung = ppl.filter((h) => sim.stung.has(h.hex)).length;
+    const bloom = c.flowers.filter((f, i) => sim.inBloom(rec, i)).length, cups = sim.cupsIn(rec).length;
+    const prey = c.caterpillars.filter((x, i) => sim.catActive(rec, i)).length + c.flies.filter((x, i) => sim.flyActive(rec, i)).length;
+    const hives = sim.hivesIn(rec).length, webs = (c.webs || []).length, birds = (c.birds || []).length, baths = (c.baths || []).length, lv = sim.escLevel(key);
+    const food = bloom + 2 * cups + prey, danger = 3 * hives + webs + birds + (c.rival ? 3 : 0);
+    const here = [];
+    if (chunkKey(chunkOf(sim.nest.x), chunkOf(sim.nest.z)) === key) here.push(sim.colony.nestAlive ? 'your nest' : 'your nest (destroyed)');
+    for (const x of sim.line) if (chunkKey(chunkOf(x.nest.x), chunkOf(x.nest.z)) === key) here.push(`your ${SPECIES_NAME[x.colony.species || 'wasp']}`);
+    if (c.rival) here.push('a rival nest');
+    for (const [, n] of sim.peerNests) if (n.alive && n.key === key) here.push("another player's nest");
+    if (sim.ext && sim.ext.hm && sim.ext.hm.chunk === key) here.push('the exterminator');
+    const bits = (arr) => arr.filter(Boolean).join(', ');
+    html = `<b>${USE_NAME[c.use || 'park'] || 'Park'}</b>${d} m from the nest${lv ? ` · <span style="color:var(--red)">alert ${lv}/5</span>` : ' · calm'}<br>`
+      + `People ${lvl(ppl.length, 4, 9)} ${ppl.length ? `${ppl.length}${stung ? `, ${stung} stung` : ''}` : ''}<br>`
+      + `Food ${lvl(food, 10, 25)} ${bits([bloom && `${bloom} flowers`, cups && `${cups} drinks`, prey && `${prey} prey`])}<br>`
+      + `Water ${baths ? `<span class="lv mid">yes</span> ${baths} birdbath${baths > 1 ? 's' : ''}` : '<span class="lv low">none</span>'}<br>`
+      + `Danger ${lvl(danger, 3, 6)} ${bits([hives && `${hives} hive${hives > 1 ? 's' : ''}`, webs && `${webs} web${webs > 1 ? 's' : ''}`, birds && `${birds} bird${birds > 1 ? 's' : ''}`, c.rival && 'rivals'])}<br>`
+      + `Trees ${c.trees.length} · tables ${c.tables.length}${(c.sheds || []).length ? ` · buildings ${(c.sheds || []).length}` : ''}`
+      + (here.length ? `<div class="here">${here.join(' · ')}</div>` : '');
+  }
+  card.innerHTML = html; card.hidden = false;
+  const cw = card.offsetWidth, ch = card.offsetHeight;
+  card.style.left = Math.max(6, Math.min(box.width - cw - 6, px + 14)) + 'px';
+  card.style.top = Math.max(top, Math.min(box.height - ch - 6, py + 14)) + 'px';
 }
 function atlasKeyAt(px, py) {
   const cv = $('atlasMap'), W = cv.clientWidth, H = cv.clientHeight, CSZ = T.chunk.size;
@@ -2490,35 +2515,51 @@ function atlasZoom(f, px, py) {
 }
 {
   const cv = $('atlasMap'), CSZ = T.chunk.size;
-  cv.addEventListener('pointerdown', (e) => { e.preventDefault(); try { cv.setPointerCapture(e.pointerId); } catch { /* optional */ } atlas.pts.set(e.pointerId, { x: e.offsetX, y: e.offsetY }); atlas.moved = 0; if (atlas.pts.size === 2) { const [a, b] = [...atlas.pts.values()]; atlas.pinch = Math.hypot(a.x - b.x, a.y - b.y); } });
+  // where on the map, from its box on screen (offsetX is not to be trusted inside a scaled, animated parent)
+  const lx = (e) => e.clientX - cv.getBoundingClientRect().left, ly = (e) => e.clientY - cv.getBoundingClientRect().top;
+  cv.addEventListener('pointerdown', (e) => { e.preventDefault(); try { cv.setPointerCapture(e.pointerId); } catch { /* optional */ } atlas.pts.set(e.pointerId, { x: lx(e), y: ly(e) }); atlas.moved = 0; if (atlas.pts.size === 2) { const [a, b] = [...atlas.pts.values()]; atlas.pinch = Math.hypot(a.x - b.x, a.y - b.y); } });
   cv.addEventListener('pointermove', (e) => {
-    const p = atlas.pts.get(e.pointerId); if (!p) return;
-    const dx = e.offsetX - p.x, dy = e.offsetY - p.y; p.x = e.offsetX; p.y = e.offsetY; atlas.moved += Math.abs(dx) + Math.abs(dy);
+    const p = atlas.pts.get(e.pointerId);
+    if (!p) { if (e.pointerType === 'mouse') { const k = atlasKeyAt(lx(e), ly(e)); if (k !== atlas.sel) { atlas.sel = k; drawAtlas(); } atlasCard(k, lx(e), ly(e)); } return; }
+    if (atlas.moved > 6) $('atlasCard').hidden = true;
+    const dx = lx(e) - p.x, dy = ly(e) - p.y; p.x = lx(e); p.y = ly(e); atlas.moved += Math.abs(dx) + Math.abs(dy);
     if (atlas.pts.size === 1) { atlas.ox += dx / atlas.cell * CSZ; atlas.oz += dy / atlas.cell * CSZ; drawAtlas(); }
     else if (atlas.pts.size === 2) { const [a, b] = [...atlas.pts.values()], d = Math.hypot(a.x - b.x, a.y - b.y); if (atlas.pinch > 0) atlasZoom(d / atlas.pinch, (a.x + b.x) / 2, (a.y + b.y) / 2); atlas.pinch = d; }
   });
   const up = (e) => {
     if (!atlas.pts.has(e.pointerId)) return;
     atlas.pts.delete(e.pointerId);
-    if (atlas.pts.size === 0 && atlas.moved < 6 && e.type === 'pointerup') { atlas.sel = atlasKeyAt(e.offsetX, e.offsetY); atlasInfo(atlas.sel); drawAtlas(); }
+    if (atlas.pts.size === 0 && atlas.moved < 6 && e.type === 'pointerup') { atlas.sel = atlasKeyAt(lx(e), ly(e)); atlasCard(atlas.sel, lx(e), ly(e)); drawAtlas(); }
     if (atlas.pts.size < 2) atlas.pinch = 0;
   };
   cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
-  cv.addEventListener('wheel', (e) => { e.preventDefault(); atlasZoom(e.deltaY < 0 ? 1.15 : 1 / 1.15, e.offsetX, e.offsetY); }, { passive: false });
-  for (const b of document.querySelectorAll('#atlasHead button[data-a]')) b.addEventListener('click', () => {
+  cv.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse' && !atlas.pts.size) { $('atlasCard').hidden = true; atlas.sel = null; drawAtlas(); } });
+  cv.addEventListener('wheel', (e) => { e.preventDefault(); atlasZoom(e.deltaY < 0 ? 1.15 : 1 / 1.15, lx(e), ly(e)); }, { passive: false });
+  for (const b of document.querySelectorAll('#atlasTools button[data-a]')) b.addEventListener('click', () => {
     const a = b.dataset.a;
     if (a === 'close') closeAtlas(); else if (a === 'zoom+') atlasZoom(1.4); else if (a === 'zoom-') atlasZoom(1 / 1.4);
     else { const w = a === 'me' ? sim.wasp : sim.nest; if (w) { atlas.ox = w.x; atlas.oz = w.z; drawAtlas(); } }
   });
   addEventListener('resize', () => drawAtlas());
   // the minimap opens it: a double click, or a double tap on a touch screen
-  const mp = $('map'); let lastTap = 0;
-  mp.addEventListener('dblclick', (e) => { e.preventDefault(); openAtlas(); });
+  const mp = $('map'); let lastTap = 0, hideAt = 0;
+  const keyOnMini = (e) => {
+    const r = mp.getBoundingClientRect(), sz = r.width, w = sim.wasp || sim.nest, cell = sz / 7 * mapView.zoom;
+    const x = w.x - (e.clientX - r.left - sz / 2) / cell * CSZ, z = w.z - (e.clientY - r.top - sz / 2) / cell * CSZ;
+    return chunkKey(chunkOf(x), chunkOf(z));
+  };
+  const miniCard = (e) => { atlasCard(keyOnMini(e), e.clientX, e.clientY, $('mapCard'), { width: innerWidth, height: innerHeight }, 6); hideAt = performance.now() + 5000; };
+  mp.addEventListener('dblclick', (e) => { e.preventDefault(); $('mapCard').hidden = true; openAtlas(); });
   mp.addEventListener('pointerdown', (e) => {
-    if (e.pointerType !== 'touch') return;
-    e.preventDefault();
-    const t = performance.now(); if (t - lastTap < 350) { openAtlas(); lastTap = 0; } else lastTap = t;
+    if (!sim) return;
+    e.preventDefault(); e.stopPropagation();
+    const t = performance.now();
+    if (e.pointerType === 'touch' && t - lastTap < 350) { lastTap = 0; $('mapCard').hidden = true; openAtlas(); return; }
+    lastTap = t; miniCard(e);
   });
+  mp.addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse' && sim && document.pointerLockElement !== canvas) miniCard(e); });
+  mp.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') $('mapCard').hidden = true; });
+  setInterval(() => { if (!$('mapCard').hidden && performance.now() > hideAt) $('mapCard').hidden = true; }, 500);
 }
 
 // ------------------------------------------------------------------ events
@@ -2914,7 +2955,7 @@ function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
   padUI(now); // menus with a controller (Xbox)
-  if (atlas.open && ++atlas.frame % 6 === 0) drawAtlas(); // live markers on the atlas
+  if (atlas.open) atlasControls(dt); // the big map has the controls until it is closed
   if (running && !paused) {
     if (sim) updateAssist(dt);
     const scale = timeScale(), cap = Math.max(8, Math.ceil(8 * scale));
@@ -3105,7 +3146,7 @@ newWorld({ seed: 1234n, dayMinutes: 2, humanDensity: 1, beeAggression: 1, season
 requestAnimationFrame(frame);
 
 // test hook for automated checks
-window.__sting = { get sim() { return sim; }, get lab() { return lab; }, input, padUI, touch, buildCmd, start: () => $("bStart").click(), humanViews, toggleNest, toggleLab, saveWorld, camera };
+window.__sting = { get sim() { return sim; }, get lab() { return lab; }, input, padUI, touch, buildCmd, atlas, start: () => $("bStart").click(), humanViews, toggleNest, toggleLab, saveWorld, camera };
 window.__garment = (hm) => garmentGraph(hm.tr, hm.clothing, hm.posture, hm.parts[hm.posture]);
 window.__toWorld = toWorld;
 window.__weather = dayWeather;

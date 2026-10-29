@@ -90,21 +90,25 @@
   #mapTools { display: flex; gap: 3px; }
   #mapTools button { min-height: 0; height: 20px; min-width: 20px; padding: 0 5px; font: 600 11px/1 var(--mono); border-radius: 3px; background: rgba(13,12,10,.55); border: 1px solid var(--line); color: var(--fg); }
   #map { display: block; width: 168px; height: 168px; background: var(--panel); border: 1px solid var(--line); cursor: zoom-in; touch-action: manipulation; }
-  /* the atlas */
-  #atlas { position: fixed; inset: 0; z-index: 6; background: var(--ink); display: grid; grid-template-columns: 1fr min(320px, 34vw); grid-template-rows: auto 1fr; }
-  #atlasHead { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: calc(8px + env(safe-area-inset-top, 0px)) 12px 8px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
-  #atlasHead h3 { margin: 0 8px 0 0; font-family: var(--display); font-size: 18px; letter-spacing: .08em; text-transform: uppercase; }
-  #atlasHead .grow { flex: 1; }
-  #atlasHead button { height: 30px; min-height: 0; padding: 0 10px; }
-  #atlasMap { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
-  #atlasInfo { border-left: 1px solid var(--line); padding: 12px; overflow-y: auto; font-size: 12px; }
-  #atlasInfo h4 { margin: 0 0 6px; font-family: var(--display); font-size: 16px; text-transform: uppercase; letter-spacing: .06em; }
-  #atlasInfo dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 8px 0; }
-  #atlasInfo dt { color: var(--muted); }
-  #atlasInfo dd { margin: 0; }
-  #atlasLegend { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11px; color: var(--muted); }
-  #atlasLegend i { display: inline-block; width: 10px; height: 10px; margin-right: 4px; vertical-align: -1px; }
-  @media (orientation: portrait) { #atlas { grid-template-columns: 1fr; grid-template-rows: auto 1fr minmax(120px, 34vh); } #atlasInfo { border-left: 0; border-top: 1px solid var(--line); } }
+  /* the atlas: the minimap grown over the screen, on top of everything; a card on the area under the pointer or tap */
+  #atlas { position: fixed; inset: max(10px, 2.5vmin); z-index: 50; background: var(--ink); border: 1px solid var(--line); box-shadow: 0 0 0 100vmax rgba(13,12,10,.5); animation: atlasIn .14s ease-out; }
+  @keyframes atlasIn { from { opacity: .3; } to { opacity: 1; } } /* a fade only: its size never waits on an animation */
+  #atlasMap { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+  #atlasTools { position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; z-index: 1; }
+  #atlasTools button { height: 32px; min-height: 0; min-width: 32px; padding: 0 9px; font: 600 12px/1 var(--mono); background: rgba(13,12,10,.75); }
+  #atlasTools button.close { background: var(--yellow); color: #111; }
+  #atlasLegend { position: absolute; left: 8px; bottom: 8px; z-index: 1; display: flex; flex-wrap: wrap; gap: 3px 9px; max-width: calc(100% - 16px); padding: 4px 8px; background: rgba(13,12,10,.7); font-size: 10.5px; color: var(--muted); pointer-events: none; }
+  #atlasLegend i { display: inline-block; width: 9px; height: 9px; margin-right: 4px; vertical-align: -1px; }
+  #mapCard { position: fixed; z-index: 8; min-width: 180px; max-width: 260px; padding: 8px 10px; background: rgba(13,12,10,.92); border: 1px solid var(--line); font-size: 11.5px; line-height: 1.45; pointer-events: none; }
+  #mapCard b { display: block; font-family: var(--display); font-size: 14px; letter-spacing: .05em; text-transform: uppercase; margin-bottom: 3px; }
+  #mapCard .lv { display: inline-block; min-width: 34px; font-weight: 700; }
+  #mapCard .lv.low { color: var(--muted); } #mapCard .lv.mid { color: var(--yellow); } #mapCard .lv.high { color: var(--orange); }
+  #mapCard .here { color: var(--yellow); margin-top: 3px; }
+  #atlasCard { position: absolute; z-index: 2; min-width: 180px; max-width: 260px; padding: 8px 10px; background: rgba(13,12,10,.92); border: 1px solid var(--line); font-size: 11.5px; line-height: 1.45; pointer-events: none; }
+  #atlasCard b { display: block; font-family: var(--display); font-size: 14px; letter-spacing: .05em; text-transform: uppercase; margin-bottom: 3px; }
+  #atlasCard .lv { display: inline-block; min-width: 34px; font-weight: 700; }
+  #atlasCard .lv.low { color: var(--muted); } #atlasCard .lv.mid { color: var(--yellow); } #atlasCard .lv.high { color: var(--orange); }
+  #atlasCard .here { color: var(--yellow); margin-top: 3px; }
 
   .panel { box-sizing: border-box; position: fixed; z-index: 6; background: var(--panel); overflow-y: auto; pointer-events: auto; display: grid; align-content: start; gap: 14px; font-size: 12px; }
   .panel h3 { margin: 0 0 6px; font-family: var(--display); font-weight: 800; font-size: 16px; letter-spacing: .08em; text-transform: uppercase; color: var(--yellow); }
@@ -214,6 +218,25 @@
   body.touch #colony .v { font-size: 14px; }
   body.touch #colony .label { margin-top: 0 !important; text-align: right; }
   body.touch #mapBox { top: calc(64px + env(safe-area-inset-top, 0px)); bottom: auto; left: auto; right: calc(10px + env(safe-area-inset-right, 0px)); opacity: .92; }
+  /* sideways: the map takes the top right corner, and the colony figures sit between the counter and it */
+  /* upright: the map top right with the colony figures under it, the clock under the counter, the menu keys below */
+  @media (orientation: portrait) {
+    body.touch #mapBox { top: calc(6px + env(safe-area-inset-top, 0px)); }
+    body.touch #colony { top: calc(var(--mapW, 120px) + 16px + env(safe-area-inset-top, 0px)); }
+    body.touch #clock { top: calc(54px + env(safe-area-inset-top, 0px)); left: calc(10px + env(safe-area-inset-left, 0px)); transform: none; text-align: left; }
+    body.touch #touch .tbtns.top { top: calc(118px + env(safe-area-inset-top, 0px)); }
+  }
+  /* upright: the map top right with the colony figures under it, the clock under the counter, the menu keys below */
+  @media (orientation: portrait) {
+    body.touch #mapBox { top: calc(6px + env(safe-area-inset-top, 0px)); }
+    body.touch #colony { top: calc(var(--mapW, 120px) + 16px + env(safe-area-inset-top, 0px)); }
+    body.touch #clock { top: calc(54px + env(safe-area-inset-top, 0px)); left: calc(10px + env(safe-area-inset-left, 0px)); transform: none; text-align: left; }
+    body.touch #touch .tbtns.top { top: calc(118px + env(safe-area-inset-top, 0px)); }
+  }
+  @media (orientation: landscape) {
+    body.touch #mapBox { top: calc(6px + env(safe-area-inset-top, 0px)); }
+    body.touch #colony { right: calc(var(--mapW, 120px) + 22px + env(safe-area-inset-right, 0px)); }
+  }
   body.touch #mapHead { display: none; } /* on a phone: double tap the map for the atlas */
   /* a double tap (or double click) opens the map large for finding the way; again closes it */
   body.touch #vitals { bottom: calc(8px + env(safe-area-inset-bottom, 0px)); width: min(300px, 44vw); gap: 4px; }
@@ -289,14 +312,12 @@
   <div id="mapHead"><span class="label shadow" id="mapcap">Map</span><span id="mapTools"><button data-m="size-" title="Smaller map (-)">−</button><button data-m="size+" title="Bigger map (=)">+</button><button data-m="zoom-" title="Zoom out ([)">⊖</button><button data-m="zoom+" title="Zoom in (])">⊕</button><button data-m="atlas" title="Atlas: the whole map (M)">Atlas</button></span></div>
   <canvas id="map" width="336" height="336" title="Double click: the atlas"></canvas>
 </div>
+<div id="mapCard" hidden></div>
 <div id="atlas" hidden>
-  <div id="atlasHead"><h3>Atlas</h3>
-    <div id="atlasLegend"><span><i style="background:hsla(95,22%,31%,1)"></i>yards</span><span><i style="background:hsla(30,18%,42%,1)"></i>town</span><span><i style="background:hsla(100,35%,14%,1)"></i>woods</span><span><i style="background:hsla(98,30%,24%,1)"></i>park</span><span><i style="background:rgba(229,65,45,.6)"></i>alert</span><span><i style="background:#f6c700;border-radius:50%"></i>your nest</span><span><i style="background:#ece8dc"></i>beehive</span><span><i style="border:2px solid #e9762b;border-radius:50%"></i>rival nest</span><span><i style="background:rgba(79,160,220,.9);border-radius:50%"></i>water</span><span><i style="background:rgba(40,70,30,.9);border-radius:50%"></i>tree</span><span><i style="background:#4fd1ff"></i>other players</span></div>
-    <span class="grow"></span>
-    <button class="ghost" data-a="zoom-" title="Zoom out">−</button><button class="ghost" data-a="zoom+" title="Zoom in">+</button><button class="ghost" data-a="me">On me</button><button class="ghost" data-a="nest">Nest</button><button data-a="close">Close (M)</button>
-  </div>
   <canvas id="atlasMap"></canvas>
-  <div id="atlasInfo"><h4>Tap or click an area</h4><p class="label" style="text-transform:none;letter-spacing:.02em">Drag to move, wheel or pinch to zoom. Areas you have not flown over yet are blank.</p></div>
+  <div id="atlasTools"><button class="ghost" data-a="zoom-" title="Zoom out">−</button><button class="ghost" data-a="zoom+" title="Zoom in">+</button><button class="ghost" data-a="me" title="Back to your wasp">Me</button><button class="ghost" data-a="nest" title="Your nest">Nest</button><button class="close" data-a="close" title="Close (M)">✕</button></div>
+  <div id="atlasLegend"><span><i style="background:hsla(95,22%,31%,1)"></i>yards</span><span><i style="background:hsla(30,18%,42%,1)"></i>town</span><span><i style="background:hsla(100,35%,14%,1)"></i>woods</span><span><i style="background:hsla(98,30%,24%,1)"></i>park</span><span><i style="background:rgba(229,65,45,.6)"></i>alert</span><span><i style="background:#f6c700;border-radius:50%"></i>your nest</span><span><i style="background:#ece8dc"></i>beehive</span><span><i style="border:2px solid #e9762b;border-radius:50%"></i>rival nest</span><span><i style="background:rgba(79,160,220,.9);border-radius:50%"></i>water</span><span><i style="background:#4fd1ff"></i>other players</span></div>
+  <div id="atlasCard" hidden></div>
 </div>
 
 <aside class="panel" id="nest" hidden>
