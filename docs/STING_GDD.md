@@ -497,7 +497,9 @@ For testing, the PoC and the core run `open`: all three species can be picked on
 - **Defence is social.** Against such an attack a player can expand into defensive units from the hives available to them, or call for help from an allied player whose line has protective units. Alliances become a game system, not only co-op (Q-07).
 - **Roles widen with the tiers.** Each new kind brings its castes as roles (soldiers, majors and minors among ants, for example), with role levels earned as in 6.8.
 
-**Open questions.** Q-21: termites are not ants (they are closer to cockroaches), so an ant line becoming termites would be a licence beyond the hornet turn's. Q-22: what a removed tree means for a persistent world. Q-23: how alliances are formed and audited in shared worlds.
+**Termites in the ant tree** (Q-21, settled 2026-10-29). Termites are a branch of the ant progression, as a subspecies-style step, not a kind of their own. The branch teaches what they are. Termites are not ants: their nearest relatives are cockroaches. They arrived at the same colony life on their own, with queens, workers, soldiers and castes. Ants and termites are a textbook case of convergent evolution. The branch's card in the colony view says so plainly, so the licence is shown, not hidden.
+
+**Open questions.** Q-22: what a removed tree means for a persistent world. Q-23: how alliances are formed and audited in shared worlds.
 
 ## 7. The wasp
 
@@ -1030,7 +1032,7 @@ On Main the entity count is dominated by AI wasps: one player's colony can hold 
 | Q-18 | What earns experience, how events are weighted, and where the hornet and bee bars sit; does a stab count every sting or only unique humans? | Start from events the sim already emits (6.8), earned in hand, and by AI colonies at the player gauge's rates; stabs follow the counter (unique humans); tune the bars, the gauge window and its floor on play data |
 | Q-19 | Is the change of species one-way? Can a hornet line go back, or a bee line earn its way back to wasps or on to hornets? | Proposal: hornets are one-way; a bee line that runs a strong year is offered wasps again |
 | Q-20 | When a line takes the bee offer, what happens to its wasp queens? | Settled 2026-10-27: they found AI-run lineage colonies (18.40); the player can hold several colonies at once and switch between them, the rest auto-managed (6.8, multi-colony play) |
-| Q-21 | Termites are not ants (they are closer to cockroaches). Can an ant line "mutate" into termites, or do termites start their own line? | Open (T4, 6.9). Proposal: termites are their own kind with their own progression, reached by founding, not by mutation, to keep the educational promise |
+| Q-21 | Termites are not ants (they are closer to cockroaches). Can an ant line "mutate" into termites, or do termites start their own line? | Settled 2026-10-29: termites are a branch of the ant progression, a subspecies-style step, with an explanatory card: not ants but cockroach relatives that evolved the same colony life on their own (convergent evolution) (6.9) |
 | Q-22 | What does a tree brought down by wood-eating units mean in a persistent world: is it a chunk delta, does it regrow, who may do it where? | Open (T4, 6.9) |
 | Q-23 | How are alliances formed, shown and audited in shared worlds, and can allied units defend another player's nest? | Open (T4, 6.9) |
 
