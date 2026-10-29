@@ -507,6 +507,10 @@ For testing, the PoC and the core run `open`: all three species can be picked on
 - **They are not steps in the colony tree.** Each is its own mode with its own player body and loop, beside the colony game.
 - **They share the world.** The same generated town, people, weather, day and season, and network. People already react to what lands on them, crosses their table or raids their food, so most of the human side carries over. A rodent in the kitchen or a bird at the barbecue meets the same households and the same pest control.
 - **Each needs its own design pass:** the body and its controls, what it eats, how it dies, how it progresses, and how it meets the colony players in shared worlds.
+- **Birds, as people know them** (noted 2026-10-29). Each real species brings its own loop:
+  - **Australian magpies** swoop people for a few weeks in the breeding season to defend the nest. Councils put up warning signs; cyclists wear helmets with cable ties. This is a territory-and-season game: guard a radius round the nest, and choose whom to swoop. It needs an Australian region (Q-06 settled the PoC on American suburbia; regions can widen later).
+  - **Gulls** steal food. They take chips from hands and learn which people and places pay off. This is a raiding loop close to the wasps' at drinks and barbecues.
+  - **Crows and ravens** remember individual faces for years. In field studies in Seattle, crows went on scolding a mask linked to capture long after it was worn, and passed the grudge to crows that never saw the capture. Good relations are rarer but documented (crows that leave gifts). This is a relationship game: every person has a standing with the bird, built over many meetings. The sim's people already remember stings by time and place (T1-18); birds would remember people back.
 
 **Open questions.** Q-22: what a removed tree means for a persistent world. Q-23: how alliances are formed and audited in shared worlds.
 
