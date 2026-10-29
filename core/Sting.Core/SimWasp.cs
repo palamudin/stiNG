@@ -8,7 +8,8 @@ namespace Sting.Core
     public sealed partial class Sim
     {
         /// A worker's span is that of her sisters (GDD 7.5): 1/adultMortality days, scaled to the season, ±20% by hash.
-        public Num LifespanMinutes(Wasp w) => (w.caste == "male" ? T.males.maleLifeDays : 1 / T.colony.adultMortality) * bio * 1440 * (0.8 + 0.4 * H32(w.id, 7));
+        public Num LifespanMinutes(Wasp w) => LifespanMinutes(w.id, w.caste);
+        public Num LifespanMinutes(int id, string caste) => (caste == "male" ? T.males.maleLifeDays : 1 / T.colony.adultMortality) * bio * 1440 * (0.8 + 0.4 * H32(id, 7));
 
         static bool Free3(string s) => s == "fly" || s == "landed" || s == "chewing";
 
@@ -790,13 +791,13 @@ namespace Sting.Core
             w.energy -= T.energy.cruisePerSec * T.DT * T.energy.hoverShare;
             if (w.chewAt != null && w.chewAt.water) // a load of water (T2-1)
             {
-                if (w.chew < T.water.fillTicks) return;
+                if (w.chew < T.water.fillTicks / (w.colony == "own" ? 1 + T.roles.fill * RoleLevel("water") : (Num)1)) return; // water carriers' level (GDD 6.8)
                 w.state = "fly"; w.chewAt = null;
                 w.carry = new Carry { kind = "water", amount = T.water.amount, what = "water" };
                 Emit("watered", ("id", w.id));
                 return;
             }
-            if (w.chew >= T.pulp.chewTicks)
+            if (w.chew >= T.pulp.chewTicks / (w.colony == "own" ? 1 + T.roles.chew * RoleLevel("pulp") : (Num)1)) // pulp collectors' level (GDD 6.8)
             {
                 w.state = "fly";
                 TakePulp(w, w.chewAt);
@@ -1209,6 +1210,7 @@ namespace Sting.Core
             if (!colony.sited || D2(w, nest.entrance) > 0.07 * 0.07) return;
             var col = colony;
             bool deposited = false;
+            string kind = w.carry != null && !w.carry.poison ? w.carry.kind : "sugar"; // the role a load home is the work of
             if (w.carry != null && w.carry.kind == "pulp" && w.caste == "queen")
             {
                 // a founding queen builds her own cells straight away (GDD 6.1)
@@ -1243,7 +1245,7 @@ namespace Sting.Core
                 Num take = Min(col.sugar, (T.energy.nestRefill - w.energy) * 0.6);
                 col.sugar -= take; w.energy += take / 0.6;
             }
-            if (deposited) { stats.deposits++; Xp(w, "deposit"); }
+            if (deposited) { stats.deposits++; Xp(w, "deposit", kind); }
             // a forager home with food remembers where it was (site fidelity), and its load carries the scent of the
             // source to nestmates leaving soon after (GDD 7.3, T1-16)
             var from = w.ai.from;
@@ -1442,7 +1444,7 @@ namespace Sting.Core
             Emit("stunned", ("id", w.id), ("driven", w.id == drivenId));
         }
 
-        void Die(Wasp w, string cause, string byHex, object detail = null)
+        internal void Die(Wasp w, string cause, string byHex, object detail = null)
         {
             bool driven = w.id == drivenId;
             wasps = wasps.FindAll(x => x != w);
@@ -1450,6 +1452,7 @@ namespace Sting.Core
             if (w.colony != "own") { /* a rival worker */ }
             else if (w.caste == "queen") { colony.queenAlive = false; Emit("queenDied", ("cause", cause)); }
             else if (w.caste == "worker") colony.adults = Max(0, colony.adults - 1); // a male or gyne out was already counted out (T2-3)
+            if (w.colony == "own") Legacy(w.id, w.pers); // a master of its job passes it on (GDD 6.8)
             if (w.fight != null) { var o = WaspById(w.fight.other); if (o != null && o.state == "fighting") { o.state = "fly"; o.fight = null; } }
             stats.deaths++;
             stats.causes.TryGetValue(cause, out Num cn); stats.causes[cause] = cn + 1;
@@ -1476,6 +1479,8 @@ namespace Sting.Core
             else if ((w.caste == "male" || w.caste == "gyne") && w.colony != null && w.colony.StartsWith("line:")) foreach (var x in line) if ("line:" + x.id == w.colony) { home = x.colony; break; }
             if (home != null && w.caste == "male") home.males += 1; // back in the nest (T2-3), the player's or a sister colony's
             else if (home != null && w.caste == "gyne") { if (w.mated) home.mated += 1; else home.gynes += 1; }
+            // an insect with experience of its own goes on living inside, and passes on its mastery when it dies (GDD 6.8)
+            if (w.colony == "own" && w.pers != null && w.caste == "worker") { colony.vets.Add(new Vet { id = w.id, born = w.born, pers = w.pers }); if (colony.vets.Count > T.roles.vetsMax) { var v0 = colony.vets[0]; colony.vets.RemoveAt(0); Legacy(v0.id, v0.pers); } }
             wasps = wasps.FindAll(x => x != w);
             Publish(new NetEv { type = "died", waspId = w.id, cause = "home", x = w.x, y = w.y, z = w.z });
             ReleaseBees(w.id);
@@ -1736,7 +1741,7 @@ namespace Sting.Core
             var W = winter; var site = W.sites[choice]; Num survivors = W.survivors, lin = W.lineage; string was = species;
             var oldNest = nest; var oldColony = colony;
             winter = null;
-            if (morph) { species = W.offer; settings.species = W.offer; } // the line changes species with this queen
+            if (morph) { ForkLine(was, W.offer); species = W.offer; settings.species = W.offer; } // the line changes species with this queen
             // the queen that continues is yours; the rest found lineage colonies (Q-10), real ones first (T2-4)
             Num winterDays = Rnd(settings.seasonDays * T.season.winterShare);
             Num target = (day + 1 + winterDays) * 1440 + T.time.dawn;

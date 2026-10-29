@@ -20,6 +20,20 @@ namespace Sting.Core
         public static readonly string[] HIVE = { "forage", "brood", "lay", "build" };
         public static readonly string[] ALL = { "swoop", "assist", "reflex", "focus", "release", "landR", "feedR", "grabR", "speed", "forage", "brood", "lay", "build" };
         public static int Index(string id) => System.Array.IndexOf(ALL, id);
+        /// the work roles (GDD 6.8), the job skills a level of each adds a rank to, and the role each kind of XP is earned in
+        public static readonly string[] ROLES = { "sugar", "protein", "pulp", "water", "guard" };
+        public static int Role(string r) => System.Array.IndexOf(ROLES, r);
+        public static bool RoleUses(string role, string id) => role switch
+        {
+            "sugar" => id == "feedR" || id == "speed",
+            "protein" => id == "grabR" || id == "speed",
+            "pulp" => id == "speed",
+            "water" => id == "feedR" || id == "speed",
+            "guard" => id == "landR" || id == "speed",
+            _ => false,
+        };
+        public static string XpRole(string k) => k switch { "sting" or "firstHuman" or "release" => "guard", "full" or "rob" => "sugar", "catch" => "protein", _ => null };
+        public static bool IsRanked(string id) => System.Array.IndexOf(RANKED, id) >= 0;
         public static bool IsUnlock(string id) => System.Array.IndexOf(UNLOCKS, id) >= 0;
         /// what the next rank of skill i costs, from which pool ("unit" or "hive"), or null when it cannot be learned
         public static (string pool, Num cost)? Cost(int i, int[] ranks)
@@ -28,7 +42,7 @@ namespace Sting.Core
             string id = ALL[i]; int r = ranks[i];
             if (IsUnlock(id)) return r != 0 ? null : id == "focus" && ranks[Index("reflex")] == 0 ? ((string, Num)?)null : ("unit", T.skills.Of(id));
             if (r >= T.skills.ranks) return null;
-            return System.Array.IndexOf(RANKED, id) >= 0 ? ("unit", T.skills.rankCost * (r + 1)) : ("hive", T.skills.hiveCost * (r + 1));
+            return System.Array.IndexOf(RANKED, id) >= 0 ? ("wasp", T.skills.rankCost * (r + 1)) : ("hive", T.skills.hiveCost * (r + 1)); // job skills: the driven insect's own XP
         }
     }
 
@@ -238,13 +252,15 @@ namespace Sting.Core
         /// Skills (GDD 6.8): costs and what a rank adds; see tuning.js
         public static class skills
         {
-            public static Num swoop = 40, assist = 40, reflex = 30, focus = 50, release = 60, rankCost = 30, landR = 0.4, feedR = 0.2, grabR = 0.2, speed = 0.05,
+            public static Num swoop = 40, assist = 40, reflex = 30, focus = 50, release = 60, rankCost = 50, landR = 0.4, feedR = 0.2, grabR = 0.2, speed = 0.05,
                 hiveCost = 40, forage = 0.08, brood = 0.08, lay = 0.1, build = 0.1, releaseMargin = 0.03, releaseKick = 2.5;
             public static int ranks = 3, releaseLead = 8, focusMs = 3000, focusCooldownMs = 15000;
             public static Num Of(string k) => k switch { "swoop" => swoop, "assist" => assist, "reflex" => reflex, "focus" => focus, "release" => release, "landR" => landR, "feedR" => feedR, "grabR" => grabR, "speed" => speed, "forage" => forage, "brood" => brood, "lay" => lay, "build" => build, _ => 0 };
         }
         /// Wintering in somewhere warm, and the household that finds a nest (GDD 6.8); see tuning.js
         public static class warm { public static Num megaR = 0.32, loss = 0.35, minAdults = 20, exposedBeeLoss = 0.25, houseNotice = 150, reproMax = 0.5; }
+        /// Roles and mastery (GDD 6.8); see tuning.js
+        public static class roles { public static int max = 5, vetsMax = 24; public static Num mastery = 150, chew = 0.1, fill = 0.1, fight = 0.15; }
         /// The player gauge (GDD 6.8); see tuning.js
         public static class gauge { public static Num window = 3, @ref = 40, floor = 0.25, minDays = 1, effMin = 0.8; }
         /// Hornets at night (T2-10): porch lights and moths; see tuning.js

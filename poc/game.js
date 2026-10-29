@@ -5,7 +5,7 @@ import {
   Sim, Act, T, DT, ZONES, ZoneName, SwatKind, SwatKindName, StyleName, TopName, BottomName, Top, Bottom,
   toWorld, toLocal, dirToWorld, chunkKey, chunkOf, hash, Domain, rangeInt, resolveSting, zoneCover, segClosest, classify, predictedKind,
   NEST, NEST_ENTRANCE, flyPos, beePos, fmtClock, minuteOfDay, isLowerZone, broodTotal, sugarCap, proteinCap, waterCap, garmentGraph, dayWeather,
-  NetLab, LINKS, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetVel, CHASE, targetLabel, assistPilot, swoopPilot, hoverPilot, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE, SKILLS, SKILL_UNLOCKS, SKILL_RANKED, SKILL_HIVE, skillCost,
+  NetLab, LINKS, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetVel, CHASE, targetLabel, assistPilot, swoopPilot, hoverPilot, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE, SKILLS, SKILL_UNLOCKS, SKILL_RANKED, SKILL_HIVE, skillCost, ROLES,
 } from './sim/index.js';
 
 // Tuning as data (GDD 13, T1-22): read tuning/sting.tune, served next to the page, before anything uses T. Without it
@@ -1893,11 +1893,12 @@ const SKILL_INFO = {
   feedR: ['Feeding reach', 'feed from further off'], grabR: ['Grab reach', 'catch prey from further off'], speed: ['Flight speed', 'faster in the air'],
   forage: ['Foraging yield', 'more from every load'], brood: ['Brood growth', 'brood develops faster'], lay: ['Population', 'the queen lays more'], build: ['Comb building', 'more cells from each load'],
 };
+const ROLE_INFO = { sugar: ['Sugar foragers', 'feeding reach, speed'], protein: ['Hunters', 'grab reach, speed'], pulp: ['Pulp collectors', 'chew faster, speed'], water: ['Water carriers', 'fill faster, feeding reach, speed'], guard: ['Guards', 'weight in a fight, landing reach, speed'] };
 let learnOnce = 0, skillSig = '', switchOnce = 0, lineSig = '';
 const SPECIES_NAME = { wasp: 'wasps', hornet: 'hornets', bee: 'honeybees' };
 // Colonies of the line (GDD 6.8, multi-colony play): one in hand, the rest on the AI at the player's gauge
 function updateLine() {
-  const g = sim.gauge(), P = sim.prog, measured = P.gaugeDays >= T.gauge.minDays;
+  const g = sim.gauge(), P = sim.player, measured = P.gaugeDays >= T.gauge.minDays;
   $('nGauge').innerHTML = [
     ['In hand', `${SPECIES_NAME[sim.species]} · ${fmt(sim.colony.adults)} adults`],
     ['Your gauge', measured ? `${Math.round(g * 100)}% · ${P.gaugeRate.toFixed(0)} XP a day in hand (full at ${T.gauge.ref})` : `not measured yet (${P.gaugeDays.toFixed(1)} of ${T.gauge.minDays} days played); the AI works at ${Math.round(g * 100)}%`],
@@ -1912,22 +1913,26 @@ function updateLine() {
 }
 $('nLine').addEventListener('click', (e) => { const b = e.target.closest('button[data-sw]'); if (b && !b.disabled) { switchOnce = +b.dataset.sw; input.switchTo = 1; } });
 function updateSkills() {
-  const P = sim.prog, X = T.xp, all = sim.settings.skills === 'all', xp = P.unitTotal + P.hiveTotal;
+  const P = sim.prog, X = T.xp, all = sim.settings.skills === 'all', xp = P.unitTotal + P.hiveTotal, w = sim._driven();
+  const p = w && w.colony === 'own' ? (w.pers || { xp: 0, by: ROLES.map(() => 0), ranks: SKILLS.map(() => 0), mastered: false }) : null;
+  const earned = p ? p.by.reduce((a, b) => a + b, 0) : 0, lead = p && earned > 0 ? ROLES[p.by.indexOf(Math.max(...p.by))] : null;
   $('nXp').innerHTML = [
-    ['Unit XP', `${Math.floor(P.unit)} to spend · ${Math.floor(P.unitTotal)} earned`], ['Hive XP', `${Math.floor(P.hive)} to spend · ${Math.floor(P.hiveTotal)} earned`],
+    ...(p ? [['This wasp', `${Math.floor(p.xp)} XP to spend · ${p.mastered ? `<b>master</b> ${lead ? `${ROLE_INFO[lead][0].toLowerCase()}: when it dies, they gain a level` : ''}` : `${Math.floor(earned)} of ${T.roles.mastery} to master its job${lead ? ` (mostly ${ROLE_INFO[lead][0].toLowerCase()})` : ''}`}`]] : []),
+    ['Line XP', `${Math.floor(P.unit)} for abilities · ${Math.floor(P.hive)} for the hive · ${Math.floor(xp)} earned`],
     ['Stabs', `${P.stabs} people nobody had stung`],
     ...(sim.species === 'wasp' && !String(sim.settings.progression || 'open').startsWith('fixed:') ? [['Year\'s turn', xp >= X.hornetXp && P.stabs >= X.hornetStabs ? 'strong enough to wake as hornets' : xp < X.beeXp && P.stabs < X.beeStabs ? `bees will be offered unless the line reaches ${X.beeXp} XP or ${X.beeStabs} stabs` : `hornets at ${X.hornetXp} XP and ${X.hornetStabs} stabs (${Math.floor(xp)}, ${P.stabs})`]] : []),
   ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
-  const sig = JSON.stringify([P.ranks, Math.floor(P.unit), Math.floor(P.hive), all]);
+  const sig = JSON.stringify([P.ranks, P.roles, Math.floor(P.unit), Math.floor(P.hive), all, w && w.id, p && p.ranks, p && Math.floor(p.xp)]);
   if (sig === skillSig) return;
   skillSig = sig;
   const btn = (id) => {
-    const i = SKILLS.indexOf(id), r = P.ranks[i], unlock = SKILL_UNLOCKS.includes(id), have = unlock ? r > 0 || all : r > 0;
-    const c = unlock && all ? null : skillCost(i, P.ranks), can = !!c && P[c.pool] >= c.cost, [name, desc] = SKILL_INFO[id];
-    const tag = unlock ? (have ? ' ✓' : '') : ` ${r}/${T.skills.ranks}`, cost = c ? ` · ${c.cost} ${c.pool} XP` : unlock && !have ? ' · needs Reflex' : '';
+    const i = SKILLS.indexOf(id), job = SKILL_RANKED.includes(id), ranks = job ? (p ? p.ranks : SKILLS.map(() => 0)) : P.ranks, r = ranks[i], unlock = SKILL_UNLOCKS.includes(id), have = unlock ? r > 0 || all : r > 0;
+    const c = unlock && all ? null : job && !p ? null : skillCost(i, ranks), can = !!c && (c.pool === 'wasp' ? p.xp : P[c.pool]) >= c.cost, [name, desc] = SKILL_INFO[id];
+    const tag = unlock ? (have ? ' ✓' : '') : ` ${r}/${T.skills.ranks}`, cost = c ? ` · ${c.cost} ${c.pool === 'wasp' ? 'of its' : c.pool === 'unit' ? 'line' : 'hive'} XP` : unlock && !have ? ' · needs Reflex' : '';
     return `<button class="ghost${have ? ' have' : ''}" data-i="${i}"${can ? '' : ' disabled'}><b>${name}${tag}</b><span>${desc}${cost}</span></button>`;
   };
-  $('nSkills').innerHTML = `<h4>Unit</h4>${[...SKILL_UNLOCKS, ...SKILL_RANKED].map(btn).join('')}<h4>Hive</h4>${SKILL_HIVE.map(btn).join('')}`;
+  const role = (r, k) => `<button class="ghost${P.roles[k] ? ' have' : ''}" disabled><b>${ROLE_INFO[r][0]} ${P.roles[k]}/${T.roles.max}</b><span>${ROLE_INFO[r][1]}</span></button>`;
+  $('nSkills').innerHTML = `<h4>This wasp: its job</h4>${SKILL_RANKED.map(btn).join('')}<h4>Line abilities</h4>${SKILL_UNLOCKS.map(btn).join('')}<h4>Roles: passed on by masters</h4>${ROLES.map(role).join('')}<h4>Hive</h4>${SKILL_HIVE.map(btn).join('')}`;
 }
 $('nSkills').addEventListener('click', (e) => { const b = e.target.closest('button[data-i]'); if (b && !b.disabled) { learnOnce = +b.dataset.i; input.learn = 1; } });
 
@@ -2426,7 +2431,9 @@ function handleEvents(events) {
           if (!lab && sim.winter) showWinter(`${e.home ? `The nest was warm enough: the colony came through the winter (${fmt(e.adults)} adults) and its queen lives on. Stay in it, or wake as one of the young queens and leave it to the AI.` : e.why === 'autumn' ? 'The colony died with the autumn, as colonies do.' : 'Your colony did not make it through the season.'} ${fmt(e.mated)} young queen${Math.round(e.mated) === 1 ? '' : 's'} mated and went into hibernation; ${e.survivors} survived the cold.${e.lineage ? ` ${e.lineage} older sister nest${e.lineage === 1 ? '' : 's'} of your line also made it.` : ''} ${total > 1 ? 'Choose which queen you wake as; the others found sister nests.' : 'You wake as the last queen of the line.'}`);
         }
         break;
-      case 'learned': toast(`Learned: ${SKILL_INFO[e.id][0]}${SKILL_RANKED.includes(e.id) || SKILL_HIVE.includes(e.id) ? ` (rank ${e.rank})` : ''}`, 'var(--yellow)', 1.6); logEvent(`learned ${SKILL_INFO[e.id][0].toLowerCase()}`); skillSig = ''; break; // GDD 6.8
+      case 'mastered': toast(`This wasp has mastered its job. When it dies, every ${ROLE_INFO[e.role][0].toLowerCase().replace(/s$/, '')} of the colony gains a level`, 'var(--yellow)', 3); skillSig = ''; break; // GDD 6.8
+      case 'legacy': toast(`A master is gone: ${ROLE_INFO[e.role][0].toLowerCase()} are now level ${e.level}`, 'var(--yellow)', 3); logEvent(`${ROLE_INFO[e.role][0].toLowerCase()} level ${e.level}`); skillSig = ''; break;
+      case 'learned': toast(`${e.wasp !== undefined ? 'This wasp learned' : 'Learned'}: ${SKILL_INFO[e.id][0]}${SKILL_RANKED.includes(e.id) || SKILL_HIVE.includes(e.id) ? ` (rank ${e.rank})` : ''}`, 'var(--yellow)', 1.6); logEvent(`learned ${SKILL_INFO[e.id][0].toLowerCase()}`); skillSig = ''; break; // GDD 6.8
       case 'learnDenied': toast('Not enough XP', 'var(--muted)', 1); break;
       case 'colonySwitch': toast(`You take the ${SPECIES_NAME[e.species]} in hand. The colony you left goes on under the AI.`, 'var(--yellow)', 3); lineSig = ''; skillSig = ''; syncNests(); waspSwitched(sim.drivenId, 0.98); syncChunks(); break; // GDD 6.8
       case 'switchDenied': toast('That colony cannot be taken in hand now', 'var(--muted)', 1.4); break;

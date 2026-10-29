@@ -16,7 +16,7 @@ export function newColony(founding = false, species = 'wasp') {
     cells: founding ? 0 : s.cells * k, protein: founding ? 0 : s.protein, sugar: founding ? 0.5 : s.sugar, pulp: founding ? 0 : s.pulp,
     water: founding ? 0 : s.water, cool: 1, thirst: 0, // T2-1
     rEggs: 0, rLarvae: 0, rPupae: 0, gynes: 0, males: 0, mated: 0, young: 0,
-    deficit: 0, fed: 1, alloc: 0, sugarlessDays: 0, xpSeen: 0, warm: false, house: false, found: false,
+    deficit: 0, fed: 1, alloc: 0, sugarlessDays: 0, xpSeen: 0, warm: false, house: false, found: false, vets: [],
     stats: { emerged: 0, laid: 0, starvedLarvae: 0, died: 0, gynesRaised: 0, deposited: { sugar: 0, protein: 0, pulp: 0, water: 0 }, cooked: 0 },
   };
   return c;

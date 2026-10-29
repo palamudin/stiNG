@@ -133,6 +133,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 105 | The lock ends on arrival, like a satnav: landed on the flower, drink or water, perched on (or under the clothes of) the person, the prey caught, at the nest; a lock on what the wasp already sits on waits until it has left and come back | 7.9 | 24 |
 | 106 | Shift on an assisted flight (to land, perch or snatch prey) hurries it at burst speed instead of taking the controls back; it still slows to settle, and Shift still held on arrival does not take off again until let go | 7.9 | 24 |
 | 107 | Landing at speed: with the way open, assisted flight flies straight in at cruising speed and brakes only within its stopping distance (a flower 1.6 m off in 0.8 s, from 3.5 s). H (d-pad down) hovers round the lock at its own 1.2 m/s, 35 cm off and facing it, keeping pace with a walker; E lands from there, H or a move key hands back | 7.9 | 24 |
+| 108 | Lines and masters: each species line keeps its own XP, stabs, abilities, hive skills and role levels (the gauge is the player's). The wasp you fly earns its own XP and buys its own job skills; one that masters its job (150 XP) leaves every worker of its role a level better when it dies (sugar foragers, hunters, pulp collectors, water carriers, guards, up to 5) | 6.8 | 24 |
 
 ## Verified
 
@@ -158,7 +159,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 - AI wasps in state packets are not checked against solid geometry (their owner does not collide them far from its player).
 - With terrain on, flight does not feel the slope (the sim works in height above the ground), hills block sight lines between people only, and buildings lean slightly with the ground they stand on.
 - Assisted flight steers round what is within a metre ahead (a trunk, a fence) but plans no route: a hedge or a house wall longer than it can see past still needs the player, and it does not dodge swats or birds.
-- Progression is at T0 (GDD 18.48, 18.49): two pools of XP, thirteen skills, multi-colony play and the gauge. The year's turn offers only wasp lines a change; each line shares one pool of XP and one tree; switching colonies is instant (no relay); the XP and gauge figures are first guesses to tune with play. The PoC runs progression `open`, so any species can also be picked on the start screen.
+- Progression is at T0 (GDD 18.48, 18.49, 18.57): each line's XP and tree, the wasp in hand's job skills, five roles levelled by masters, multi-colony play and the gauge. The year's turn offers only wasp lines a change; switching colonies is instant (no relay); a trained wasp that goes home retires inside rather than flying again; the XP, mastery and gauge figures are first guesses to tune with play. The PoC runs progression `open`, so any species can also be picked on the start screen.
 - A swarm is told, not shown: the new colony appears on its tree, but no cloud of bees flies there. A bee colony's queens and drones stay abstract (no mating flights).
 - A raid on another player's nest takes one larva at a time, by the player's own wasp; AI workers do not raid other players' nests, as they do not raid rival nests.
 

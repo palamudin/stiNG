@@ -300,7 +300,7 @@ namespace Sting.Core
         void LineTick(bool daylight, Num frac)
         {
             if (line.Count == 0) return;
-            Num dt = (Num)60 / dayTicks; var av = EcoAvail(); var lb = LineBoost(); Num g = Gauge();
+            Num dt = (Num)60 / dayTicks; var av = EcoAvail(); Num g = Gauge();
             foreach (var sc in new List<LineColony>(line))
             {
                 var c = sc.colony; string key = "line:" + sc.id; int outN = 0; foreach (var w in wasps) if (w.colony == key) outN++;
@@ -309,7 +309,7 @@ namespace Sting.Core
                     c.sugar += T.line.queenForage.sugar * dt * av.sugar; c.protein += T.line.queenForage.protein * dt * av.protein; c.pulp += T.line.queenForage.pulp * dt;
                 }
                 var h = NestHeat(minute, sc.nest.site);
-                Colony.Step(c, dt, outN, daylight, frac, bio, BroodSpeed(minute, sc.nest.site, c.cool), av, (h.heat, h.cook), lb);
+                Colony.Step(c, dt, outN, daylight, frac, bio, BroodSpeed(minute, sc.nest.site, c.cool), av, (h.heat, h.cook), LineBoost(c.species ?? "wasp"));
                 HiveXp(c, g, false); // a colony on the AI earns at the player's gauge (GDD 6.8)
                 if (Colony.Sp(c).perennial != 0) Swarm(c, sc.nest);
                 // the exterminator (abstract; he is drawn only for the player's own nest): called to a sister nest's

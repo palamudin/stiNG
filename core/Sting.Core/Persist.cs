@@ -86,7 +86,7 @@ namespace Sting.Core
 
     public static class Persist
     {
-        public const int SAVE_VERSION = 29; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home); 14: barbecue meat taken; 15: regions, pulp taken from wood; 16: strolls and garden rounds; 17: the carry ledger and sips (T1-20); 18: water (T2-1); 19: young queens on their mating flight (T2-3); 20: lineage colonies (T2-4); 21: feature modifiers (T2-6); 22: the exterminator called to a sister colony; 23: terrain; 24: the swoop; 25: species (wasps, hornets, honeybees); 26: XP and skills; 27: the player gauge, hives kept over a wasp winter; 28: wintering in somewhere warm; 29: a person's pace, for a lock
+        public const int SAVE_VERSION = 30; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home); 14: barbecue meat taken; 15: regions, pulp taken from wood; 16: strolls and garden rounds; 17: the carry ledger and sips (T1-20); 18: water (T2-1); 19: young queens on their mating flight (T2-3); 20: lineage colonies (T2-4); 21: feature modifiers (T2-6); 22: the exterminator called to a sister colony; 23: terrain; 24: the swoop; 25: species (wasps, hornets, honeybees); 26: XP and skills; 27: the player gauge, hives kept over a wasp winter; 28: wintering in somewhere warm; 29: a person's pace, for a lock; 30: each line's own progression, insects' own experience, role levels
         const uint MAGIC = 0x474E4953; // "SING"
 
         // ---------------------------------------------------------------- one Io per type
@@ -172,6 +172,7 @@ namespace Sting.Core
             a.B(ref w.walking); a.D(ref w.fightReqUntil);
             if (a.Opt(ref w.land)) { a.D(ref w.land.nx); a.D(ref w.land.ny); a.D(ref w.land.nz); a.S(ref w.land.kind); a.B(ref w.land.hasH); a.D(ref w.land.hx); a.D(ref w.land.hy); a.D(ref w.land.hz); a.I(ref w.land.yawQ); }
             a.I(ref w.noLandUntil); a.S(ref w.trapCause); a.I(ref w.swoopUntil); a.I(ref w.swoopReady); a.S(ref w.sp); a.B(ref w.spent); a.I(ref w.pollenT); // GDD 6.8
+            if (a.Opt(ref w.pers)) IoPers(a, w.pers); // its own experience (GDD 6.8)
             if (a.Opt(ref w.rob)) { a.S(ref w.rob.key); a.I(ref w.rob.h); a.D(ref w.rob.progress); a.D(ref w.rob.prevSting); }
             return w;
         }
@@ -183,6 +184,16 @@ namespace Sting.Core
         }
 
         /// The parts of a human that change; the rest comes from the world (seed and chunk)
+        static void IoProg(Archive a, Prog P)
+        {
+            a.D(ref P.unit); a.D(ref P.unitTotal); a.D(ref P.hive); a.D(ref P.hiveTotal); a.I(ref P.stabs);
+            for (int k = 0; k < P.ranks.Length; k++) a.I(ref P.ranks[k]);
+            for (int k = 0; k < P.roles.Length; k++) a.I(ref P.roles[k]);
+        }
+        static void IoPers(Archive a, Pers p)
+        {
+            a.D(ref p.xp); for (int k = 0; k < p.by.Length; k++) a.D(ref p.by[k]); for (int k = 0; k < p.ranks.Length; k++) a.I(ref p.ranks[k]); a.B(ref p.mastered);
+        }
         static void IoHumanState(Archive a, Human h)
         {
             IoClothing(a, ref h.clothing);
@@ -220,6 +231,7 @@ namespace Sting.Core
             a.D(ref s.depSugar); a.D(ref s.depProtein); a.D(ref s.depPulp);
             a.D(ref c.water); a.D(ref c.cool); a.D(ref c.thirst); a.D(ref s.depWater); a.D(ref s.cooked); // T2-1
             a.S(ref c.species); a.I(ref c.swarmed); a.D(ref c.xpSeen); a.B(ref c.warm); a.B(ref c.house); a.B(ref c.found); // GDD 6.8
+            a.List(ref c.vets, () => new Vet(), v => { a.I(ref v.id); a.D(ref v.born); if (a.Opt(ref v.pers)) IoPers(a, v.pers); });
         }
 
         static ChunkState IoChunkState(Archive a, ChunkState s)
@@ -329,7 +341,12 @@ namespace Sting.Core
             if (a.Opt(ref s.hiberPick)) { a.I(ref s.hiberPick.season); a.D(ref s.hiberPick.x); a.D(ref s.hiberPick.z); a.S(ref s.hiberPick.kind); }
             if (a.Opt(ref s.springAt)) { a.D(ref s.springAt.x); a.D(ref s.springAt.z); }
             if (a.Opt(ref s.homeScent)) IoKnown(a, s.homeScent);
-            { var P = s.prog; a.D(ref P.unit); a.D(ref P.unitTotal); a.D(ref P.hive); a.D(ref P.hiveTotal); a.I(ref P.stabs); for (int k = 0; k < P.ranks.Length; k++) a.I(ref P.ranks[k]); a.D(ref P.hand); a.D(ref P.handSeen); a.D(ref P.gaugeRate); a.D(ref P.gaugeDays); } // GDD 6.8
+            { // each line's progression, by species, and the player gauge (GDD 6.8)
+                int n = s.progs.Count; a.I(ref n);
+                if (a.Reading) { s.progs.Clear(); for (int i = 0; i < n; i++) { string sp = null; a.S(ref sp); var P = new Prog(); IoProg(a, P); s.progs[sp] = P; } }
+                else foreach (var kv in s.progs) { string sp = kv.Key; a.S(ref sp); IoProg(a, kv.Value); }
+                var G = s.player; a.D(ref G.hand); a.D(ref G.handSeen); a.D(ref G.gaugeRate); a.D(ref G.gaugeDays);
+            }
             if (a.Opt(ref s.pendingSwitch)) { a.I(ref s.pendingSwitch.at); a.I(ref s.pendingSwitch.target); }
             if (a.Opt(ref s.muni))
             {
@@ -462,7 +479,7 @@ namespace Sting.Core
             sim.noAI = noAI;
             sim.nextWaspId = peer * 1000000 + 1;
             sim.wasps = new List<Wasp>(); sim.remote = new OrderedMap<int, RemoteWasp>(); sim.outbox = new List<Msg>();
-            sim.prog = new Prog(); sim.colony = Colony.New(false, sim.species); sim.nest = World.MakeNest(World.NEST.treeX, World.NEST.treeZ, World.NEST.x, World.NEST.y, World.NEST.z); sim.colony.maxCells = sim.MaxCells("trunk"); sim.oldNests = new List<Nest>(); // a joining player's line starts with no XP (GDD 6.8)
+            sim.progs.Clear(); sim.player = new Player(); sim.colony = Colony.New(false, sim.species); sim.nest = World.MakeNest(World.NEST.treeX, World.NEST.treeZ, World.NEST.x, World.NEST.y, World.NEST.z); sim.colony.maxCells = sim.MaxCells("trunk"); sim.oldNests = new List<Nest>(); // a joining player's line starts with no XP (GDD 6.8)
             sim.stats = new SimStats();
             sim.netStats = new NetStats();
             sim.ghost = null; sim.extinct = false; sim.lineage = 0; sim.evSeq = 0; sim.prevAct = 0; sim.pressUsed = false;

@@ -431,6 +431,14 @@ The line earns experience, and experience grows a tree. A line that runs a whole
 - **Load.** Every colony held is a colony the owner's machine simulates in full near its player and at the relevance tiers further out (11.12). The number held is a world setting *(tune)*; on Main, colonies of an offline player run at the abstract tier (Q-15).
 - **Ownership.** Every colony held is owned by the player's peer and published like any other (D-19); peers audit each one separately.
 
+**Roles and individual mastery** (agreed 2026-10-29; replaces the line-wide ranked unit skills of 18.48)
+- **The wasp in hand excels, the line remembers.** The ranked job skills (landing reach, feeding reach, grab reach, flight speed) belong to the individual insect the player drives. Only it earns personal experience, from the work it does, and it learns its own ranks with that experience at a high cost *(tune)*.
+- **Abilities stay the line's.** The active abilities (dash, assisted flight, the Reflex cue, focus, quick release) are learned once with the line's experience, and every insect the player drives has them.
+- **Mastery passes on.** An insect whose personal experience reaches the mastery bar *(tune)* has mastered its job. When it dies, of old age or killed, the line gains one passive level in the role it worked most, and every worker of that role has it from then on. One that dies before mastery passes nothing on.
+- **Roles, as far as nature goes.** The five work roles the sim already has: sugar foragers, hunters (protein), pulp collectors, water carriers and guards. Each role level gives its workers a little more of what the job needs: reach for foragers and hunters, chewing and filling speed, a guard's weight in a fight, and some speed for all. Roles will widen with later tiers (nurses, builders; other species' castes).
+- **Why.** Levelling is a life's work, not a speedrun. A good player's trained wasps leave the colony better when they go, so keeping an experienced insect alive is worth something, and losing it before mastery costs something.
+- **Each line keeps its own** experience, stabs, abilities, hive skills, role levels and year's turn. A line is the player's colonies of one species. A new species line takes the experience of the queen that founds it: a copy of the line she came from, as it stands. The player gauge belongs to the player, across lines.
+
 **Pillar P1.** No wasp turns into a hornet. Like balling on *Vespula* (9.2), this is a game license: the change is the player's progression, applied when a new queen is woken. The world itself stays nature as is. Hornets and bees behave as their biology says; none gains a face or a voice.
 
 **The three species**, on one code path (D-22): the wasp code, with a species table read from tuning (18.29).
@@ -479,6 +487,17 @@ The line earns experience, and experience grows a tree. A line that runs a whole
 For testing, the PoC and the core run `open`: all three species can be picked on the start screen from the start. In a shared world, players' lines can be different species. A hornet player hunting a wasp player's foragers is the rivalry working as intended (Q-07). Every species' stabs count on the one counter (Q-09).
 
 ---
+
+### 6.9 Genus progression and more insects **[T4] [vision]** (agreed 2026-10-29)
+
+**Educational by design.** Every line starts as the most common species of its kind. The experience it gathers lets it "mutate" into a subspecies or a related genus with its own biology, so the player learns how real social insects differ by playing them. Like the hornet turn (6.8), the change happens at a generation boundary and is a game licence. The animals themselves behave as their biology says.
+
+- **Each kind has its own genus progression.** Wasps (the common yellowjacket onward: hornets built, 18.47), bees (the honeybee onward) and, new at T4, ants (the common ant onward, toward specialists such as the bullet ant).
+- **Specialists change what the player can do to the world and to other players.** The example agreed: wood-eating colonies as **tree removal** units that can bring down another player's nest tree.
+- **Defence is social.** Against such an attack a player can expand into defensive units from the hives available to them, or call for help from an allied player whose line has protective units. Alliances become a game system, not only co-op (Q-07).
+- **Roles widen with the tiers.** Each new kind brings its castes as roles (soldiers, majors and minors among ants, for example), with role levels earned as in 6.8.
+
+**Open questions.** Q-21: termites are not ants (they are closer to cockroaches), so an ant line becoming termites would be a licence beyond the hornet turn's. Q-22: what a removed tree means for a persistent world. Q-23: how alliances are formed and audited in shared worlds.
 
 ## 7. The wasp
 
@@ -1011,6 +1030,9 @@ On Main the entity count is dominated by AI wasps: one player's colony can hold 
 | Q-18 | What earns experience, how events are weighted, and where the hornet and bee bars sit; does a stab count every sting or only unique humans? | Start from events the sim already emits (6.8), earned in hand, and by AI colonies at the player gauge's rates; stabs follow the counter (unique humans); tune the bars, the gauge window and its floor on play data |
 | Q-19 | Is the change of species one-way? Can a hornet line go back, or a bee line earn its way back to wasps or on to hornets? | Proposal: hornets are one-way; a bee line that runs a strong year is offered wasps again |
 | Q-20 | When a line takes the bee offer, what happens to its wasp queens? | Settled 2026-10-27: they found AI-run lineage colonies (18.40); the player can hold several colonies at once and switch between them, the rest auto-managed (6.8, multi-colony play) |
+| Q-21 | Termites are not ants (they are closer to cockroaches). Can an ant line "mutate" into termites, or do termites start their own line? | Open (T4, 6.9). Proposal: termites are their own kind with their own progression, reached by founding, not by mutation, to keep the educational promise |
+| Q-22 | What does a tree brought down by wood-eating units mean in a persistent world: is it a chunk delta, does it regrow, who may do it where? | Open (T4, 6.9) |
+| Q-23 | How are alliances formed, shown and audited in shared worlds, and can allied units defend another player's nest? | Open (T4, 6.9) |
 
 ---
 
@@ -1746,6 +1768,54 @@ Hovering:
 
 389 properties hold, and the 29 digests are unchanged.
 
+### 18.57 Lines, the wasp in hand, and roles passed on by masters (6.8)
+
+**Agreed 2026-10-29.** Two problems with the T0 tree of 18.48:
+- **One worker skilled the whole colony.** The job skills were the line's, so every insect had them at once and levelling was a speedrun.
+- **One pool for every line.** All lines shared one pool of XP and one tree.
+
+**What changed.**
+- **Each line keeps its own.** `sim.progs` holds one record per species line: XP, stabs, abilities, hive skills and role levels. `sim.prog` is the line in hand.
+  - The player gauge moved to `sim.player`, so it belongs to the player across lines.
+  - A colony earns hive XP for its own line.
+  - A colony on the AI uses its own line's hive skills, never past the line in hand.
+  - Waking a new species forks the line: the new line starts as a copy of the one the queen came from.
+- **Job skills are the insect's.**
+  - The driven insect earns personal XP (`w.pers`) alongside the line's, from the same events. The work decides the role: stings and quick releases are a guard's, feeding and robbing a sugar forager's, catches a hunter's, and a load home counts for its kind.
+  - It buys its own ranks of landing reach, feeding reach, grab reach and flight speed at 50 times the rank (was 30, and line-wide).
+  - Abilities (dash, assisted flight, Reflex, focus, quick release) stay line-wide.
+- **Mastery passes on.**
+  - At 150 personal XP earned, the insect has mastered its job.
+  - When it dies, the line's level in the role it worked most rises by one, up to 5. Old age, swatted, fallen in a fight: any death counts. One that dies before mastery passes nothing on.
+  - A trained insect that goes home lives on inside (`colony.vets`) and passes its mastery on when it dies of age there.
+- **What a role level does.**
+  - Every worker of the role gets one more rank of the role's job skills. Sugar foragers: feeding reach and speed. Hunters: grab reach and speed. Pulp collectors: speed. Water carriers: feeding reach and speed. Guards: landing reach and speed.
+  - Pulp collectors chew 10% faster per level, and water carriers fill 10% faster.
+  - Guards get 0.15 more weight per level in a fight.
+- **The colony view.** It shows:
+  - This wasp: its XP, mastery progress and job skills.
+  - Line abilities.
+  - The five role levels.
+  - Hive skills.
+- **Saves.** C# save version 30. Old JS saves move their single record into the line in hand and the gauge.
+
+**Checks.** JS and both C# builds agree.
+
+What the insect in hand earns:
+- A sting earns the insect 10 personal XP as guard's work, as well as the line's 10.
+- A job skill is learned with the insect's own XP, 50 for rank 1. Only it flies faster: another worker does not.
+
+Mastery and role levels:
+- A hunter that mastered its job dies, and every hunter reaches and flies a rank further. Foragers do not.
+- One killed before mastery passes nothing on.
+- A master that goes home passes its mastery on when it dies of age.
+
+Lines:
+- Taking a bee colony in hand shows the bee line's own XP and skills, and the wasp line keeps its own.
+- A hornet line starts with the experience of the queen that founded it.
+
+Three digests changed (the progression digests now include role levels). 397 properties hold.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1754,7 +1824,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (107 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony; the T0 of progression (18.48): XP, unit and hive skills, the year's turn; multi-colony play with the player gauge (18.49); wintering in somewhere warm (18.50); chasing moving prey with a lock, with a colony view you can click (18.51); obstacle avoidance in assisted flight (18.52); reaching what moves under a lock (18.53); the lock ending on arrival (18.54); Shift hurrying an assisted flight (18.55); and landing at speed with hovering round a lock (18.56). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (108 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony; the T0 of progression (18.48): XP, unit and hive skills, the year's turn; multi-colony play with the player gauge (18.49); wintering in somewhere warm (18.50); chasing moving prey with a lock, with a colony view you can click (18.51); obstacle avoidance in assisted flight (18.52); reaching what moves under a lock (18.53); the lock ending on arrival (18.54); Shift hurrying an assisted flight (18.55); landing at speed with hovering round a lock (18.56); and lines, the wasp in hand and roles passed on by masters (18.57). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 

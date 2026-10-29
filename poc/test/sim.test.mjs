@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, humanParts, malesAbout, chunkOf, toLocal, dirToWorld, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, pickTarget, assistPilot, swoopPilot, hoverPilot, HOVER, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS,
+  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, pickTarget, assistPilot, swoopPilot, hoverPilot, HOVER, ROLES, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS,
 } from '../sim/index.js';
 import { applyTuning, parseTuning, tuningHash, tuningLeaves, TUNE } from '../sim/tunefile.js';
 
@@ -1900,13 +1900,34 @@ function seated(sim, pred) {
     place(s.wasp, { x: 5, y: 2, z: 5 }); run(s, 1, () => idle({ act: Act.Swoop, yawQ: 0 }));
     ok(s.wasp.swoopUntil > 0, 'once learned, X dashes'); }
   // ranks: speed and grab reach
-  { const cruise = (r) => { const s = mk(); s.prog.ranks[SKILLS.indexOf('speed')] = r; place(s.wasp, { x: 5, y: 2, z: 5 }); let v = 0; run(s, 120, (sim) => { v = Math.hypot(sim.wasp.vx, sim.wasp.vz); return idle({ mz: 100, yawQ: 0 }); }); return v; };
+  { const cruise = (r) => { const s = mk(); s._pers(s.wasp).ranks[SKILLS.indexOf('speed')] = r; place(s.wasp, { x: 5, y: 2, z: 5 }); let v = 0; run(s, 120, (sim) => { v = Math.hypot(sim.wasp.vx, sim.wasp.vz); return idle({ mz: 100, yawQ: 0 }); }); return v; };
     const v0 = cruise(0), v3 = cruise(3);
     ok(v3 > v0 * 1.1, `flight speed at rank 3 is ${((v3 / v0 - 1) * 100).toFixed(0)}% faster (${v0.toFixed(2)} -> ${v3.toFixed(2)} m/s)`);
     const s = mk(); const cat = s.records.get('0,0').content.caterpillars.find((c, i) => s.catActive(s.records.get('0,0'), i));
     const d = T.prey.catchDist * Math.SQRT2 * 1.25; place(s.wasp, { x: cat.x + d, y: cat.y, z: cat.z });
-    const before = s._preyNear(s.wasp); s.prog.ranks[SKILLS.indexOf('grabR')] = 2; const after = s._preyNear(s.wasp);
+    const before = s._preyNear(s.wasp); s._pers(s.wasp).ranks[SKILLS.indexOf('grabR')] = 2; const after = s._preyNear(s.wasp);
     ok(!before && after && after.kind === 'caterpillar', 'grab reach at rank 2 catches a caterpillar a quarter further off'); }
+  // job skills belong to the insect in hand; mastery passes on to its role (GDD 6.8, 2026-10-29)
+  { const s = mk(); for (const h of s.active) h.tr = { ...h.tr, style: Style.Freezer }; stingOnce(s); const p = s.wasp.pers, gi = ROLES.indexOf('guard');
+    ok(p && p.xp === T.xp.sting + T.xp.firstHuman && p.by[gi] === p.xp && s.wasp.role === 'guard' && s.prog.unit === p.xp, `the wasp in hand earns its own XP as well as the line's: a sting is guard's work (${p.xp} personal XP)`); }
+  { const s = mk(), w = s.wasp, sp = SKILLS.indexOf('speed'); s._pers(w).xp = T.skills.rankCost + 10; s.prog.unit = 0;
+    const ev = learn(s, 'speed'), other = s._spawnWasp(false); other.role = 'sugar';
+    ok(count(ev, 'learned') === 1 && w.pers.ranks[sp] === 1 && w.pers.xp === 10 && s.prog.ranks[sp] === 0 && s._mul(w, 'speed') > 1 && s._mul(other, 'speed') === 1,
+      `a job skill is learned by the wasp in hand with its own XP (${T.skills.rankCost} for rank 1), and only it flies faster`);
+    const ev2 = learn(s, 'speed'); ok(count(ev2, 'learnDenied') === 1, 'the next rank costs more than it has'); }
+  { const s = mk(), w = s.wasp, pi = ROLES.indexOf('protein'), K = T.skills;
+    s._pers(w).by[pi] = T.roles.mastery - 1; const ev = []; s._xp(w, 'catch'); ev.push(...s.drainEvents());
+    const hunter = s._spawnWasp(false); hunter.role = 'protein'; const forager = s._spawnWasp(false); forager.role = 'sugar';
+    const g0 = s._mul(hunter, 'grabR'); s._die(w, 'old age', null); ev.push(...s.drainEvents());
+    const lg = ev.find((e) => e.type === 'legacy');
+    ok(count(ev, 'mastered') === 1 && lg && lg.role === 'protein' && lg.level === 1 && g0 === 1 && s._mul(hunter, 'grabR') === 1 + K.grabR && s._mul(hunter, 'speed') === 1 + K.speed && s._mul(forager, 'grabR') === 1,
+      'a hunter that mastered its job dies, and every hunter of the colony reaches and flies a rank further; foragers do not'); }
+  { const s = mk(), w = s.wasp; s._pers(w).by[0] = T.roles.mastery - 10; s._die(w, 'swatted', null); const ev = s.drainEvents();
+    ok(count(ev, 'legacy') === 0 && s.prog.roles.every((r) => r === 0), 'one killed before mastery passes nothing on'); }
+  { const s = mk(), w = s.wasp; const p = s._pers(w); p.by[ROLES.indexOf('pulp')] = T.roles.mastery; p.mastered = true;
+    s.drivenId = -1; s._despawn(w); const kept = s.colony.vets.length === 1;
+    s.colony.vets[0].born = s.minute - 1e6; const ev = run(s, 3700);
+    ok(kept && count(ev, 'legacy') === 1 && s.roleLevel('pulp') === 1 && s.colony.vets.length === 0, 'a master that goes home lives on inside, and passes its mastery on when it dies of age'); }
   // hive skills: more from every load, faster brood
   { const a = newColony(), b = newColony(), K = T.skills;
     for (let i = 0; i < 20; i++) { colonyStep(a, 0.1, 0, true, 0.3, 0.2); colonyStep(b, 0.1, 0, true, 0.3, 0.2, 1, null, null, { forage: 1 + 3 * K.forage, brood: 1 + 3 * K.brood, lay: 1, build: 1 }); }
@@ -1939,7 +1960,8 @@ function seated(sim, pred) {
     const e = ev.find((x) => x.type === 'offer'); run(t, 1, () => idle({ pick: 1001 }));
     ok(e && e.species === 'hornet' && t.species === 'hornet' && t.colony.species === 'hornet' && t.wasp.sp === 'hornet' && t.wasp.caste === 'queen' && t.line.every((x) => x.colony.species === 'wasp') && t.settings.species === 'hornet',
       `a strong line wakes as a hornet queen; the other queens found wasp colonies (${t.line.length})`);
-    const r = restore(snapshot(t)); ok(r.species === 'hornet' && r.prog.stabs === T.xp.hornetStabs && r.prog.ranks.length === SKILLS.length, 'a save keeps the species the line turned into and its XP'); }
+    ok(t.progs.hornet.unitTotal === T.xp.hornetXp && t.progs.wasp.unitTotal === T.xp.hornetXp, 'the hornet line starts with the experience of the queen that founds it; the wasp line keeps its own');
+    const r = restore(snapshot(t)); ok(r.species === 'hornet' && r.prog.stabs === T.xp.hornetStabs && r.prog.ranks.length === SKILLS.length && r.progs.wasp, 'a save keeps the species the line turned into and each line\'s XP'); }
   { const { t } = yearEnd(0, 0); run(t, 1, () => idle({ pick: 1001 }));
     ok(t.species === 'bee' && t.colony.adults === T.xp.beeSwarm && !t.colony.sited, `a weak line can try a honeybee colony: a queen with a swarm of ${t.colony.adults}`); }
   { const { t } = yearEnd(0, 0); run(t, 1, () => idle({ pick: 1 }));
@@ -1955,15 +1977,15 @@ function seated(sim, pred) {
     const sc = { id: ++s.lineSeq, nest, colony: c, season: s.season.n, ext: 0 }; s.line.push(sc); return sc;
   };
   { const s = mk(), G = T.gauge, g0 = s.gauge(), dt = 0.05;
-    for (let i = 0; i < 180; i++) { s.prog.hand += G.ref * dt; s._gaugeTick(dt); }
+    for (let i = 0; i < 180; i++) { s.player.hand += G.ref * dt; s._gaugeTick(dt); }
     const g1 = s.gauge();
     for (let i = 0; i < 60; i++) s._gaugeTick(dt);
     const g2 = s.gauge();
     ok(g0 === G.floor && g1 > 0.9 && g2 < 0.5 && g2 >= G.floor, `the gauge: ${g0} until measured, ${g1.toFixed(2)} after nine days at full rate, ${g2.toFixed(2)} after three idle days`); }
   { const lineXp = (good) => {
-      const s = mk(); const sc = addLine(s, 'wasp', 6); if (good) { s.prog.gaugeDays = 5; s.prog.gaugeRate = T.gauge.ref; }
-      run(s, 3600, (sim) => { if (sim.wasp) place(sim.wasp, { x: sim.nest.entrance.x + 1, y: 1.5, z: sim.nest.entrance.z }); if (good) { sim.prog.gaugeRate = T.gauge.ref; sim.prog.gaugeDays = 5; } return idle(); });
-      return { xp: s.prog.hiveTotal - s.prog.hand, food: sc.colony.sugar + sc.colony.protein + sc.colony.pulp };
+      const s = mk(); const sc = addLine(s, 'wasp', 6); if (good) { s.player.gaugeDays = 5; s.player.gaugeRate = T.gauge.ref; }
+      run(s, 3600, (sim) => { if (sim.wasp) place(sim.wasp, { x: sim.nest.entrance.x + 1, y: 1.5, z: sim.nest.entrance.z }); if (good) { sim.player.gaugeRate = T.gauge.ref; sim.player.gaugeDays = 5; } return idle(); });
+      return { xp: s.prog.hiveTotal - s.player.hand, food: sc.colony.sugar + sc.colony.protein + sc.colony.pulp };
     };
     const lo = lineXp(false), hi = lineXp(true);
     ok(hi.xp > lo.xp * 3 && hi.food > lo.food, `a colony on the AI earns hive XP and forages at the player's gauge (${hi.xp.toFixed(2)} XP at full, ${lo.xp.toFixed(2)} at the floor)`); }
@@ -1974,13 +1996,18 @@ function seated(sim, pred) {
       'taking a bee colony of the line in hand: you fly a bee from its hive, and your wasp colony goes on under the AI');
     run(s, 1, () => idle({ pick: -(1000 + back.id) }));
     ok(s.colony === own && s.species === 'wasp' && s.wasp.sp === 'wasp', 'and back to the wasps'); }
+  { const s = mk(); s.prog.unit = 30; s.prog.ranks[SKILLS.indexOf('swoop')] = 1; const sc = addLine(s, 'bee', 8);
+    run(s, 1, () => idle({ pick: -(1000 + sc.id) })); const bee = { unit: s.prog.unit, swoop: s.hasSkill(s.wasp, 'swoop') };
+    const back = s.line.find((x) => x.colony.species === 'wasp'); run(s, 1, () => idle({ pick: -(1000 + back.id) }));
+    ok(bee.unit === 0 && !bee.swoop && s.prog.unit === 30 && s.hasSkill(s.wasp, 'swoop') && Object.keys(s.progs).sort().join() === 'bee,wasp',
+      'each line keeps its own XP and skills: the bee colony starts its own, and the wasps still have theirs'); }
   { const s = mk(); s.colony.sited = false; const sc = addLine(s, 'wasp', 6); const ev = run(s, 1, () => idle({ pick: -(1000 + sc.id) }));
     ok(count(ev, 'switchDenied') === 1 && s.colony !== sc.colony, 'a founding queen without a nest cannot leave it to the AI'); }
   { const t = mk(); const hv = addLine(t, 'bee', 8); hv.colony.sugar = 400; t.colony.mated = 200; t.season.startMinute -= 0.71 * t.settings.seasonDays * 1440;
     const a0 = hv.colony.adults; run(t, 120); run(t, 1, () => idle({ pick: 1 }));
     ok(t.line.includes(hv) && hv.colony.queenAlive && hv.colony.adults < a0 && t.line.some((x) => x.colony.species === 'wasp'),
       `a honeybee colony of a wasp line winters as a cluster and is still there in spring (${a0.toFixed(0)} -> ${hv.colony.adults.toFixed(0)} bees), beside the new wasp colonies`);
-    const r = restore(snapshot(t)); ok(r.line.length === t.line.length && r.prog.gaugeDays === t.prog.gaugeDays, 'a save keeps the line\'s colonies and the gauge'); }
+    const r = restore(snapshot(t)); ok(r.line.length === t.line.length && r.player.gaugeDays === t.player.gaugeDays, 'a save keeps the line\'s colonies and the gauge'); }
 }
 
 // 52. Wintering in somewhere warm, and a house that finds the nest (GDD 6.8)

@@ -241,8 +241,15 @@ export const T = {
   // foraging yield, brood development, laying and comb built per load. Quick release: an insect stinging a person pulls
   // out and away when a hand will land within releaseLead ticks and reach it (releaseMargin m), at releaseKick m/s.
   // Focus (an activated slowdown, solo) lasts focusMs and is ready again after focusCooldownMs.
-  skills: { swoop: 40, assist: 40, reflex: 30, focus: 50, release: 60, ranks: 3, rankCost: 30, landR: 0.4, feedR: 0.2, grabR: 0.2, speed: 0.05,
+  skills: { swoop: 40, assist: 40, reflex: 30, focus: 50, release: 60, ranks: 3, rankCost: 50, landR: 0.4, feedR: 0.2, grabR: 0.2, speed: 0.05,
     hiveCost: 40, forage: 0.08, brood: 0.08, lay: 0.1, build: 0.1, releaseLead: 8, releaseMargin: 0.03, releaseKick: 2.5, focusMs: 3000, focusCooldownMs: 15000 },
+
+  // Roles and mastery (GDD 6.8, agreed 2026-10-29). The ranked job skills (landR, feedR, grabR, speed) belong to the
+  // insect the player drives: it earns personal XP from its work (the same figures as T.xp) and buys its own ranks with it
+  // at rankCost times the rank. One whose personal XP earned reaches mastery has mastered its job; when it dies, the line
+  // gains a level (up to max) in the role it worked most, and every worker of that role has it: one more rank of the role's
+  // job skills (ROLE_SKILLS), chewing pulp chew and filling water fill faster per level, a guard fight more in a fight.
+  roles: { max: 5, mastery: 150, chew: 0.1, fill: 0.1, fight: 0.15, vetsMax: 24 },
 
   // The player gauge (GDD 6.8): how well the player plays, measured, so colonies on the AI progress at the player's
   // level and no higher. rate: XP earned in hand (unit XP, and hive XP of the colony in hand) per in-game day, smoothed
@@ -380,13 +387,17 @@ export const SKILL_UNLOCKS = ['swoop', 'assist', 'reflex', 'focus', 'release'];
 export const SKILL_RANKED = ['landR', 'feedR', 'grabR', 'speed'];
 export const SKILL_HIVE = ['forage', 'brood', 'lay', 'build'];
 export const SKILLS = [...SKILL_UNLOCKS, ...SKILL_RANKED, ...SKILL_HIVE];
+// The work roles (GDD 6.8), the job skills a level of each adds a rank to, and the role each kind of XP is earned in
+export const ROLES = ['sugar', 'protein', 'pulp', 'water', 'guard'];
+export const ROLE_SKILLS = { sugar: ['feedR', 'speed'], protein: ['grabR', 'speed'], pulp: ['speed'], water: ['feedR', 'speed'], guard: ['landR', 'speed'] };
+export const XP_ROLE = { sting: 'guard', firstHuman: 'guard', release: 'guard', full: 'sugar', rob: 'sugar', catch: 'protein' };
 // What the next rank of skill i costs, from which pool, or null when it cannot be learned (maxed, or focus before reflex)
 export function skillCost(i, ranks) {
   const id = SKILLS[i], K = T.skills, r = ranks[i] | 0;
   if (i < 0 || i >= SKILLS.length) return null;
   if (SKILL_UNLOCKS.includes(id)) return r ? null : id === 'focus' && !ranks[SKILLS.indexOf('reflex')] ? null : { pool: 'unit', cost: K[id] };
   if (r >= K.ranks) return null;
-  return SKILL_RANKED.includes(id) ? { pool: 'unit', cost: K.rankCost * (r + 1) } : { pool: 'hive', cost: K.hiveCost * (r + 1) };
+  return SKILL_RANKED.includes(id) ? { pool: 'wasp', cost: K.rankCost * (r + 1) } : { pool: 'hive', cost: K.hiveCost * (r + 1) }; // job skills: the driven insect's own XP
 }
 // The species a world lets a new line start as
 export function speciesAllowed(settings) {

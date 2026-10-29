@@ -67,6 +67,8 @@ namespace Sting.Core
         public int stateTicks;
         public Attach attach; public Under under; public Ball ball; public Num born;
         public Carry carry; public int groundTicks, chew; public string role = "sugar", colony = "own";
+        /// its own experience, once it has earned some (GDD 6.8)
+        public Pers pers;
         /// a young queen who has mated on her flight (T2-3)
         public bool mated;
         /// the wood being chewed (T1-12): a box in a chunk, or a tree (i = -1)
@@ -258,7 +260,18 @@ namespace Sting.Core
     public sealed class HiberSite { public string kind; public Num x, y, z, q; public int n; public bool scouted; }
     public sealed class Winter { public string why; public List<HiberSite> sites = new List<HiberSite>(); public Num survivors, lineage; public int until; /** the year's turn (GDD 6.8): "hornet", "bee" or null */ public string offer; /** the line's hives, wintering as clusters */ public List<LineColony> keep; /** the player's own nest wintered in (GDD 6.8) */ public bool home; }
     /// the line's XP and skills (GDD 6.8)
-    public sealed class Prog { public Num unit, unitTotal, hive, hiveTotal; public int stabs; public int[] ranks = new int[Skills.ALL.Length]; /** the player gauge: XP earned in hand, the part counted, the smoothed rate per day, days measured */ public Num hand, handSeen, gaugeRate, gaugeDays; }
+    /// a line's XP, stabs, skills and role levels (GDD 6.8); a line is the player's colonies of one species
+    public sealed class Prog
+    {
+        public Num unit, unitTotal, hive, hiveTotal; public int stabs; public int[] ranks = new int[Skills.ALL.Length]; public int[] roles = new int[Skills.ROLES.Length];
+        public Prog Copy() => new Prog { unit = unit, unitTotal = unitTotal, hive = hive, hiveTotal = hiveTotal, stabs = stabs, ranks = (int[])ranks.Clone(), roles = (int[])roles.Clone() };
+    }
+    /// the player gauge (GDD 6.8): XP earned in hand, the part counted, the smoothed rate per day, days measured; the player's, across lines
+    public sealed class Player { public Num hand, handSeen, gaugeRate, gaugeDays; }
+    /// an insect's own experience (GDD 6.8): to spend, earned per role, its job ranks, whether it mastered its job
+    public sealed class Pers { public Num xp; public Num[] by = new Num[Skills.ROLES.Length]; public int[] ranks = new int[Skills.ALL.Length]; public bool mastered; }
+    /// an insect with experience of its own living on inside the nest
+    public sealed class Vet { public int id; public Num born; public Pers pers; }
     public sealed class HiberPick { public int season; public Num x, z; public string kind; }
     public sealed class Spot { public Num x, z; }
     public sealed class SiteHit { public string type; public Num x, y, z, ix, iz, nx, nz; public Tree t; public bool house; }

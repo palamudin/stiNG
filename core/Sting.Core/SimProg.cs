@@ -8,42 +8,85 @@ namespace Sting.Core
     public sealed partial class Sim
     {
         public int Rank(string id) => prog.ranks[Skills.Index(id)];
+        /// a line's rank in a skill, without making the line if it has none
+        public int Rank(string id, string sp) { if (sp == null || sp == species) return Rank(id); return progs.TryGetValue(sp, out var p) ? p.ranks[Skills.Index(id)] : 0; }
+        /// a new line takes the experience of the queen that founds it: the line she came from, as it stands (GDD 6.8)
+        internal void ForkLine(string from, string to) { if (!progs.ContainsKey(to)) progs[to] = LPW(from).Copy(); }
         /// an insect of the player's line has a skill once the line learned it ("all": every unlock from the start)
         public bool HasSkill(Wasp w, string id)
         {
             if (w != null && w.colony != "own") return false;
             return (settings.skills == "all" && Skills.IsUnlock(id)) || Rank(id) > 0;
         }
-        /// a ranked skill's multiplier for this insect (1 exactly when unlearned)
-        public Num Mul(WaspBase wb, string id) => wb is Wasp w && w.colony == "own" ? 1 + T.skills.Of(id) * Rank(id) : 1;
+        /// a job skill's multiplier for this insect: its own ranks, plus its role's level if the role uses that skill (GDD 6.8)
+        public Num Mul(WaspBase wb, string id) => wb is Wasp w && w.colony == "own" ? 1 + T.skills.Of(id) * (OwnRank(w, id) + RoleRank(w, id)) : 1;
+        int OwnRank(Wasp w, string id) => w.pers != null ? w.pers.ranks[Skills.Index(id)] : 0;
+        public int RoleLevel(string role) => prog.roles[Skills.Role(role)];
+        int RoleRank(Wasp w, string id) => Skills.RoleUses(w.role, id) ? RoleLevel(w.role) : 0;
+        /// a guard's weight in a fight from its role's level, on top of its species'
+        internal Num FightBonus(Wasp w) => Spw(w).fight + (w.colony == "own" && w.role == "guard" ? T.roles.fight * RoleLevel("guard") : 0);
+        internal Pers PersOf(Wasp w) => w.pers ??= new Pers();
+        /// it dies: one that mastered its job leaves its role a level better for every worker of it
+        internal void Legacy(int id, Pers pers)
+        {
+            if (pers == null || !pers.mastered) return;
+            int ri = 0;
+            for (int i = 1; i < Skills.ROLES.Length; i++) if (pers.by[i] > pers.by[ri]) ri = i;
+            var P = prog;
+            if (P.roles[ri] >= T.roles.max) return;
+            P.roles[ri]++;
+            Emit("legacy", ("id", id), ("role", Skills.ROLES[ri]), ("level", P.roles[ri]));
+        }
+        internal void PersXp(Wasp w, Num v, string r)
+        {
+            int ri = r != null ? Skills.Role(r) : -1; var p = PersOf(w);
+            p.xp += v;
+            if (ri >= 0) { p.by[ri] += v; w.role = r; }
+            Num sum = 0; foreach (var b in p.by) sum += b;
+            if (!p.mastered && sum >= T.roles.mastery) { p.mastered = true; Emit("mastered", ("id", w.id), ("role", Skills.ROLES[ri >= 0 ? ri : 0])); }
+        }
         /// the hive skills' multipliers for the player's colony
         public Boost BoostNow() => new Boost { forage = 1 + T.skills.forage * Rank("forage"), brood = 1 + T.skills.brood * Rank("brood"), lay = 1 + T.skills.lay * Rank("lay"), build = 1 + T.skills.build * Rank("build") };
+        /// a line's hive skills on the AI: its own tree, but never past the line in hand (GDD 6.8, the level cap)
+        Boost CapBoost(string sp)
+        {
+            int R(string id) => System.Math.Min(Rank(id, sp), Rank(id));
+            return new Boost { forage = 1 + T.skills.forage * R("forage"), brood = 1 + T.skills.brood * R("brood"), lay = 1 + T.skills.lay * R("lay"), build = 1 + T.skills.build * R("build") };
+        }
         /// hand: earned by the player's own play (the gauge counts only that)
-        void Gain(bool unit, Num v, bool hand = true) { if (unit) { prog.unit += v; prog.unitTotal += v; } else { prog.hive += v; prog.hiveTotal += v; } if (hand) prog.hand += v; }
-        /// unit XP for what the insect the player flies does
-        void Xp(Wasp w, string k) { if (w.id == drivenId && w.colony == "own") Gain(true, T.xp.Of(k)); }
+        void Gain(bool unit, Num v, bool hand = true, string sp = null) { var P = LPW(sp ?? species); if (unit) { P.unit += v; P.unitTotal += v; } else { P.hive += v; P.hiveTotal += v; } if (hand) player.hand += v; }
+        /// unit XP for what the insect the player flies does: the line's, and its own, in the role the work belongs to;
+        /// doing that work makes it a worker of that role (role: a load's kind, for a deposit)
+        internal void Xp(Wasp w, string k, string role = null)
+        {
+            if (w.id != drivenId || w.colony != "own") return;
+            Num v = T.xp.Of(k);
+            Gain(true, v);
+            PersXp(w, v, role ?? Skills.XpRole(k));
+        }
         internal static Num HiveScore(ColonyState c) { var s = c.stats; return s.emerged * T.xp.emerged + (s.depSugar + s.depProtein + s.depPulp + s.depWater) * T.xp.load + s.gynesRaised * T.xp.raised; }
         /// hive XP: what the colony did since the last colony tick
         void HiveXp(ColonyState c) => HiveXp(c, 1, true);
         void HiveXp(ColonyState c, Num k, bool hand)
         {
             Num v = HiveScore(c);
-            if (v > c.xpSeen) Gain(false, (v - c.xpSeen) * k, hand);
+            if (v > c.xpSeen) Gain(false, (v - c.xpSeen) * k, hand, c.species ?? "wasp"); // to the line the colony is of
             c.xpSeen = v;
         }
         /// the player gauge (GDD 6.8): the XP the player earns in hand per in-game day, smoothed; idling lets it fall
         internal void GaugeTick(Num dt)
         {
-            var P = prog; Num d = P.hand - P.handSeen;
+            var P = player; Num d = P.hand - P.handSeen;
             P.handSeen = P.hand;
             P.gaugeRate += (d / dt - P.gaugeRate) * Min(1, dt / T.gauge.window);
             P.gaugeDays += dt;
         }
-        public Num Gauge() => prog.gaugeDays < T.gauge.minDays ? T.gauge.floor : Clamp(prog.gaugeRate / T.gauge.@ref, T.gauge.floor, 1);
+        public Num Gauge() => player.gaugeDays < T.gauge.minDays ? T.gauge.floor : Clamp(player.gaugeRate / T.gauge.@ref, T.gauge.floor, 1);
         /// how a colony on the AI works: the hive skills scaled by the gauge, and foraging from effMin to full
-        public Boost LineBoost()
+        public Boost LineBoost() => LineBoost(species);
+        public Boost LineBoost(string sp)
         {
-            Num g = Gauge(), e = T.gauge.effMin + (1 - T.gauge.effMin) * g; var B = BoostNow();
+            Num g = Gauge(), e = T.gauge.effMin + (1 - T.gauge.effMin) * g; var B = CapBoost(sp);
             return new Boost { forage = e * (1 + (B.forage - 1) * g), brood = 1 + (B.brood - 1) * g, lay = 1 + (B.lay - 1) * g, build = 1 + (B.build - 1) * g };
         }
         /// take another colony of the line in hand (GDD 6.8, multi-colony play): yours goes on under the AI at your gauge
@@ -65,6 +108,15 @@ namespace Sting.Core
         }
         void Learn(int i)
         {
+            if (i >= 0 && i < Skills.ALL.Length && Skills.IsRanked(Skills.ALL[i]))
+            { // a job skill: the insect in hand learns it with its own XP
+                var w = Driven(); string jid = Skills.ALL[i];
+                var p = w != null && w.colony == "own" ? PersOf(w) : null; var jc = p != null ? Skills.Cost(i, p.ranks) : null;
+                if (jc == null || p.xp < jc.Value.cost) { Emit("learnDenied", ("id", jid)); return; }
+                p.xp -= jc.Value.cost; p.ranks[i]++;
+                Emit("learned", ("id", jid), ("rank", p.ranks[i]), ("pool", jc.Value.pool), ("cost", jc.Value.cost), ("wasp", w.id));
+                return;
+            }
             string id = i >= 0 && i < Skills.ALL.Length ? Skills.ALL[i] : null; var c = Skills.Cost(i, prog.ranks);
             if (c == null || (settings.skills == "all" && Skills.IsUnlock(id)) || (c.Value.pool == "unit" ? prog.unit : prog.hive) < c.Value.cost) { Emit("learnDenied", ("id", id)); return; }
             if (c.Value.pool == "unit") prog.unit -= c.Value.cost; else prog.hive -= c.Value.cost;

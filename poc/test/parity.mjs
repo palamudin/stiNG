@@ -200,7 +200,7 @@ for (const sc of SIM_SCENARIOS) {
     sim.step(bot(sim));
     for (const e of sim.drainEvents()) { d.s(e.type); d.f(e.t); }
     if (sim.tick % 60 === 0) { d.s(sim.stateHash()); d.s(sim.humanHash()); }
-    if (sc.prog && sim.tick % 60 === 0) { const P = sim.prog; d.f(P.unit); d.f(P.unitTotal); d.f(P.hive); d.f(P.hiveTotal); d.f(P.stabs); for (const r of P.ranks) d.f(r); d.f(P.hand); d.f(P.gaugeRate); d.f(P.gaugeDays); d.f(sim.line.length); d.f(sim.colony.adults); for (const x of sim.line) { d.f(x.id); d.f(x.colony.adults); d.f(x.colony.sugar); } }
+    if (sc.prog && sim.tick % 60 === 0) { const P = sim.prog, Q = sim.player; d.f(P.unit); d.f(P.unitTotal); d.f(P.hive); d.f(P.hiveTotal); d.f(P.stabs); for (const r of P.ranks) d.f(r); for (const r of P.roles) d.f(r); d.f(Q.hand); d.f(Q.gaugeRate); d.f(Q.gaugeDays); d.f(sim.line.length); d.f(sim.colony.adults); for (const x of sim.line) { d.f(x.id); d.f(x.colony.adults); d.f(x.colony.sugar); } }
   }
   d.s(sim.stateHash()); d.s(sim.humanHash());
   out(`sim.${sc.name}`, d.hex());

@@ -109,7 +109,7 @@ namespace Sting.Core.Tests
                     var w = sim.wasp; double x = w != null ? (double)w.x : 0, y = w != null ? (double)w.y : 0, z = w != null ? (double)w.z : 0;
                     trace.Add(string.Join(" ", sim.tick, kinds.ToString("x8"), x.ToString("R", CultureInfo.InvariantCulture), y.ToString("R", CultureInfo.InvariantCulture), z.ToString("R", CultureInfo.InvariantCulture), ((double)sim.colony.adults).ToString("R", CultureInfo.InvariantCulture)));
                 }
-                if (prog && sim.tick % 60 == 0) { var P = sim.prog; d.F(P.unit); d.F(P.unitTotal); d.F(P.hive); d.F(P.hiveTotal); d.F(P.stabs); foreach (int r in P.ranks) d.F(r); d.F(P.hand); d.F(P.gaugeRate); d.F(P.gaugeDays); d.F(sim.line.Count); d.F(sim.colony.adults); foreach (var x in sim.line) { d.F(x.id); d.F(x.colony.adults); d.F(x.colony.sugar); } }
+                if (prog && sim.tick % 60 == 0) { var P = sim.prog; var Q = sim.player; d.F(P.unit); d.F(P.unitTotal); d.F(P.hive); d.F(P.hiveTotal); d.F(P.stabs); foreach (int r in P.ranks) d.F(r); foreach (int r in P.roles) d.F(r); d.F(Q.hand); d.F(Q.gaugeRate); d.F(Q.gaugeDays); d.F(sim.line.Count); d.F(sim.colony.adults); foreach (var x in sim.line) { d.F(x.id); d.F(x.colony.adults); d.F(x.colony.sugar); } }
             }
             traces[name] = trace;
             d.S(sim.StateHash()); d.S(sim.HumanHash());

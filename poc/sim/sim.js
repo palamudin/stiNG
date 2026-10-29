@@ -1,7 +1,7 @@
 // STING simulation core (iteration 2). Mirrors Sting.Core: no rendering, no wall clock.
 // Every wasp, driven or AI, goes through the same flight, contact, sting and swat code.
 import { Domain, hash, unit, rangeInt, u64, h32, hseq, dsin, dcos, clamp, clamp01, fnv32, hex64, rnd, sq, datan2, TAU } from './rng.js';
-import { T, DT, GEN_VERSION, DEFAULT_SETTINGS, SKILLS, SKILL_UNLOCKS, skillCost } from './tuning.js';
+import { T, DT, GEN_VERSION, DEFAULT_SETTINGS, SKILLS, SKILL_UNLOCKS, SKILL_RANKED, skillCost, ROLES, ROLE_SKILLS, XP_ROLE } from './tuning.js';
 import {
   Zone, ZONES, SwatKind, SwatKindName, Style, humanTraits, humanClothing, suitClothing, zoneCover, bodyParts, humanParts,
   segClosest, classify, toWorld, toLocal, dirToWorld, resolveSting, windowFor, selfReach, garmentGraph, Top,
@@ -70,7 +70,8 @@ export class Sim {
     this.dragonState = new Map();
     this.species = opts.species || this.settings.species || 'wasp'; // the player's line (GDD 6.8)
     this.colony = newColony(false, this.species);
-    this.prog = this._newProg(); // the line's XP and skills (GDD 6.8)
+    this.progs = {}; // each line's XP, stabs and skills, by species (GDD 6.8); this.prog is the line in hand
+    this.player = this._newPlayer(); // the player gauge: what the player earns in hand, whichever line
     this.nest = makeNest(NEST.treeX, NEST.treeZ, NEST.x, NEST.y, NEST.z);
     this.colony.maxCells = this._maxCells('trunk');
     this.oldNests = [];
@@ -687,7 +688,7 @@ export class Sim {
         if (w && (w.state === 'fly' || w.state === 'landed' || w.state === 'chewing')) {
           w.state = 'fighting'; w.vx = w.vy = w.vz = 0;
           w.fight = { other: ev.a, remote: true, peer: ev.peer, start: ev.tick, until: this.tick + T.rival.fightTicks, mash: 0, theirVenom: ev.venom, theirQueen: ev.queen, theirFb: ev.fb || 0, myVenom: w.venom };
-          this._publish({ type: 'fightJoin', a: ev.a, b: ev.b, toPeer: ev.peer, venom: w.venom, queen: w.caste === 'queen', fb: spw(w).fight });
+          this._publish({ type: 'fightJoin', a: ev.a, b: ev.b, toPeer: ev.peer, venom: w.venom, queen: w.caste === 'queen', fb: this._fightBonus(w) });
           this.emit('fight', { a: ev.a, b: ev.b, driven: w.id === this.drivenId, remote: true });
         } else this._publish({ type: 'fightRefuse', a: ev.a, b: ev.b, toPeer: ev.peer });
         break;
@@ -719,7 +720,7 @@ export class Sim {
         const w = this.waspById(ev.a);
         if (!w || !w.fight || w.fight.other !== ev.b) break;
         const f = w.fight;
-        const aWins = this._fightScore(w.id, f.myVenom, w.caste === 'queen', 0, f.start, spw(w).fight) >= this._fightScore(ev.b, ev.venom, ev.queen, ev.mash, f.start, ev.fb || 0);
+        const aWins = this._fightScore(w.id, f.myVenom, w.caste === 'queen', 0, f.start, this._fightBonus(w)) >= this._fightScore(ev.b, ev.venom, ev.queen, ev.mash, f.start, ev.fb || 0);
         this._fightResolve(w, aWins, ev.b);
         break;
       }
@@ -777,7 +778,7 @@ export class Sim {
         if (!mine) this.stats.remoteStings++; else if (ev.driven) this.stats.stings++; else this.stats.aiStings++;
         if (mine) { // the line's XP and stabs (GDD 6.8): a sting that moves the counter is a stab
           if (first) this.prog.stabs++;
-          if (ev.driven) this._gain('unit', T.xp.sting + (first ? T.xp.firstHuman : 0));
+          if (ev.driven) { const v = T.xp.sting + (first ? T.xp.firstHuman : 0), w = this.waspById(ev.waspId); this._gain('unit', v); if (w && w.colony === 'own') this._persXp(w, v, 'guard'); }
         }
         this.addEsc(hm.x, hm.z, T.esc.sting * (ev.pain ?? 1));
         this.cs(hm.chunk).lastSting = { x: ev.sx, z: ev.sz };
@@ -1813,13 +1814,13 @@ export class Sim {
     w.chew++;
     w.energy -= T.energy.cruisePerSec * DT * T.energy.hoverShare;
     if (w.chewAt && w.chewAt.water) { // a load of water (T2-1)
-      if (w.chew < T.water.fillTicks) return;
+      if (w.chew < T.water.fillTicks / (w.colony === 'own' ? 1 + T.roles.fill * this.roleLevel('water') : 1)) return; // water carriers' level (GDD 6.8)
       w.state = 'fly'; w.chewAt = null;
       w.carry = { kind: 'water', amount: T.water.amount, what: 'water' };
       this.emit('watered', { id: w.id });
       return;
     }
-    if (w.chew >= T.pulp.chewTicks) {
+    if (w.chew >= T.pulp.chewTicks / (w.colony === 'own' ? 1 + T.roles.chew * this.roleLevel('pulp') : 1)) { // pulp collectors' level (GDD 6.8)
       w.state = 'fly';
       this._takePulp(w, w.chewAt || null);
       w.chewAt = null;
@@ -1985,6 +1986,7 @@ export class Sim {
     if (!this.colony.sited || dist2(w, this.nest.entrance) > 0.07 * 0.07) return;
     const col = this.colony;
     let deposited = false;
+    const kind = w.carry && !w.carry.poison ? w.carry.kind : 'sugar'; // the role a load home is the work of
     if (w.carry && w.carry.kind === 'pulp' && w.caste === 'queen') {
       // a founding queen builds her own cells straight away (GDD 6.1)
       col.cells += w.carry.amount * T.colony.cellsPerPulp;
@@ -2011,7 +2013,7 @@ export class Sim {
       const take = Math.min(col.sugar, (T.energy.nestRefill - w.energy) * 0.6);
       col.sugar -= take; w.energy += take / 0.6;
     }
-    if (deposited) { this.stats.deposits++; this._xp(w, 'deposit'); }
+    if (deposited) { this.stats.deposits++; this._xp(w, 'deposit', kind); }
     // a forager home with food remembers where it was (site fidelity), and its load carries the scent of the source
     // to nestmates leaving soon after (GDD 7.3, T1-16)
     const from = w.ai && w.ai.from;
@@ -2179,6 +2181,7 @@ export class Sim {
     if (w.colony !== 'own') { /* a rival worker */ }
     else if (w.caste === 'queen') { this.colony.queenAlive = false; this.emit('queenDied', { cause }); }
     else if (w.caste === 'worker') this.colony.adults = Math.max(0, this.colony.adults - 1); // a male or gyne out was already counted out (T2-3)
+    if (w.colony === 'own') this._legacy(w.id, w.pers); // a master of its job passes it on (GDD 6.8)
     if (w.fight) { const o = this.waspById(w.fight.other); if (o && o.state === 'fighting') { o.state = 'fly'; o.fight = null; } }
     this.stats.deaths++;
     this.stats.causes[cause] = (this.stats.causes[cause] || 0) + 1;
@@ -2200,6 +2203,8 @@ export class Sim {
     const home = w.colony === 'own' ? this.colony : (w.caste === 'male' || w.caste === 'gyne') && typeof w.colony === 'string' && w.colony.startsWith('line:') ? (this.line.find((x) => 'line:' + x.id === w.colony) || {}).colony : null;
     if (home && w.caste === 'male') home.males += 1; // back in the nest (T2-3), the player's or a sister colony's
     else if (home && w.caste === 'gyne') { if (w.mated) home.mated += 1; else home.gynes += 1; }
+    // an insect with experience of its own goes on living inside, and passes on its mastery when it dies (GDD 6.8)
+    if (w.colony === 'own' && w.pers && w.caste === 'worker') { const v = this.colony.vets || (this.colony.vets = []); v.push({ id: w.id, born: w.born ?? this.minute, pers: w.pers }); if (v.length > T.roles.vetsMax) this._legacy(v[0].id, v.shift().pers); }
     this.wasps = this.wasps.filter((x) => x !== w);
     this._publish({ type: 'died', waspId: w.id, cause: 'home', x: w.x, y: w.y, z: w.z });
     this._releaseBees(w.id);
@@ -2427,7 +2432,7 @@ export class Sim {
     const W = this.winter, site = W.sites[choice], survivors = W.survivors, lineage = W.lineage, was = this.species;
     const oldNest = this.nest, oldColony = this.colony;
     this.winter = null;
-    if (morph) { this.species = W.offer; this.settings.species = W.offer; } // the line changes species with this queen
+    if (morph) { this._forkLine(was, W.offer); this.species = W.offer; this.settings.species = W.offer; } // the line changes species with this queen, and her experience goes with her
     // the queen that continues is yours; the rest found lineage colonies (Q-10), real ones first (T2-4)
     const winterDays = rnd(this.settings.seasonDays * T.season.winterShare);
     const target = (this.day + 1 + winterDays) * 1440 + T.time.dawn;
@@ -2461,40 +2466,79 @@ export class Sim {
 
   // ---------------- progression (GDD 6.8): XP, skills, the year's turn
 
-  _newProg() { return { unit: 0, unitTotal: 0, hive: 0, hiveTotal: 0, stabs: 0, ranks: SKILLS.map(() => 0), hand: 0, handSeen: 0, gaugeRate: 0, gaugeDays: 0 }; }
-  rank(id) { return this.prog.ranks[SKILLS.indexOf(id)] | 0; }
+  _newProg() { return { unit: 0, unitTotal: 0, hive: 0, hiveTotal: 0, stabs: 0, ranks: SKILLS.map(() => 0), roles: ROLES.map(() => 0) }; }
+  _newPlayer() { return { hand: 0, handSeen: 0, gaugeRate: 0, gaugeDays: 0 }; }
+  // Each line keeps its own XP, stabs and tree (GDD 6.8); a line is the player's colonies of one species
+  get prog() { return this._lpw(this.species); }
+  set prog(v) { this._oldProg = v; } // a save from before lines had their own (persist.js moves it over)
+  _lpw(sp) { return this.progs[sp] || (this.progs[sp] = this._newProg()); }
+  // a new line takes the experience of the queen that founds it: the line she came from, as it stands (GDD 6.8)
+  _forkLine(from, to) { if (!this.progs[to]) { const P = this._lpw(from); this.progs[to] = { ...P, ranks: P.ranks.slice(), roles: P.roles.slice() }; } }
+  rank(id, sp) { const P = sp === undefined || sp === this.species ? this.prog : this.progs[sp]; return P ? P.ranks[SKILLS.indexOf(id)] | 0 : 0; }
   // An insect of the player's line has a skill once the line learned it ('all': every unlock from the start)
   hasSkill(w, id) {
     if (w && w.colony !== 'own') return false;
     return (this.settings.skills === 'all' && SKILL_UNLOCKS.includes(id)) || this.rank(id) > 0;
   }
-  // a ranked skill's multiplier for this insect (1 exactly when unlearned)
-  _mul(w, id) { return w && w.colony === 'own' ? 1 + T.skills[id] * this.rank(id) : 1; }
+  // A job skill's multiplier for this insect: its own ranks, plus its role's level if the role uses that skill (GDD 6.8);
+  // 1 exactly with neither
+  _mul(w, id) { return w && w.colony === 'own' ? 1 + T.skills[id] * (this._ownRank(w, id) + this._roleRank(w, id)) : 1; }
+  _ownRank(w, id) { return w.pers ? w.pers.ranks[SKILLS.indexOf(id)] | 0 : 0; }
+  roleLevel(role) { return this.prog.roles[ROLES.indexOf(role)] | 0; }
+  _roleRank(w, id) { const k = ROLE_SKILLS[w.role]; return k && k.includes(id) ? this.roleLevel(w.role) : 0; }
+  // a guard's weight in a fight from its role's level, on top of its species'
+  _fightBonus(w) { return spw(w).fight + (w.colony === 'own' && w.role === 'guard' ? T.roles.fight * this.roleLevel('guard') : 0); }
+  // An insect's own experience (GDD 6.8): what it earned in each role, what it has to spend, its job ranks, mastery
+  _pers(w) { return w.pers || (w.pers = { xp: 0, by: ROLES.map(() => 0), ranks: SKILLS.map(() => 0), mastered: false }); }
+  // It dies: one that mastered its job leaves its role a level better for every worker of it
+  _legacy(id, pers) {
+    if (!pers || !pers.mastered) return;
+    let ri = 0;
+    for (let i = 1; i < ROLES.length; i++) if (pers.by[i] > pers.by[ri]) ri = i;
+    const P = this.prog;
+    if (P.roles[ri] >= T.roles.max) return;
+    P.roles[ri]++;
+    this.emit('legacy', { id, role: ROLES[ri], level: P.roles[ri] });
+  }
   // the hive skills' multipliers for the player's colony
   boost() { const K = T.skills; return { forage: 1 + K.forage * this.rank('forage'), brood: 1 + K.brood * this.rank('brood'), lay: 1 + K.lay * this.rank('lay'), build: 1 + K.build * this.rank('build') }; }
+  // a line's hive skills on the AI: its own tree, but never past the line in hand (GDD 6.8, the level cap)
+  _capBoost(sp) { const K = T.skills, r = (id) => Math.min(this.rank(id, sp), this.rank(id)); return { forage: 1 + K.forage * r('forage'), brood: 1 + K.brood * r('brood'), lay: 1 + K.lay * r('lay'), build: 1 + K.build * r('build') }; }
   // hand: earned by the player's own play (the gauge counts only that)
-  _gain(pool, v, hand = true) { const P = this.prog; P[pool] += v; P[pool + 'Total'] += v; if (hand) P.hand += v; }
-  // unit XP for what the insect the player flies does
-  _xp(w, k) { if (w.id === this.drivenId && w.colony === 'own') this._gain('unit', T.xp[k]); }
+  _gain(pool, v, hand = true, sp = this.species) { const P = this._lpw(sp); P[pool] += v; P[pool + 'Total'] += v; if (hand) this.player.hand += v; }
+  // unit XP for what the insect the player flies does: the line's, and its own, in the role the work belongs to; doing
+  // that work makes it a worker of that role (role: a load's kind, for a deposit)
+  _xp(w, k, role) {
+    if (w.id !== this.drivenId || w.colony !== 'own') return;
+    const v = T.xp[k];
+    this._gain('unit', v);
+    this._persXp(w, v, role || XP_ROLE[k]);
+  }
+  _persXp(w, v, r) {
+    const ri = ROLES.indexOf(r), p = this._pers(w);
+    p.xp += v;
+    if (ri >= 0) { p.by[ri] += v; w.role = r; }
+    if (!p.mastered && p.by.reduce((a, b) => a + b, 0) >= T.roles.mastery) { p.mastered = true; this.emit('mastered', { id: w.id, role: ROLES[ri >= 0 ? ri : 0] }); }
+  }
   _hiveScore(c) { const X = T.xp, d = c.stats.deposited; return c.stats.emerged * X.emerged + (d.sugar + d.protein + d.pulp + d.water) * X.load + c.stats.gynesRaised * X.raised; }
   // hive XP: what the colony did since the last colony tick
   _hiveXp(c, k = 1, hand = true) {
     const v = this._hiveScore(c);
     if (c.xpSeen === undefined) c.xpSeen = v; // a save from before XP
-    if (v > c.xpSeen) this._gain('hive', (v - c.xpSeen) * k, hand);
+    if (v > c.xpSeen) this._gain('hive', (v - c.xpSeen) * k, hand, c.species || 'wasp'); // to the line the colony is of
     c.xpSeen = v;
   }
   // The player gauge (GDD 6.8): the XP the player earns in hand per in-game day, smoothed; idling lets it fall
   _gaugeTick(dt) {
-    const P = this.prog, G = T.gauge, d = P.hand - P.handSeen;
+    const P = this.player, G = T.gauge, d = P.hand - P.handSeen;
     P.handSeen = P.hand;
     P.gaugeRate += (d / dt - P.gaugeRate) * Math.min(1, dt / G.window);
     P.gaugeDays += dt;
   }
-  gauge() { const P = this.prog, G = T.gauge; return P.gaugeDays < G.minDays ? G.floor : clamp(P.gaugeRate / G.ref, G.floor, 1); }
+  gauge() { const P = this.player, G = T.gauge; return P.gaugeDays < G.minDays ? G.floor : clamp(P.gaugeRate / G.ref, G.floor, 1); }
   // how a colony on the AI works: the hive skills scaled by the gauge, and foraging from effMin to full
-  lineBoost() {
-    const g = this.gauge(), G = T.gauge, B = this.boost(), e = G.effMin + (1 - G.effMin) * g;
+  lineBoost(sp = this.species) {
+    const g = this.gauge(), G = T.gauge, B = this._capBoost(sp), e = G.effMin + (1 - G.effMin) * g;
     return { forage: e * (1 + (B.forage - 1) * g), brood: 1 + (B.brood - 1) * g, lay: 1 + (B.lay - 1) * g, build: 1 + (B.build - 1) * g };
   }
   // Take another colony of the line in hand (GDD 6.8, multi-colony play): yours goes on under the AI at your gauge
@@ -2514,6 +2558,14 @@ export class Sim {
     this.emit('colonySwitch', { id: this.lineSeq, to: id, species: this.species });
   }
   _learn(i) {
+    if (SKILL_RANKED.includes(SKILLS[i])) { // a job skill: the insect in hand learns it with its own XP
+      const w = this._driven(), id = SKILLS[i];
+      const p = w && w.colony === 'own' ? this._pers(w) : null, c = p && skillCost(i, p.ranks);
+      if (!c || p.xp < c.cost) { this.emit('learnDenied', { id }); return; }
+      p.xp -= c.cost; p.ranks[i]++;
+      this.emit('learned', { id, rank: p.ranks[i], pool: c.pool, cost: c.cost, wasp: w.id });
+      return;
+    }
     const id = SKILLS[i], c = skillCost(i, this.prog.ranks);
     if (!c || (this.settings.skills === 'all' && SKILL_UNLOCKS.includes(id)) || this.prog[c.pool] < c.cost) { this.emit('learnDenied', { id: id || null }); return; }
     this.prog[c.pool] -= c.cost; this.prog.ranks[i]++;
@@ -4131,7 +4183,7 @@ export class Sim {
   _startRemoteFight(a, otherId, peer) {
     a.state = 'fighting'; a.vx = a.vy = a.vz = 0;
     a.fight = { other: otherId, remote: true, starter: true, peer, start: this.tick, until: this.tick + T.rival.fightTicks, myVenom: a.venom, mash: 0 };
-    this._publish({ type: 'fight', a: a.id, b: otherId, toPeer: peer, venom: a.venom, queen: a.caste === 'queen', fb: spw(a).fight });
+    this._publish({ type: 'fight', a: a.id, b: otherId, toPeer: peer, venom: a.venom, queen: a.caste === 'queen', fb: this._fightBonus(a) });
   }
 
   _fightScore(id, venom, queen, mash, start, fb = 0) { return venom + (queen ? 1 : 0) + mash + h32(id, start, 61) * 1.2 + fb; } // fb: a hornet's weight (GDD 6.8)
@@ -4147,8 +4199,8 @@ export class Sim {
     const f = w.fight;
     if (f.starter) { if (this.tick > f.until + T.rival.remoteFightTimeout) { w.state = 'fly'; w.fight = null; } return; }
     if (this.tick < f.until) return;
-    const bWins = this._fightScore(w.id, f.myVenom, w.caste === 'queen', f.mash, f.start, spw(w).fight) > this._fightScore(f.other, f.theirVenom, f.theirQueen, 0, f.start, f.theirFb || 0);
-    this._publish({ type: 'fightEnd', a: f.other, b: w.id, toPeer: f.peer, mash: f.mash, venom: f.myVenom, queen: w.caste === 'queen', fb: spw(w).fight });
+    const bWins = this._fightScore(w.id, f.myVenom, w.caste === 'queen', f.mash, f.start, this._fightBonus(w)) > this._fightScore(f.other, f.theirVenom, f.theirQueen, 0, f.start, f.theirFb || 0);
+    this._publish({ type: 'fightEnd', a: f.other, b: w.id, toPeer: f.peer, mash: f.mash, venom: f.myVenom, queen: w.caste === 'queen', fb: this._fightBonus(w) });
     this._fightResolve(w, bWins, f.other);
   }
 
@@ -4221,6 +4273,12 @@ export class Sim {
     this._muniTick(); // the town's campaign runs on whether or not any colony is left
     if (this.extinct || this.winter) return; // the line is over, or the queens sleep until one is chosen
     const col = this.colony;
+    // the insects with experience of their own that live on inside grow old there; a master passes on its mastery (GDD 6.8)
+    if (col.vets && col.vets.length) {
+      const keep = [];
+      for (const v of col.vets) { if (this.minute - v.born > this.lifespanMinutes({ id: v.id, caste: 'worker' }) || !col.nestAlive) this._legacy(v.id, v.pers); else keep.push(v); }
+      col.vets = keep;
+    }
     const day = isDaylight(this.minute) && !this.raining && this.canFly();
     const daylight = this._forageHours(spOf(col)) && this.canFly(); // the line's own hours: hornets work at night (T2-10)
     const frac = this.seasonFrac;
@@ -4319,14 +4377,14 @@ export class Sim {
   // Each sister colony lives through the season like yours, run by the AI; a founding queen forages alone
   _lineTick(daylight, frac) {
     if (!this.line.length) return;
-    const L = T.line, dt = 60 / this.dayTicks, av = this.ecoAvail(), lb = this.lineBoost(), g = this.gauge();
+    const L = T.line, dt = 60 / this.dayTicks, av = this.ecoAvail(), g = this.gauge();
     for (const sc of this.line.slice()) {
       const c = sc.colony, out = this.wasps.filter((w) => w.colony === 'line:' + sc.id).length;
       if (c.adults < 1 && c.queenAlive && daylight) {
         const q = L.queenForage; c.sugar += q.sugar * dt * av.sugar; c.protein += q.protein * dt * av.protein; c.pulp += q.pulp * dt;
       }
       const h = this.nestHeat(this.minute, sc.nest.site);
-      colonyStep(c, dt, out, daylight, frac, this.bio, this.broodSpeed(this.minute, sc.nest.site, c.cool), av, h, lb);
+      colonyStep(c, dt, out, daylight, frac, this.bio, this.broodSpeed(this.minute, sc.nest.site, c.cool), av, h, this.lineBoost(c.species || 'wasp'));
       this._hiveXp(c, g, false); // a colony on the AI earns at the player's gauge (GDD 6.8)
       if (spOf(c).perennial) this._swarm(c, sc.nest);
       // the exterminator (abstract; he is drawn only for the player's own nest): called to a sister nest's neighbourhood,

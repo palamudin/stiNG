@@ -1202,13 +1202,45 @@ namespace Sting.Core.Tests
                     Ok(s.wasp.swoopUntil > 0, "once learned, X dashes");
                 }
                 {
-                    double Cruise(int r) { var s = Mk(); s.prog.ranks[Skills.Index("speed")] = r; Place(s.wasp, P(5, 2, 5)); double v = 0; RunS(s, 120, (sim, i) => { v = Hypot(sim.wasp.vx, sim.wasp.vz); return Idle(c => { c.mz = 100; c.yawQ = 0; }); }); return v; }
+                    double Cruise(int r) { var s = Mk(); s.PersOf(s.wasp).ranks[Skills.Index("speed")] = r; Place(s.wasp, P(5, 2, 5)); double v = 0; RunS(s, 120, (sim, i) => { v = Hypot(sim.wasp.vx, sim.wasp.vz); return Idle(c => { c.mz = 100; c.yawQ = 0; }); }); return v; }
                     double v0 = Cruise(0), v3 = Cruise(3);
                     Ok(v3 > v0 * 1.1, $"flight speed at rank 3 is {(v3 / v0 - 1) * 100:0}% faster ({v0:0.00} -> {v3:0.00} m/s)");
                     var s = Mk(); var rec = s.records.Get("0,0"); Caterpillar cat = null; for (int k = 0; k < rec.content.caterpillars.Count; k++) if (s.CatActive(rec, k)) { cat = rec.content.caterpillars[k]; break; }
                     Num d = T.prey.catchDist * Sqrt(2) * 1.25; Place(s.wasp, P(cat.x + d, cat.y, cat.z));
-                    var before = s.PreyNear(s.wasp); s.prog.ranks[Skills.Index("grabR")] = 2; var after = s.PreyNear(s.wasp);
+                    var before = s.PreyNear(s.wasp); s.PersOf(s.wasp).ranks[Skills.Index("grabR")] = 2; var after = s.PreyNear(s.wasp);
                     Ok(before == null && after != null && after.kind == "caterpillar", "grab reach at rank 2 catches a caterpillar a quarter further off");
+                }
+                // job skills belong to the insect in hand; mastery passes on to its role (GDD 6.8, 2026-10-29)
+                {
+                    var s = Calm(Mk()); StingOnce(s); var p = s.wasp.pers; int gi = Skills.Role("guard");
+                    Ok(p != null && p.xp == T.xp.sting + T.xp.firstHuman && p.by[gi] == p.xp && s.wasp.role == "guard" && s.prog.unit == p.xp, $"the wasp in hand earns its own XP as well as the line's: a sting is guard's work ({D(p?.xp ?? 0)} personal XP)");
+                }
+                {
+                    var s = Mk(); var w = s.wasp; int sp = Skills.Index("speed"); s.PersOf(w).xp = T.skills.rankCost + 10; s.prog.unit = 0;
+                    var ev = Learn(s, "speed"); var other = s.SpawnWasp(false); other.role = "sugar";
+                    Ok(Count(ev, "learned") == 1 && w.pers.ranks[sp] == 1 && w.pers.xp == 10 && s.prog.ranks[sp] == 0 && s.Mul(w, "speed") > 1 && s.Mul(other, "speed") == 1,
+                        $"a job skill is learned by the wasp in hand with its own XP ({D(T.skills.rankCost)} for rank 1), and only it flies faster");
+                    var ev2 = Learn(s, "speed"); Ok(Count(ev2, "learnDenied") == 1, "the next rank costs more than it has");
+                }
+                {
+                    var s = Mk(); var w = s.wasp; int pi = Skills.Role("protein");
+                    s.PersOf(w).by[pi] = T.roles.mastery - 1; var ev = new List<SimEvent>(); s.Xp(w, "catch"); ev.AddRange(s.DrainEvents());
+                    var hunter = s.SpawnWasp(false); hunter.role = "protein"; var forager = s.SpawnWasp(false); forager.role = "sugar";
+                    Num g0 = s.Mul(hunter, "grabR"); s.Die(w, "old age", null); ev.AddRange(s.DrainEvents());
+                    var lg = ev.Find(e => e.type == "legacy");
+                    Ok(Count(ev, "mastered") == 1 && lg != null && (string)lg["role"] == "protein" && System.Convert.ToInt32(lg["level"]) == 1 && g0 == 1 && s.Mul(hunter, "grabR") == 1 + T.skills.grabR && s.Mul(hunter, "speed") == 1 + T.skills.speed && s.Mul(forager, "grabR") == 1,
+                        "a hunter that mastered its job dies, and every hunter of the colony reaches and flies a rank further; foragers do not");
+                }
+                {
+                    var s = Mk(); var w = s.wasp; s.PersOf(w).by[0] = T.roles.mastery - 10; s.Die(w, "swatted", null); var ev = s.DrainEvents();
+                    bool none = true; foreach (int r in s.prog.roles) if (r != 0) none = false;
+                    Ok(Count(ev, "legacy") == 0 && none, "one killed before mastery passes nothing on");
+                }
+                {
+                    var s = Mk(); var w = s.wasp; var p = s.PersOf(w); p.by[Skills.Role("pulp")] = T.roles.mastery; p.mastered = true;
+                    s.drivenId = -1; s.Despawn(w); bool kept = s.colony.vets.Count == 1;
+                    s.colony.vets[0].born = s.minute - 1000000; var ev = RunS(s, 3700);
+                    Ok(kept && Count(ev, "legacy") == 1 && s.RoleLevel("pulp") == 1 && s.colony.vets.Count == 0, "a master that goes home lives on inside, and passes its mastery on when it dies of age");
                 }
                 {
                     var a = Colony.New(); var b = Colony.New();
@@ -1248,7 +1280,8 @@ namespace Sting.Core.Tests
                     var e = ev.FirstOrDefault(x => x.type == "offer"); RunS(t, 1, (sim, i) => Idle(c => c.pick = 1001));
                     Ok(e != null && (string)e["species"] == "hornet" && t.species == "hornet" && t.colony.species == "hornet" && t.wasp.sp == "hornet" && t.wasp.caste == "queen" && t.line.All(x => x.colony.species == "wasp") && t.settings.species == "hornet",
                         $"a strong line wakes as a hornet queen; the other queens found wasp colonies ({t.line.Count})");
-                    var r = Persist.Restore(Persist.Snapshot(t)); Ok(r.species == "hornet" && r.prog.stabs == (int)T.xp.hornetStabs && r.prog.ranks.Length == Skills.ALL.Length, "a save keeps the species the line turned into and its XP");
+                    Ok(t.progs["hornet"].unitTotal == T.xp.hornetXp && t.progs["wasp"].unitTotal == T.xp.hornetXp, "the hornet line starts with the experience of the queen that founds it; the wasp line keeps its own");
+                    var r = Persist.Restore(Persist.Snapshot(t)); Ok(r.species == "hornet" && r.prog.stabs == (int)T.xp.hornetStabs && r.prog.ranks.Length == Skills.ALL.Length && r.progs.ContainsKey("wasp"), "a save keeps the species the line turned into and each line's XP");
                 }
                 { var (t, _) = YearEnd(0, 0); RunS(t, 1, (sim, i) => Idle(c => c.pick = 1001)); Ok(t.species == "bee" && t.colony.adults == T.xp.beeSwarm && !t.colony.sited, $"a weak line can try a honeybee colony: a queen with a swarm of {D(t.colony.adults)}"); }
                 { var (t, _) = YearEnd(0, 0); RunS(t, 1, (sim, i) => Idle(c => c.pick = 1)); Ok(t.species == "wasp" && t.colony.species == "wasp", "declining the offer, the line goes on as wasps"); }
@@ -1264,7 +1297,7 @@ namespace Sting.Core.Tests
                 }
                 {
                     var s = Mk(); Num dt = 0.05, g0 = s.Gauge();
-                    for (int i = 0; i < 180; i++) { s.prog.hand += T.gauge.@ref * dt; s.GaugeTick(dt); }
+                    for (int i = 0; i < 180; i++) { s.player.hand += T.gauge.@ref * dt; s.GaugeTick(dt); }
                     Num g1 = s.Gauge();
                     for (int i = 0; i < 60; i++) s.GaugeTick(dt);
                     Num g2 = s.Gauge();
@@ -1273,9 +1306,9 @@ namespace Sting.Core.Tests
                 {
                     (double xp, double food) LineXp(bool good)
                     {
-                        var s = Mk(); var sc = AddLine(s, "wasp", 6); if (good) { s.prog.gaugeDays = 5; s.prog.gaugeRate = T.gauge.@ref; }
-                        RunS(s, 3600, (sim, i) => { if (sim.wasp != null) Place(sim.wasp, P(sim.nest.entrance.x + 1, 1.5, sim.nest.entrance.z)); if (good) { sim.prog.gaugeRate = T.gauge.@ref; sim.prog.gaugeDays = 5; } return Idle(); });
-                        return (D(s.prog.hiveTotal - s.prog.hand), D(sc.colony.sugar + sc.colony.protein + sc.colony.pulp));
+                        var s = Mk(); var sc = AddLine(s, "wasp", 6); if (good) { s.player.gaugeDays = 5; s.player.gaugeRate = T.gauge.@ref; }
+                        RunS(s, 3600, (sim, i) => { if (sim.wasp != null) Place(sim.wasp, P(sim.nest.entrance.x + 1, 1.5, sim.nest.entrance.z)); if (good) { sim.player.gaugeRate = T.gauge.@ref; sim.player.gaugeDays = 5; } return Idle(); });
+                        return (D(s.prog.hiveTotal - s.player.hand), D(sc.colony.sugar + sc.colony.protein + sc.colony.pulp));
                     }
                     var lo = LineXp(false); var hi = LineXp(true);
                     Ok(hi.xp > lo.xp * 3 && hi.food > lo.food, $"a colony on the AI earns hive XP and forages at the player's gauge ({hi.xp:0.00} XP at full, {lo.xp:0.00} at the floor)");
@@ -1289,13 +1322,20 @@ namespace Sting.Core.Tests
                     RunS(s, 1, (sim, i) => Idle(c => c.pick = -(1000 + back.id)));
                     Ok(s.colony == own && s.species == "wasp" && s.wasp.sp == "wasp", "and back to the wasps");
                 }
+                {
+                    var s = Mk(); s.prog.unit = 30; s.prog.ranks[Skills.Index("swoop")] = 1; var sc = AddLine(s, "bee", 8);
+                    RunS(s, 1, (sim, i) => Idle(c => c.pick = -(1000 + sc.id))); Num beeUnit = s.prog.unit; bool beeSwoop = s.HasSkill(s.wasp, "swoop");
+                    var back = s.line.FirstOrDefault(x => x.colony.species == "wasp"); RunS(s, 1, (sim, i) => Idle(c => c.pick = -(1000 + back.id)));
+                    Ok(beeUnit == 0 && !beeSwoop && s.prog.unit == 30 && s.HasSkill(s.wasp, "swoop") && string.Join(",", s.progs.Keys) == "bee,wasp",
+                        "each line keeps its own XP and skills: the bee colony starts its own, and the wasps still have theirs");
+                }
                 { var s = Mk(); s.colony.sited = false; var sc = AddLine(s, "wasp", 6); var ev = RunS(s, 1, (sim, i) => Idle(c => c.pick = -(1000 + sc.id))); Ok(Count(ev, "switchDenied") == 1 && s.colony != sc.colony, "a founding queen without a nest cannot leave it to the AI"); }
                 {
                     var t = Mk(); var hv = AddLine(t, "bee", 8); hv.colony.sugar = 400; t.colony.mated = 200; t.season.startMinute -= 0.71 * t.settings.seasonDays * 1440;
                     Num a0 = hv.colony.adults; RunS(t, 120); RunS(t, 1, (sim, i) => Idle(c => c.pick = 1));
                     Ok(t.line.Contains(hv) && hv.colony.queenAlive && hv.colony.adults < a0 && t.line.Any(x => x.colony.species == "wasp"),
                         $"a honeybee colony of a wasp line winters as a cluster and is still there in spring ({D(a0):0} -> {D(hv.colony.adults):0} bees), beside the new wasp colonies");
-                    var r = Persist.Restore(Persist.Snapshot(t)); Ok(r.line.Count == t.line.Count && r.prog.gaugeDays == t.prog.gaugeDays, "a save keeps the line's colonies and the gauge");
+                    var r = Persist.Restore(Persist.Snapshot(t)); Ok(r.line.Count == t.line.Count && r.player.gaugeDays == t.player.gaugeDays, "a save keeps the line's colonies and the gauge");
                 }
             }
             // 52. wintering in somewhere warm, and a house that finds the nest (GDD 6.8)

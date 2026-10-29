@@ -520,7 +520,7 @@ namespace Sting.Core
                     {
                         w.state = "fighting"; w.vx = w.vy = w.vz = 0;
                         w.fight = new Fight { other = ev.a, remote = true, peer = ev.peer, start = ev.tick, until = tick + T.rival.fightTicks, mash = 0, theirVenom = ev.venom, theirQueen = ev.queen, theirFb = ev.fb, myVenom = w.venom };
-                        Publish(new NetEv { type = "fightJoin", a = ev.a, b = ev.b, toPeer = ev.peer, venom = w.venom, queen = w.caste == "queen", fb = Spw(w).fight });
+                        Publish(new NetEv { type = "fightJoin", a = ev.a, b = ev.b, toPeer = ev.peer, venom = w.venom, queen = w.caste == "queen", fb = FightBonus(w) });
                         Emit("fight", ("a", ev.a), ("b", ev.b), ("driven", w.id == drivenId), ("remote", true));
                     }
                     else Publish(new NetEv { type = "fightRefuse", a = ev.a, b = ev.b, toPeer = ev.peer });
@@ -557,7 +557,7 @@ namespace Sting.Core
                     var w = WaspById(ev.a);
                     if (w == null || w.fight == null || w.fight.other != ev.b) break;
                     var f = w.fight;
-                    bool aWins = FightScore(w.id, f.myVenom, w.caste == "queen", 0, f.start, Spw(w).fight) >= FightScore(ev.b, ev.venom, ev.queen, ev.mash, f.start, ev.fb);
+                    bool aWins = FightScore(w.id, f.myVenom, w.caste == "queen", 0, f.start, FightBonus(w)) >= FightScore(ev.b, ev.venom, ev.queen, ev.mash, f.start, ev.fb);
                     FightResolve(w, aWins, ev.b);
                     break;
                 }
@@ -621,7 +621,7 @@ namespace Sting.Core
                     if (mine)
                     { // the line's XP and stabs (GDD 6.8): a sting that moves the counter is a stab
                         if (first) prog.stabs++;
-                        if (ev.driven) Gain(true, T.xp.sting + (first ? T.xp.firstHuman : 0));
+                        if (ev.driven) { Num v = T.xp.sting + (first ? T.xp.firstHuman : 0); var sw = WaspById(ev.waspId); Gain(true, v); if (sw != null && sw.colony == "own") PersXp(sw, v, "guard"); }
                     }
                     AddEsc(hm.x, hm.z, T.esc.sting * (ev.pain ?? 1));
                     CS(hm.chunk).lastSting = new LastSting { x = ev.sx, z = ev.sz };

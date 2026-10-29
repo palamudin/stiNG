@@ -244,7 +244,12 @@ namespace Sting.Core
         /// the player's line's species (GDD 6.8)
         public string species = "wasp";
         /// the line's XP and skills (GDD 6.8)
-        public Prog prog = new Prog();
+        /// each line's XP, stabs and skills, by species (GDD 6.8); prog is the line in hand
+        public SortedDictionary<string, Prog> progs = new SortedDictionary<string, Prog>(System.StringComparer.Ordinal);
+        public Prog prog => LPW(species);
+        internal Prog LPW(string sp) { if (!progs.TryGetValue(sp, out var p)) { p = new Prog(); progs[sp] = p; } return p; }
+        /// the player gauge: what the player earns in hand, whichever line
+        public Player player = new Player();
         /// a wasp's species row: its line's, or a rival's (the neighbourhood's yellowjackets)
         internal static SpeciesRow Spw(Wasp w) => T.species.Of(w.sp);
         /// a site's room for comb, for the line's species: a bee colony builds a bigger nest (T2-11)

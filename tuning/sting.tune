@@ -636,7 +636,7 @@ reflex = 30
 focus = 50
 release = 60
 ranks = 3
-rankCost = 30
+rankCost = 50
 landR = 0.4
 feedR = 0.2
 grabR = 0.2
@@ -651,6 +651,14 @@ releaseMargin = 0.03
 releaseKick = 2.5
 focusMs = 3000
 focusCooldownMs = 15000
+
+[roles]
+max = 5
+mastery = 150
+chew = 0.1
+fill = 0.1
+fight = 0.15
+vetsMax = 24
 
 [gauge]
 window = 3

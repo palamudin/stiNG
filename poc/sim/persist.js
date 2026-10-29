@@ -59,6 +59,11 @@ export function restore(json) {
   }
   // plain state
   for (const k of Object.keys(d)) if (!['v', 'gen', 'tune', 'opts', 'records', 'humans', 'active', 'ext'].includes(k)) sim[k] = d[k];
+  if (sim._oldProg) { // a save from before each line had its own XP (GDD 6.8): it was the line in hand's, with the gauge
+    const o = sim._oldProg; delete sim._oldProg;
+    sim.progs = { [sim.species]: { unit: o.unit, unitTotal: o.unitTotal, hive: o.hive, hiveTotal: o.hiveTotal, stabs: o.stabs, ranks: o.ranks } };
+    sim.player = { hand: o.hand || 0, handSeen: o.handSeen || 0, gaugeRate: o.gaugeRate || 0, gaugeDays: o.gaugeDays || 0 };
+  }
   if (sim.colony.young === undefined) sim.colony.young = 0; // saves from before worker ages (T1-13)
   if (!sim.line) { sim.line = []; sim.lineSeq = 0; } // saves from before lineage colonies (T2-4)
   if (!sim.plaus.held) { sim.plaus.held = {}; sim.plaus.sips = {}; } // saves from before the carry ledger (T1-20)
@@ -117,7 +122,7 @@ export function joinFrom(json, peer, opts = {}) {
   sim.noAI = !!opts.noAI;
   sim.nextWaspId = peer * 1000000 + 1;
   sim.wasps = []; sim.remote = new Map(); sim.outbox = [];
-  sim.prog = sim._newProg(); sim.colony = newColony(false, sim.species); sim.nest = makeNest(NEST.treeX, NEST.treeZ, NEST.x, NEST.y, NEST.z); sim.colony.maxCells = sim._maxCells('trunk'); sim.oldNests = []; // a joining player's line starts with no XP (GDD 6.8)
+  sim.progs = {}; sim.player = sim._newPlayer(); sim.colony = newColony(false, sim.species); sim.nest = makeNest(NEST.treeX, NEST.treeZ, NEST.x, NEST.y, NEST.z); sim.colony.maxCells = sim._maxCells('trunk'); sim.oldNests = []; // a joining player's line starts with no XP (GDD 6.8)
   sim.stats = { stings: 0, aiStings: 0, remoteStings: 0, full: 0, deaths: 0, causes: {}, caught: 0, deposits: 0 };
   sim.netStats = { sent: 0, recv: 0, late: 0, lateMax: 0 };
   sim.ghost = null; sim.extinct = false; sim.lineage = 0; sim.evSeq = 0; sim.prevAct = 0; sim.pressUsed = false;

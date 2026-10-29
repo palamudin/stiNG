@@ -1414,7 +1414,7 @@ namespace Sting.Core
         {
             a.state = "fighting"; a.vx = a.vy = a.vz = 0;
             a.fight = new Fight { other = otherId, remote = true, starter = true, peer = p, start = tick, until = tick + T.rival.fightTicks, myVenom = a.venom, mash = 0 };
-            Publish(new NetEv { type = "fight", a = a.id, b = otherId, toPeer = p, venom = a.venom, queen = a.caste == "queen", fb = Spw(a).fight });
+            Publish(new NetEv { type = "fight", a = a.id, b = otherId, toPeer = p, venom = a.venom, queen = a.caste == "queen", fb = FightBonus(a) });
         }
 
         static Num FightScore(int id, Num venom, bool queen, Num mash, Num start, Num fb) => venom + (queen ? 1 : 0) + mash + H32(id, start, 61) * 1.2 + fb; // fb: a hornet's weight (GDD 6.8)
@@ -1432,8 +1432,8 @@ namespace Sting.Core
             var f = w.fight;
             if (f.starter) { if (tick > f.until + T.rival.remoteFightTimeout) { w.state = "fly"; w.fight = null; } return; }
             if (tick < f.until) return;
-            bool bWins = FightScore(w.id, f.myVenom, w.caste == "queen", f.mash, f.start, Spw(w).fight) > FightScore(f.other, f.theirVenom, f.theirQueen, 0, f.start, f.theirFb);
-            Publish(new NetEv { type = "fightEnd", a = f.other, b = w.id, toPeer = f.peer, mash = f.mash, venom = f.myVenom, queen = w.caste == "queen", fb = Spw(w).fight });
+            bool bWins = FightScore(w.id, f.myVenom, w.caste == "queen", f.mash, f.start, FightBonus(w)) > FightScore(f.other, f.theirVenom, f.theirQueen, 0, f.start, f.theirFb);
+            Publish(new NetEv { type = "fightEnd", a = f.other, b = w.id, toPeer = f.peer, mash = f.mash, venom = f.myVenom, queen = w.caste == "queen", fb = FightBonus(w) });
             FightResolve(w, bWins, f.other);
         }
 
@@ -1553,6 +1553,13 @@ namespace Sting.Core
             MuniTick(); // the town's campaign runs on whether or not any colony is left
             if (extinct || winter != null) return; // the line is over, or the queens sleep until one is chosen
             var col = colony;
+            // the insects with experience of their own that live on inside grow old there; a master passes on its mastery (GDD 6.8)
+            if (col.vets.Count > 0)
+            {
+                var keep = new List<Vet>();
+                foreach (var v in col.vets) { if (minute - v.born > LifespanMinutes(v.id, "worker") || !col.nestAlive) Legacy(v.id, v.pers); else keep.Add(v); }
+                col.vets = keep;
+            }
             bool day = IsDaylight(minute) && !Raining && CanFly();
             bool daylight = ForageHours(Colony.Sp(col)) && CanFly(); // the line's own hours: hornets work at night (T2-10)
             Num frac = SeasonFrac;

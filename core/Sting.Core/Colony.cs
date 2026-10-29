@@ -29,6 +29,8 @@ namespace Sting.Core
         public Num xpSeen;
         /// nested somewhere warm (a house, a giant tree's hollow), inside a house, and found by the household there (GDD 6.8)
         public bool warm, house, found;
+        /// insects with experience of their own living on inside, who pass on their mastery when they die (GDD 6.8)
+        public System.Collections.Generic.List<Vet> vets = new System.Collections.Generic.List<Vet>();
         public ColonyStats stats = new ColonyStats();
         public ColonyState Clone() { var c = (ColonyState)MemberwiseClone(); c.stats = stats.Clone(); return c; }
         public Num this[string k]
