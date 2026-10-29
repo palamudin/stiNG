@@ -1882,6 +1882,44 @@ Assisted landing (E), hover (H) and the lock suit touch well, because the wasp d
 
 Not yet tried on a real phone.
 
+### 18.60 The map: minimap sizes, the atlas, a phone HUD (10)
+
+**Found in play (2026-10-29).** Three problems with the map and HUD:
+- **On a phone,** the minimap sat under the left thumb, and the HUD's large type took the upper corners.
+- **On a 4K screen,** the minimap was too small to read.
+- **No way to look further.** Nothing showed the wider map for finding the way.
+
+**The minimap.**
+- Its size and zoom are the player's. The buttons on its header, or - and = for size and [ and ] for zoom, step through five sizes (120 to 440 px) and five zooms (from about three areas across to fourteen). They are kept between sessions.
+- It is drawn at the screen's pixel density, so it stays sharp at 4K.
+- It now also marks the line's other colonies.
+- M opened the sound before; the volume slider in the pause menu covers that, so M now opens the atlas.
+
+**The atlas.** The whole map full screen.
+- **Opening and closing:** M, the Atlas button, a double click (or double tap on a phone) on the minimap, or the controller's d-pad left. M, Esc, B or Close shut it.
+- **Moving and zooming:** drag or the right stick to move; the wheel, pinch, the + and − buttons or the triggers to zoom. "On me" and "Nest" recentre it.
+- **What it shows:** every area flown over, coloured by land use, with streets and buildings. Zoomed in, it adds trees and water. It also shows the alert by area, people (yellow once stung, red when panicking), hives, rival nests, your nest and the line's other colonies, other players and their nests, and your wasp with its heading. A legend sits in the header.
+- **Area details:** a click or tap on an area names it and lists:
+  - its distance from the nest, and its alert level;
+  - the people in it now, and how many are already stung;
+  - flowers in bloom, tables, trees, buildings, water, hives, webs and birds;
+  - whose nests are there, and whether the exterminator is.
+  Areas not yet flown over say so.
+- The game runs on while the atlas is open, as with the colony view; opening it does not pause the game.
+
+**A phone HUD.** On a touch screen:
+- the counter, clock and colony figures use small type, and the colony figures sit in two columns;
+- the minimap sits top right under them, kept at no more than 168 px, and a double tap opens the atlas;
+- the status, hint and bars at the bottom are smaller, so the thumbs' corners stay with the controls.
+
+**Checks.** In headless Chromium, on a 1600 × 900 desktop and an 844 × 390 phone:
+- = twice grows the minimap from 168 to 320 px.
+- M (desktop) and a double tap (phone) open the atlas, which no longer pauses the game.
+- A click in the middle names the wasp's area: park, 131 m from the nest, calm, its people, flowers, tables, trees, hive and webs.
+- Close shuts the atlas.
+- The controller and touch checks of 18.58 and 18.59 still pass.
+- There are no console errors.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1890,7 +1928,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (110 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony; the T0 of progression (18.48): XP, unit and hive skills, the year's turn; multi-colony play with the player gauge (18.49); wintering in somewhere warm (18.50); chasing moving prey with a lock, with a colony view you can click (18.51); obstacle avoidance in assisted flight (18.52); reaching what moves under a lock (18.53); the lock ending on arrival (18.54); Shift hurrying an assisted flight (18.55); landing at speed with hovering round a lock (18.56); lines, the wasp in hand and roles passed on by masters (18.57); playing with a controller only, Xbox included (18.58); and touch controls for phones and tablets (18.59). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (111 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony; the T0 of progression (18.48): XP, unit and hive skills, the year's turn; multi-colony play with the player gauge (18.49); wintering in somewhere warm (18.50); chasing moving prey with a lock, with a colony view you can click (18.51); obstacle avoidance in assisted flight (18.52); reaching what moves under a lock (18.53); the lock ending on arrival (18.54); Shift hurrying an assisted flight (18.55); landing at speed with hovering round a lock (18.56); lines, the wasp in hand and roles passed on by masters (18.57); playing with a controller only, Xbox included (18.58); touch controls for phones and tablets (18.59); and the map: minimap sizes, the atlas and a phone HUD (18.60). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 

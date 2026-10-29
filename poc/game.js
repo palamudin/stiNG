@@ -1542,6 +1542,7 @@ function readPad() {
   const dz = (v) => (Math.abs(v) < 0.15 ? 0 : v);
   const b = (i) => !!(gp.buttons[i] && (gp.buttons[i].pressed || gp.buttons[i].value > 0.5));
   const edge = (i) => b(i) && !pad.prev[i];
+  if (atlas.open) { pad.prev = gp.buttons.map((x) => !!(x && (x.pressed || x.value > 0.5))); return null; } // the pad works the atlas (padUI)
   if (ui.nest) { // the colony view has the buttons (padUI); the sticks still fly
     if (edge(8)) toggleNest();
     pad.prev = gp.buttons.map((x) => !!(x && (x.pressed || x.value > 0.5)));
@@ -1553,6 +1554,8 @@ function readPad() {
   if (edge(11)) toggleLock(); // R3: lock on
   if (edge(12)) swoop(); // d-pad up: swoop
   if (edge(13)) toggleHover(); // d-pad down: hover round the lock
+  if (edge(14)) toggleAtlas(); // d-pad left: the atlas
+  if (edge(15)) { mapView.size = MAP_SIZES[(MAP_SIZES.indexOf(mapView.size) + 1) % MAP_SIZES.length]; applyMapView(); } // d-pad right: map size
   if (edge(10)) eyeTurnDown(); else if (pad.prev[10] && !b(10)) eyeTurnUp(); // L3: turn to where you look
   pad.prev = gp.buttons.map((x) => !!(x && (x.pressed || x.value > 0.5)));
   return out;
@@ -1612,6 +1615,7 @@ canvas.addEventListener('touchend', lookEnd); canvas.addEventListener('touchcanc
 const padNav = { prev: [], at: null, repeatAt: 0, dir: 0, used: false };
 function activeMenu() {
   for (const id of ['winterScreen', 'extinctScreen', 'pauseScreen', 'startScreen']) { const el = $(id); if (el && !el.hidden) return el; }
+  if (atlas.open) return $('atlas');
   if (ui.nest) return $('nest');
   return null;
 }
@@ -1648,6 +1652,7 @@ function navPress() {
 }
 function navBack(root) {
   if (root.id === 'pauseScreen') { setPaused(false); lock(); }
+  else if (root.id === 'atlas') closeAtlas();
   else if (root.id === 'nest') toggleNest();
 }
 function padUI(now) {
@@ -1667,6 +1672,12 @@ function padUI(now) {
     padNav.dir = dir;
     if (edge(0)) navPress();
     if (edge(1)) navBack(root);
+    if (root.id === 'atlas') { // the right stick moves the map, the triggers zoom, d-pad left closes it
+      const rx = gp.axes[2] || 0, ry = gp.axes[3] || 0, CSZ = T.chunk.size;
+      if (Math.abs(rx) > 0.15 || Math.abs(ry) > 0.15) { atlas.ox -= rx * 8 / atlas.cell * CSZ; atlas.oz -= ry * 8 / atlas.cell * CSZ; drawAtlas(); }
+      if (b(7)) atlasZoom(1.03); if (b(6)) atlasZoom(1 / 1.03);
+      if (edge(14)) closeAtlas();
+    }
     if (edge(9) && root.id === 'pauseScreen') navBack(root);
   } else if (padNav.at) navFocus(null);
   padNav.prev = gp.buttons.map((x) => !!(x && (x.pressed || x.value > 0.5)));
@@ -1880,7 +1891,10 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyG' && !e.repeat && running && !paused) { eyeTurnDown(); return; }
   if (e.code === 'KeyE' && !e.repeat && running && !paused && startPilot()) return;
   if (e.code === 'KeyH' && !e.repeat && running && !paused) { toggleHover(); return; }
-  if (e.code === 'KeyM' && !e.repeat) { audio.on = !audio.on; toast(audio.on ? 'Sound on' : 'Sound off', 'var(--muted)', 1.2); return; }
+  if (e.code === 'KeyM' && !e.repeat && sim && running) { toggleAtlas(); return; } // the atlas (sound is the pause menu's volume)
+  if (atlas.open && e.code === 'Escape') { e.preventDefault(); closeAtlas(); return; }
+  if ((e.code === 'Minus' || e.code === 'Equal') && !e.repeat) { mapStep('size', e.code === 'Equal' ? 1 : -1); return; }
+  if ((e.code === 'BracketLeft' || e.code === 'BracketRight') && !e.repeat) { mapStep('zoom', e.code === 'BracketRight' ? 1 : -1); return; }
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
   input.keys.add(e.code);
 });
@@ -1917,7 +1931,7 @@ function lock() { if (touch.on) return; try { const p = canvas.requestPointerLoc
 document.addEventListener('pointerlockchange', () => {
   if (!running) return;
   const locked = document.pointerLockElement === canvas;
-  if (!locked && pointerLockWorked && !ui.nest && $('winterScreen').hidden && $('extinctScreen').hidden) setPaused(true); // the colony view frees the mouse on purpose
+  if (!locked && pointerLockWorked && !ui.nest && !atlas.open && $('winterScreen').hidden && $('extinctScreen').hidden) setPaused(true); // the colony view and the atlas free the mouse on purpose
   if (locked) { pointerLockWorked = true; setPaused(false); }
 });
 function setPaused(p) { paused = p; if (p && sim) $('pauseTag').textContent = `${tagText(sim.settings)} · rules ${rulesHash(sim.settings)} · tuning ${TUNE.hash}`; input.free.held = false; $('pauseScreen').hidden = !p; input.lmb = false; input.keys.clear(); if (p) { $('saveNote').textContent = ''; saveWorld(false); } }
@@ -1944,7 +1958,7 @@ $('bQuit').addEventListener('click', () => {
 });
 // Esc opens the menu even when the mouse was never captured (the browser handles Esc itself while it is)
 addEventListener('keydown', (e) => {
-  if (e.code !== 'Escape' || !running || document.pointerLockElement === canvas) return;
+  if (e.code !== 'Escape' || !running || document.pointerLockElement === canvas || e.defaultPrevented) return;
   if (!$('winterScreen').hidden || !$('extinctScreen').hidden) return;
   setPaused(!paused);
 });
@@ -2293,15 +2307,37 @@ const dayLabel = (m) => (Math.floor(m / 1440) === sim.day ? fmtClock(m) : `day $
 
 // ------------------------------------------------------------------ minimap
 
+// The map (GDD 10). One drawing, two views: the minimap round the wasp (heading up the screen as the wasp turns it) and
+// the atlas, the whole map full screen, moved and zoomed by hand. ox, oz: the world point at the middle; cell: pixels a
+// chunk is across. Drawn in CSS pixels on a canvas sized for the screen's pixel density, so it stays sharp at 4K.
 const mapCtx = $('map').getContext('2d');
-function drawMap() {
-  const ctx = mapCtx, W = 336, cell = 48, span = 4, CSZ = T.chunk.size;
-  const w = sim.wasp || { x: 0, z: 0 };
-  const toS = (x, z) => [W / 2 - (x - w.x) / CSZ * cell, W / 2 - (z - w.z) / CSZ * cell];
-  const ccx = chunkOf(w.x), ccz = chunkOf(w.z);
-  ctx.clearRect(0, 0, W, W);
-  const yellow = css('--yellow'), red = css('--red');
-  for (let dz = -span; dz <= span; dz++) for (let dx = -span; dx <= span; dx++) {
+const mapView = { size: 168, zoom: 1 }; // the minimap's size on screen (CSS px) and zoom (1: seven chunks across)
+const MAP_SIZES = [120, 168, 240, 320, 440], MAP_ZOOMS = [0.5, 0.7, 1, 1.4, 2];
+try { Object.assign(mapView, JSON.parse(localStorage.getItem('sting.map') || '{}')); } catch { /* optional */ }
+function fitCanvas(cv, w, h) {
+  const r = Math.min(devicePixelRatio || 1, 3), W = Math.round(w * r), H = Math.round(h * r);
+  if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+  return r;
+}
+function applyMapView() {
+  const m = $('map'), sz = document.body.classList.contains('touch') && mapView.size > 168 ? 168 : mapView.size;
+  m.style.width = m.style.height = sz + 'px';
+  try { localStorage.setItem('sting.map', JSON.stringify(mapView)); } catch { /* optional */ }
+}
+function mapStep(kind, d) {
+  const list = kind === 'size' ? MAP_SIZES : MAP_ZOOMS, cur = mapView[kind];
+  let i = list.findIndex((v) => v >= cur); if (i < 0) i = list.length - 1;
+  mapView[kind] = list[Math.max(0, Math.min(list.length - 1, i + d))];
+  applyMapView();
+}
+function drawMapTo(ctx, W, H, ox, oz, cell, o = {}) {
+  const CSZ = T.chunk.size, w = sim.wasp || { x: 0, z: 0 }, k = Math.max(1, Math.min(2.2, cell / 48)); // markers grow a little when zoomed in
+  const toS = (x, z) => [W / 2 - (x - ox) / CSZ * cell, H / 2 - (z - oz) / CSZ * cell];
+  const ccx = chunkOf(ox), ccz = chunkOf(oz), sx0 = Math.ceil(W / 2 / cell) + 1, sz0 = Math.ceil(H / 2 / cell) + 1;
+  ctx.clearRect(0, 0, W, H);
+  const yellow = css('--yellow'), red = css('--red'), orange = css('--orange');
+  const wc = chunkOf(w.x), wz = chunkOf(w.z);
+  for (let dz = -sz0; dz <= sz0; dz++) for (let dx = -sx0; dx <= sx0; dx++) {
     const cx = ccx + dx, cz = ccz + dz, key = chunkKey(cx, cz);
     const [sx, sy] = toS((cx + 0.5) * CSZ, (cz + 0.5) * CSZ);
     const rec = sim.records.get(key);
@@ -2316,15 +2352,22 @@ function drawMap() {
       ctx.fillStyle = 'rgba(214,206,190,.55)';
       for (const sh of rec.content.sheds || []) if (sh.house) { const [x, y] = toS(sh.x, sh.z); ctx.fillRect(x - sh.hw / CSZ * cell, y - sh.hd / CSZ * cell, sh.hw * 2 / CSZ * cell, sh.hd * 2 / CSZ * cell); }
       for (const m of rec.content.malls || []) { const [x, y] = toS(m.x, m.z); ctx.fillRect(x - m.hw / CSZ * cell, y - m.hd / CSZ * cell, m.hw * 2 / CSZ * cell, m.hd * 2 / CSZ * cell); }
+      if (o.detail) { // the atlas, zoomed in: trees and water too
+        ctx.fillStyle = 'rgba(40,70,30,.9)';
+        for (const t of rec.content.trees) { const [x, y] = toS(t.x, t.z); ctx.beginPath(); ctx.arc(x, y, Math.max(1.5, (t.r || 0.3) * 3 / CSZ * cell), 0, Math.PI * 2); ctx.fill(); }
+        ctx.fillStyle = 'rgba(79,160,220,.9)';
+        for (const b of rec.content.baths || []) { const [x, y] = toS(b.x, b.z); ctx.beginPath(); ctx.arc(x, y, 2.5 * k, 0, Math.PI * 2); ctx.fill(); }
+      }
       const lv = sim.escLevel(key);
       if (lv) { ctx.fillStyle = `rgba(229,65,45,${0.1 + lv * 0.1})`; ctx.fillRect(sx + 1, sy + 1, cell - 2, cell - 2); }
       ctx.fillStyle = 'rgba(243,238,226,.4)';
       for (const t of rec.content.tables) { const [x, y] = toS(t.x, t.z); ctx.fillRect(x - 2, y - 2, 4, 4); }
       ctx.fillStyle = '#ece8dc';
-      for (const hv of sim.hivesIn(rec)) { const [x, y] = toS(hv.x, hv.z); ctx.fillRect(x - 3, y - 3, 6, 6); }
-      if (rec.content.rival) { const [x, y] = toS(rec.content.rival.x, rec.content.rival.z); ctx.strokeStyle = css('--orange'); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.stroke(); }
-    } else { ctx.strokeStyle = 'rgba(165,157,138,.2)'; ctx.strokeRect(sx + 1.5, sy + 1.5, cell - 3, cell - 3); }
-    if (Math.abs(dx) <= T.chunk.activeRadius && Math.abs(dz) <= T.chunk.activeRadius) { ctx.strokeStyle = 'rgba(246,199,0,.3)'; ctx.strokeRect(sx + 0.5, sy + 0.5, cell - 1, cell - 1); }
+      for (const hv of sim.hivesIn(rec)) { const [x, y] = toS(hv.x, hv.z); ctx.fillRect(x - 3 * k, y - 3 * k, 6 * k, 6 * k); }
+      if (rec.content.rival) { const [x, y] = toS(rec.content.rival.x, rec.content.rival.z); ctx.strokeStyle = orange; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 4 * k, 0, Math.PI * 2); ctx.stroke(); }
+    } else if (!o.detail || cell > 14) { ctx.strokeStyle = 'rgba(165,157,138,.2)'; ctx.strokeRect(sx + 1.5, sy + 1.5, cell - 3, cell - 3); }
+    if (Math.abs(cx - wc) <= T.chunk.activeRadius && Math.abs(cz - wz) <= T.chunk.activeRadius) { ctx.strokeStyle = 'rgba(246,199,0,.3)'; ctx.strokeRect(sx + 0.5, sy + 0.5, cell - 1, cell - 1); }
+    if (o.sel && o.sel === key) { ctx.strokeStyle = yellow; ctx.lineWidth = 2; ctx.strokeRect(sx + 1, sy + 1, cell - 2, cell - 2); ctx.lineWidth = 1; }
   }
   for (const hm of sim.active) {
     if (hm.state === 'away') continue;
@@ -2332,39 +2375,150 @@ function drawMap() {
     ctx.fillStyle = hm.special ? red : hm.panic > 0.5 ? red : sim.stung.has(hm.hex) ? yellow : 'rgba(243,238,226,.85)';
     ctx.fillRect(x - 2, y - 2, hm.special ? 6 : 4, hm.special ? 6 : 4);
   }
-  ctx.fillStyle = 'rgba(246,199,0,.8)';
-  for (const x of sim.wasps) { if (x.id === sim.drivenId) continue; ctx.fillStyle = x.colony === 'own' ? 'rgba(246,199,0,.8)' : css('--orange'); const [px, py] = toS(x.x, x.z); ctx.fillRect(px - 1, py - 1, 2, 2); }
+  for (const x of sim.wasps) { if (x.id === sim.drivenId) continue; ctx.fillStyle = x.colony === 'own' ? 'rgba(246,199,0,.8)' : orange; const [px, py] = toS(x.x, x.z); ctx.fillRect(px - 1, py - 1, 2, 2); }
   // other players' wasps (T1-21): near and mid ones as dots; far traffic as a count per chunk, a cluster of dots where
   // the chunk is on the map and a tick at the edge of the map, pointing at it, where it is off it
   const blue = '#4fd1ff';
   ctx.fillStyle = blue;
   for (const [, r] of sim.remote) { if (r.rival) continue; const [px, py] = toS(r.x, r.z); ctx.fillRect(px - 2, py - 2, 4, 4); }
-  // other players' nests (colony against colony)
-  ctx.strokeStyle = blue; ctx.lineWidth = 2;
-  for (const [, n] of sim.peerNests) { if (!n.alive) continue; const [px, py] = toS(n.x, n.z); ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI * 2); ctx.stroke(); }
+  ctx.strokeStyle = blue; ctx.lineWidth = 2; // other players' nests (colony against colony)
+  for (const [, n] of sim.peerNests) { if (!n.alive) continue; const [px, py] = toS(n.x, n.z); ctx.beginPath(); ctx.arc(px, py, 5 * k, 0, Math.PI * 2); ctx.stroke(); }
   const far = new Map();
-  for (const [, tr] of sim.remoteTraffic) for (const [k, n] of tr.chunks) far.set(k, (far.get(k) || 0) + n);
-  ctx.font = '600 18px ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  for (const [k, n] of far) {
-    const [cx, cz] = k.split(',').map(Number), [sx, sy] = toS((cx + 0.5) * CSZ, (cz + 0.5) * CSZ);
-    if (sx > 4 && sx < W - 4 && sy > 4 && sy < W - 4) {
+  for (const [, tr] of sim.remoteTraffic) for (const [kk, n] of tr.chunks) far.set(kk, (far.get(kk) || 0) + n);
+  ctx.font = `600 ${o.detail ? 13 : 18}px ui-monospace, monospace`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (const [kk, n] of far) {
+    const [cx, cz] = kk.split(',').map(Number), [sx, sy] = toS((cx + 0.5) * CSZ, (cz + 0.5) * CSZ);
+    if (sx > 4 && sx < W - 4 && sy > 4 && sy < H - 4) {
       for (let i = 0; i < Math.min(n, 9); i++) { const a = i * 2.4, rr = 4 + 4 * Math.sqrt(i); ctx.fillRect(sx + rr * Math.cos(a) - 2, sy + rr * Math.sin(a) - 2, 4, 4); }
       if (n > 9) ctx.fillText(String(n), sx, sy - 20);
-    } else {
-      const dx = sx - W / 2, dy = sy - W / 2, m = (W / 2 - 12) / Math.max(Math.abs(dx), Math.abs(dy));
-      const ex = W / 2 + dx * m, ey = W / 2 + dy * m, ang = Math.atan2(dy, dx);
+    } else if (!o.detail) {
+      const dx = sx - W / 2, dy = sy - H / 2, m = (Math.min(W, H) / 2 - 12) / Math.max(Math.abs(dx), Math.abs(dy));
+      const ex = W / 2 + dx * m, ey = H / 2 + dy * m, ang = Math.atan2(dy, dx);
       ctx.save(); ctx.translate(ex, ey); ctx.rotate(ang);
       ctx.beginPath(); ctx.moveTo(10, 0); ctx.lineTo(-4, -8); ctx.lineTo(-4, 8); ctx.closePath(); ctx.fill();
       ctx.restore();
       ctx.fillText(String(n), ex - Math.cos(ang) * 20, ey - Math.sin(ang) * 20);
     }
   }
+  // the line's other colonies, then yours
+  ctx.lineWidth = 2;
+  for (const x of sim.line) { const [px, py] = toS(x.nest.x, x.nest.z); ctx.strokeStyle = x.colony.nestAlive ? 'rgba(246,199,0,.6)' : red; ctx.beginPath(); ctx.arc(px, py, 4 * k, 0, Math.PI * 2); ctx.stroke(); }
   const [nx, ny] = toS(sim.nest.x, sim.nest.z);
   ctx.strokeStyle = sim.colony.nestAlive ? yellow : red; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.arc(nx, ny, 5, 0, Math.PI * 2); ctx.stroke();
-  ctx.save(); ctx.translate(W / 2, W / 2); ctx.rotate(-input.yaw);
-  ctx.fillStyle = yellow; ctx.beginPath(); ctx.moveTo(0, -11); ctx.lineTo(7, 8); ctx.lineTo(0, 4); ctx.lineTo(-7, 8); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.arc(nx, ny, 5 * k, 0, Math.PI * 2); ctx.stroke();
+  if (o.detail) { ctx.fillStyle = yellow; ctx.beginPath(); ctx.arc(nx, ny, 2.5 * k, 0, Math.PI * 2); ctx.fill(); }
+  const [wx, wy] = toS(w.x, w.z), ar = o.detail ? 1.3 : 1;
+  ctx.save(); ctx.translate(wx, wy); ctx.rotate(-input.yaw);
+  ctx.fillStyle = yellow; ctx.strokeStyle = 'rgba(0,0,0,.6)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, -11 * ar); ctx.lineTo(7 * ar, 8 * ar); ctx.lineTo(0, 4 * ar); ctx.lineTo(-7 * ar, 8 * ar); ctx.closePath(); ctx.fill(); ctx.stroke();
   ctx.restore();
+}
+function drawMap() {
+  const m = $('map'), sz = m.clientWidth || mapView.size, r = fitCanvas(m, sz, sz), w = sim.wasp || { x: 0, z: 0 };
+  mapCtx.setTransform(r, 0, 0, r, 0, 0);
+  drawMapTo(mapCtx, sz, sz, w.x, w.z, sz / 7 * mapView.zoom);
+}
+for (const b of document.querySelectorAll('#mapTools button')) b.addEventListener('click', (e) => {
+  e.stopPropagation(); const m = b.dataset.m;
+  if (m === 'atlas') openAtlas(); else mapStep(m.startsWith('size') ? 'size' : 'zoom', m.endsWith('+') ? 1 : -1);
+});
+applyMapView();
+
+// The atlas: the whole map full screen. Drag to move, wheel or pinch to zoom, a tap or click on an area tells what is
+// there. M, the Atlas button, a double tap or double click on the minimap, or the d-pad left open and close it.
+const atlas = { open: false, ox: 0, oz: 0, cell: 40, sel: null, pts: new Map(), pinch: 0, moved: 0, frame: 0 };
+const atlasCtx = $('atlasMap').getContext('2d');
+function openAtlas() {
+  const w = sim && (sim.wasp || sim.nest);
+  if (!w) return;
+  atlas.open = true; atlas.ox = w.x; atlas.oz = w.z; $('atlas').hidden = false;
+  const cv = $('atlasMap'); atlas.cell = Math.max(32, Math.min(cv.clientWidth, cv.clientHeight) / 9); // about nine areas across
+  input.lmb = false; input.free.held = false;
+  if (document.pointerLockElement === canvas) document.exitPointerLock?.();
+  drawAtlas();
+}
+function closeAtlas() { atlas.open = false; $('atlas').hidden = true; atlas.pts.clear(); if (running && !paused && !ui.nest) lock(); }
+function toggleAtlas() { if (atlas.open) closeAtlas(); else openAtlas(); }
+function drawAtlas() {
+  if (!atlas.open || !sim) return;
+  const cv = $('atlasMap'), W = cv.clientWidth, H = cv.clientHeight, r = fitCanvas(cv, W, H);
+  atlasCtx.setTransform(r, 0, 0, r, 0, 0);
+  drawMapTo(atlasCtx, W, H, atlas.ox, atlas.oz, atlas.cell, { detail: atlas.cell >= 24, sel: atlas.sel });
+}
+const USE_NAME = { yards: 'Backyards', forest: 'Woods', mall: 'Strip mall', town: 'Town square', park: 'Park' };
+function atlasInfo(key) {
+  const rec = sim.records.get(key), [cx, cz] = key.split(',').map(Number), CSZ = T.chunk.size;
+  const d = Math.round(Math.hypot((cx * CSZ) - sim.nest.x, (cz * CSZ) - sim.nest.z));
+  if (!rec) { $('atlasInfo').innerHTML = `<h4>Unexplored</h4><dl><dt>Area</dt><dd>${cx}, ${cz}</dd><dt>From the nest</dt><dd>${d} m</dd></dl><p>Fly over it to map it.</p>`; return; }
+  const c = rec.content, ppl = sim.active.filter((h) => h.chunk === key && h.state !== 'away' && !h.special), stung = ppl.filter((h) => sim.stung.has(h.hex)).length;
+  const bloom = c.flowers.filter((f, i) => sim.inBloom(rec, i)).length, hives = sim.hivesIn(rec).length, lv = sim.escLevel(key);
+  const houses = (c.sheds || []).filter((x) => x.house).length, sheds = (c.sheds || []).length - houses;
+  const here = [];
+  if (chunkKey(chunkOf(sim.nest.x), chunkOf(sim.nest.z)) === key) here.push(sim.colony.nestAlive ? 'your nest' : 'your nest (destroyed)');
+  for (const x of sim.line) if (chunkKey(chunkOf(x.nest.x), chunkOf(x.nest.z)) === key) here.push(`a ${SPECIES_NAME[x.colony.species || 'wasp']} colony of your line`);
+  if (c.rival) here.push('a rival nest');
+  for (const [, n] of sim.peerNests) if (n.alive && n.key === key) here.push("another player's nest");
+  if (sim.ext && sim.ext.hm && sim.ext.hm.chunk === key) here.push('the exterminator');
+  const rows = [
+    ['Area', `${cx}, ${cz} · ${d} m from the nest`],
+    ['Alert', lv ? `level ${lv} of 5${lv >= 3 ? ' · people are fetching spray' : ''}` : 'calm'],
+    ['People now', ppl.length ? `${ppl.length}${stung ? ` · ${stung} already stung` : ''}` : 'none'],
+    ['Flowers', `${bloom} in bloom of ${c.flowers.length}`],
+    ['Tables', String(c.tables.length)],
+    ['Trees', String(c.trees.length)],
+    ...(houses || sheds ? [['Buildings', `${houses ? `${houses} house${houses > 1 ? 's' : ''}` : ''}${houses && sheds ? ', ' : ''}${sheds ? `${sheds} shed${sheds > 1 ? 's' : ''}` : ''}`]] : []),
+    ...((c.baths || []).length ? [['Water', `${c.baths.length} birdbath${c.baths.length > 1 ? 's' : ''}`]] : []),
+    ...(hives ? [['Beehives', String(hives)]] : []),
+    ...((c.webs || []).length ? [['Spider webs', String(c.webs.length)]] : []),
+    ...((c.birds || []).length ? [['Birds', String(c.birds.length)]] : []),
+  ];
+  $('atlasInfo').innerHTML = `<h4>${USE_NAME[c.use || 'park'] || 'Park'}</h4>${here.length ? `<p><b>${here.join(' · ')}</b></p>` : ''}<dl>${rows.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join('')}</dl>`;
+}
+function atlasKeyAt(px, py) {
+  const cv = $('atlasMap'), W = cv.clientWidth, H = cv.clientHeight, CSZ = T.chunk.size;
+  const x = atlas.ox - (px - W / 2) / atlas.cell * CSZ, z = atlas.oz - (py - H / 2) / atlas.cell * CSZ;
+  return chunkKey(chunkOf(x), chunkOf(z));
+}
+function atlasZoom(f, px, py) {
+  const cv = $('atlasMap'), W = cv.clientWidth, H = cv.clientHeight, CSZ = T.chunk.size, c0 = atlas.cell;
+  const c1 = Math.max(6, Math.min(220, c0 * f));
+  if (px !== undefined) { // keep the point under the cursor where it is
+    const x = atlas.ox - (px - W / 2) / c0 * CSZ, z = atlas.oz - (py - H / 2) / c0 * CSZ;
+    atlas.ox = x + (px - W / 2) / c1 * CSZ; atlas.oz = z + (py - H / 2) / c1 * CSZ;
+  }
+  atlas.cell = c1; drawAtlas();
+}
+{
+  const cv = $('atlasMap'), CSZ = T.chunk.size;
+  cv.addEventListener('pointerdown', (e) => { e.preventDefault(); try { cv.setPointerCapture(e.pointerId); } catch { /* optional */ } atlas.pts.set(e.pointerId, { x: e.offsetX, y: e.offsetY }); atlas.moved = 0; if (atlas.pts.size === 2) { const [a, b] = [...atlas.pts.values()]; atlas.pinch = Math.hypot(a.x - b.x, a.y - b.y); } });
+  cv.addEventListener('pointermove', (e) => {
+    const p = atlas.pts.get(e.pointerId); if (!p) return;
+    const dx = e.offsetX - p.x, dy = e.offsetY - p.y; p.x = e.offsetX; p.y = e.offsetY; atlas.moved += Math.abs(dx) + Math.abs(dy);
+    if (atlas.pts.size === 1) { atlas.ox += dx / atlas.cell * CSZ; atlas.oz += dy / atlas.cell * CSZ; drawAtlas(); }
+    else if (atlas.pts.size === 2) { const [a, b] = [...atlas.pts.values()], d = Math.hypot(a.x - b.x, a.y - b.y); if (atlas.pinch > 0) atlasZoom(d / atlas.pinch, (a.x + b.x) / 2, (a.y + b.y) / 2); atlas.pinch = d; }
+  });
+  const up = (e) => {
+    if (!atlas.pts.has(e.pointerId)) return;
+    atlas.pts.delete(e.pointerId);
+    if (atlas.pts.size === 0 && atlas.moved < 6 && e.type === 'pointerup') { atlas.sel = atlasKeyAt(e.offsetX, e.offsetY); atlasInfo(atlas.sel); drawAtlas(); }
+    if (atlas.pts.size < 2) atlas.pinch = 0;
+  };
+  cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+  cv.addEventListener('wheel', (e) => { e.preventDefault(); atlasZoom(e.deltaY < 0 ? 1.15 : 1 / 1.15, e.offsetX, e.offsetY); }, { passive: false });
+  for (const b of document.querySelectorAll('#atlasHead button[data-a]')) b.addEventListener('click', () => {
+    const a = b.dataset.a;
+    if (a === 'close') closeAtlas(); else if (a === 'zoom+') atlasZoom(1.4); else if (a === 'zoom-') atlasZoom(1 / 1.4);
+    else { const w = a === 'me' ? sim.wasp : sim.nest; if (w) { atlas.ox = w.x; atlas.oz = w.z; drawAtlas(); } }
+  });
+  addEventListener('resize', () => drawAtlas());
+  // the minimap opens it: a double click, or a double tap on a touch screen
+  const mp = $('map'); let lastTap = 0;
+  mp.addEventListener('dblclick', (e) => { e.preventDefault(); openAtlas(); });
+  mp.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'touch') return;
+    e.preventDefault();
+    const t = performance.now(); if (t - lastTap < 350) { openAtlas(); lastTap = 0; } else lastTap = t;
+  });
 }
 
 // ------------------------------------------------------------------ events
@@ -2760,6 +2914,7 @@ function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
   padUI(now); // menus with a controller (Xbox)
+  if (atlas.open && ++atlas.frame % 6 === 0) drawAtlas(); // live markers on the atlas
   if (running && !paused) {
     if (sim) updateAssist(dt);
     const scale = timeScale(), cap = Math.max(8, Math.ceil(8 * scale));

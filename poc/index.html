@@ -83,8 +83,28 @@
   #lockMark span { position: absolute; left: 40px; top: 6px; white-space: nowrap; font: 700 12px var(--mono, ui-monospace, monospace); color: var(--fg); text-shadow: 0 1px 2px #000; text-transform: uppercase; letter-spacing: .06em; }
   #toast { top: 24%; left: 50%; transform: translateX(-50%); text-align: center; font-family: var(--display); font-weight: 800; font-size: 22px; letter-spacing: .05em; text-transform: uppercase; opacity: 0; transition: opacity .3s; max-width: 90vw; }
 
-  #map { bottom: calc(16px + env(safe-area-inset-bottom, 0px)); left: calc(16px + env(safe-area-inset-left, 0px)); width: 168px; height: 168px; background: var(--panel); border: 1px solid var(--line); }
-  #mapcap { bottom: calc(188px + env(safe-area-inset-bottom, 0px)); left: calc(16px + env(safe-area-inset-left, 0px)); }
+  /* The minimap (GDD 10): its size and zoom are the player's (the buttons, or - and = for size, [ and ] for zoom); the
+     atlas (M) is the whole map, full screen */
+  #mapBox { position: fixed; z-index: 2; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); left: calc(16px + env(safe-area-inset-left, 0px)); display: grid; gap: 4px; user-select: none; }
+  #mapHead { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  #mapTools { display: flex; gap: 3px; }
+  #mapTools button { min-height: 0; height: 20px; min-width: 20px; padding: 0 5px; font: 600 11px/1 var(--mono); border-radius: 3px; background: rgba(13,12,10,.55); border: 1px solid var(--line); color: var(--fg); }
+  #map { display: block; width: 168px; height: 168px; background: var(--panel); border: 1px solid var(--line); cursor: zoom-in; touch-action: manipulation; }
+  /* the atlas */
+  #atlas { position: fixed; inset: 0; z-index: 6; background: var(--ink); display: grid; grid-template-columns: 1fr min(320px, 34vw); grid-template-rows: auto 1fr; }
+  #atlasHead { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: calc(8px + env(safe-area-inset-top, 0px)) 12px 8px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  #atlasHead h3 { margin: 0 8px 0 0; font-family: var(--display); font-size: 18px; letter-spacing: .08em; text-transform: uppercase; }
+  #atlasHead .grow { flex: 1; }
+  #atlasHead button { height: 30px; min-height: 0; padding: 0 10px; }
+  #atlasMap { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+  #atlasInfo { border-left: 1px solid var(--line); padding: 12px; overflow-y: auto; font-size: 12px; }
+  #atlasInfo h4 { margin: 0 0 6px; font-family: var(--display); font-size: 16px; text-transform: uppercase; letter-spacing: .06em; }
+  #atlasInfo dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 8px 0; }
+  #atlasInfo dt { color: var(--muted); }
+  #atlasInfo dd { margin: 0; }
+  #atlasLegend { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11px; color: var(--muted); }
+  #atlasLegend i { display: inline-block; width: 10px; height: 10px; margin-right: 4px; vertical-align: -1px; }
+  @media (orientation: portrait) { #atlas { grid-template-columns: 1fr; grid-template-rows: auto 1fr minmax(120px, 34vh); } #atlasInfo { border-left: 0; border-top: 1px solid var(--line); } }
 
   .panel { box-sizing: border-box; position: fixed; z-index: 6; background: var(--panel); overflow-y: auto; pointer-events: auto; display: grid; align-content: start; gap: 14px; font-size: 12px; }
   .panel h3 { margin: 0 0 6px; font-family: var(--display); font-weight: 800; font-size: 16px; letter-spacing: .08em; text-transform: uppercase; color: var(--yellow); }
@@ -97,7 +117,7 @@
   #nest .skills { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 6px; }
   #nest .skills h4, #nest .skills > .label { grid-column: 1 / -1; }
   body.nest-open #view { cursor: default; }
-  body.nest-open #map, body.nest-open #mapcap { display: none; }
+  body.nest-open #mapBox { display: none; }
   @media (min-width: 900px) { body.nest-open #vitals { left: calc(50% + 180px); width: min(420px, calc(100vw - 400px)); } }
   .swatline { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 3px 0; border-top: 1px solid rgba(243,238,226,.08); }
   .log { font-size: 11px; color: var(--muted); display: grid; gap: 1px; }
@@ -160,7 +180,7 @@
   .stripe { height: 10px; background: repeating-linear-gradient(-45deg, var(--yellow) 0 12px, var(--ink) 12px 24px); }
 
   #pauseScreen { z-index: 5; }
-  body.hardcore #vitals .bars, body.hardcore #zone, body.hardcore #hint, body.hardcore #map, body.hardcore #mapcap, body.hardcore #reticle, body.hardcore #colony, body.hardcore #alert { display: none; }
+  body.hardcore #vitals .bars, body.hardcore #zone, body.hardcore #hint, body.hardcore #mapBox, body.hardcore #reticle, body.hardcore #colony, body.hardcore #alert { display: none; }
   #dead { z-index: 4; background: rgba(13,12,10,.35); pointer-events: none; }
   #dead .title { color: var(--red); font-size: clamp(56px, 12vw, 110px); }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
@@ -173,8 +193,7 @@
   #touch .tstick .knob { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%; background: rgba(243,238,226,.55); }
   #touch .tbtns { position: absolute; display: grid; gap: 8px; pointer-events: none; }
   #touch .tbtns.right { right: max(14px, env(safe-area-inset-right, 0px)); bottom: max(14px, env(safe-area-inset-bottom, 0px)); grid-template-columns: repeat(4, 58px); }
-  #touch .tbtns.top { top: calc(max(8px, env(safe-area-inset-top, 0px)) + 78px); left: max(10px, env(safe-area-inset-left, 0px)); grid-template-columns: repeat(2, auto); }
-  body.touch #map, body.touch #mapcap { display: none; } /* the stick has that corner */
+  #touch .tbtns.top { top: calc(max(6px, env(safe-area-inset-top, 0px)) + 52px); left: max(10px, env(safe-area-inset-left, 0px)); grid-template-columns: repeat(2, auto); }
   #touch button { pointer-events: auto; touch-action: none; min-width: 44px; height: 52px; padding: 0 6px; border-radius: 12px; border: 1px solid rgba(243,238,226,.4); background: rgba(13,12,10,.45); color: var(--fg); font: 600 12px/1 var(--mono, monospace); letter-spacing: .02em; -webkit-user-select: none; user-select: none; }
   #touch .tbtns.top button { height: 36px; font-size: 11px; }
   #touch button.on { background: rgba(246,199,0,.55); color: #111; }
@@ -182,7 +201,34 @@
   body.touch.nest-open #touch .tstick, body.touch.nest-open #touch .tbtns.right { display: none; }
   #rotate { display: none; }
   @media (orientation: portrait) { body.touch #rotate { display: block; position: fixed; z-index: 3; left: 50%; bottom: 170px; transform: translateX(-50%); padding: 6px 10px; border-radius: 8px; background: rgba(13,12,10,.6); color: var(--fg); font-size: 12px; pointer-events: none; } }
-  @media (max-height: 520px) { body.touch .hud { zoom: .68; } }
+  /* A phone HUD: small type, the map up top on the right under the colony figures, the thumbs' corners left to the
+     controls */
+  body.touch .hud .label { font-size: 8px; letter-spacing: .1em; }
+  body.touch #counter { top: calc(6px + env(safe-area-inset-top, 0px)); left: calc(10px + env(safe-area-inset-left, 0px)); }
+  body.touch #counter .big { font-size: 20px; }
+  body.touch #counter .bump { font-size: 13px; height: 15px; }
+  body.touch #alert i { width: 9px; height: 4px; }
+  body.touch #clock { top: calc(6px + env(safe-area-inset-top, 0px)); }
+  body.touch #clock .t { font-size: 15px; }
+  body.touch #colony { top: calc(6px + env(safe-area-inset-top, 0px)); right: calc(10px + env(safe-area-inset-right, 0px)); grid-template-columns: auto auto; column-gap: 8px; row-gap: 0; align-items: baseline; }
+  body.touch #colony .v { font-size: 14px; }
+  body.touch #colony .label { margin-top: 0 !important; text-align: right; }
+  body.touch #mapBox { top: calc(64px + env(safe-area-inset-top, 0px)); bottom: auto; left: auto; right: calc(10px + env(safe-area-inset-right, 0px)); opacity: .92; }
+  body.touch #mapHead { display: none; } /* on a phone: double tap the map for the atlas */
+  /* a double tap (or double click) opens the map large for finding the way; again closes it */
+  body.touch #vitals { bottom: calc(8px + env(safe-area-inset-bottom, 0px)); width: min(300px, 44vw); gap: 4px; }
+  body.touch #status { font-size: 12px; min-height: 14px; }
+  body.touch #hint { font-size: 9.5px; min-height: 12px; }
+  body.touch #hint kbd { font-size: 9px; }
+  body.touch .bar { height: 4px; }
+  body.touch #zone { font-size: 13px; }
+  body.touch #zone small { font-size: 9px; }
+  body.touch #lockMark span { font-size: 10px; }
+  @media (orientation: portrait) {
+    body.touch #touch .tbtns.right { grid-template-columns: repeat(4, 46px); gap: 6px; }
+    body.touch #touch .tbtns.right button { height: 44px; font-size: 10px; }
+    body.touch #vitals { bottom: calc(200px + env(safe-area-inset-bottom, 0px)); width: 80vw; }
+  }
 </style>
 
 <canvas id="view" aria-label="STING game view"></canvas>
@@ -239,8 +285,19 @@
   </div>
 </div>
 
-<div class="hud label shadow" id="mapcap">Discovered chunks</div>
-<canvas class="hud" id="map" width="336" height="336"></canvas>
+<div id="mapBox">
+  <div id="mapHead"><span class="label shadow" id="mapcap">Map</span><span id="mapTools"><button data-m="size-" title="Smaller map (-)">−</button><button data-m="size+" title="Bigger map (=)">+</button><button data-m="zoom-" title="Zoom out ([)">⊖</button><button data-m="zoom+" title="Zoom in (])">⊕</button><button data-m="atlas" title="Atlas: the whole map (M)">Atlas</button></span></div>
+  <canvas id="map" width="336" height="336" title="Double click: the atlas"></canvas>
+</div>
+<div id="atlas" hidden>
+  <div id="atlasHead"><h3>Atlas</h3>
+    <div id="atlasLegend"><span><i style="background:hsla(95,22%,31%,1)"></i>yards</span><span><i style="background:hsla(30,18%,42%,1)"></i>town</span><span><i style="background:hsla(100,35%,14%,1)"></i>woods</span><span><i style="background:hsla(98,30%,24%,1)"></i>park</span><span><i style="background:rgba(229,65,45,.6)"></i>alert</span><span><i style="background:#f6c700;border-radius:50%"></i>your nest</span><span><i style="background:#ece8dc"></i>beehive</span><span><i style="border:2px solid #e9762b;border-radius:50%"></i>rival nest</span><span><i style="background:rgba(79,160,220,.9);border-radius:50%"></i>water</span><span><i style="background:rgba(40,70,30,.9);border-radius:50%"></i>tree</span><span><i style="background:#4fd1ff"></i>other players</span></div>
+    <span class="grow"></span>
+    <button class="ghost" data-a="zoom-" title="Zoom out">−</button><button class="ghost" data-a="zoom+" title="Zoom in">+</button><button class="ghost" data-a="me">On me</button><button class="ghost" data-a="nest">Nest</button><button data-a="close">Close (M)</button>
+  </div>
+  <canvas id="atlasMap"></canvas>
+  <div id="atlasInfo"><h4>Tap or click an area</h4><p class="label" style="text-transform:none;letter-spacing:.02em">Drag to move, wheel or pinch to zoom. Areas you have not flown over yet are blank.</p></div>
+</div>
 
 <aside class="panel" id="nest" hidden>
   <section>
@@ -343,11 +400,11 @@
       <div><kbd>R</kbd>rest in the nest at night</div>
       <div><kbd>N</kbd>nest panel</div>
       <div><kbd>Tab</kbd>lab overlay</div>
-      <div><kbd>M</kbd>sound on / off</div>
+      <div><kbd>M</kbd>atlas: the whole map · <kbd>-</kbd>/<kbd>=</kbd> map size · <kbd>[</kbd>/<kbd>]</kbd> map zoom</div>
       <div><kbd>Arrows</kbd>look without mouse</div>
       <div><kbd>Z</kbd>focus: slow time (a skill, solo)</div>
       <div><kbd>Esc</kbd>pause</div>
-      <div><kbd>Gamepad</kbd>sticks fly and look · RT sting · LT burst · A act · Y switch · X rest · R3 lock · L3 turn to look · d-pad up swoop · d-pad down hover · View colony · Start pause</div>
+      <div><kbd>Gamepad</kbd>sticks fly and look · RT sting · LT burst · A act · Y switch · X rest · R3 lock · L3 turn to look · d-pad up swoop · d-pad down hover · View colony · Start pause · d-pad left atlas · d-pad right map size</div>
     </div>
     <div class="start">
       <label class="label" for="seed">World seed<input id="seed" value="1234" inputmode="numeric" autocomplete="off"></label>
