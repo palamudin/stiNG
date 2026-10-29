@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, humanParts, malesAbout, chunkOf, toLocal, dirToWorld, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, pickTarget, assistPilot, swoopPilot, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS,
+  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, pickTarget, assistPilot, swoopPilot, hoverPilot, HOVER, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS,
 } from '../sim/index.js';
 import { applyTuning, parseTuning, tuningHash, tuningLeaves, TUNE } from '../sim/tunefile.js';
 
@@ -2082,6 +2082,27 @@ function seated(sim, pred) {
     place(s.wasp, found.p);
     const r = fly(s, found.t, found.f, 900);
     ok(r.done === 'landed', `locked on a flower behind a ${found.h.toFixed(1)} m fence, assisted flight climbs over it and lands (${r.done} in ${(r.arrive / 60).toFixed(2)} s)`); }
+}
+
+// 55. Hovering round a lock (GDD 7.9): H holds the wasp a little way off, drifting round at its own speed; E lands from there
+{
+  const s = new Sim({ seed: 1234, birds: false }, { noAI: true }); run(s, 1);
+  const rec = s.records.get('0,0'), fi = rec.content.flowers.findIndex((f, k) => s.inBloom(rec, k) && s.nectarAt(rec, k) > 0), f = rec.content.flowers[fi], t = { kind: 'flower', key: '0,0', i: fi };
+  place(s.wasp, { x: f.x + 2.5, y: f.y + 0.6, z: f.z - 1.5 });
+  let top = 0, a4 = 0, r4 = 0, dy4 = 0, a6 = 0;
+  for (let k = 1; k <= 360; k++) { const r = hoverPilot(s, s.wasp, t, idle()); s.step(r.cmd); s.drainEvents(); const w = s.wasp; top = Math.max(top, Math.hypot(w.vx, w.vy, w.vz));
+    if (k === 240) { a4 = Math.atan2(w.x - f.x, w.z - f.z); r4 = Math.hypot(w.x - f.x, w.z - f.z); dy4 = w.y - f.y; } if (k === 360) a6 = Math.atan2(w.x - f.x, w.z - f.z); }
+  const turned = Math.abs(Math.atan2(Math.sin(a6 - a4), Math.cos(a6 - a4)));
+  ok(s.wasp.state === 'fly' && Math.abs(r4 - HOVER.r) < 0.03 && Math.abs(dy4 - HOVER.up) < 0.03 && turned > 0.5 && top < HOVER.speed + 0.3, `H on a locked flower: the wasp comes over at its hover speed (at most ${top.toFixed(2)} m/s) and holds ${r4.toFixed(2)} m off and ${dy4.toFixed(2)} m up, drifting round it (${turned.toFixed(2)} rad in 2 s)`);
+  let r = null, k = 0; for (; k < 600; k++) { r = assistPilot(s, s.wasp, t, idle()); if (r.done) break; s.step(r.cmd); s.drainEvents(); }
+  ok(r.done === 'landed', `from the hover, E lands on it straight away (${r.done} in ${(k / 60).toFixed(2)} s)`);
+  let hm = null; for (let i = 0; i < 60 * 60 * 20 && !hm; i += 30) { run(s, 30); hm = s.active.find((h) => h.state === 'stroll' && Math.hypot(h.vx, h.vz) > 0.5 && !h.special); }
+  const ht = { kind: 'human', hex: hm.hex, part: 'Torso', t: 0.5, n: { x: 0, y: 0, z: -1 } };
+  if (s.wasp.state !== 'fly') { s.wasp.state = 'fly'; s.wasp.land = null; }
+  place(s.wasp, { x: hm.x + 1.5, y: 1.4, z: hm.z + 1 });
+  let lo = Infinity, hi = 0;
+  for (let i = 0; i <= 600; i++) { const rr = hoverPilot(s, s.wasp, ht, idle()); s.step(rr.cmd); s.drainEvents(); const p = targetPos(s, ht), w = s.wasp; if (i >= 180) { const d = Math.hypot(w.x - p.x, w.z - p.z); lo = Math.min(lo, d); hi = Math.max(hi, d); } }
+  ok(s.wasp.state === 'fly' && lo > 0.2 && hi < 0.55, `H on a person strolling at ${Math.hypot(hm.vx, hm.vz).toFixed(2)} m/s: the wasp keeps pace, ${lo.toFixed(2)} to ${hi.toFixed(2)} m off them`);
 }
 
 // Tuning as data (GDD 13, T1-22): one plain-text file feeds both sims

@@ -1448,6 +1448,38 @@ namespace Sting.Core.Tests
                     Ok(r.done == "landed", $"locked on a flower behind a {fh:0.0} m fence, assisted flight climbs over it and lands ({r.done} in {r.arrive / 60.0:0.00} s)");
                 }
             }
+            // 55. hovering round a lock (GDD 7.9): H holds the wasp a little way off, drifting round at its own speed; E lands from there
+            {
+                var s = new Sim(new Settings { seed = 1234, birds = false }, new SimOpts { noAI = true }); RunS(s, 1);
+                s.records.TryGet("0,0", out var rec); int fi = -1; for (int k = 0; k < rec.content.flowers.Count && fi < 0; k++) if (s.InBloom(rec, k) && s.NectarAt(rec, k) > 0) fi = k; var f = rec.content.flowers[fi];
+                var t = new LockTarget { kind = "flower", key = "0,0", i = fi };
+                Place(s.wasp, P(f.x + 2.5, f.y + 0.6, f.z - 1.5));
+                double top = 0, a4 = 0, r4 = 0, dy4 = 0, a6 = 0;
+                for (int k = 1; k <= 360; k++)
+                {
+                    var r = Assist.HoverPilot(s, s.wasp, t, Idle()); s.Step(r.cmd); s.DrainEvents(); var w = s.wasp;
+                    top = Math.Max(top, Math.Sqrt(D(w.vx * w.vx + w.vy * w.vy + w.vz * w.vz)));
+                    if (k == 240) { a4 = Math.Atan2(D(w.x - f.x), D(w.z - f.z)); r4 = Hypot(w.x - f.x, w.z - f.z); dy4 = D(w.y - f.y); }
+                    if (k == 360) a6 = Math.Atan2(D(w.x - f.x), D(w.z - f.z));
+                }
+                double turned = Math.Abs(Math.Atan2(Math.Sin(a6 - a4), Math.Cos(a6 - a4)));
+                Ok(s.wasp.state == "fly" && Math.Abs(r4 - D(Assist.hoverR)) < 0.03 && Math.Abs(dy4 - D(Assist.hoverUp)) < 0.03 && turned > 0.5 && top < D(Assist.hoverSpeed) + 0.3, $"H on a locked flower: the wasp comes over at its hover speed (at most {top:0.00} m/s) and holds {r4:0.00} m off and {dy4:0.00} m up, drifting round it ({turned:0.00} rad in 2 s)");
+                (Cmd cmd, string done) lr = (null, null); int n = 0;
+                for (; n < 600; n++) { lr = Assist.Pilot(s, s.wasp, t, Idle()); if (lr.done != null) break; s.Step(lr.cmd); s.DrainEvents(); }
+                Ok(lr.done == "landed", $"from the hover, E lands on it straight away ({lr.done} in {n / 60.0:0.00} s)");
+                Human hm = null;
+                for (int i = 0; i < 60 * 60 * 20 && hm == null; i += 30) { RunS(s, 30); hm = s.active.Find(h => h.state == "stroll" && Hypot(h.vx, h.vz) > 0.5 && !h.special); }
+                var ht = new LockTarget { kind = "human", hex = hm.hex, part = "Torso", t = 0.5, n = new V3(0, 0, -1) };
+                if (s.wasp.state != "fly") { s.wasp.state = "fly"; s.wasp.land = null; }
+                Place(s.wasp, P(hm.x + 1.5, 1.4, hm.z + 1));
+                double lo = double.PositiveInfinity, hi = 0;
+                for (int i = 0; i <= 600; i++)
+                {
+                    var rr = Assist.HoverPilot(s, s.wasp, ht, Idle()); s.Step(rr.cmd); s.DrainEvents(); var p = Assist.TargetPos(s, ht).Value; var w = s.wasp;
+                    if (i >= 180) { double dd = Hypot(w.x - p.x, w.z - p.z); lo = Math.Min(lo, dd); hi = Math.Max(hi, dd); }
+                }
+                Ok(s.wasp.state == "fly" && lo > 0.2 && hi < 0.55, $"H on a person strolling at {Hypot(hm.vx, hm.vz):0.00} m/s: the wasp keeps pace, {lo:0.00} to {hi:0.00} m off them");
+            }
             // 46. feature modifiers (T2-6): woods, towns, water and hives set at world creation act on generation
             {
                 (int forest, int town, int baths, int hives, bool apart) Census(Settings st)

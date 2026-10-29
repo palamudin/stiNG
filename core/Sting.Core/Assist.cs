@@ -281,6 +281,30 @@ namespace Sting.Core
             return (yaw0, pitch0, false); // boxed in: straight on, and slide as before
         }
 
+        /// Landing: the share of its acceleration it counts on to brake with, the step of the look along a straight way in past
+        /// a person's body, and how near the goal that look stops (GDD 7.9). Matches poc/sim/assist.js LAND.
+        public static readonly Num landBrake = 0.5, landBodyStep = 0.02, landBodyStop = 0.03;
+        /// can it fly straight to the goal? Not into a drink or water (over the rim), nor through anything solid, nor through
+        /// the person it is going to land on
+        static bool StraightIn(Sim sim, Wasp w, LockTarget t, V3 g)
+        {
+            if (t.kind == "cup" || t.kind == "bath") return false;
+            Num dx = g.x - w.x, dy = g.y - w.y, dz = g.z - w.z, d = Sqrt(dx * dx + dy * dy + dz * dz), len = d - landBodyStop;
+            if (len <= 0) return true;
+            var u = new V3(dx / d, dy / d, dz / d);
+            if (ClearLen(sim, w.x, w.y, w.z, u, len) < len) return false;
+            if (t.kind != "human") return true;
+            var hm = sim.HumanByHex(t.hex); Num R = T.wasp.radius;
+            if (hm == null) return false;
+            var parts = hm.PartsNow; int n = (int)Floor(len / landBodyStep);
+            for (int k = 0; k <= n; k++)
+            {
+                Num s = k * landBodyStep; var lp = Body.ToLocal(hm.F, new V3(w.x + u.x * s, w.y + u.y * s, w.z + u.z * s));
+                foreach (var part in parts) { var q = Body.SegClosest(part.a, part.b, lp); if (Sq(lp.x - q.x) + Sq(lp.y - q.y) + Sq(lp.z - q.z) < Sq(part.r + R)) return false; }
+            }
+            return true;
+        }
+
         public static (Cmd cmd, string done) Pilot(Sim sim, Wasp w, LockTarget t, Cmd cmd)
         {
             var K = Kinds.TryGetValue(t.kind, out var kk) ? kk : null;
@@ -311,7 +335,8 @@ namespace Sting.Core
             var g = g0;
             Num hd = Sqrt(Sq(g.p.x - w.x) + Sq(g.p.z - w.z));
             V3 wp = g.p;
-            if (g.above && hd > 0.06) wp = new V3(g.p.x, g.p.y + Min(0.4, 0.3 * hd + 0.04), g.p.z);
+            if (!moving && StraightIn(sim, w, t, g.p)) wp = g.p;
+            else if (g.above && hd > 0.06) wp = new V3(g.p.x, g.p.y + Min(0.4, 0.3 * hd + 0.04), g.p.z);
             else if (g.n != null && Sqrt(D2(w, g.p)) > 0.2) { var n = g.n.Value; wp = new V3(g.p.x + n.x * 0.15, g.p.y + n.y * 0.15, g.p.z + n.z * 0.15); }
             Num dx = wp.x - w.x, dy = wp.y - w.y, dz = wp.z - w.z, d = Sqrt(dx * dx + dy * dy + dz * dz), dg = Sqrt(D2(w, g0.p)); // how near it really is
             var o = Copy(); o.burst = hurry ? 1 : 0;
@@ -319,7 +344,9 @@ namespace Sting.Core
             if (dg < 0.004 && !K.prey) { o.mz = 0; o.burst = 0; return (o, null); } // hold still: it settles on its own
             // touching the person at their pace: let go of the controls and it settles on them (a walker too)
             if (moving && t.kind == "human" && w.contact != null && w.contact.humanHex == t.hex && Sq(w.vx - v.x) + Sq(w.vy) + Sq(w.vz - v.z) < Sq(T.land.maxSpeed)) { o.mz = 0; o.burst = 0; return (o, null); }
-            Num want = Clamp(Min(d, dg) * 2.2, K.prey ? 0.3 : 0.06, top) * (dg < 0.15 && !K.prey ? 0.6 : 1);
+            // as fast as it can still stop in: cruising until the braking distance, then down to a crawl at the spot
+            Num want = moving ? Clamp(Min(d, dg) * 2.2, K.prey ? 0.3 : 0.06, top) * (dg < 0.15 && !K.prey ? 0.6 : 1)
+                : Clamp(Sqrt(2 * T.wasp.accel * landBrake * Min(d, dg)), K.prey ? 0.3 : 0.06, top);
             Num fx = dx, fy = dy, fz = dz; // the way to fly
             if (moving)
             { // its velocity plus closing speed (prey is run down; a person is come up to gently); burst when that is past cruising
@@ -335,6 +362,31 @@ namespace Sting.Core
             else { o.yawQ = RndI(h.yaw * 1e4); o.pitchQ = RndI(Clamp(h.pitch, -1.45, 1.45) * 1e4); if (!moving) o.mz = o.mz > 50 ? o.mz : 50; }
             o.act = 0;
             return (o, null);
+        }
+
+        /// Hovering round a lock (GDD 7.9): H holds the wasp a short way off the target, facing it, and lets it drift slowly round
+        /// it at its own unhurried speed, matching its pace if it moves; from there E lands at once. Matches poc/sim/assist.js HOVER.
+        public static readonly Num hoverR = 0.35, hoverUp = 0.1, hoverSpeed = 1.2, hoverOrbit = 0.5, hoverGain = 3;
+        public static (Cmd cmd, string done) HoverPilot(Sim sim, Wasp w, LockTarget t, Cmd cmd)
+        {
+            if (w.state == "landed" || w.state == "perched") return (new Cmd { mx = 0, my = 100, mz = 0, burst = 0, sting = 0, yawQ = cmd.yawQ, pitchQ = cmd.pitchQ, act = 0, alloc = cmd.alloc, pick = cmd.pick }, null); // up first
+            if (w.state != "fly") return (cmd, "gone");
+            var pp = TargetPos(sim, t);
+            if (pp == null) return (cmd, "gone");
+            var p = pp.Value; var v = TargetVel(sim, t);
+            // the station: on the wasp's side of the target, a little further round each tick
+            Num ux = w.x - p.x, uz = w.z - p.z, ul = Sqrt(ux * ux + uz * uz);
+            if (ul < 1e-6) { ux = 1; uz = 0; } else { ux /= ul; uz /= ul; }
+            Num a = DAtan2(ux, uz) + hoverOrbit / hoverGain, sx = p.x + DSin(a) * hoverR, sy = p.y + hoverUp, sz = p.z + DCos(a) * hoverR;
+            // the velocity that takes it there and keeps it there: the target's own, plus the way back to station
+            Num fx = (sx - w.x) * hoverGain, fy = (sy - w.y) * hoverGain, fz = (sz - w.z) * hoverGain, fl = Sqrt(fx * fx + fy * fy + fz * fz);
+            if (fl > hoverSpeed) { fx *= hoverSpeed / fl; fy *= hoverSpeed / fl; fz *= hoverSpeed / fl; }
+            fx += v.x; fy += v.y; fz += v.z;
+            // facing the target, level: forward and sideways on the move keys, up and down on climb
+            Num yaw = DAtan2(p.x - w.x, p.z - w.z), sy0 = DSin(yaw), cy0 = DCos(yaw), top = T.wasp.cruise * (w.carry != null ? T.wasp.carrySpeedMul : 1);
+            Num mz = (fx * sy0 + fz * cy0) / top, mx = (-fx * cy0 + fz * sy0) / top, my = fy / T.wasp.climb, m = Sqrt(mz * mz + mx * mx + my * my);
+            if (m > 1) { mz /= m; mx /= m; my /= m; }
+            return (new Cmd { mx = RndI(mx * 100), my = RndI(my * 100), mz = RndI(mz * 100), burst = 0, sting = 0, yawQ = RndI(yaw * 1e4), pitchQ = 0, act = 0, alloc = cmd.alloc, pick = cmd.pick }, null);
         }
 
         /// the swoop with a lock: the dash homes on the target and the slam does what the target calls for; locked on a

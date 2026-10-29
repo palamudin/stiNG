@@ -5,7 +5,7 @@ import {
   Sim, Act, T, DT, ZONES, ZoneName, SwatKind, SwatKindName, StyleName, TopName, BottomName, Top, Bottom,
   toWorld, toLocal, dirToWorld, chunkKey, chunkOf, hash, Domain, rangeInt, resolveSting, zoneCover, segClosest, classify, predictedKind,
   NEST, NEST_ENTRANCE, flyPos, beePos, fmtClock, minuteOfDay, isLowerZone, broodTotal, sugarCap, proteinCap, waterCap, garmentGraph, dayWeather,
-  NetLab, LINKS, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetVel, CHASE, targetLabel, assistPilot, swoopPilot, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE, SKILLS, SKILL_UNLOCKS, SKILL_RANKED, SKILL_HIVE, skillCost,
+  NetLab, LINKS, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetVel, CHASE, targetLabel, assistPilot, swoopPilot, hoverPilot, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE, SKILLS, SKILL_UNLOCKS, SKILL_RANKED, SKILL_HIVE, skillCost,
 } from './sim/index.js';
 
 // Tuning as data (GDD 13, T1-22): read tuning/sting.tune, served next to the page, before anything uses T. Without it
@@ -1543,6 +1543,7 @@ function readPad() {
   if (edge(8)) toggleNest();
   if (edge(11)) toggleLock(); // R3: lock on
   if (edge(12)) swoop(); // d-pad up: swoop
+  if (edge(13)) toggleHover(); // d-pad down: hover round the lock
   if (edge(10)) eyeTurnDown(); else if (pad.prev[10] && !b(10)) eyeTurnUp(); // L3: turn to where you look
   pad.prev = gp.buttons.map((x) => !!(x && (x.pressed || x.value > 0.5)));
   return out;
@@ -1603,6 +1604,11 @@ function buildCmd() {
     const w = sim._driven();
     // a move key or the sting takes the controls back; Shift does not: it hurries the flight (burst speed)
     if (!w || cmd.mx || cmd.my || cmd.mz || cmd.sting) { input.pilot = null; if (w) toast('You have it', 'var(--muted)', 0.8); return cmd; }
+    if (input.pilotMode === 'hover') { // H: hold a little way off it, drifting round (GDD 7.9)
+      const h = hoverPilot(sim, w, input.pilot, cmd);
+      if (h.done) { input.pilot = null; toast('It is gone', 'var(--muted)', 1); return cmd; }
+      return h.cmd;
+    }
     const r = assistPilot(sim, w, input.pilot, cmd);
     if (r.done) {
       input.pilot = null;
@@ -1645,9 +1651,19 @@ function interactNear() { const h = sim.hint || {}; return !!(h.prey || h.bait |
 function startPilot() {
   if (!input.lock || !TARGET_KIND[input.lock.kind].go || interactNear()) return false;
   if (!sim.hasSkill(sim._driven(), 'assist')) { toast('Assisted flight is a skill: learn it in the colony view (N)', 'var(--muted)', 1.6); return false; }
-  input.pilot = input.lock;
+  input.pilot = input.lock; input.pilotMode = 'land';
   toast(`Flying to the ${targetLabel(sim, input.lock)}`, 'var(--yellow)', 1);
   return true;
+}
+// H (d-pad down): hover round the locked target at an unhurried pace, facing it; H again or a move key hands back, E lands
+function toggleHover() {
+  const w = sim && sim._driven();
+  if (!w || !running || paused) return;
+  if (input.pilot && input.pilotMode === 'hover') { input.pilot = null; toast('You have it', 'var(--muted)', 0.8); return; }
+  if (!input.lock) { toast('Lock on something first (V) to hover round it', 'var(--muted)', 1.3); return; }
+  if (!sim.hasSkill(w, 'assist')) { toast('Assisted flight is a skill: learn it in the colony view (N)', 'var(--muted)', 1.6); return; }
+  input.pilot = input.lock; input.pilotMode = 'hover';
+  toast(`Hovering round the ${targetLabel(sim, input.lock)}`, 'var(--yellow)', 1);
 }
 // G (or L3): a tap turns the wasp to where you are looking; held a second it switches the auto turn on or off, which
 // turns the wasp after your gaze once you have looked away for a second
@@ -1730,6 +1746,7 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyZ' && !e.repeat && running && !paused) { focus(); return; }
   if (e.code === 'KeyG' && !e.repeat && running && !paused) { eyeTurnDown(); return; }
   if (e.code === 'KeyE' && !e.repeat && running && !paused && startPilot()) return;
+  if (e.code === 'KeyH' && !e.repeat && running && !paused) { toggleHover(); return; }
   if (e.code === 'KeyM' && !e.repeat) { audio.on = !audio.on; toast(audio.on ? 'Sound on' : 'Sound off', 'var(--muted)', 1.2); return; }
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
   input.keys.add(e.code);
@@ -2092,8 +2109,9 @@ function updateHud() {
   else if (w.state === 'fighting') hint = `Mash ${kbd('LMB')} to sting it first`;
   else if (w.state === 'landed') hint = w.walking ? 'Walking · it follows the surface round edges, up trunks and under tables · look where you want to go' : `Resting costs no sugar in the warmth · mouse turns · ${kbd('W')}${kbd('A')}${kbd('S')}${kbd('D')} walk on any surface · ${kbd('LMB')} sting someone within reach · ${kbd('Space')} or ${kbd('Shift')} take off`;
   else if (w.state === 'perched') hint = `${kbd('W')}${kbd('A')}${kbd('S')}${kbd('D')} crawl (look up or down to climb) · ${kbd('LMB')} sting · ${kbd('Space')} take off · ${kbd('E')} crawl under at an opening`;
+  else if (input.pilot && input.pilotMode === 'hover') hint = `Hovering round the ${targetLabel(sim, input.pilot)} · ${TARGET_KIND[input.pilot.kind] && TARGET_KIND[input.pilot.kind].go ? `${kbd('E')} ${TARGET_KIND[input.pilot.kind].go} · ` : ''}${kbd('H')} stop · any move key takes over`;
   else if (input.pilot) hint = `Flying to the ${targetLabel(sim, input.pilot)} · ${kbd("Shift")} faster · any move key takes over`;
-  else if (input.lock && !h.prey && !h.opening && !h.water && !h.wood) hint = `Locked on the ${targetLabel(sim, input.lock)} · ${kbd('W')} close in · ${kbd('S')} back off · ${kbd('A')}${kbd('D')} circle${TARGET_KIND[input.lock.kind].go ? ` · ${kbd('E')} ${TARGET_KIND[input.lock.kind].go}` : ''} · ${kbd('V')} release`;
+  else if (input.lock && !h.prey && !h.opening && !h.water && !h.wood) hint = `Locked on the ${targetLabel(sim, input.lock)} · ${kbd('W')} close in · ${kbd('S')} back off · ${kbd('A')}${kbd('D')} circle${TARGET_KIND[input.lock.kind].go ? ` · ${kbd('E')} ${TARGET_KIND[input.lock.kind].go}` : ''} · ${kbd('H')} hover · ${kbd('V')} release`;
   else if (h.rival) hint = `${kbd('E')} steal a larva from the rival nest`;
   else if (h.raid !== null && h.raid !== undefined) hint = `${kbd('E')} steal a larva from player ${h.raid + 1}'s nest · their guards will come after you`;
   else if (h.hive) hint = `${kbd('E')} get into the hive for honey and brood · the bees inside fight back`;

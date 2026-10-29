@@ -236,6 +236,28 @@ function goalOf(sim, t, p) {
   return { x: p.x, y: p.y, z: p.z };
 }
 
+// Landing: the share of its acceleration it counts on to brake with, the step of the look along a straight way in
+// past a person's body, and how near the goal that look stops (GDD 7.9)
+export const LAND = { brake: 0.5, bodyStep: 0.02, bodyStop: 0.03 };
+// Can it fly straight to the goal? Not into a drink or water (over the rim), nor through anything solid, nor through
+// the person it is going to land on
+function straightIn(sim, w, t, g) {
+  if (t.kind === 'cup' || t.kind === 'bath') return false;
+  const dx = g.x - w.x, dy = g.y - w.y, dz = g.z - w.z, d = Math.sqrt(dx * dx + dy * dy + dz * dz), len = d - LAND.bodyStop;
+  if (len <= 0) return true;
+  const u = { x: dx / d, y: dy / d, z: dz / d };
+  if (clearLen(sim, w.x, w.y, w.z, u, len) < len) return false;
+  if (t.kind !== 'human') return true;
+  const hm = sim.humanByHex(t.hex), R = T.wasp.radius;
+  if (!hm) return false;
+  const parts = hm.parts[hm.posture] || hm.parts.stand, n = Math.floor(len / LAND.bodyStep);
+  for (let k = 0; k <= n; k++) {
+    const s = k * LAND.bodyStep, lp = toLocal(hm, { x: w.x + u.x * s, y: w.y + u.y * s, z: w.z + u.z * s });
+    for (const part of parts) { const q = segClosest(part.a, part.b, lp); if (sq(lp.x - q.x) + sq(lp.y - q.y) + sq(lp.z - q.z) < sq(part.r + R)) return false; }
+  }
+  return true;
+}
+
 // One tick of the pilot: the command that takes the wasp to the target and settles it there (or catches it).
 // Returns { cmd, done } where done says why the flight is over ('arrived', 'gone', 'caught', 'landed', 'perched').
 export function assistPilot(sim, w, t, cmd) {
@@ -263,10 +285,11 @@ export function assistPilot(sim, w, t, cmd) {
   // whichever way it goes
   const v = targetVel(sim, t), vs = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z), moving = vs > CHASE.moving;
   const g = g0;
-  // come in from above for anything to land on, along the outward side for a person
+  // straight in when the way is open; else from above for anything to land on, along the outward side for a person
   const hd = Math.sqrt(sq(g.x - w.x) + sq(g.z - w.z));
   let wp = g;
-  if (g.above && hd > 0.06) wp = { x: g.x, y: g.y + Math.min(0.4, 0.3 * hd + 0.04), z: g.z };
+  if (!moving && straightIn(sim, w, t, g)) wp = g;
+  else if (g.above && hd > 0.06) wp = { x: g.x, y: g.y + Math.min(0.4, 0.3 * hd + 0.04), z: g.z };
   else if (g.n && Math.sqrt(d2(w, g)) > 0.2) wp = { x: g.x + g.n.x * 0.15, y: g.y + g.n.y * 0.15, z: g.z + g.n.z * 0.15 };
   const dx = wp.x - w.x, dy = wp.y - w.y, dz = wp.z - w.z, d = Math.sqrt(dx * dx + dy * dy + dz * dz), dg = Math.sqrt(d2(w, g0)); // how near it really is
   const out = { ...cmd, mx: 0, my: 0, burst: hurry ? 1 : 0, sting: 0 };
@@ -274,7 +297,9 @@ export function assistPilot(sim, w, t, cmd) {
   if (dg < 0.004 && !K.prey) { out.mz = 0; out.burst = 0; return { cmd: out, done: null }; } // hold still: it settles on its own
   // touching the person at their pace: let go of the controls and it settles on them (a walker too)
   if (moving && t.kind === 'human' && w.contact && w.contact.humanHex === t.hex && sq(w.vx - v.x) + sq(w.vy) + sq(w.vz - v.z) < sq(T.land.maxSpeed)) { out.mz = 0; out.burst = 0; return { cmd: out, done: null }; }
-  const want = clamp(Math.min(d, dg) * 2.2, K.prey ? 0.3 : 0.06, top) * (dg < 0.15 && !K.prey ? 0.6 : 1);
+  // as fast as it can still stop in: cruising until the braking distance, then down to a crawl at the spot
+  const want = moving ? clamp(Math.min(d, dg) * 2.2, K.prey ? 0.3 : 0.06, top) * (dg < 0.15 && !K.prey ? 0.6 : 1)
+    : clamp(Math.sqrt(2 * T.wasp.accel * LAND.brake * Math.min(d, dg)), K.prey ? 0.3 : 0.06, top);
   let fx = dx, fy = dy, fz = dz; // the way to fly
   if (moving) { // its velocity plus closing speed (prey is run down; a person is come up to gently); burst when that is past cruising
     const close = (K.prey ? Math.max(want, CHASE.closeMin) : want) / Math.max(d, 1e-6);
@@ -294,6 +319,34 @@ export function assistPilot(sim, w, t, cmd) {
   }
   out.act = 0;
   return { cmd: out, done: null };
+}
+
+// Hovering round a lock (GDD 7.9): H holds the wasp a short way off the target, facing it, and lets it drift slowly round
+// it at its own unhurried speed, matching its pace if it moves; from there E lands at once. Any move key takes over.
+// r, m off it; up, m above it; speed, m/s at most on top of the target's; orbit, rad/s round it; gain, 1/s back to station
+export const HOVER = { r: 0.35, up: 0.1, speed: 1.2, orbit: 0.5, gain: 3 };
+export function hoverPilot(sim, w, t, cmd) {
+  if (w.state === 'landed' || w.state === 'perched') return { cmd: { ...cmd, mx: 0, my: 100, mz: 0, burst: 0, sting: 0, act: 0 }, done: null }; // up first
+  if (w.state !== 'fly') return { cmd, done: 'gone' };
+  const p = targetPos(sim, t);
+  if (!p) return { cmd, done: 'gone' };
+  const H = HOVER, v = targetVel(sim, t);
+  // the station: on the wasp's side of the target, a little further round each tick
+  let ux = w.x - p.x, uz = w.z - p.z;
+  const ul = Math.sqrt(ux * ux + uz * uz);
+  if (ul < 1e-6) { ux = 1; uz = 0; } else { ux /= ul; uz /= ul; }
+  const a = datan2(ux, uz) + H.orbit / H.gain, sx = p.x + dsin(a) * H.r, sy = p.y + H.up, sz = p.z + dcos(a) * H.r;
+  // the velocity that takes it there and keeps it there: the target's own, plus the way back to station
+  let fx = (sx - w.x) * H.gain, fy = (sy - w.y) * H.gain, fz = (sz - w.z) * H.gain;
+  const fl = Math.sqrt(fx * fx + fy * fy + fz * fz);
+  if (fl > H.speed) { fx *= H.speed / fl; fy *= H.speed / fl; fz *= H.speed / fl; }
+  fx += v.x; fy += v.y; fz += v.z;
+  // facing the target, level: forward and sideways on the move keys, up and down on climb
+  const yaw = datan2(p.x - w.x, p.z - w.z), sy0 = dsin(yaw), cy0 = dcos(yaw), top = T.wasp.cruise * (w.carry ? T.wasp.carrySpeedMul : 1);
+  let mz = (fx * sy0 + fz * cy0) / top, mx = (-fx * cy0 + fz * sy0) / top, my = fy / T.wasp.climb;
+  const m = Math.sqrt(mz * mz + mx * mx + my * my);
+  if (m > 1) { mz /= m; mx /= m; my /= m; }
+  return { cmd: { ...cmd, mx: Math.round(mx * 100), my: Math.round(my * 100), mz: Math.round(mz * 100), burst: 0, sting: 0, act: 0, yawQ: Math.round(yaw * 1e4), pitchQ: 0 }, done: null };
 }
 
 // The swoop with a lock (GDD 7.9): the dash homes on the target and the slam does what the target calls for (grab the

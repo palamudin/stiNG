@@ -132,6 +132,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 104 | Reaching what moves: people have a pace, and under a lock W and assisted flight fly the target's velocity plus closing speed instead of slowing near it, so a walker or a bee can be reached; letting go against a walker settles on them at their pace | 7.9 | 24 |
 | 105 | The lock ends on arrival, like a satnav: landed on the flower, drink or water, perched on (or under the clothes of) the person, the prey caught, at the nest; a lock on what the wasp already sits on waits until it has left and come back | 7.9 | 24 |
 | 106 | Shift on an assisted flight (to land, perch or snatch prey) hurries it at burst speed instead of taking the controls back; it still slows to settle, and Shift still held on arrival does not take off again until let go | 7.9 | 24 |
+| 107 | Landing at speed: with the way open, assisted flight flies straight in at cruising speed and brakes only within its stopping distance (a flower 1.6 m off in 0.8 s, from 3.5 s). H (d-pad down) hovers round the lock at its own 1.2 m/s, 35 cm off and facing it, keeping pace with a walker; E lands from there, H or a move key hands back | 7.9 | 24 |
 
 ## Verified
 
@@ -163,4 +164,4 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 
 ## Controls
 
-Mouse look · hold RMB look from the wasp's eyes · G turn to where you look (hold 1 s: auto turn) · V or MMB lock on · E with a lock: fly there and land · X or d-pad up swoop (with a lock: onto it; a skill) · Z focus (a skill, solo) · WASD fly · Space / C up and down · Shift burst, mash to break free · hold LMB or F to sting · E catch, chew, crawl under clothes · Q take over nearest worker · R rest at night · N colony view (frees the mouse; N or Esc closes it; T cycles its speed, solo, set in the pause menu) · Tab lab · M sound · Arrows look · WASD walk when landed · Esc pause (Save world is on the pause screen; Continue appears on the start screen once a save exists).
+Mouse look · hold RMB look from the wasp's eyes · G turn to where you look (hold 1 s: auto turn) · V or MMB lock on · E with a lock: fly there and land (Shift: faster) · H or d-pad down with a lock: hover round it · X or d-pad up swoop (with a lock: onto it; a skill) · Z focus (a skill, solo) · WASD fly · Space / C up and down · Shift burst, mash to break free · hold LMB or F to sting · E catch, chew, crawl under clothes · Q take over nearest worker · R rest at night · N colony view (frees the mouse; N or Esc closes it; T cycles its speed, solo, set in the pause menu) · Tab lab · M sound · Arrows look · WASD walk when landed · Esc pause (Save world is on the pause screen; Continue appears on the start screen once a save exists).
