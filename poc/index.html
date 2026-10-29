@@ -125,6 +125,7 @@
   .skills h4 { margin: 8px 0 2px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; opacity: .7; }
   .offer { border: 1px solid var(--yellow); padding: 8px 10px; margin: 8px 0; }
   button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+  .padfocus { outline: 3px solid var(--yellow) !important; outline-offset: 2px; } /* the control a controller is on */
 
   .screen { position: fixed; z-index: 7; inset: 0; display: grid; place-items: center; background: rgba(13,12,10,.74); padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); overflow-y: auto; }
   .card { width: min(600px, 100%); display: grid; gap: 18px; }
@@ -316,7 +317,7 @@
       <div><kbd>Arrows</kbd>look without mouse</div>
       <div><kbd>Z</kbd>focus: slow time (a skill, solo)</div>
       <div><kbd>Esc</kbd>pause</div>
-      <div><kbd>Gamepad</kbd>sticks fly and look · RT sting · LT burst · A act · Y switch · X rest · R3 lock · L3 turn to look · d-pad up swoop · d-pad down hover</div>
+      <div><kbd>Gamepad</kbd>sticks fly and look · RT sting · LT burst · A act · Y switch · X rest · R3 lock · L3 turn to look · d-pad up swoop · d-pad down hover · View colony · Start pause</div>
     </div>
     <div class="start">
       <label class="label" for="seed">World seed<input id="seed" value="1234" inputmode="numeric" autocomplete="off"></label>
@@ -346,7 +347,7 @@
       <button class="ghost" id="bContinue" hidden>Continue</button>
     </div>
     <p class="label" id="worldTag">Standard rules</p>
-    <p class="label" id="startNote">Personal world. Built for keyboard and mouse.</p>
+    <p class="label" id="startNote">Personal world. Keyboard and mouse, or a controller (Xbox included): d-pad to move, A to press, left and right to change, B back, Start to pause.</p>
   </div>
 </div>
 

@@ -19,6 +19,9 @@ try {
 } catch (e) { console.warn('tuning: running the built-in values', e.message); }
 
 const $ = (id) => document.getElementById(id);
+// Edge on Xbox drives a mouse cursor with the controller unless a page opts out; opting out hands the controller to the
+// Gamepad API (and stops B from going back a page). Harmless where the property does not exist.
+try { if ('gamepadInputEmulation' in navigator) navigator.gamepadInputEmulation = 'gamepad'; } catch { /* optional */ }
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const ms = (ticks) => Math.round(ticks * 1000 / 60);
@@ -1539,7 +1542,13 @@ function readPad() {
   const dz = (v) => (Math.abs(v) < 0.15 ? 0 : v);
   const b = (i) => !!(gp.buttons[i] && (gp.buttons[i].pressed || gp.buttons[i].value > 0.5));
   const edge = (i) => b(i) && !pad.prev[i];
+  if (ui.nest) { // the colony view has the buttons (padUI); the sticks still fly
+    if (edge(8)) toggleNest();
+    pad.prev = gp.buttons.map((x) => !!(x && (x.pressed || x.value > 0.5)));
+    return { lx: dz(gp.axes[0] || 0), ly: dz(gp.axes[1] || 0), rx: dz(gp.axes[2] || 0), ry: dz(gp.axes[3] || 0), b: () => false, edge: () => false };
+  }
   const out = { lx: dz(gp.axes[0] || 0), ly: dz(gp.axes[1] || 0), rx: dz(gp.axes[2] || 0), ry: dz(gp.axes[3] || 0), b, edge };
+  if (edge(9)) { setPaused(true); pad.prev = gp.buttons.map((x) => !!(x && (x.pressed || x.value > 0.5))); return null; } // Start: pause
   if (edge(8)) toggleNest();
   if (edge(11)) toggleLock(); // R3: lock on
   if (edge(12)) swoop(); // d-pad up: swoop
@@ -1548,6 +1557,82 @@ function readPad() {
   pad.prev = gp.buttons.map((x) => !!(x && (x.pressed || x.value > 0.5)));
   return out;
 }
+
+// Menus with a controller (Xbox, or any pad): the d-pad or left stick moves between the controls of the screen that is
+// open, A presses (or ticks, or steps a choice on), left and right change a slider or a choice, B goes back, Start
+// resumes. The keyboard's arrows and Enter work the same while a menu is open and the mouse is free.
+const padNav = { prev: [], at: null, repeatAt: 0, dir: 0, used: false };
+function activeMenu() {
+  for (const id of ['winterScreen', 'extinctScreen', 'pauseScreen', 'startScreen']) { const el = $(id); if (el && !el.hidden) return el; }
+  if (ui.nest) return $('nest');
+  return null;
+}
+function menuItems(root) {
+  return [...root.querySelectorAll('button, select, input, [data-nav]')].filter((el) => !el.disabled && el.offsetParent !== null && el.type !== 'hidden');
+}
+function navFocus(el) {
+  if (padNav.at && padNav.at !== el) padNav.at.classList.remove('padfocus');
+  padNav.at = el;
+  if (!el) return;
+  el.classList.add('padfocus');
+  try { el.focus({ preventScroll: true }); } catch { /* optional */ }
+  el.scrollIntoView({ block: 'nearest' });
+}
+function navMove(root, step) {
+  const items = menuItems(root);
+  if (!items.length) return;
+  const i = items.indexOf(padNav.at);
+  navFocus(items[i < 0 ? (step > 0 ? 0 : items.length - 1) : (i + step + items.length) % items.length]);
+}
+function navAdjust(step) {
+  const el = padNav.at;
+  if (!el) return false;
+  if (el.tagName === 'SELECT') { el.selectedIndex = (el.selectedIndex + step + el.options.length) % el.options.length; el.dispatchEvent(new Event('change', { bubbles: true })); return true; }
+  if (el.type === 'range') { const st = +el.step || 1; el.value = Math.min(+el.max, Math.max(+el.min, +el.value + step * st * 2)); el.dispatchEvent(new Event('input', { bubbles: true })); return true; }
+  return false;
+}
+function navPress() {
+  const el = padNav.at;
+  if (!el) return;
+  if (el.tagName === 'SELECT') { navAdjust(1); return; }
+  if (el.type === 'range' || el.type === 'text' || el.tagName === 'INPUT' && el.type !== 'checkbox') return;
+  el.click();
+}
+function navBack(root) {
+  if (root.id === 'pauseScreen') { setPaused(false); lock(); }
+  else if (root.id === 'nest') toggleNest();
+}
+function padUI(now) {
+  const gp = navigator.getGamepads ? [...navigator.getGamepads()].find((g) => g && g.connected) : null;
+  const root = activeMenu();
+  if (!gp) { padNav.prev = []; return; }
+  const b = (i) => !!(gp.buttons[i] && (gp.buttons[i].pressed || gp.buttons[i].value > 0.5)), edge = (i) => b(i) && !padNav.prev[i];
+  if (root) {
+    padNav.used = true;
+    if (!padNav.at || !root.contains(padNav.at) || padNav.at.offsetParent === null) { navFocus(null); navMove(root, 1); }
+    const ax = gp.axes[0] || 0, ay = gp.axes[1] || 0;
+    const dir = b(12) || ay < -0.6 ? -2 : b(13) || ay > 0.6 ? 2 : b(14) || ax < -0.6 ? -1 : b(15) || ax > 0.6 ? 1 : 0;
+    if (dir && (dir !== padNav.dir || now >= padNav.repeatAt)) {
+      if (Math.abs(dir) === 1 && navAdjust(dir)) { /* changed a slider or a choice */ } else navMove(root, Math.sign(dir));
+      padNav.repeatAt = now + (dir !== padNav.dir ? 380 : 120);
+    }
+    padNav.dir = dir;
+    if (edge(0)) navPress();
+    if (edge(1)) navBack(root);
+    if (edge(9) && root.id === 'pauseScreen') navBack(root);
+  } else if (padNav.at) navFocus(null);
+  padNav.prev = gp.buttons.map((x) => !!(x && (x.pressed || x.value > 0.5)));
+}
+// the arrows and Enter work a menu too, while the mouse is free
+addEventListener('keydown', (e) => {
+  const root = activeMenu();
+  if (!root || root.id === 'nest' || document.pointerLockElement === canvas) return; // the colony view keeps its keys for flying
+  const t = e.target;
+  if (t && t.tagName === 'INPUT' && t.type === 'text') return;
+  if (e.code === 'ArrowDown' || e.code === 'ArrowUp') { e.preventDefault(); navMove(root, e.code === 'ArrowDown' ? 1 : -1); }
+  else if ((e.code === 'ArrowLeft' || e.code === 'ArrowRight') && padNav.at && navAdjust(e.code === 'ArrowLeft' ? -1 : 1)) e.preventDefault();
+  else if (e.code === 'Enter' && padNav.at && padNav.at.tagName !== 'BUTTON') { e.preventDefault(); navPress(); }
+});
 
 function buildCmd() {
   if (input.autopilot) return input.autopilot(sim); // test hook: scripted pilots use the same input path
@@ -1754,7 +1839,7 @@ addEventListener('keydown', (e) => {
 addEventListener('keyup', (e) => { input.keys.delete(e.code); if (e.code === 'KeyG') eyeTurnUp(); });
 addEventListener('blur', () => { input.keys.clear(); input.lmb = false; input.free.held = false; });
 let lockFailed = false, pointerLockWorked = false;
-document.addEventListener('pointerlockerror', () => { lockFailed = true; toast('Mouse capture unavailable · drag with right button to look', 'var(--muted)', 3); });
+document.addEventListener('pointerlockerror', () => { lockFailed = true; if (!padNav.used) toast('Mouse capture unavailable · drag with right button to look', 'var(--muted)', 3); });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('mousedown', (e) => {
   if (!running || paused) return;
@@ -2626,6 +2711,7 @@ let last = performance.now(), acc = 0, panelTimer = 0;
 function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
+  padUI(now); // menus with a controller (Xbox)
   if (running && !paused) {
     if (sim) updateAssist(dt);
     const scale = timeScale(), cap = Math.max(8, Math.ceil(8 * scale));
@@ -2816,7 +2902,7 @@ newWorld({ seed: 1234n, dayMinutes: 2, humanDensity: 1, beeAggression: 1, season
 requestAnimationFrame(frame);
 
 // test hook for automated checks
-window.__sting = { get sim() { return sim; }, get lab() { return lab; }, input, start: () => $("bStart").click(), humanViews, toggleNest, toggleLab, saveWorld, camera };
+window.__sting = { get sim() { return sim; }, get lab() { return lab; }, input, padUI, start: () => $("bStart").click(), humanViews, toggleNest, toggleLab, saveWorld, camera };
 window.__garment = (hm) => garmentGraph(hm.tr, hm.clothing, hm.posture, hm.parts[hm.posture]);
 window.__toWorld = toWorld;
 window.__weather = dayWeather;

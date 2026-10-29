@@ -134,6 +134,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 106 | Shift on an assisted flight (to land, perch or snatch prey) hurries it at burst speed instead of taking the controls back; it still slows to settle, and Shift still held on arrival does not take off again until let go | 7.9 | 24 |
 | 107 | Landing at speed: with the way open, assisted flight flies straight in at cruising speed and brakes only within its stopping distance (a flower 1.6 m off in 0.8 s, from 3.5 s). H (d-pad down) hovers round the lock at its own 1.2 m/s, 35 cm off and facing it, keeping pace with a walker; E lands from there, H or a move key hands back | 7.9 | 24 |
 | 108 | Lines and masters: each species line keeps its own XP, stabs, abilities, hive skills and role levels (the gauge is the player's). The wasp you fly earns its own XP and buys its own job skills; one that masters its job (150 XP) leaves every worker of its role a level better when it dies (sugar foragers, hunters, pulp collectors, water carriers, guards, up to 5) | 6.8 | 24 |
+| 109 | Controller only (Xbox): the page opts out of Edge-on-Xbox mouse mode; every screen works with a pad (d-pad or stick to move, A press, left/right change, B back); Start pauses, View opens the colony view; no mouse capture needed. Arrows and Enter work the menus too | 10 | 24 |
 
 ## Verified
 
