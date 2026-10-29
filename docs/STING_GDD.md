@@ -503,6 +503,11 @@ For testing, the PoC and the core run `open`: all three species can be picked on
 - **The bridge is real.** Termites sit inside the cockroach family tree. Their closest living relative is the wood roach *Cryptocercus*: it lives in families in rotting logs and digests wood with the same gut microbes as termites. A step from termites to the wood roach, then to the household cockroaches, teaches how social life arose.
 - **A different game.** Most cockroaches have no colony: no queen, no castes, only loose groups that gather where it is dark, warm and damp. A roach line would play as a swarm of individuals spreading through houses, not as a colony with jobs, and the human side would answer with pest control (8, the exterminator). It needs its own design pass before it is built.
 
+**Offshoots: other ways to live in the same world** (vision, 2026-10-29). The cockroach line is the first step out of colony play. Taken further, it becomes a family of offshoot modes for players who prefer a different kind of game: solitary insects, small animals such as rodents, even birds.
+- **They are not steps in the colony tree.** Each is its own mode with its own player body and loop, beside the colony game.
+- **They share the world.** The same generated town, people, weather, day and season, and network. People already react to what lands on them, crosses their table or raids their food, so most of the human side carries over. A rodent in the kitchen or a bird at the barbecue meets the same households and the same pest control.
+- **Each needs its own design pass:** the body and its controls, what it eats, how it dies, how it progresses, and how it meets the colony players in shared worlds.
+
 **Open questions.** Q-22: what a removed tree means for a persistent world. Q-23: how alliances are formed and audited in shared worlds.
 
 ## 7. The wasp
