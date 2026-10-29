@@ -499,6 +499,10 @@ For testing, the PoC and the core run `open`: all three species can be picked on
 
 **Termites in the ant tree** (Q-21, settled 2026-10-29). Termites are a branch of the ant progression, as a subspecies-style step, not a kind of their own. The branch teaches what they are. Termites are not ants: their nearest relatives are cockroaches. They arrived at the same colony life on their own, with queens, workers, soldiers and castes. Ants and termites are a textbook case of convergent evolution. The branch's card in the colony view says so plainly, so the licence is shown, not hidden.
 
+**Further down the line: the pests** (vision, 2026-10-29). The termite branch can go on into the cockroaches, and the biology carries it.
+- **The bridge is real.** Termites sit inside the cockroach family tree. Their closest living relative is the wood roach *Cryptocercus*: it lives in families in rotting logs and digests wood with the same gut microbes as termites. A step from termites to the wood roach, then to the household cockroaches, teaches how social life arose.
+- **A different game.** Most cockroaches have no colony: no queen, no castes, only loose groups that gather where it is dark, warm and damp. A roach line would play as a swarm of individuals spreading through houses, not as a colony with jobs, and the human side would answer with pest control (8, the exterminator). It needs its own design pass before it is built.
+
 **Open questions.** Q-22: what a removed tree means for a persistent world. Q-23: how alliances are formed and audited in shared worlds.
 
 ## 7. The wasp
