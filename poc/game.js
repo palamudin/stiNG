@@ -1558,6 +1558,54 @@ function readPad() {
   return out;
 }
 
+// Touch controls (phones and tablets): the stick on the left flies (forward, back and sideways, like the left stick), a
+// drag anywhere else on the view looks, and the buttons press the keys they stand for, held while touched where the key
+// is held (sting, act, burst, climb). Phones start on light graphics.
+const touch = { on: false, lx: 0, ly: 0, stickId: null, lookId: null, lx0: 0, ly0: 0 };
+function useTouch() {
+  if (touch.on) return;
+  touch.on = true; document.body.classList.add('touch');
+  try { if (!localStorage.getItem('sting.display')) { $('gfx').value = 'low'; applyDisplaySettings(); } } catch { /* optional */ }
+}
+addEventListener('touchstart', () => useTouch(), { passive: true, once: true });
+const capture = (el, e) => { try { el.setPointerCapture(e.pointerId); } catch { /* a pointer the browser no longer tracks */ } };
+const sendKey = (type, code) => dispatchEvent(new KeyboardEvent(type, { code, key: code, bubbles: true }));
+for (const b of document.querySelectorAll('#touch button[data-k]')) {
+  const code = b.dataset.k, hold = b.hasAttribute('data-hold');
+  const up = (e) => { if (!b.classList.contains('on')) return; b.classList.remove('on'); if (hold) sendKey('keyup', code); e && e.preventDefault(); };
+  b.addEventListener('pointerdown', (e) => { e.preventDefault(); capture(b, e); b.classList.add('on'); sendKey('keydown', code); if (!hold) { sendKey('keyup', code); setTimeout(() => b.classList.remove('on'), 120); } });
+  b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('lostpointercapture', up);
+  b.addEventListener('contextmenu', (e) => e.preventDefault());
+}
+{
+  const st = $('tStick'), knob = st.querySelector('.knob'), R = 50;
+  const move = (e) => {
+    const r = st.getBoundingClientRect(); let dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2); const d = Math.hypot(dx, dy);
+    if (d > R) { dx *= R / d; dy *= R / d; }
+    touch.lx = dx / R; touch.ly = dy / R; knob.style.transform = `translate(${dx}px, ${dy}px)`;
+  };
+  const end = () => { touch.stickId = null; touch.lx = touch.ly = 0; knob.style.transform = ''; };
+  st.addEventListener('pointerdown', (e) => { e.preventDefault(); touch.stickId = e.pointerId; capture(st, e); move(e); });
+  st.addEventListener('pointermove', (e) => { if (e.pointerId === touch.stickId) move(e); });
+  st.addEventListener('pointerup', end); st.addEventListener('pointercancel', end);
+}
+// a drag on the view looks; a touch never stings or asks for the mouse
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault(); useTouch();
+  if (touch.lookId === null) { const t = e.changedTouches[0]; touch.lookId = t.identifier; touch.lx0 = t.clientX; touch.ly0 = t.clientY; }
+}, { passive: false });
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    if (t.identifier !== touch.lookId || paused) continue;
+    const k = 0.005 * opts.sens, dx = t.clientX - touch.lx0, dy = t.clientY - touch.ly0;
+    touch.lx0 = t.clientX; touch.ly0 = t.clientY;
+    input.yaw -= dx * k; input.pitch = Math.max(-1.45, Math.min(1.45, input.pitch - ySign() * dy * k));
+  }
+}, { passive: false });
+const lookEnd = (e) => { for (const t of e.changedTouches) if (t.identifier === touch.lookId) touch.lookId = null; };
+canvas.addEventListener('touchend', lookEnd); canvas.addEventListener('touchcancel', lookEnd);
+
 // Menus with a controller (Xbox, or any pad): the d-pad or left stick moves between the controls of the screen that is
 // open, A presses (or ticks, or steps a choice on), left and right change a slider or a choice, B goes back, Start
 // resumes. The keyboard's arrows and Enter work the same while a menu is open and the mouse is free.
@@ -1649,8 +1697,8 @@ function buildCmd() {
   if (k.has('ArrowDown')) input.pitch = Math.max(-1.45, input.pitch - look * 0.8);
   const clamp100 = (v) => Math.max(-100, Math.min(100, Math.round(v)));
   const cmd = {
-    mx: clamp100(a('KeyD', 'KeyA') + (gp ? gp.lx * 100 : 0)),
-    mz: clamp100(a('KeyW', 'KeyS') - (gp ? gp.ly * 100 : 0)),
+    mx: clamp100(a('KeyD', 'KeyA') + (gp ? gp.lx * 100 : 0) + touch.lx * 100),
+    mz: clamp100(a('KeyW', 'KeyS') - (gp ? gp.ly * 100 : 0) - touch.ly * 100),
     my: clamp100(a('Space', 'KeyC') + (gp ? ((gp.b(5) ? 100 : 0) - (gp.b(4) || gp.b(1) ? 100 : 0)) : 0)),
     burst: k.has('ShiftLeft') || k.has('ShiftRight') || (gp && gp.b(6)) ? 1 : 0,
     sting: input.lmb || k.has('KeyF') || (gp && gp.b(7)) ? 1 : 0,
@@ -1839,7 +1887,7 @@ addEventListener('keydown', (e) => {
 addEventListener('keyup', (e) => { input.keys.delete(e.code); if (e.code === 'KeyG') eyeTurnUp(); });
 addEventListener('blur', () => { input.keys.clear(); input.lmb = false; input.free.held = false; });
 let lockFailed = false, pointerLockWorked = false;
-document.addEventListener('pointerlockerror', () => { lockFailed = true; if (!padNav.used) toast('Mouse capture unavailable · drag with right button to look', 'var(--muted)', 3); });
+document.addEventListener('pointerlockerror', () => { lockFailed = true; if (!padNav.used && !touch.on) toast('Mouse capture unavailable · drag with right button to look', 'var(--muted)', 3); });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('mousedown', (e) => {
   if (!running || paused) return;
@@ -1865,7 +1913,7 @@ addEventListener('mousemove', (e) => {
   input.yaw -= e.movementX * k;
   input.pitch = Math.max(-1.45, Math.min(1.45, input.pitch - ySign() * e.movementY * k));
 });
-function lock() { try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch { /* optional */ } }
+function lock() { if (touch.on) return; try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch { /* optional */ } }
 document.addEventListener('pointerlockchange', () => {
   if (!running) return;
   const locked = document.pointerLockElement === canvas;
@@ -2896,13 +2944,13 @@ $('bStay').addEventListener('click', () => { pickOnce = 2000; input.pick = 1; $(
 $('winterSites').addEventListener('click', (e) => { const b = e.target.closest('button[data-i]'); if (b) wake(+b.dataset.i); });
 $('bNewLine').addEventListener('click', () => { $('extinctScreen').hidden = true; newWorld(settings); running = true; lock(); });
 try { if (localStorage.getItem('sting.lab') === '1') toggleLab(); } catch { /* optional */ }
-if (matchMedia('(pointer: coarse)').matches) $('startNote').textContent = 'Needs a keyboard and mouse. On touch devices you can look around but not fly.';
+if (matchMedia('(pointer: coarse)').matches) { useTouch(); $('startNote').textContent = 'Personal world. Touch: the stick flies, drag anywhere to look, the buttons do the rest. Phones run lighter graphics; a keyboard, mouse or controller works too.'; }
 
 newWorld({ seed: 1234n, dayMinutes: 2, humanDensity: 1, beeAggression: 1, seasonDays: 40 });
 requestAnimationFrame(frame);
 
 // test hook for automated checks
-window.__sting = { get sim() { return sim; }, get lab() { return lab; }, input, padUI, start: () => $("bStart").click(), humanViews, toggleNest, toggleLab, saveWorld, camera };
+window.__sting = { get sim() { return sim; }, get lab() { return lab; }, input, padUI, touch, buildCmd, start: () => $("bStart").click(), humanViews, toggleNest, toggleLab, saveWorld, camera };
 window.__garment = (hm) => garmentGraph(hm.tr, hm.clothing, hm.posture, hm.parts[hm.posture]);
 window.__toWorld = toWorld;
 window.__weather = dayWeather;

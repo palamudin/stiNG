@@ -25,6 +25,7 @@
   }
   html, body { height: 100%; }
   body { background: var(--ink); color: var(--fg); font-family: var(--mono); font-size: 13px; overflow: hidden; }
+  [hidden] { display: none !important; } /* our own, not left to whatever page wraps this one */
   #view { position: fixed; inset: 0; display: block; width: 100%; height: 100%; cursor: crosshair; }
   .hud { position: fixed; pointer-events: none; user-select: none; z-index: 2; }
   .label { font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
@@ -163,9 +164,38 @@
   #dead { z-index: 4; background: rgba(13,12,10,.35); pointer-events: none; }
   #dead .title { color: var(--red); font-size: clamp(56px, 12vw, 110px); }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+  /* Touch controls (phones and tablets): a stick on the left, buttons on the right, menu keys along the top; drag anywhere
+     else to look */
+  #touch { position: fixed; inset: 0; z-index: 3; pointer-events: none; display: none; }
+  body.touch #touch { display: block; }
+  body.touch #view { touch-action: none; }
+  #touch .tstick { position: absolute; left: max(18px, env(safe-area-inset-left, 0px)); bottom: max(18px, env(safe-area-inset-bottom, 0px)); width: 132px; height: 132px; border-radius: 50%; background: rgba(243,238,226,.10); border: 2px solid rgba(243,238,226,.35); pointer-events: auto; touch-action: none; }
+  #touch .tstick .knob { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%; background: rgba(243,238,226,.55); }
+  #touch .tbtns { position: absolute; display: grid; gap: 8px; pointer-events: none; }
+  #touch .tbtns.right { right: max(14px, env(safe-area-inset-right, 0px)); bottom: max(14px, env(safe-area-inset-bottom, 0px)); grid-template-columns: repeat(4, 58px); }
+  #touch .tbtns.top { top: calc(max(8px, env(safe-area-inset-top, 0px)) + 78px); left: max(10px, env(safe-area-inset-left, 0px)); grid-template-columns: repeat(2, auto); }
+  body.touch #map, body.touch #mapcap { display: none; } /* the stick has that corner */
+  #touch button { pointer-events: auto; touch-action: none; min-width: 44px; height: 52px; padding: 0 6px; border-radius: 12px; border: 1px solid rgba(243,238,226,.4); background: rgba(13,12,10,.45); color: var(--fg); font: 600 12px/1 var(--mono, monospace); letter-spacing: .02em; -webkit-user-select: none; user-select: none; }
+  #touch .tbtns.top button { height: 36px; font-size: 11px; }
+  #touch button.on { background: rgba(246,199,0,.55); color: #111; }
+  #touch button.sting { background: rgba(200,40,30,.55); }
+  body.touch.nest-open #touch .tstick, body.touch.nest-open #touch .tbtns.right { display: none; }
+  #rotate { display: none; }
+  @media (orientation: portrait) { body.touch #rotate { display: block; position: fixed; z-index: 3; left: 50%; bottom: 170px; transform: translateX(-50%); padding: 6px 10px; border-radius: 8px; background: rgba(13,12,10,.6); color: var(--fg); font-size: 12px; pointer-events: none; } }
+  @media (max-height: 520px) { body.touch .hud { zoom: .68; } }
 </style>
 
 <canvas id="view" aria-label="STING game view"></canvas>
+<div id="touch" aria-label="Touch controls">
+  <div class="tstick" id="tStick"><div class="knob"></div></div>
+  <div class="tbtns right">
+    <button data-k="KeyV">Lock</button><button data-k="KeyH">Hover</button><button data-k="KeyX">Dash</button><button data-k="Space" data-hold>Up</button>
+    <button data-k="KeyE" data-hold>Act</button><button data-k="ShiftLeft" data-hold>Burst</button><button data-k="KeyG" data-hold>Turn</button><button data-k="KeyC" data-hold>Down</button>
+    <button data-k="KeyF" data-hold class="sting" style="grid-column: span 4">Sting</button>
+  </div>
+  <div class="tbtns top"><button data-k="Escape">Pause</button><button data-k="KeyN">Colony</button><button data-k="KeyQ">Switch</button><button data-k="KeyR">Rest</button></div>
+</div>
+<div id="rotate">Turn the phone sideways for room to fly</div>
 
 <div class="hud shadow" id="counter">
   <div class="label">Stung</div>
