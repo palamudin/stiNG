@@ -2001,6 +2001,15 @@ function seated(sim, pred) {
     const back = s.line.find((x) => x.colony.species === 'wasp'); run(s, 1, () => idle({ pick: -(1000 + back.id) }));
     ok(bee.unit === 0 && !bee.swoop && s.prog.unit === 30 && s.hasSkill(s.wasp, 'swoop') && Object.keys(s.progs).sort().join() === 'bee,wasp',
       'each line keeps its own XP and skills: the bee colony starts its own, and the wasps still have theirs'); }
+  { const s = mk(); const own = s.colony, sc = addLine(s, 'bee', 60), P = T.possess;
+    let ev = run(s, 1, () => idle({ pick: -(1000 + sc.id) })); const waiting = s.colony === own && count(ev, 'switchPending') === 1;
+    ev = run(s, P.relayTicks - 2); const still = s.colony === own;
+    ev = run(s, 3);
+    const took = count(ev, 'colonySwitch') === 1 && s.colony === sc.colony;
+    const t = mk(); const sc2 = addLine(t, 'bee', 60); run(t, 1, () => idle({ pick: -(1000 + sc2.id) }));
+    const ev2 = run(t, 2, (sim, i) => idle({ act: i === 0 ? Act.Switch : 0 })); run(t, P.relayTicks);
+    ok(waiting && still && took && count(ev2, 'switchCancelled') === 1 && t.colony !== sc2.colony,
+      `a colony of the line 60 m off is taken through the relay, as a far worker is (Q-03): ${P.relayTicks / 60} s, and Q cancels it`); }
   { const s = mk(); s.colony.sited = false; const sc = addLine(s, 'wasp', 6); const ev = run(s, 1, () => idle({ pick: -(1000 + sc.id) }));
     ok(count(ev, 'switchDenied') === 1 && s.colony !== sc.colony, 'a founding queen without a nest cannot leave it to the AI'); }
   { const t = mk(); const hv = addLine(t, 'bee', 8); hv.colony.sugar = 400; t.colony.mated = 200; t.season.startMinute -= 0.71 * t.settings.seasonDays * 1440;

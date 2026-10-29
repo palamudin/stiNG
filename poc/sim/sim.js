@@ -931,6 +931,12 @@ export class Sim {
     const ps = this.pendingSwitch;
     if (!ps || this.tick < ps.at) return;
     this.pendingSwitch = null;
+    if (ps.colony) { // a colony of the line, relayed (GDD 6.8): still there to take?
+      const sc = this.line.find((x) => x.id === ps.colony);
+      if (!sc || this.winter || this.extinct || !this.colony.sited || !this.colony.nestAlive || !sc.colony.nestAlive) { this.emit('switchDenied', { id: ps.colony }); return; }
+      this._takeColony(sc);
+      return;
+    }
     const d = this._driven();
     if (!d) return;
     let to = ps.target ? this.waspById(ps.target) : null;
@@ -2541,10 +2547,20 @@ export class Sim {
     const g = this.gauge(), G = T.gauge, B = this._capBoost(sp), e = G.effMin + (1 - G.effMin) * g;
     return { forage: e * (1 + (B.forage - 1) * g), brood: 1 + (B.brood - 1) * g, lay: 1 + (B.lay - 1) * g, build: 1 + (B.build - 1) * g };
   }
-  // Take another colony of the line in hand (GDD 6.8, multi-colony play): yours goes on under the AI at your gauge
+  // Take another colony of the line in hand (GDD 6.8, multi-colony play): yours goes on under the AI at your gauge. The
+  // same relay rules as taking a far worker (Q-03): a colony whose nest is within 30 m of your insect is taken at once;
+  // a farther one after the relay delay. Asking again for the one on its way, or Q, cancels it.
   _switchColony(id) {
     const sc = this.line.find((x) => x.id === id);
     if (!sc || this.winter || this.extinct || !this.colony.sited || !this.colony.nestAlive || !sc.colony.nestAlive) { this.emit('switchDenied', { id }); return; }
+    const ps = this.pendingSwitch;
+    if (ps) { this.pendingSwitch = null; this.emit('switchCancelled'); if (ps.colony === id) return; }
+    const d = this._driven(), P = T.possess;
+    if (d && dist2(d, sc.nest) <= P.freeRange * P.freeRange) { this._takeColony(sc); return; }
+    this.pendingSwitch = { at: this.tick + P.relayTicks, target: 0, colony: id };
+    this.emit('switchPending', { seconds: P.relayTicks / 60, toNest: false, colony: id, species: sc.colony.species || 'wasp' });
+  }
+  _takeColony(sc) {
     for (const w of this.wasps.slice()) if (w.colony === 'own' || w.colony === 'line:' + sc.id) this._despawn(w);
     this.line = this.line.filter((x) => x !== sc);
     this.line.push({ id: ++this.lineSeq, nest: this.nest, colony: this.colony, season: this.season.n, ext: 0 });
@@ -2555,7 +2571,7 @@ export class Sim {
     const w = this._spawnWasp(true);
     this.drivenId = w.id;
     this._updateChunks(true);
-    this.emit('colonySwitch', { id: this.lineSeq, to: id, species: this.species });
+    this.emit('colonySwitch', { id: this.lineSeq, to: sc.id, species: this.species });
   }
   _learn(i) {
     if (SKILL_RANKED.includes(SKILLS[i])) { // a job skill: the insect in hand learns it with its own XP

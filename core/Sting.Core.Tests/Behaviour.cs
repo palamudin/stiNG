@@ -1329,6 +1329,16 @@ namespace Sting.Core.Tests
                     Ok(beeUnit == 0 && !beeSwoop && s.prog.unit == 30 && s.HasSkill(s.wasp, "swoop") && string.Join(",", s.progs.Keys) == "bee,wasp",
                         "each line keeps its own XP and skills: the bee colony starts its own, and the wasps still have theirs");
                 }
+                {
+                    var s = Mk(); var own = s.colony; var sc = AddLine(s, "bee", 60); int R = T.possess.relayTicks;
+                    var ev = RunS(s, 1, (sim, i) => Idle(c => c.pick = -(1000 + sc.id))); bool waiting = s.colony == own && Count(ev, "switchPending") == 1;
+                    RunS(s, R - 2); bool still = s.colony == own;
+                    ev = RunS(s, 3); bool took = Count(ev, "colonySwitch") == 1 && s.colony == sc.colony;
+                    var t = Mk(); var sc2 = AddLine(t, "bee", 60); RunS(t, 1, (sim, i) => Idle(c => c.pick = -(1000 + sc2.id)));
+                    var ev2 = RunS(t, 2, (sim, i) => Idle(c => c.act = i == 0 ? Act.Switch : 0)); RunS(t, R);
+                    Ok(waiting && still && took && Count(ev2, "switchCancelled") == 1 && t.colony != sc2.colony,
+                        $"a colony of the line 60 m off is taken through the relay, as a far worker is (Q-03): {R / 60} s, and Q cancels it");
+                }
                 { var s = Mk(); s.colony.sited = false; var sc = AddLine(s, "wasp", 6); var ev = RunS(s, 1, (sim, i) => Idle(c => c.pick = -(1000 + sc.id))); Ok(Count(ev, "switchDenied") == 1 && s.colony != sc.colony, "a founding queen without a nest cannot leave it to the AI"); }
                 {
                     var t = Mk(); var hv = AddLine(t, "bee", 8); hv.colony.sugar = 400; t.colony.mated = 200; t.season.startMinute -= 0.71 * t.settings.seasonDays * 1440;

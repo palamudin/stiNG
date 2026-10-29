@@ -529,6 +529,13 @@ namespace Sting.Core
             var ps = pendingSwitch;
             if (ps == null || tick < ps.at) return;
             pendingSwitch = null;
+            if (ps.colony != 0)
+            { // a colony of the line, relayed (GDD 6.8): still there to take?
+                LineColony sc = null; foreach (var x in line) if (x.id == ps.colony) { sc = x; break; }
+                if (sc == null || winter != null || extinct || !colony.sited || !colony.nestAlive || !sc.colony.nestAlive) { Emit("switchDenied", ("id", ps.colony)); return; }
+                TakeColony(sc);
+                return;
+            }
             var d = Driven();
             if (d == null) return;
             var to = ps.target != 0 ? WaspById(ps.target) : null;

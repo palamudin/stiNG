@@ -90,10 +90,21 @@ namespace Sting.Core
             return new Boost { forage = e * (1 + (B.forage - 1) * g), brood = 1 + (B.brood - 1) * g, lay = 1 + (B.lay - 1) * g, build = 1 + (B.build - 1) * g };
         }
         /// take another colony of the line in hand (GDD 6.8, multi-colony play): yours goes on under the AI at your gauge
+        /// the same relay rules as taking a far worker (Q-03): a colony whose nest is within 30 m of your insect is taken at
+        /// once; a farther one after the relay delay. Asking again for the one on its way, or Q, cancels it.
         void SwitchColony(int id)
         {
             LineColony sc = null; foreach (var x in line) if (x.id == id) { sc = x; break; }
             if (sc == null || winter != null || extinct || !colony.sited || !colony.nestAlive || !sc.colony.nestAlive) { Emit("switchDenied", ("id", id)); return; }
+            var ps = pendingSwitch;
+            if (ps != null) { pendingSwitch = null; Emit("switchCancelled"); if (ps.colony == id) return; }
+            var d = Driven();
+            if (d != null && Sq(d.x - sc.nest.x) + Sq(d.y - sc.nest.y) + Sq(d.z - sc.nest.z) <= T.possess.freeRange * T.possess.freeRange) { TakeColony(sc); return; }
+            pendingSwitch = new PendingSwitch { at = tick + T.possess.relayTicks, target = 0, colony = id };
+            Emit("switchPending", ("seconds", (Num)T.possess.relayTicks / 60), ("toNest", false), ("colony", id), ("species", sc.colony.species ?? "wasp"));
+        }
+        void TakeColony(LineColony sc)
+        {
             foreach (var w in new List<Wasp>(wasps)) if (w.colony == "own" || w.colony == "line:" + sc.id) Despawn(w);
             line.Remove(sc);
             line.Add(new LineColony { id = ++lineSeq, nest = nest, colony = colony, season = season.n });
@@ -104,7 +115,7 @@ namespace Sting.Core
             var dw = SpawnWasp(true);
             drivenId = dw.id;
             UpdateChunks(true);
-            Emit("colonySwitch", ("id", lineSeq), ("to", id), ("species", species));
+            Emit("colonySwitch", ("id", lineSeq), ("to", sc.id), ("species", species));
         }
         void Learn(int i)
         {

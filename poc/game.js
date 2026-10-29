@@ -190,7 +190,7 @@ let running = false, paused = false;
 const input = { pick: 0, keys: new Set(), lmb: false, yaw: 0, pitch: 0, alloc: 1, autopilot: null, free: { yaw: 0, pitch: 0, held: false },
   lock: null, pilot: null, autoTurn: false, turning: false, gazeOff: 0, gDown: 0, gLong: false }; // lock-on, assisted flight, eye turn (GDD 7.9)
 // Player options from the Esc menu, kept per browser
-const opts = { volume: 0.7, sens: 1, invert: false, reflex: true };
+const opts = { volume: 0.7, sens: 1, invert: false, reflex: true, autoGrab: null }; // autoGrab null: on for touch, off otherwise
 try { Object.assign(opts, JSON.parse(localStorage.getItem('sting.options') || '{}')); } catch { /* optional */ }
 const saveOpts = () => { try { localStorage.setItem('sting.options', JSON.stringify(opts)); } catch { /* optional */ } };
 const ySign = () => (opts.invert ? -1 : 1);
@@ -1715,6 +1715,12 @@ function buildCmd() {
     pick: input.switchTo ? (input.switchTo = 0, -(1000 + switchOnce)) : input.learn ? (input.learn = 0, -(learnOnce + 1)) : input.pick ? (input.pick = 0, pickOnce) : 0, // negative picks: take a colony in hand, learn a skill (GDD 6.8)
   };
   if (input.eatBurst) { if (cmd.burst) cmd.burst = 0; else input.eatBurst = false; }
+  // Auto grab (on by default with touch): prey within reach and nothing in the jaws, and nothing else E would do here (a
+  // person under it, a hive or nest entrance, a winter site), so E is pressed for you, in pulses as a held E would not
+  const autoGrab = opts.autoGrab ?? touch.on, aw = autoGrab && sim && sim._driven();
+  if (aw && (aw.state === 'fly' || aw.state === 'landed') && !aw.carry && aw.caste === 'worker' && !aw.contact && !input.pilot && sim._preyNear(aw)
+    && !sim._hiveEntranceNear(aw) && !(T.species[aw.sp || 'wasp'].hunts && (sim._rivalNestNear(aw) || sim._peerNestNear(aw))) && !(!T.species[aw.sp || 'wasp'].perennial && sim.seasonFrac >= T.season.reproStart && sim.colony.mated + sim.colony.gynes >= 1 && sim._hiberNear(aw)))
+    cmd.act |= (sim.tick & 1) ? Act.Interact : 0;
   // locked on: closing in on something that stays put slows near it, so W brings you up to it rather than past it. A
   // moving target (prey, a walker) is never slowed for: W flies its velocity plus closing speed toward it, so the gap
   // shrinks whichever way it goes and you match its pace when you reach it (Shift for more when it is quick)
@@ -1930,13 +1936,14 @@ document.addEventListener('pointerlockchange', () => {
   if (!locked && pointerLockWorked && !ui.nest && !atlas.open && $('winterScreen').hidden && $('extinctScreen').hidden) setPaused(true); // the colony view and the atlas free the mouse on purpose
   if (locked) { pointerLockWorked = true; setPaused(false); }
 });
-function setPaused(p) { paused = p; if (p && sim) $('pauseTag').textContent = `${tagText(sim.settings)} · rules ${rulesHash(sim.settings)} · tuning ${TUNE.hash}`; input.free.held = false; $('pauseScreen').hidden = !p; input.lmb = false; input.keys.clear(); if (p) { $('saveNote').textContent = ''; saveWorld(false); } }
+function setPaused(p) { paused = p; if (p) showOpts(); if (p && sim) $('pauseTag').textContent = `${tagText(sim.settings)} · rules ${rulesHash(sim.settings)} · tuning ${TUNE.hash}`; input.free.held = false; $('pauseScreen').hidden = !p; input.lmb = false; input.keys.clear(); if (p) { $('saveNote').textContent = ''; saveWorld(false); } }
 $('bResume').addEventListener('click', () => { setPaused(false); lock(); });
 function showOpts() {
   $('optVol').value = Math.round(opts.volume * 100); $('optVolOut').textContent = Math.round(opts.volume * 100) + '%';
   $('optSens').value = Math.round(opts.sens * 100); $('optSensOut').textContent = opts.sens.toFixed(2) + '×';
   $('optInvert').checked = opts.invert;
   $('optReflex').checked = opts.reflex;
+  $('optGrab').checked = opts.autoGrab ?? touch.on;
 }
 showOpts();
 $('optVol').addEventListener('input', (e) => {
@@ -1946,6 +1953,7 @@ $('optVol').addEventListener('input', (e) => {
 $('optSens').addEventListener('input', (e) => { opts.sens = +e.target.value / 100; saveOpts(); showOpts(); });
 $('optInvert').addEventListener('change', (e) => { opts.invert = e.target.checked; saveOpts(); });
 $('optReflex').addEventListener('change', (e) => { opts.reflex = e.target.checked; saveOpts(); });
+$('optGrab').addEventListener('change', (e) => { opts.autoGrab = e.target.checked; saveOpts(); });
 $('bQuit').addEventListener('click', () => {
   if (!lab) saveWorld(true);
   paused = false; running = false; input.keys.clear(); input.lmb = false;
@@ -2707,7 +2715,7 @@ function handleEvents(events) {
       case 'nestDestroyed': toast('The nest is destroyed', 'var(--red)', 4); logEvent(`nest destroyed · ${e.died} inside died`); break;
       case 'possess': waspSwitched(e.id); logEvent(`now driving worker ${e.id}`); break;
       case 'noSwitch': toast('No worker to take over', 'var(--muted)', 1.4); break;
-      case 'switchPending': toast(`Relaying through the colony · ${e.seconds} s · Q cancels`, 'var(--muted)', 2.2); break;
+      case 'switchPending': toast(e.colony ? `Relaying you to the ${SPECIES_NAME[e.species] || 'colony'} · ${e.seconds} s · Q cancels` : `Relaying through the colony · ${e.seconds} s · Q cancels`, 'var(--muted)', 2.2); break;
       case 'switchCancelled': toast('Switch cancelled', 'var(--muted)', 1.2); break;
       case 'cantRest': toast(e.why === 'day' ? 'Rest only at night' : e.why === 'net' ? 'No resting with a second player' : 'Rest at the nest entrance', 'var(--muted)', 1.6); break;
       case 'rested': toast('Morning', 'var(--yellow)', 1.6); break;
@@ -3146,7 +3154,7 @@ newWorld({ seed: 1234n, dayMinutes: 2, humanDensity: 1, beeAggression: 1, season
 requestAnimationFrame(frame);
 
 // test hook for automated checks
-window.__sting = { get sim() { return sim; }, get lab() { return lab; }, input, padUI, touch, buildCmd, atlas, start: () => $("bStart").click(), humanViews, toggleNest, toggleLab, saveWorld, camera };
+window.__sting = { get sim() { return sim; }, get lab() { return lab; }, input, padUI, touch, buildCmd, atlas, opts, start: () => $("bStart").click(), humanViews, toggleNest, toggleLab, saveWorld, camera };
 window.__garment = (hm) => garmentGraph(hm.tr, hm.clothing, hm.posture, hm.parts[hm.posture]);
 window.__toWorld = toWorld;
 window.__weather = dayWeather;

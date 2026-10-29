@@ -1930,6 +1930,30 @@ Not yet tried on a real phone.
 - The controller and touch checks of 18.58 and 18.59 still pass.
 - There are no console errors.
 
+### 18.61 Colony switching through the relay (6.8, Q-03)
+
+**Closes a T0 limit (18.49).** Taking another colony of the line in hand was instant. Now it follows the same relay rules as taking a far worker (Q-03):
+- **Near:** a colony whose nest is within 30 m of the insect in hand is taken at once.
+- **Far:** a farther one comes after the relay delay (4 s). The player keeps flying meanwhile, and a toast names the colony on its way.
+- **Cancelling:** asking again for the same colony, or Q, cancels it. Asking for another colony replaces it.
+- **On arrival:** the switch is checked again, so a colony destroyed in the meantime is refused.
+- **Saves:** a switch on its way is kept (C# save version 31).
+
+**Checks.** JS and both C# builds agree. A colony of the line 60 m off is not taken at once; it is still not taken two ticks before the relay ends, and is taken once it does. A second run shows that Q cancels it. The near-colony tests of 18.49 (8 m off) are unchanged. One digest changed (the multi-colony digest), the rest did not. 398 properties hold.
+
+### 18.62 Auto grab (7.9, 10)
+
+**Found in play (2026-10-29).** On a phone, catching prey meant tapping Act at the right moment beside it, which is fiddly with a thumb.
+
+**The fix.** With auto grab on, the game presses E for the player whenever:
+- prey is within grab reach, and the insect is flying past or settled beside it on a stalk;
+- the insect is carrying nothing;
+- nothing else E would do there takes precedence: a person under it, a hive or nest entrance, or a winter site in the scouting season.
+
+E is pressed in pulses, as the assisted flight does, because a held E would act only once. It is input only, recorded and replayed like a press, so the sim is unchanged. Auto grab is an option in the pause menu: on by default on touch screens, off with a keyboard, mouse or controller.
+
+**Checks.** In headless Chromium on an emulated phone, a wasp placed 1.5 cm from a caterpillar settled beside it and caught it two ticks later with no button pressed. There were no console errors.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1938,7 +1962,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (111 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony; the T0 of progression (18.48): XP, unit and hive skills, the year's turn; multi-colony play with the player gauge (18.49); wintering in somewhere warm (18.50); chasing moving prey with a lock, with a colony view you can click (18.51); obstacle avoidance in assisted flight (18.52); reaching what moves under a lock (18.53); the lock ending on arrival (18.54); Shift hurrying an assisted flight (18.55); landing at speed with hovering round a lock (18.56); lines, the wasp in hand and roles passed on by masters (18.57); playing with a controller only, Xbox included (18.58); touch controls for phones and tablets (18.59); and the map: minimap sizes, the big map and a phone HUD (18.60). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (113 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony; the T0 of progression (18.48): XP, unit and hive skills, the year's turn; multi-colony play with the player gauge (18.49); wintering in somewhere warm (18.50); chasing moving prey with a lock, with a colony view you can click (18.51); obstacle avoidance in assisted flight (18.52); reaching what moves under a lock (18.53); the lock ending on arrival (18.54); Shift hurrying an assisted flight (18.55); landing at speed with hovering round a lock (18.56); lines, the wasp in hand and roles passed on by masters (18.57); playing with a controller only, Xbox included (18.58); touch controls for phones and tablets (18.59); the map: minimap sizes, the big map and a phone HUD (18.60); colony switching through the relay (18.61); and auto grab (18.62). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 

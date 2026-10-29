@@ -137,6 +137,8 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 109 | Controller only (Xbox): the page opts out of Edge-on-Xbox mouse mode; every screen works with a pad (d-pad or stick to move, A press, left/right change, B back); Start pauses, View opens the colony view; no mouse capture needed. Arrows and Enter work the menus too | 10 | 24 |
 | 110 | Touch controls (phones, tablets): a stick to fly, drag to look, buttons for lock, hover, dash, climb, act, burst, turn and a wide sting, menu buttons for pause, colony, switch and rest; light graphics by default on phones; no mouse capture | 10 | 24 |
 | 111 | The map: the minimap's size and zoom are the player's (buttons, - = [ ]), sharp at 4K, and a click or tap on an area shows its card (people, food, water, danger as low/mid/high; alert; nests). M (or the Atlas button, a double tap, d-pad left) grows it over the screen; it takes over the controls (WASD, sticks, Q/E zoom) until closed. A compact phone HUD: the map top right, clear of the buttons, sideways or upright | 10 | 24 |
+| 112 | Colony switching through the relay: a colony of the line within 30 m is taken at once, a farther one after the 4 s relay (as a far worker, Q-03); Q or asking again cancels it | 6.8 | 24 |
+| 113 | Auto grab: prey within reach is caught without pressing (when nothing else E would do there takes precedence); a pause-menu option, on by default on touch screens | 7.9, 10 | 24 |
 
 ## Verified
 
@@ -162,7 +164,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 - AI wasps in state packets are not checked against solid geometry (their owner does not collide them far from its player).
 - With terrain on, flight does not feel the slope (the sim works in height above the ground), hills block sight lines between people only, and buildings lean slightly with the ground they stand on.
 - Assisted flight steers round what is within a metre ahead (a trunk, a fence) but plans no route: a hedge or a house wall longer than it can see past still needs the player, and it does not dodge swats or birds.
-- Progression is at T0 (GDD 18.48, 18.49, 18.57): each line's XP and tree, the wasp in hand's job skills, five roles levelled by masters, multi-colony play and the gauge. The year's turn offers only wasp lines a change; switching colonies is instant (no relay); a trained wasp that goes home retires inside rather than flying again; the XP, mastery and gauge figures are first guesses to tune with play. The PoC runs progression `open`, so any species can also be picked on the start screen.
+- Progression is at T0 (GDD 18.48, 18.49, 18.57): each line's XP and tree, the wasp in hand's job skills, five roles levelled by masters, multi-colony play and the gauge. The year's turn offers only wasp lines a change; a trained wasp that goes home retires inside rather than flying again; the XP, mastery and gauge figures are first guesses to tune with play. The PoC runs progression `open`, so any species can also be picked on the start screen.
 - A swarm is told, not shown: the new colony appears on its tree, but no cloud of bees flies there. A bee colony's queens and drones stay abstract (no mating flights).
 - A raid on another player's nest takes one larva at a time, by the player's own wasp; AI workers do not raid other players' nests, as they do not raid rival nests.
 
