@@ -223,22 +223,14 @@
   @media (orientation: portrait) {
     body.touch #mapBox { top: calc(6px + env(safe-area-inset-top, 0px)); }
     body.touch #colony { top: calc(var(--mapW, 120px) + 16px + env(safe-area-inset-top, 0px)); }
-    body.touch #clock { top: calc(54px + env(safe-area-inset-top, 0px)); left: calc(10px + env(safe-area-inset-left, 0px)); transform: none; text-align: left; }
-    body.touch #touch .tbtns.top { top: calc(118px + env(safe-area-inset-top, 0px)); }
-  }
-  /* upright: the map top right with the colony figures under it, the clock under the counter, the menu keys below */
-  @media (orientation: portrait) {
-    body.touch #mapBox { top: calc(6px + env(safe-area-inset-top, 0px)); }
-    body.touch #colony { top: calc(var(--mapW, 120px) + 16px + env(safe-area-inset-top, 0px)); }
-    body.touch #clock { top: calc(54px + env(safe-area-inset-top, 0px)); left: calc(10px + env(safe-area-inset-left, 0px)); transform: none; text-align: left; }
-    body.touch #touch .tbtns.top { top: calc(118px + env(safe-area-inset-top, 0px)); }
+    body.touch #clock { top: calc(68px + env(safe-area-inset-top, 0px)); left: calc(10px + env(safe-area-inset-left, 0px)); transform: none; text-align: left; }
+    body.touch #touch .tbtns.top { top: calc(130px + env(safe-area-inset-top, 0px)); }
   }
   @media (orientation: landscape) {
     body.touch #mapBox { top: calc(6px + env(safe-area-inset-top, 0px)); }
     body.touch #colony { right: calc(var(--mapW, 120px) + 22px + env(safe-area-inset-right, 0px)); }
   }
-  body.touch #mapHead { display: none; } /* on a phone: double tap the map for the atlas */
-  /* a double tap (or double click) opens the map large for finding the way; again closes it */
+  body.touch #mapHead { display: none; } /* on a phone: a tap shows an area's card, a double tap the big map */
   body.touch #vitals { bottom: calc(8px + env(safe-area-inset-bottom, 0px)); width: min(300px, 44vw); gap: 4px; }
   body.touch #status { font-size: 12px; min-height: 14px; }
   body.touch #hint { font-size: 9.5px; min-height: 12px; }
