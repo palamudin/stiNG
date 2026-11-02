@@ -140,6 +140,8 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 112 | Colony switching through the relay: a colony of the line within 30 m is taken at once, a farther one after the 4 s relay (as a far worker, Q-03); Q or asking again cancels it | 6.8 | 24 |
 | 113 | Auto grab: prey within reach is caught without pressing (when nothing else E would do there takes precedence); a pause-menu option, on by default on touch screens | 7.9, 10 | 24 |
 | 114 | The year's turn for every line: hornets are one way; a honeybee line that earns 300 XP in a year is offered a young queen to found a wasp colony, its hive going on under the AI | 6.8 | 25 |
+| 115 | Moths at the porch lights can be locked on to and caught with assisted flight | 7.9 | 25 |
+| 116 | Fireflies on summer evenings: dozens drifting over the lawns at dusk, each flashing on its own beat; catch one and the wasp spits it out, as real hunters do (they taste foul) | 5.3, 7.9 | 25 |
 
 ## Verified
 

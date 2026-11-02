@@ -1852,6 +1852,28 @@ function seated(sim, pred) {
     let mo = null; for (const r of s.activeChunks) { const m = s.mothsIn(r)[0]; if (m) { mo = m; break; } }
     place(s.wasp, { x: mo.x, y: mo.y, z: mo.z }); const ev = run(s, 2, (sim, i) => idle({ act: i === 0 ? Act.Interact : 0 }));
     ok(s.lightsIn(s.activeChunks.find((r) => s.lightsIn(r).length)).length > 0 && ev.some((e) => e.type === 'caught' && e.kind === 'moth') && s.wasp.carry.what === 'moth', 'at 22:00 a porch light burns with moths round it, and E at one takes it'); }
+  { const s = mk('hornet'), md = s.minute % 1440; s.clockOffset += (s.minute - md + 1320 - s.minute) * s.tpm; s._minute(clockMinutes(s.tick + s.clockOffset, s.settings));
+    let mo = null, key = null; for (const r of s.activeChunks) { const m = s.mothsIn(r)[0]; if (m) { mo = m; key = chunkKey(r.cx, r.cz); break; } }
+    place(s.wasp, { x: mo.x + 1.2, y: mo.y - 0.2, z: mo.z + 0.6 });
+    const dx = mo.x - s.wasp.x, dy = mo.y - s.wasp.y, dz = mo.z - s.wasp.z, d = Math.hypot(dx, dy, dz), t = pickTarget(s, s.wasp, { x: dx / d, y: dy / d, z: dz / d }), v = t && targetVel(s, t);
+    let r = null, k = 0; for (; k < 600 && t; k++) { r = assistPilot(s, s.wasp, t, idle()); if (r.done) break; s.step(r.cmd); s.drainEvents(); }
+    ok(t && t.kind === 'moth' && t.key === key && targetLabel(s, t) === 'moth' && Math.hypot(v.x, v.y, v.z) > 0.1 && r && r.done === 'caught' && s.wasp.carry && s.wasp.carry.what === 'moth',
+      `locked on a moth circling its porch light at ${t ? Math.hypot(v.x, v.y, v.z).toFixed(2) : '?'} m/s, assisted flight catches it (${r && r.done} in ${(k / 60).toFixed(2)} s)`); }
+  // fireflies on summer evenings: over lawns, never in anything solid, each on its own beat; taken, they are spat out
+  { const dusk = (sp, frac, at) => { const s = mk(sp), md = s.minute % 1440; s.clockOffset += (at - md) * s.tpm; s._minute(clockMinutes(s.tick + s.clockOffset, s.settings)); s.season.startMinute = s.minute - frac * s.settings.seasonDays * 1440; run(s, 1); return s; };
+    const s = dusk('hornet', 0.45, T.time.dusk + 30), noon = dusk('hornet', 0.45, 13 * 60), spring = dusk('hornet', 0.1, T.time.dusk + 30);
+    const all = s.activeChunks.flatMap((r) => s.fireflySpots(r).map((f) => ({ r, f }))), F = T.fireflies;
+    const clear = all.every(({ r, f }) => !r.content.boxes.some((b) => f.x > b.minx - F.wander && f.x < b.maxx + F.wander && f.z > b.minz - F.wander && f.z < b.maxz + F.wander) && !s._cylsOf(r).some((c) => Math.hypot(f.x - c.x, f.z - c.z) < c.r + F.wander));
+    const lit = new Set(); for (let k = 0; k < F.period; k += 10) for (const { f } of all) if (s.fireflyGlow(f, s.tick + k)) lit.add(f);
+    const now = all.filter(({ f }) => s.fireflyGlow(f, s.tick)).length;
+    ok(all.length > 20 && s.fireflyTime() && !noon.fireflyTime() && !spring.fireflyTime() && clear && lit.size === all.length && now < all.length / 3,
+      `fireflies on a midsummer evening: ${all.length} over the lawns round the nest, clear of trees and sheds; none at noon or in spring; each flashes on its own beat (${now} lit at once)`);
+    const rec = s.activeChunks.find((r) => s.firefliesIn(r).length), ff = s.firefliesIn(rec)[0];
+    place(s.wasp, { x: ff.x + 1, y: ff.y + 0.3, z: ff.z + 0.5 });
+    const dx = ff.x - s.wasp.x, dy = ff.y - s.wasp.y, dz = ff.z - s.wasp.z, d = Math.hypot(dx, dy, dz), t = pickTarget(s, s.wasp, { x: dx / d, y: dy / d, z: dz / d });
+    let r = null, k = 0, spat = 0; for (; k < 600; k++) { r = assistPilot(s, s.wasp, t, idle()); if (r.done) break; s.step(r.cmd); spat += s.drainEvents().filter((e) => e.type === 'spat').length; }
+    ok(t && t.kind === 'firefly' && r.done === 'spat' && spat === 1 && !s.wasp.carry && s.firefliesIn(rec).length === s.fireflySpots(rec).length,
+      `locked on a firefly, assisted flight takes it and the hornet spits it out (in ${(k / 60).toFixed(2)} s): it carries nothing home, and the firefly flies on`); }
   { const s = mk('hornet'); run(s, 600); const rv = s.wasps.find((x) => s.isRival(x) && x.state === 'fly');
     place(s.wasp, { x: rv.x + 0.01, y: rv.y, z: rv.z }); const ev = run(s, 2, (sim, i) => idle({ act: i === 0 ? Act.Interact : 0 }));
     ok(ev.some((e) => e.type === 'waspDied' && e.cause === 'taken by a hornet') && s.wasp.carry.what === 'wasp', 'a hornet takes a rival yellowjacket on the wing and carries it home as prey'); }

@@ -79,6 +79,8 @@ namespace Sting.Core
         public Land land; public int noLandUntil; public string trapCause;
         /// the swoop (GDD 7.9): the tick its dash ends, and the tick the next one may start
         public int swoopUntil, swoopReady;
+        /// the tick it last spat out a firefly
+        public int spat = int.MinValue / 2;
         /// its species (GDD 6.8); a bee that has stung a person and dies of it (T2-11); pollen packed so far, in ticks
         public string sp = "wasp"; public bool spent; public int pollenT;
         internal SipPend sipPend; // net only: sips not yet told to the other peers
@@ -193,6 +195,7 @@ namespace Sting.Core
         internal List<Grill> grills; internal List<Cyl> cyls; internal List<Roof> roofs;
         internal List<WaterSrc> puddles; internal long puddleDay = long.MinValue; // T2-1
         internal List<PorchLight> lights; // T2-10
+        internal List<Firefly> fireflies; // summer evenings
         string[] _sub = new string[0];
         /// "cx,cz#i": the key of the i-th hive or hunter in this chunk
         public string Sub(int i)
@@ -251,7 +254,9 @@ namespace Sting.Core
         public Dictionary<string, int> held = new Dictionary<string, int>(); public Dictionary<string, List<SipRec>> sips = new Dictionary<string, List<SipRec>>();
     }
     public sealed class SipRec { public int t; public Num amount; }
-    public sealed class Hint { public string opening, prey, site, hiber; public bool bait, wood, nest, rival, hive, water; public int? raid; }
+    public sealed class Hint { public string opening, prey, site, hiber; public bool bait, wood, nest, rival, hive, water, firefly; public int? raid; }
+    /// a firefly's spot: where it drifts, how, and its flash phase
+    public sealed class Firefly { public int i, ph; public Num x, y, z, w, p; }
     /// another player's nest, as it last said (colony against colony)
     public sealed class PeerNest { public Num x, y, z; public string key; public bool alive; public string species = "wasp"; }
     /// A hibernation site and the queens waking there (T1-15)

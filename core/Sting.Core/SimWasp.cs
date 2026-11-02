@@ -509,6 +509,9 @@ namespace Sting.Core
             if (c != null && w.state == "fly") { PerchOn(w, c.humanHex, c.zone, c.surf, c.n, c.part); return; }
             var prey = w.carry == null ? PreyNear(w) : null; // one load at a time (T1-20)
             if (prey != null) { Catch(w, prey); return; }
+            // a firefly: taken, tasted and spat out; it flies on, and the insect has nothing for it
+            var ff = w.carry == null ? FireflyNear(w) : null;
+            if (ff != null) { w.spat = tick; Emit("spat", ("id", w.id), ("what", "firefly")); return; }
             if (w.carry == null && SP.hunts != 0 && BaitNear(w) != null) { TakeBait(w); return; }
             var wet = w.carry == null ? WaterNear(w) : null; // T2-1
             if (wet != null) { w.state = "chewing"; w.chew = 0; w.chewAt = new WoodSpot { key = wet.Value.key, i = wet.Value.i, water = true }; w.vx = w.vy = w.vz = 0; Emit("drinkStart", ("id", w.id)); return; }
@@ -525,6 +528,7 @@ namespace Sting.Core
             {
                 opening = c != null && c.opening >= 0 ? c.openingKey : null,
                 prey = pn?.kind,
+                firefly = w.carry == null && FireflyNear(w) != null,
                 bait = w.carry == null && SP.hunts != 0 && BaitNear(w) != null,
                 wood = w.carry == null && c == null && SP.wood != 0 && WoodNear(w) != null,
                 water = w.carry == null && c == null && WaterNear(w) != null,
@@ -1045,6 +1049,58 @@ namespace Sting.Core
         public bool FlyActive(ChunkRec rec, int i) => IsDaylight(minute) && HSeq((long)(seed & 0xffffffffUL), rec.cx, rec.cz, i, day, 973) < FlyShare(); // flies settle for the night
         /// porch lights (T2-10): one on each house, on a long wall at the middle, burning from dusk to dawn; derived from
         /// the frozen houses, so old worlds have them; moths circle each one, and a hornet takes them
+        /// fireflies (summer evenings): out now? The season's middle, around dusk, dry
+        public bool FireflyTime() => FireflyTime(minute);
+        public bool FireflyTime(long m)
+        {
+            long md = MinuteOfDay(m); Num f = (Num)(m - season.startMinute) / (settings.seasonDays * 1440);
+            return !Raining && f >= T.fireflies.from && f <= T.fireflies.to && md >= T.time.dusk - T.fireflies.before && md <= T.time.dusk + T.fireflies.after;
+        }
+        /// a chunk's fireflies, from the seed, clear of anything solid; none over a town or a mall
+        public List<Firefly> FireflySpots(ChunkRec rec)
+        {
+            if (rec.fireflies != null) return rec.fireflies;
+            var list = new List<Firefly>(); long sd = (long)(seed & 0xffffffffUL); Num CS = T.chunk.size; string use = rec.content.use ?? "park";
+            int n = use == "park" ? T.fireflies.park : use == "yards" ? T.fireflies.yards : use == "forest" ? T.fireflies.forest : 0;
+            Num m = T.fireflies.wander + 0.3; var boxes = rec.content.boxes; var cyls = CylsOf(rec);
+            bool Open(Num x, Num z)
+            {
+                foreach (var b in boxes) if (x > b.minx - m && x < b.maxx + m && z > b.minz - m && z < b.maxz + m) return false;
+                foreach (var c in cyls) if (Sq(x - c.x) + Sq(z - c.z) < Sq(c.r + m)) return false;
+                return true;
+            }
+            for (int i = 0; i < n; i++) for (int k = 0; k < 6; k++)
+            {
+                Num U(int j) => HSeq(sd, rec.cx, rec.cz, i * 8 + k, 970 + j);
+                Num x = (rec.cx + (U(0) - 0.5) * 0.9) * CS, z = (rec.cz + (U(1) - 0.5) * 0.9) * CS;
+                if (!Open(x, z)) continue;
+                list.Add(new Firefly { i = list.Count, x = x, z = z, y = T.fireflies.low + U(2) * (T.fireflies.high - T.fireflies.low), w = 0.25 + 0.25 * U(3), p = U(4) * TAU, ph = (int)Floor(U(5) * T.fireflies.period) });
+                break;
+            }
+            rec.fireflies = list;
+            return list;
+        }
+        public static V3 FireflyPos(Firefly f, long tick)
+        {
+            Num t = (Num)tick / 60;
+            return new V3(f.x + T.fireflies.wander * DSin(f.w * t + f.p), f.y + 0.25 * DSin(f.w * 1.7 * t + f.p), f.z + T.fireflies.wander * DCos(f.w * 0.8 * t + f.p * 1.3));
+        }
+        public static bool FireflyGlow(Firefly f, long tick) => (tick + f.ph) % T.fireflies.period < T.fireflies.flash;
+        public List<(int i, V3 p)> FirefliesIn(ChunkRec rec)
+        {
+            var o = new List<(int, V3)>();
+            if (!FireflyTime()) return o;
+            foreach (var f in FireflySpots(rec)) o.Add((f.i, FireflyPos(f, tick)));
+            return o;
+        }
+        /// one in grab reach of this insect, or null
+        internal (string key, int i)? FireflyNear(Wasp w)
+        {
+            if (Spw(w).hunts == 0 || !FireflyTime()) return null;
+            Num r = T.prey.catchDist * Mul(w, "grabR"), r2 = r * r;
+            foreach (var rec in activeChunks) foreach (var f in FireflySpots(rec)) if (D2(w, FireflyPos(f, tick)) <= r2) return (rec.key, f.i);
+            return null;
+        }
         public List<PorchLight> LightsIn(ChunkRec rec)
         {
             if (rec.lights != null) return rec.lights;

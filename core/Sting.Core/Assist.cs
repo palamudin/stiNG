@@ -21,6 +21,8 @@ namespace Sting.Core
             ["fly"] = new TargetKind { label = "fly", go = "catch it", prey = true },
             ["caterpillar"] = new TargetKind { label = "caterpillar", go = "catch it", prey = true },
             ["bee"] = new TargetKind { label = "bee", go = "catch it", prey = true, hazard = true },
+            ["moth"] = new TargetKind { label = "moth", go = "catch it", prey = true }, // at a porch light at night (T2-10)
+            ["firefly"] = new TargetKind { label = "firefly", go = "catch it", prey = true }, // on summer evenings; spat out, it tastes foul
             ["flower"] = new TargetKind { label = "flower", go = "land on it" },
             ["cup"] = new TargetKind { label = "drink", go = "drink from it" },
             ["bath"] = new TargetKind { label = "water", go = "land at the water" },
@@ -80,6 +82,13 @@ namespace Sting.Core
                         return t.i < list.Count ? (t.kind == "bird" ? World.BirdPos(list[t.i], sim.tick) : World.DragonPos(list[t.i], sim.tick)) : (V3?)null;
                     }
                 case "web": return t.i < c.webs.Count ? new V3(c.webs[t.i].x, c.webs[t.i].y, c.webs[t.i].z) : (V3?)null;
+                case "firefly": { var fs = sim.FireflySpots(rec); return t.i < fs.Count && sim.FireflyTime() ? Sim.FireflyPos(fs[t.i], sim.tick) : (V3?)null; }
+                case "moth":
+                    { // circling its porch light while it is lit and not taken
+                        if (!sim.Lit() || sim.Raining || (st.caughtMoth != null && st.caughtMoth.TryGetValue(t.i, out var cm) && cm > sim.tick)) return null;
+                        var L = sim.LightsIn(rec); int li = t.i / T.moths.perLight;
+                        return li < L.Count ? Sim.MothPos(L[li], t.i % T.moths.perLight, sim.tick) : (V3?)null;
+                    }
             }
             return null;
         }
@@ -101,6 +110,8 @@ namespace Sting.Core
                 for (int i = 0; i < c.baths.Count; i++) Add(new LockTarget { kind = "bath", key = key, i = i });
                 for (int i = 0; i < c.birds.Count; i++) Add(new LockTarget { kind = "bird", key = key, i = i });
                 for (int i = 0; i < c.dragonflies.Count; i++) Add(new LockTarget { kind = "dragonfly", key = key, i = i });
+                foreach (var mo in sim.MothsIn(rec)) Add(new LockTarget { kind = "moth", key = key, i = mo.i });
+                foreach (var ff in sim.FirefliesIn(rec)) Add(new LockTarget { kind = "firefly", key = key, i = ff.i });
                 for (int i = 0; i < c.webs.Count; i++) Add(new LockTarget { kind = "web", key = key, i = i });
             }
             foreach (var x in sim.wasps) if (x != w && Sim.IsRival(x)) Add(new LockTarget { kind = "wasp", id = x.id });
@@ -196,10 +207,12 @@ namespace Sting.Core
             if (t == null) return Z;
             if (t.kind == "wasp") { WaspBase x = (WaspBase)sim.WaspById(t.id) ?? sim.remote.Get(t.id); return x != null ? new V3(x.vx, x.vy, x.vz) : Z; }
             if (t.kind == "human") { var hm = sim.HumanByHex(t.hex); return hm != null && hm.state != "away" ? new V3(hm.vx, 0, hm.vz) : Z; } // a person's pace over their last step
-            if (t.kind != "fly" && t.kind != "bee" && t.kind != "bird" && t.kind != "dragonfly") return Z;
+            if (t.kind != "fly" && t.kind != "bee" && t.kind != "bird" && t.kind != "dragonfly" && t.kind != "moth" && t.kind != "firefly") return Z;
             if (!sim.records.TryGet(t.key, out var rec)) return Z;
             var c = rec.content; int k = sim.tick; V3? a = null, b = null;
             if (t.kind == "fly") { if (t.i < c.flies.Count) { a = World.FlyPos(c.flies[t.i], k); b = World.FlyPos(c.flies[t.i], k + 1); } }
+            else if (t.kind == "firefly") { var fs = sim.FireflySpots(rec); if (t.i < fs.Count) { a = Sim.FireflyPos(fs[t.i], k); b = Sim.FireflyPos(fs[t.i], k + 1); } }
+            else if (t.kind == "moth") { var L = sim.LightsIn(rec); int li = t.i / T.moths.perLight; if (li < L.Count) { a = Sim.MothPos(L[li], t.i % T.moths.perLight, k); b = Sim.MothPos(L[li], t.i % T.moths.perLight, k + 1); } }
             else if (t.kind == "bee") { var hv = sim.HivesIn(rec); if (t.h < hv.Count) { a = World.BeePos(hv[t.h], t.i, k); b = World.BeePos(hv[t.h], t.i, k + 1); } }
             else
             {
@@ -309,6 +322,7 @@ namespace Sting.Core
         {
             var K = Kinds.TryGetValue(t.kind, out var kk) ? kk : null;
             if (K == null || K.go == null) return (cmd, "no");
+            if (t.kind == "firefly" && w.spat >= sim.tick - 2) return (cmd, "spat"); // taken and spat out
             Cmd Copy() => new Cmd { mx = 0, my = 0, mz = cmd.mz, burst = 0, sting = 0, yawQ = cmd.yawQ, pitchQ = cmd.pitchQ, act = cmd.act, alloc = cmd.alloc, pick = cmd.pick };
             if (w.state == "landed")
             {

@@ -18,6 +18,8 @@ export const TARGET_KIND = {
   fly: { label: 'fly', go: 'catch it', prey: true },
   caterpillar: { label: 'caterpillar', go: 'catch it', prey: true },
   bee: { label: 'bee', go: 'catch it', prey: true, hazard: true },
+  moth: { label: 'moth', go: 'catch it', prey: true }, // at a porch light at night (T2-10)
+  firefly: { label: 'firefly', go: 'catch it', prey: true }, // on summer evenings; spat out, it tastes foul
   flower: { label: 'flower', go: 'land on it' },
   cup: { label: 'drink', go: 'drink from it' },
   bath: { label: 'water', go: 'land at the water' },
@@ -59,6 +61,12 @@ export function targetPos(sim, t) {
       return s ? { x: s.x, y: s.y, z: s.z } : list[t.i] ? (t.kind === 'bird' ? birdPos : dragonPos)(list[t.i], sim.tick) : null;
     }
     case 'web': return c.webs[t.i] || null;
+    case 'firefly': { const f = sim.fireflySpots(rec)[t.i]; return f && sim.fireflyTime() ? sim.fireflyPos(f, sim.tick) : null; }
+    case 'moth': { // circling its porch light while it is lit and not taken
+      if (!sim.lit() || sim.raining || (st.caughtMoth && st.caughtMoth[t.i] > sim.tick)) return null;
+      const L = sim.lightsIn(rec), li = Math.floor(t.i / T.moths.perLight);
+      return li < L.length ? sim.mothPos(L[li], t.i % T.moths.perLight, sim.tick) : null;
+    }
   }
   return null;
 }
@@ -71,12 +79,14 @@ export function targetVel(sim, t) {
   if (!t) return Z;
   if (t.kind === 'wasp') { const x = sim.waspById(t.id) || sim.remote.get(t.id); return x ? { x: x.vx || 0, y: x.vy || 0, z: x.vz || 0 } : Z; }
   if (t.kind === 'human') { const hm = sim.humanByHex(t.hex); return hm && hm.state !== 'away' ? { x: hm.vx || 0, y: 0, z: hm.vz || 0 } : Z; } // a person's pace over their last step
-  if (t.kind !== 'fly' && t.kind !== 'bee' && t.kind !== 'bird' && t.kind !== 'dragonfly') return Z;
+  if (t.kind !== 'fly' && t.kind !== 'bee' && t.kind !== 'bird' && t.kind !== 'dragonfly' && t.kind !== 'moth' && t.kind !== 'firefly') return Z;
   const rec = sim.records.get(t.key);
   if (!rec) return Z;
   const c = rec.content, k = sim.tick;
   let a = null, b = null;
   if (t.kind === 'fly') { const f = c.flies[t.i]; if (f) { a = flyPos(f, k); b = flyPos(f, k + 1); } }
+  else if (t.kind === 'firefly') { const f = sim.fireflySpots(rec)[t.i]; if (f) { a = sim.fireflyPos(f, k); b = sim.fireflyPos(f, k + 1); } }
+  else if (t.kind === 'moth') { const L = sim.lightsIn(rec), li = Math.floor(t.i / T.moths.perLight); if (li < L.length) { a = sim.mothPos(L[li], t.i % T.moths.perLight, k); b = sim.mothPos(L[li], t.i % T.moths.perLight, k + 1); } }
   else if (t.kind === 'bee') { const hv = sim.hivesIn(rec)[t.h]; if (hv) { a = beePos(hv, t.i, k); b = beePos(hv, t.i, k + 1); } }
   else {
     const list = t.kind === 'bird' ? c.birds : c.dragonflies, s = (t.kind === 'bird' ? sim.birdState : sim.dragonState).get(t.key + '#' + t.i);
@@ -164,6 +174,8 @@ function candidates(sim, w) {
     c.baths.forEach((_, i) => one('bath', i));
     c.birds.forEach((_, i) => one('bird', i));
     c.dragonflies.forEach((_, i) => one('dragonfly', i));
+    for (const mo of sim.mothsIn(rec)) one('moth', mo.i);
+    for (const ff of sim.firefliesIn(rec)) one('firefly', ff.i);
     c.webs.forEach((_, i) => one('web', i));
   }
   for (const x of sim.wasps) if (x !== w && sim.isRival(x)) add({ kind: 'wasp', id: x.id }, targetPos(sim, { kind: 'wasp', id: x.id }));
@@ -263,6 +275,7 @@ function straightIn(sim, w, t, g) {
 export function assistPilot(sim, w, t, cmd) {
   const K = TARGET_KIND[t.kind] || {};
   if (!K.go) return { cmd, done: 'no' };
+  if (t.kind === 'firefly' && w.spat >= sim.tick - 2) return { cmd, done: 'spat' }; // taken and spat out
   if (w.state === 'landed') {
     // settled next to its prey (a caterpillar on a stalk): grab it from there
     const pp = K.prey && !w.carry ? targetPos(sim, t) : null;

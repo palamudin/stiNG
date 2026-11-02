@@ -271,6 +271,12 @@ export const T = {
   // circling it at orbit m; a hornet takes one as protein. bio: European hornets hunt at night and come to lights.
   // A hornet that wins a wrestle with another colony's wasp keeps it as prey (waspProtein).
   moths: { perLight: 3, orbit: 0.3, height: 2.3, out: 0.25, protein: 1, respawnTicks: 2400, strength: 5, waspProtein: 2 },
+  // Fireflies on summer evenings: over the lawns of parks, yards and woods (park, yards, forest per chunk) from before
+  // minutes before dusk to after minutes after it, mid-season (from..to of the season), not in rain; each drifts at its
+  // spot (wander m, height low..high m) and flashes for flash ticks every period ticks at its own phase. bio: Photinus
+  // pyralis, the common eastern firefly, flashes about every 5.5 s at dusk. They are distasteful (lucibufagins in their
+  // blood): a wasp that takes one spits it out and gets nothing.
+  fireflies: { park: 24, yards: 16, forest: 12, from: 0.3, to: 0.75, before: 20, after: 150, wander: 1.2, low: 0.35, high: 1.4, period: 330, flash: 28 },
   // The honeybee colony (T2-11). A bee standing at a flower in bloom gathers a pollen load (protein) in pollenSecs.
   // Cells are wax, made from sugar (waxSugar a pulp's worth), while the store is over waxFrom of its cap. In winter the
   // cluster eats winterNeed sugar per bee per day; what the store covers lives, less winterLoss, and a cluster under

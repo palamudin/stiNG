@@ -1144,6 +1144,38 @@ namespace Sting.Core.Tests
                     Ok(s.activeChunks.Any(r => s.LightsIn(r).Count > 0) && ev.Any(e => e.type == "caught" && (string)e["kind"] == "moth") && s.wasp.carry != null && s.wasp.carry.what == "moth", "at 22:00 a porch light burns with moths round it, and E at one takes it");
                 }
                 {
+                    var s = Mk("hornet"); long md = s.minute % 1440; s.clockOffset += (s.minute - md + 1320 - s.minute) * s.tpm; s.Minute(World.ClockMinutes(s.tick + s.clockOffset, s.settings));
+                    Moth? mo = null; string key = null; foreach (var r in s.activeChunks) { var ms = s.MothsIn(r); if (ms.Count > 0) { mo = ms[0]; key = r.key; break; } }
+                    var mp = mo.Value.p; Place(s.wasp, P(mp.x + 1.2, mp.y - 0.2, mp.z + 0.6));
+                    Num dx = mp.x - s.wasp.x, dy = mp.y - s.wasp.y, dz = mp.z - s.wasp.z, dd = Sqrt(dx * dx + dy * dy + dz * dz);
+                    var t = Assist.PickTarget(s, s.wasp, new V3(dx / dd, dy / dd, dz / dd)); var v = t != null ? Assist.TargetVel(s, t) : new V3(0, 0, 0);
+                    (Cmd cmd, string done) r2 = (null, null); int k = 0;
+                    for (; k < 600 && t != null; k++) { r2 = Assist.Pilot(s, s.wasp, t, Idle()); if (r2.done != null) break; s.Step(r2.cmd); s.DrainEvents(); }
+                    double vs = Math.Sqrt(D(v.x * v.x + v.y * v.y + v.z * v.z));
+                    Ok(t != null && t.kind == "moth" && t.key == key && vs > 0.1 && r2.done == "caught" && s.wasp.carry != null && s.wasp.carry.what == "moth",
+                        $"locked on a moth circling its porch light at {vs:0.00} m/s, assisted flight catches it ({r2.done} in {k / 60.0:0.00} s)");
+                }
+                // fireflies on summer evenings: over lawns, never in anything solid, each on its own beat; taken, they are spat out
+                {
+                    Sim Dusk(string sp, double frac, Num at) { var x = Mk(sp); long md = x.minute % 1440; x.clockOffset += (long)(at - md) * x.tpm; x.Minute(World.ClockMinutes(x.tick + x.clockOffset, x.settings)); x.season.startMinute = x.minute - (long)(frac * x.settings.seasonDays * 1440); RunS(x, 1); return x; }
+                    var s = Dusk("hornet", 0.45, T.time.dusk + 30); var noon = Dusk("hornet", 0.45, 13 * 60); var spring = Dusk("hornet", 0.1, T.time.dusk + 30);
+                    var all = new List<(ChunkRec r, Firefly f)>(); foreach (var rr in s.activeChunks) foreach (var f in s.FireflySpots(rr)) all.Add((rr, f));
+                    Num FW = T.fireflies.wander; bool clear = true;
+                    foreach (var (rr, f) in all) { foreach (var b in rr.content.boxes) if (f.x > b.minx - FW && f.x < b.maxx + FW && f.z > b.minz - FW && f.z < b.maxz + FW) clear = false; foreach (var c in s.CylsOf(rr)) if (Hypot(f.x - c.x, f.z - c.z) < D(c.r + FW)) clear = false; }
+                    var lit = new HashSet<Firefly>(); for (int k0 = 0; k0 < T.fireflies.period; k0 += 10) foreach (var (rr, f) in all) if (Sim.FireflyGlow(f, s.tick + k0)) lit.Add(f);
+                    int now = 0; foreach (var (rr, f) in all) if (Sim.FireflyGlow(f, s.tick)) now++;
+                    Ok(all.Count > 20 && s.FireflyTime() && !noon.FireflyTime() && !spring.FireflyTime() && clear && lit.Count == all.Count && now < all.Count / 3,
+                        $"fireflies on a midsummer evening: {all.Count} over the lawns round the nest, clear of trees and sheds; none at noon or in spring; each flashes on its own beat ({now} lit at once)");
+                    ChunkRec rec = null; foreach (var rr in s.activeChunks) if (s.FirefliesIn(rr).Count > 0) { rec = rr; break; }
+                    var ff = s.FirefliesIn(rec)[0].p; Place(s.wasp, P(ff.x + 1, ff.y + 0.3, ff.z + 0.5));
+                    Num dx = ff.x - s.wasp.x, dy = ff.y - s.wasp.y, dz = ff.z - s.wasp.z, dd = Sqrt(dx * dx + dy * dy + dz * dz);
+                    var t = Assist.PickTarget(s, s.wasp, new V3(dx / dd, dy / dd, dz / dd));
+                    (Cmd cmd, string done) r = (null, null); int k = 0, spat = 0;
+                    for (; k < 600; k++) { r = Assist.Pilot(s, s.wasp, t, Idle()); if (r.done != null) break; s.Step(r.cmd); foreach (var e in s.DrainEvents()) if (e.type == "spat") spat++; }
+                    Ok(t != null && t.kind == "firefly" && r.done == "spat" && spat == 1 && s.wasp.carry == null && s.FirefliesIn(rec).Count == s.FireflySpots(rec).Count,
+                        $"locked on a firefly, assisted flight takes it and the hornet spits it out (in {k / 60.0:0.00} s): it carries nothing home, and the firefly flies on");
+                }
+                {
                     var s = Mk("hornet"); RunS(s, 600); var rv = s.wasps.First(x => Sim.IsRival(x) && x.state == "fly");
                     Place(s.wasp, P(rv.x + 0.01, rv.y, rv.z)); var ev = RunS(s, 2, (sim, i) => Idle(c => c.act = i == 0 ? Act.Interact : 0));
                     Ok(ev.Any(e => e.type == "waspDied" && (string)e["cause"] == "taken by a hornet") && s.wasp.carry != null && s.wasp.carry.what == "wasp", "a hornet takes a rival yellowjacket on the wing and carries it home as prey");

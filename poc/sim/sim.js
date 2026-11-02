@@ -1450,6 +1450,9 @@ export class Sim {
     if (c && w.state === 'fly') { this._perch(w, c); return; }
     const prey = !w.carry ? this._preyNear(w) : null; // one load at a time (T1-20)
     if (prey) { this._catch(w, prey); return; }
+    // a firefly: taken, tasted and spat out; it flies on, and the insect has nothing for it
+    const ff = !w.carry ? this._fireflyNear(w) : null;
+    if (ff) { w.spat = this.tick; this.emit('spat', { id: w.id, what: 'firefly' }); return; }
     if (!w.carry && SP.hunts && this._baitNear(w)) { this._takeBait(w); return; }
     const wet = !w.carry ? this._waterNear(w) : null; // T2-1
     if (wet) { w.state = 'chewing'; w.chew = 0; w.chewAt = { key: wet.key, i: wet.i, water: true }; w.vx = w.vy = w.vz = 0; this.emit('drinkStart', { id: w.id }); return; }
@@ -1463,6 +1466,7 @@ export class Sim {
     this.hint = {
       opening: c && c.opening >= 0 ? c.openingKey : null,
       prey: !w.carry && this._preyNear(w) ? this._preyNear(w).kind : null,
+      firefly: !w.carry && !!this._fireflyNear(w),
       bait: !w.carry && SP.hunts && !!this._baitNear(w),
       wood: !w.carry && !c && SP.wood && !!this._woodNear(w),
       water: !w.carry && !c && !!this._waterNear(w),
@@ -3483,6 +3487,40 @@ export class Sim {
     return list;
   }
   lit(m = this.minute) { return !isDaylight(m); }
+  // Fireflies (summer evenings): out now? The season's middle, around dusk, dry
+  fireflyTime(m = this.minute) {
+    const F = T.fireflies, md = minuteOfDay(m), f = (m - this.season.startMinute) / (this.settings.seasonDays * 1440);
+    return !this.raining && f >= F.from && f <= F.to && md >= T.time.dusk - F.before && md <= T.time.dusk + F.after;
+  }
+  // a chunk's fireflies: where each one drifts and its flash phase, from the seed; none over a town or a mall
+  fireflySpots(rec) {
+    if (rec._ff) return rec._ff;
+    const F = T.fireflies, sd = Number(this.seed & 0xffffffffn), CS = T.chunk.size, n = F[rec.content.use || 'park'] || 0, list = [];
+    // its whole drift stays clear of anything solid: a few tries for a spot in the open, else none
+    const m = F.wander + 0.3, boxes = rec.content.boxes, cyls = this._cylsOf(rec);
+    const open = (x, z) => !boxes.some((b) => x > b.minx - m && x < b.maxx + m && z > b.minz - m && z < b.maxz + m) && !cyls.some((c) => sq(x - c.x) + sq(z - c.z) < sq(c.r + m));
+    for (let i = 0; i < n; i++) for (let k = 0; k < 6; k++) {
+      const u = (j) => hseq(sd, rec.cx, rec.cz, i * 8 + k, 970 + j), x = (rec.cx + (u(0) - 0.5) * 0.9) * CS, z = (rec.cz + (u(1) - 0.5) * 0.9) * CS;
+      if (!open(x, z)) continue;
+      list.push({ i: list.length, x, z, y: F.low + u(2) * (F.high - F.low), w: 0.25 + 0.25 * u(3), p: u(4) * TAU, ph: Math.floor(u(5) * F.period) });
+      break;
+    }
+    rec._ff = list;
+    return list;
+  }
+  fireflyPos(f, tick) {
+    const F = T.fireflies, t = tick / 60;
+    return { x: f.x + F.wander * dsin(f.w * t + f.p), y: f.y + 0.25 * dsin(f.w * 1.7 * t + f.p), z: f.z + F.wander * dcos(f.w * 0.8 * t + f.p * 1.3) };
+  }
+  fireflyGlow(f, tick) { return (tick + f.ph) % T.fireflies.period < T.fireflies.flash; }
+  firefliesIn(rec) { return this.fireflyTime() ? this.fireflySpots(rec).map((f) => ({ i: f.i, ...this.fireflyPos(f, this.tick) })) : []; }
+  // one in grab reach of this insect, or null
+  _fireflyNear(w) {
+    if (!spw(w).hunts || !this.fireflyTime()) return null;
+    const r = T.prey.catchDist * this._mul(w, 'grabR'), r2 = r * r;
+    for (const rec of this.activeChunks) for (const f of this.fireflySpots(rec)) if (dist2(w, this.fireflyPos(f, this.tick)) <= r2) return { key: chunkKey(rec.cx, rec.cz), i: f.i };
+    return null;
+  }
   // where moth k of a light is (i = light * perLight + k)
   mothPos(l, k, tick) {
     const M = T.moths, a = tick * 0.045 * (1 + 0.25 * k) + k * 2.1;

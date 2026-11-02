@@ -644,6 +644,14 @@ const mothMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.006, 6, 5), 
 const lampMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.06, 10, 8), new THREE.MeshBasicMaterial({ color: '#ffdf9a' }), 256);
 const glowMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.4, 12, 10), new THREE.MeshBasicMaterial({ color: '#ffc870', transparent: true, opacity: 0.1, depthWrite: false }), 256);
 for (const m of [flyMesh, catMesh, beeMesh, mothMesh, lampMesh, glowMesh]) { m.count = 0; m.frustumCulled = false; scene.add(m); }
+// fireflies: a dark body each, and a point of light that holds its size on screen when one flashes
+const fireflyMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.004, 6, 5), mat('#2b2618'), MAXI); fireflyMesh.count = 0; fireflyMesh.frustumCulled = false; scene.add(fireflyMesh);
+const FF_MAX = 512, ffGeo = new THREE.BufferGeometry(), ffPos = new Float32Array(FF_MAX * 3);
+ffGeo.setAttribute('position', new THREE.BufferAttribute(ffPos, 3)); ffGeo.setDrawRange(0, 0);
+const ffDot = (() => { const c = document.createElement('canvas'); c.width = c.height = 32; const g = c.getContext('2d'), r = g.createRadialGradient(16, 16, 0, 16, 16, 16);
+  r.addColorStop(0, 'rgba(255,255,220,1)'); r.addColorStop(0.25, 'rgba(225,255,110,0.9)'); r.addColorStop(1, 'rgba(160,255,60,0)'); g.fillStyle = r; g.fillRect(0, 0, 32, 32); return new THREE.CanvasTexture(c); })();
+const ffGlow = new THREE.Points(ffGeo, new THREE.PointsMaterial({ map: ffDot, color: '#ffffff', size: 11, sizeAttenuation: false, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+ffGlow.frustumCulled = false; scene.add(ffGlow);
 const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(1, 1, 1), _p = new THREE.Vector3();
 
 // Pest-control bait stations: a dark box on the trunk with the bait showing through its slot
@@ -763,6 +771,16 @@ function renderCritters(t) {
   { let best = null, bd = 30 * 30; if (nl) for (const rec of sim.activeChunks) for (const l of sim.lightsIn(rec)) { const d = (l.x - camera.position.x) ** 2 + (l.z - camera.position.z) ** 2; if (d < bd) { bd = d; best = l; } }
     porchLight.intensity = best ? 2.2 : 0; if (best) porchLight.position.set(best.x + best.nx * 0.3, best.y + (sim.settings.terrain ? sim.ground(best.x, best.z) : 0), best.z + best.nz * 0.3); }
   for (const m of [lampMesh, glowMesh, mothMesh]) m.instanceMatrix.needsUpdate = true;
+  // fireflies on summer evenings: each flashes on its own beat
+  let nff = 0, nfg = 0;
+  if (sim.fireflyTime()) for (const rec of sim.activeChunks) for (const f of sim.fireflySpots(rec)) {
+    if (nff >= MAXI) break;
+    const p = sim.fireflyPos(f, t);
+    fireflyMesh.setMatrixAt(nff++, _m4.makeTranslation(p.x, p.y, p.z));
+    if (nfg < FF_MAX && sim.fireflyGlow(f, Math.floor(t))) { ffPos[nfg * 3] = p.x; ffPos[nfg * 3 + 1] = p.y; ffPos[nfg * 3 + 2] = p.z; nfg++; }
+  }
+  fireflyMesh.count = nff; fireflyMesh.instanceMatrix.needsUpdate = true;
+  ffGeo.setDrawRange(0, nfg); ffGeo.attributes.position.needsUpdate = true;
   // carrion (T1-8): a small dark carcass on the grass
   let nk = 0;
   for (const rec of sim.activeChunks) for (const cr of sim.carrionIn(rec)) {
@@ -1758,7 +1776,7 @@ function buildCmd() {
     const r = assistPilot(sim, w, input.pilot, cmd);
     if (r.done) {
       input.pilot = null;
-      const say = { landed: 'Landed', perched: 'On them', caught: 'Got it', gone: 'It is gone' }[r.done];
+      const say = { landed: 'Landed', perched: 'On them', caught: 'Got it', gone: 'It is gone', spat: 'Spat it out' }[r.done];
       if (say) toast(say, 'var(--yellow)', 1);
       if (say) input.lock = null; // there, or gone: the lock has done its job
       if (cmd.burst) { input.eatBurst = true; cmd.burst = 0; } // Shift still held from hurrying: not a take-off until let go
@@ -1793,7 +1811,7 @@ function swoop() {
   else input.swoopOnce = true;
 }
 // E with a lock on something the wasp can go to, and nothing to act on right here: fly there
-function interactNear() { const h = sim.hint || {}; return !!(h.prey || h.bait || h.wood || h.water || h.site || h.rival || h.hive || h.hiber || h.opening || (h.raid !== null && h.raid !== undefined)); }
+function interactNear() { const h = sim.hint || {}; return !!(h.prey || h.firefly || h.bait || h.wood || h.water || h.site || h.rival || h.hive || h.hiber || h.opening || (h.raid !== null && h.raid !== undefined)); }
 function startPilot() {
   if (!input.lock || !TARGET_KIND[input.lock.kind].go || interactNear()) return false;
   if (!sim.hasSkill(sim._driven(), 'assist')) { toast('Assisted flight is a skill: learn it in the colony view (N)', 'var(--muted)', 1.6); return false; }
@@ -1822,6 +1840,7 @@ function eyeTurnUp() {
 // Has the wasp got to the locked target? The words to say when it has, else null
 function lockArrived(w, t) {
   const K = TARGET_KIND[t.kind] || {};
+  if (t.kind === 'firefly') return w.spat >= sim.tick - 30 ? 'Spat it out' : null;
   if (K.prey) return w.carry && !t.carry0 ? 'Got it' : null;
   if (t.kind === 'human') return w.state === 'perched' && w.perch && w.perch.hex === t.hex ? 'On them' : w.state === 'under' && w.under && w.under.hex === t.hex ? 'Under their clothes' : null;
   if (!K.go) return null; // a hazard is watched, never reached
@@ -2282,6 +2301,7 @@ function updateHud() {
     }
   } else if (w.state === 'chewing') hint = `Keep holding ${kbd('E')}`;
   else if (h.opening) hint = `${kbd('E')} crawl in at the ${h.opening}`;
+  else if (h.firefly && !h.prey) hint = `A firefly · ${kbd('E')} catch it (they taste foul)`;
   else if (h.prey) hint = h.prey === 'carrion' ? `${kbd('E')} take a load of meat from the carcass` : h.prey === 'meat' ? `${kbd('E')} grab a piece of barbecue meat` : `${kbd('E')} catch the ${h.prey}`;
   else if (h.bait) hint = `${kbd('E')} take the meat from the station`;
   else if (h.water) hint = `Hold ${kbd('E')} to take water home${sim.nestHeat().heat > 0 ? ' · the nest is hot' : ''}`;
@@ -2774,6 +2794,7 @@ function handleEvents(events) {
       case 'learnDenied': toast('Not enough XP', 'var(--muted)', 1); break;
       case 'colonySwitch': toast(`You take the ${SPECIES_NAME[e.species]} in hand. The colony you left goes on under the AI.`, 'var(--yellow)', 3); lineSig = ''; skillSig = ''; syncNests(); waspSwitched(sim.drivenId, 0.98); syncChunks(); break; // GDD 6.8
       case 'switchDenied': toast('That colony cannot be taken in hand now', 'var(--muted)', 1.4); break;
+      case 'spat': if (e.what === 'firefly') { toast('Spat it out. Fireflies taste foul: their blood carries lucibufagins, a poison most hunters learn to leave alone.', 'var(--muted)', 4); logEvent('a firefly, spat out'); } break;
       case 'quickRelease': if (e.driven) toast('Pulled out just in time', 'var(--yellow)', 1); break;
       case 'sisterFounded': logEvent(`a sister colony of the line was founded ${Math.round(Math.hypot(e.x - sim.nest.x, e.z - sim.nest.z))} m away`); break; // T2-4
       case 'sisterLost': toast('A sister colony of the line has died out', 'var(--red)', 2); break;

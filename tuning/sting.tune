@@ -686,6 +686,20 @@ respawnTicks = 2400
 strength = 5
 waspProtein = 2
 
+[fireflies]
+park = 24
+yards = 16
+forest = 12
+from = 0.3
+to = 0.75
+before = 20
+after = 150
+wander = 1.2
+low = 0.35
+high = 1.4
+period = 330
+flash = 28
+
 [hive]
 pollenSecs = 4
 pollenLoad = 1

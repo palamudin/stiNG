@@ -264,6 +264,8 @@ namespace Sting.Core
         /// The player gauge (GDD 6.8); see tuning.js
         public static class gauge { public static Num window = 3, @ref = 40, floor = 0.25, minDays = 1, effMin = 0.8; }
         /// Hornets at night (T2-10): porch lights and moths; see tuning.js
+        /// Fireflies on summer evenings; see tuning.js
+        public static class fireflies { public static int park = 24, yards = 16, forest = 12, period = 330, flash = 28; public static Num from = 0.3, to = 0.75, before = 20, after = 150, wander = 1.2, low = 0.35, high = 1.4; }
         public static class moths { public static int perLight = 3, respawnTicks = 2400; public static Num orbit = 0.3, height = 2.3, @out = 0.25, protein = 1, strength = 5, waspProtein = 2; }
         /// The honeybee colony (T2-11): see tuning.js
         public static class hive
