@@ -1043,7 +1043,7 @@ On Main the entity count is dominated by AI wasps: one player's colony can hold 
 | Q-16 | Humans outside a peer's interest | Settled (18.9): committed interest windows; humans simulated over the union |
 | Q-17 | Should the colony economy balance stores late in the season (sugar piles up)? | Settled (18.11): stores are capped at a few days of need |
 | Q-18 | What earns experience, how events are weighted, and where the hornet and bee bars sit; does a stab count every sting or only unique humans? | Start from events the sim already emits (6.8), earned in hand, and by AI colonies at the player gauge's rates; stabs follow the counter (unique humans); tune the bars, the gauge window and its floor on play data |
-| Q-19 | Is the change of species one-way? Can a hornet line go back, or a bee line earn its way back to wasps or on to hornets? | Proposal: hornets are one-way; a bee line that runs a strong year is offered wasps again |
+| Q-19 | Is the change of species one-way? Can a hornet line go back, or a bee line earn its way back to wasps or on to hornets? | Settled and built (18.63): hornets are one-way; a bee line that runs a strong year is offered wasps again |
 | Q-20 | When a line takes the bee offer, what happens to its wasp queens? | Settled 2026-10-27: they found AI-run lineage colonies (18.40); the player can hold several colonies at once and switch between them, the rest auto-managed (6.8, multi-colony play) |
 | Q-21 | Termites are not ants (they are closer to cockroaches). Can an ant line "mutate" into termites, or do termites start their own line? | Settled 2026-10-29: termites are a branch of the ant progression, a subspecies-style step, with an explanatory card: not ants but cockroach relatives that evolved the same colony life on their own (convergent evolution) (6.9) |
 | Q-22 | What does a tree brought down by wood-eating units mean in a persistent world: is it a chunk delta, does it regrow, who may do it where? | Open (T4, 6.9) |
@@ -1954,6 +1954,29 @@ E is pressed in pulses, as the assisted flight does, because a held E would act 
 
 **Checks.** In headless Chromium on an emulated phone, a wasp placed 1.5 cm from a caterpillar settled beside it and caught it two ticks later with no button pressed. There were no console errors.
 
+### 18.63 The year's turn for hornet and honeybee lines (6.8, Q-19)
+
+**Closes a T0 limit (18.48).** Only wasp lines had a year's turn. Q-19 is now settled as proposed:
+- **Hornets are one way.** A hornet line is offered nothing.
+- **A honeybee line can go back.** A bee line that runs a strong year is offered wasps.
+
+**A year is measured, not a lifetime.** Each line keeps a mark: the XP it had at its last winter. A honeybee line is offered wasps when it earned at least `T.xp.waspXp` (300) since then. A line that is rich from old years but idle this one is not.
+
+**How it plays.** A honeybee colony winters as a cluster (T2-11), so there is no queen to choose. After a strong year the winter screen opens like a wasp winter:
+- **Waking a wasp queen.** It lists up to five sheltered sites near the hive, each a young queen to wake as a wasp. The one woken founds a wasp colony there, and the hive goes on under the AI as a colony of the line.
+- **Staying.** "Stay in the hive", or the timeout, springs on in the hive as before.
+
+A quiet year springs straight on, with no screen. The mark is kept in saves (C# save version 32).
+
+**Checks.** JS and both C# builds agree:
+- A hornet line is offered nothing, however strong.
+- A honeybee line that earned 300 XP this year is offered wasps; one that earned it before its last winter is not.
+- Taking the offer wakes a wasp queen without a nest, and the hive (220 bees) goes on in the line.
+- Staying keeps the hive in hand.
+- A quiet year has no offer.
+
+The 29 digests are unchanged. 402 properties hold.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -1962,7 +1985,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (113 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony; the T0 of progression (18.48): XP, unit and hive skills, the year's turn; multi-colony play with the player gauge (18.49); wintering in somewhere warm (18.50); chasing moving prey with a lock, with a colony view you can click (18.51); obstacle avoidance in assisted flight (18.52); reaching what moves under a lock (18.53); the lock ending on arrival (18.54); Shift hurrying an assisted flight (18.55); landing at speed with hovering round a lock (18.56); lines, the wasp in hand and roles passed on by masters (18.57); playing with a controller only, Xbox included (18.58); touch controls for phones and tablets (18.59); the map: minimap sizes, the big map and a phone HUD (18.60); colony switching through the relay (18.61); and auto grab (18.62). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (114 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony; the T0 of progression (18.48): XP, unit and hive skills, the year's turn; multi-colony play with the player gauge (18.49); wintering in somewhere warm (18.50); chasing moving prey with a lock, with a colony view you can click (18.51); obstacle avoidance in assisted flight (18.52); reaching what moves under a lock (18.53); the lock ending on arrival (18.54); Shift hurrying an assisted flight (18.55); landing at speed with hovering round a lock (18.56); lines, the wasp in hand and roles passed on by masters (18.57); playing with a controller only, Xbox included (18.58); touch controls for phones and tablets (18.59); the map: minimap sizes, the big map and a phone HUD (18.60); colony switching through the relay (18.61); auto grab (18.62); and the year's turn for hornet and honeybee lines (18.63). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 

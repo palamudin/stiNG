@@ -258,13 +258,14 @@ namespace Sting.Core
     /// a colony of the line run by the AI (T2-4)
     public sealed class LineColony { public int id, season; public Nest nest; public ColonyState colony; /** when the exterminator comes for it (0: not called) */ public long ext; }
     public sealed class HiberSite { public string kind; public Num x, y, z, q; public int n; public bool scouted; }
-    public sealed class Winter { public string why; public List<HiberSite> sites = new List<HiberSite>(); public Num survivors, lineage; public int until; /** the year's turn (GDD 6.8): "hornet", "bee" or null */ public string offer; /** the line's hives, wintering as clusters */ public List<LineColony> keep; /** the player's own nest wintered in (GDD 6.8) */ public bool home; }
-    /// the line's XP and skills (GDD 6.8)
+    public sealed class Winter { public string why; public List<HiberSite> sites = new List<HiberSite>(); public Num survivors, lineage; public int until; /** the year's turn (GDD 6.8): "hornet", "bee" or null */ public string offer; /** the line's hives, wintering as clusters */ public List<LineColony> keep; /** the player's own nest wintered in (GDD 6.8) */ public bool home; /** a honeybee hive's winter with a wasp offer (Q-19), and its length in days */ public bool bee; public Num days; }
     /// a line's XP, stabs, skills and role levels (GDD 6.8); a line is the player's colonies of one species
     public sealed class Prog
     {
         public Num unit, unitTotal, hive, hiveTotal; public int stabs; public int[] ranks = new int[Skills.ALL.Length]; public int[] roles = new int[Skills.ROLES.Length];
-        public Prog Copy() => new Prog { unit = unit, unitTotal = unitTotal, hive = hive, hiveTotal = hiveTotal, stabs = stabs, ranks = (int[])ranks.Clone(), roles = (int[])roles.Clone() };
+        /// the XP the line had at its last winter: a year is measured from here (Q-19)
+        public Num mark;
+        public Prog Copy() => new Prog { unit = unit, unitTotal = unitTotal, hive = hive, hiveTotal = hiveTotal, stabs = stabs, ranks = (int[])ranks.Clone(), roles = (int[])roles.Clone(), mark = mark };
     }
     /// the player gauge (GDD 6.8): XP earned in hand, the part counted, the smoothed rate per day, days measured; the player's, across lines
     public sealed class Player { public Num hand, handSeen, gaugeRate, gaugeDays; }

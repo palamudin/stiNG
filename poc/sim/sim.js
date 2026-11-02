@@ -2318,6 +2318,7 @@ export class Sim {
     for (const w of this.wasps.slice()) this._despawn(w);
     this.ghost = null;
     this.winter = { why, sites, survivors, lineage, until: this.tick + H.chooseTicks, offer: this._offer(), keep, home };
+    this.prog.mark = this.prog.unitTotal + this.prog.hiveTotal; // the next year is measured from here
     if (this.winter.offer) this.emit('offer', { species: this.winter.offer });
   }
 
@@ -2351,6 +2352,18 @@ export class Sim {
     });
     this.emit('winter', { why, bee: true, adults: Math.floor(mine ? this.colony.adults : 0), honey: this.colony.sugar, sisters: this.line.length, season: n, mated: 0, survivors: mine ? 1 : 0, lineage: this.line.length, sites: [] });
     if (!mine && !this.line.length) { this.extinct = true; this.emit('lineExtinct', { nestAlive: this.colony.nestAlive }); return; }
+    const offer = mine ? this._offer() : null;
+    this.prog.mark = this.prog.unitTotal + this.prog.hiveTotal; // the next year is measured from here
+    if (offer) { // a strong year: one of the hive's young queens may found a wasp colony instead (Q-19); the hive goes on under the AI
+      const H = T.hiber, cands = this.hiberSites(), order = cands.map((x, i) => i).sort((a, b) => cands[b].q - cands[a].q || a - b).slice(0, H.spread);
+      const sites = order.map((i) => ({ kind: cands[i].kind, x: cands[i].x, y: cands[i].y, z: cands[i].z, q: cands[i].q, n: 1, scouted: false }));
+      if (sites.length) {
+        this.winter = { why, bee: true, days, sites, survivors: 1, lineage: 0, until: this.tick + H.chooseTicks, offer, keep: this.line, home: true };
+        this.line = [];
+        this.emit('offer', { species: offer });
+        return;
+      }
+    }
     this._hiveSpring(days, n, mine);
   }
   // Spring after a winter in the hive: the same hive, or with yours gone the strongest colony of the line's
@@ -2403,8 +2416,11 @@ export class Sim {
   // 2000 stays in the nest that wintered in, the default when it did (GDD 6.8)
   _winterStep(k) {
     const W = this.winter;
-    if (W.home && (k === 2000 || (k === 0 && this.tick >= W.until))) { this._wakeHome(); return; }
     const morph = k > 1000 && k < 2000 && !!W.offer;
+    if (W.bee && !morph && (k === 2000 || (k >= 1 && k <= W.sites.length) || (k === 0 && this.tick >= W.until))) { // the hive goes on, with you in it
+      this.winter = null; this.line = W.keep; this._hiveSpring(W.days, this.season.n, true); return;
+    }
+    if (W.home && (k === 2000 || (k === 0 && this.tick >= W.until))) { this._wakeHome(); return; }
     if (morph) k -= 1000;
     const ok = k >= 1 && k <= W.sites.length;
     if (ok || this.tick >= W.until) this._spring(ok ? k - 1 : 0, ok && morph);
@@ -2472,7 +2488,7 @@ export class Sim {
 
   // ---------------- progression (GDD 6.8): XP, skills, the year's turn
 
-  _newProg() { return { unit: 0, unitTotal: 0, hive: 0, hiveTotal: 0, stabs: 0, ranks: SKILLS.map(() => 0), roles: ROLES.map(() => 0) }; }
+  _newProg() { return { unit: 0, unitTotal: 0, hive: 0, hiveTotal: 0, stabs: 0, ranks: SKILLS.map(() => 0), roles: ROLES.map(() => 0), mark: 0 }; } // mark: the XP the line had at its last winter
   _newPlayer() { return { hand: 0, handSeen: 0, gaugeRate: 0, gaugeDays: 0 }; }
   // Each line keeps its own XP, stabs and tree (GDD 6.8); a line is the player's colonies of one species
   get prog() { return this._lpw(this.species); }
@@ -2587,10 +2603,14 @@ export class Sim {
     this.prog[c.pool] -= c.cost; this.prog.ranks[i]++;
     this.emit('learned', { id, rank: this.prog.ranks[i], pool: c.pool, cost: c.cost });
   }
-  // The year's turn: a wasp line strong enough may wake as hornets; one that is not is offered honeybees
+  // The year's turn: a wasp line strong enough may wake as hornets; one that is not is offered honeybees. A hornet line
+  // stays hornets (one way, Q-19); a honeybee line that ran a strong year (the XP it earned since its last winter) is
+  // offered wasps again.
   _offer() {
     const P = this.prog, X = T.xp, xp = P.unitTotal + P.hiveTotal, prog = this.settings.progression || 'open';
-    if (this.species !== 'wasp' || prog.startsWith('fixed:')) return null;
+    if (prog.startsWith('fixed:')) return null;
+    if (this.species === 'bee') return xp - (P.mark || 0) >= X.waspXp ? 'wasp' : null;
+    if (this.species !== 'wasp') return null;
     if (xp >= X.hornetXp && P.stabs >= X.hornetStabs) return 'hornet';
     if (xp < X.beeXp && P.stabs < X.beeStabs) return 'bee';
     return null;

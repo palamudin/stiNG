@@ -1966,6 +1966,19 @@ function seated(sim, pred) {
     ok(t.species === 'bee' && t.colony.adults === T.xp.beeSwarm && !t.colony.sited, `a weak line can try a honeybee colony: a queen with a swarm of ${t.colony.adults}`); }
   { const { t } = yearEnd(0, 0); run(t, 1, () => idle({ pick: 1 }));
     ok(t.species === 'wasp' && t.colony.species === 'wasp', 'declining the offer, the line goes on as wasps'); }
+  // Q-19: a hornet line stays hornets; a honeybee line's strong year is offered wasps again
+  { const h = mk({ species: 'hornet' }); h.prog.unitTotal = 1e4; h.prog.stabs = 1e3; const hx = h._offer();
+    const b = mk({ species: 'bee' }); b.prog.hiveTotal = T.xp.waspXp; const strong = b._offer(); b.prog.mark = T.xp.waspXp - 1; const quiet = b._offer();
+    ok(hx === null && strong === 'wasp' && quiet === null, 'the year\'s turn: a hornet line is offered nothing (one way); a honeybee line that earned its bar this year is offered wasps, one that did not is not'); }
+  const beeYear = (xp) => { const t = mk({ species: 'bee' }); t.prog.hiveTotal = xp; t.colony.sugar = 5000; t.colony.adults = 400; t.season.startMinute -= 0.99 * t.settings.seasonDays * 1440; const ev = run(t, 120); return { t, ev }; };
+  { const { t, ev } = beeYear(T.xp.waspXp); const hive = t.colony, W = t.winter;
+    const offered = ev.some((e) => e.type === 'offer' && e.species === 'wasp') && W && W.bee && W.sites.length > 0;
+    run(t, 1, () => idle({ pick: 1001 }));
+    ok(offered && t.species === 'wasp' && t.colony.species === 'wasp' && t.colony.sited === false && t.wasp.caste === 'queen' && t.line.some((x) => x.colony === hive) && t.prog.mark >= T.xp.waspXp,
+      `a honeybee line's strong year: a young queen founds a wasp colony and the hive goes on under the AI (${hive.adults.toFixed(0)} bees)`); }
+  { const { t } = beeYear(T.xp.waspXp); const hive = t.colony; run(t, 1, () => idle({ pick: 2000 }));
+    ok(!t.winter && t.species === 'bee' && t.colony === hive, 'staying, the line goes on in its hive'); }
+  { const { t, ev } = beeYear(0); ok(!t.winter && t.species === 'bee' && !ev.some((e) => e.type === 'offer') && ev.some((e) => e.type === 'spring'), 'a quiet honeybee year springs on in the hive with no offer'); }
 }
 
 // 51. Multi-colony play and the player gauge (GDD 6.8)

@@ -1285,6 +1285,26 @@ namespace Sting.Core.Tests
                 }
                 { var (t, _) = YearEnd(0, 0); RunS(t, 1, (sim, i) => Idle(c => c.pick = 1001)); Ok(t.species == "bee" && t.colony.adults == T.xp.beeSwarm && !t.colony.sited, $"a weak line can try a honeybee colony: a queen with a swarm of {D(t.colony.adults)}"); }
                 { var (t, _) = YearEnd(0, 0); RunS(t, 1, (sim, i) => Idle(c => c.pick = 1)); Ok(t.species == "wasp" && t.colony.species == "wasp", "declining the offer, the line goes on as wasps"); }
+                // Q-19: a hornet line stays hornets; a honeybee line's strong year is offered wasps again
+                {
+                    var h = Mk(new Settings { species = "hornet" }); h.prog.unitTotal = 10000; h.prog.stabs = 1000; var hx = h.Offer();
+                    var b = Mk(new Settings { species = "bee" }); b.prog.hiveTotal = T.xp.waspXp; var strong = b.Offer(); b.prog.mark = T.xp.waspXp - 1; var quiet = b.Offer();
+                    Ok(hx == null && strong == "wasp" && quiet == null, "the year's turn: a hornet line is offered nothing (one way); a honeybee line that earned its bar this year is offered wasps, one that did not is not");
+                }
+                (Sim t, List<SimEvent> ev) BeeYear(Num xp)
+                {
+                    var t = Mk(new Settings { species = "bee" }); t.prog.hiveTotal = xp; t.colony.sugar = 5000; t.colony.adults = 400; t.season.startMinute -= 0.99 * t.settings.seasonDays * 1440;
+                    return (t, RunS(t, 120));
+                }
+                {
+                    var (t, ev) = BeeYear(T.xp.waspXp); var hive = t.colony; var W = t.winter;
+                    bool offered = ev.Exists(e => e.type == "offer" && (string)e["species"] == "wasp") && W != null && W.bee && W.sites.Count > 0;
+                    RunS(t, 1, (sim, i) => Idle(c => c.pick = 1001));
+                    Ok(offered && t.species == "wasp" && t.colony.species == "wasp" && !t.colony.sited && t.wasp.caste == "queen" && t.line.Exists(x => x.colony == hive) && t.prog.mark >= T.xp.waspXp,
+                        $"a honeybee line's strong year: a young queen founds a wasp colony and the hive goes on under the AI ({D(hive.adults):0} bees)");
+                }
+                { var (t, _) = BeeYear(T.xp.waspXp); var hive = t.colony; RunS(t, 1, (sim, i) => Idle(c => c.pick = 2000)); Ok(t.winter == null && t.species == "bee" && t.colony == hive, "staying, the line goes on in its hive"); }
+                { var (t, ev) = BeeYear(0); Ok(t.winter == null && t.species == "bee" && !ev.Exists(e => e.type == "offer") && ev.Exists(e => e.type == "spring"), "a quiet honeybee year springs on in the hive with no offer"); }
             }
             // 51. multi-colony play and the player gauge (GDD 6.8)
             {

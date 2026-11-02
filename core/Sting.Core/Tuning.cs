@@ -246,7 +246,7 @@ namespace Sting.Core
         public static class xp
         {
             public static Num sting = 4, firstHuman = 6, full = 2, @catch = 3, deposit = 1, rob = 4, release = 2, emerged = 0.1, load = 0.05, raised = 2,
-                hornetXp = 600, hornetStabs = 25, beeXp = 150, beeStabs = 5, beeSwarm = 60;
+                hornetXp = 600, hornetStabs = 25, beeXp = 150, beeStabs = 5, beeSwarm = 60, waspXp = 300;
             public static Num Of(string k) => k switch { "sting" => sting, "firstHuman" => firstHuman, "full" => full, "catch" => @catch, "deposit" => deposit, "rob" => rob, "release" => release, _ => 0 };
         }
         /// Skills (GDD 6.8): costs and what a rank adds; see tuning.js

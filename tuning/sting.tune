@@ -628,6 +628,7 @@ hornetStabs = 25
 beeXp = 150
 beeStabs = 5
 beeSwarm = 60
+waspXp = 300
 
 [skills]
 swoop = 40

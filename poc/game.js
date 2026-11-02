@@ -2761,6 +2761,7 @@ function handleEvents(events) {
       case 'knockedOff': if (e.id === sim.drivenId) toast('Knocked off', 'var(--yellow)', 1.2); break;
       case 'nestFounded': toast(e.auto ? 'The queen settled in a tree near where she wintered' : e.house ? `Nest founded inside a house: warm enough to winter through, but grow past ${T.warm.houseNotice} and the people will find it` : e.warm ? 'Nest founded in a giant tree\'s hollow: warm enough to winter through' : 'Nest founded', 'var(--yellow)', e.warm ? 4 : 2.4); logEvent('nest founded'); break; // GDD 6.8
       case 'winter':
+        if (e.bee && sim.winter && sim.winter.offer && !lab) { showWinter(`The cluster ate its honey and came through: ${fmt(e.adults)} bees.${e.sisters ? ` ${e.sisters} colon${e.sisters === 1 ? 'y' : 'ies'} of the line too.` : ''} The line had a strong year. One of the hive's young queens can found a wasp colony instead; the hive goes on under the AI. Or stay in the hive.`); break; } // Q-19
         if (e.bee) { toast(e.survivors ? `Winter. The cluster ate its honey and came through: ${fmt(e.adults)} bees.${e.sisters ? ` ${e.sisters} colon${e.sisters === 1 ? 'y' : 'ies'} of the line too.` : ''}` : e.sisters ? 'Your hive did not survive the winter. The line goes on in one of its swarms.' : 'No colony of the line made it through the winter.', e.survivors || e.sisters ? 'var(--yellow)' : 'var(--red)', 5); break; } // T2-11
         {
           const total = e.survivors + e.lineage;
@@ -3128,8 +3129,14 @@ function showWinter(text) {
   $('bStay').hidden = !sim.winter.home; // GDD 6.8: the nest wintered in
   if (offer === 'hornet') { $('morphLabel').textContent = 'Wake as a hornet queen'; $('morphNote').textContent = 'The line has done enough this year: the queen you wake founds a hornet colony. The other queens stay wasps.'; }
   if (offer === 'bee') { $('morphLabel').textContent = 'Try a honeybee colony'; $('morphNote').textContent = 'The line did little this year. The queen you wake can lead a swarm of honeybees instead; the other queens stay wasps.'; }
+  // a honeybee line's strong year (Q-19): each site is a wasp queen to wake; staying keeps you in the hive
+  const beeTurn = sim.winter.bee && offer === 'wasp';
+  if (beeTurn) $('winterOffer').hidden = true;
+  $('bSpring').hidden = beeTurn;
+  $('bStay').textContent = beeTurn ? 'Stay in the hive' : 'Stay in the nest';
   $('winterSites').innerHTML = sim.winter.sites.map((s, i) => {
     const d = Math.round(Math.hypot(s.x - sim.nest.x, s.z - sim.nest.z));
+    if (sim.winter.bee) return `<button class="ghost" data-i="${i + 1}"><b>Wake a wasp queen ${T.hiber.name[s.kind]}</b><span>${d} m from the hive · shelter ${Math.round(s.q * 100)}% · she founds a wasp colony</span></button>`;
     return `<button class="ghost" data-i="${i + 1}"><b>${s.n || 1} queen${(s.n || 1) === 1 ? '' : 's'} ${T.hiber.name[s.kind]}</b><span>${d} m from the old nest · shelter ${Math.round(s.q * 100)}%${s.scouted ? ' · the site you scouted' : ''}</span></button>`;
   }).join('');
   $('winterScreen').hidden = false;
@@ -3139,7 +3146,7 @@ function showWinter(text) {
 }
 // Waking: a pick goes out in the next command, and the sim wakes that queen
 function wake(i) {
-  pickOnce = i + (sim.winter && sim.winter.offer && $('morph').checked ? 1000 : 0); input.pick = 1;
+  pickOnce = i + (sim.winter && sim.winter.offer && ($('morph').checked || sim.winter.bee) ? 1000 : 0); input.pick = 1;
   $('winterScreen').hidden = true; setPaused(false); lock();
   toast('Spring. Find a nest site and press E: a trunk, a burrow, under a branch, a gap in a shed or a hollow tree.', 'var(--yellow)', 4);
 }

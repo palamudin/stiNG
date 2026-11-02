@@ -1612,6 +1612,7 @@ namespace Sting.Core
             foreach (var w in new List<Wasp>(wasps)) Despawn(w);
             ghost = null;
             winter = new Winter { why = why, sites = sites, survivors = survivors, lineage = lin, until = tick + T.hiber.chooseTicks, offer = Offer(), keep = keep, home = home };
+            prog.mark = prog.unitTotal + prog.hiveTotal; // the next year is measured from here
             if (winter.offer != null) Emit("offer", ("species", winter.offer));
         }
 
@@ -1648,6 +1649,22 @@ namespace Sting.Core
             });
             Emit("winter", ("why", why), ("bee", true), ("adults", Floor(mine ? colony.adults : 0)), ("honey", colony.sugar), ("sisters", line.Count), ("season", n), ("mated", (Num)0), ("survivors", (Num)(mine ? 1 : 0)), ("lineage", (Num)line.Count), ("sites", 0));
             if (!mine && line.Count == 0) { extinct = true; Emit("lineExtinct", ("nestAlive", colony.nestAlive)); return; }
+            string offer = mine ? Offer() : null;
+            prog.mark = prog.unitTotal + prog.hiveTotal; // the next year is measured from here
+            if (offer != null)
+            { // a strong year: one of the hive's young queens may found a wasp colony instead (Q-19); the hive goes on under the AI
+                var cands = HiberSites(); var order = new List<int>(); for (int i = 0; i < cands.Count; i++) order.Add(i);
+                order.Sort((a, b) => { int c = cands[b].q.CompareTo(cands[a].q); return c != 0 ? c : a.CompareTo(b); });
+                var sites = new List<HiberSite>();
+                for (int i = 0; i < order.Count && i < T.hiber.spread; i++) { var c = cands[order[i]]; sites.Add(new HiberSite { kind = c.kind, x = c.x, y = c.y, z = c.z, q = c.q, n = 1, scouted = false }); }
+                if (sites.Count > 0)
+                {
+                    winter = new Winter { why = why, bee = true, days = days, sites = sites, survivors = 1, lineage = 0, until = tick + T.hiber.chooseTicks, offer = offer, keep = line, home = true };
+                    line = new List<LineColony>();
+                    Emit("offer", ("species", offer));
+                    return;
+                }
+            }
             HiveSpring(days, n, mine);
         }
         /// spring after a winter in the hive: the same hive, or with yours gone the strongest colony of the line's
@@ -1704,8 +1721,12 @@ namespace Sting.Core
         void WinterStep(int k)
         {
             var W = winter;
-            if (W.home && (k == 2000 || (k == 0 && tick >= W.until))) { WakeHome(); return; }
             bool morph = k > 1000 && k < 2000 && W.offer != null;
+            if (W.bee && !morph && (k == 2000 || (k >= 1 && k <= W.sites.Count) || (k == 0 && tick >= W.until)))
+            { // the hive goes on, with you in it
+                winter = null; line = W.keep; HiveSpring(W.days, season.n, true); return;
+            }
+            if (W.home && (k == 2000 || (k == 0 && tick >= W.until))) { WakeHome(); return; }
             if (morph) k -= 1000;
             bool ok = k >= 1 && k <= W.sites.Count;
             if (ok || tick >= W.until) Spring(ok ? k - 1 : 0, ok && morph);

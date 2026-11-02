@@ -138,7 +138,9 @@ namespace Sting.Core
         internal string Offer()
         {
             Num xp = prog.unitTotal + prog.hiveTotal; string pg = settings.progression ?? "open";
-            if (species != "wasp" || pg.StartsWith("fixed:", System.StringComparison.Ordinal)) return null;
+            if (pg.StartsWith("fixed:", System.StringComparison.Ordinal)) return null;
+            if (species == "bee") return xp - prog.mark >= T.xp.waspXp ? "wasp" : null; // a honeybee line's strong year (Q-19)
+            if (species != "wasp") return null; // a hornet line stays hornets
             if (xp >= T.xp.hornetXp && prog.stabs >= T.xp.hornetStabs) return "hornet";
             if (xp < T.xp.beeXp && prog.stabs < T.xp.beeStabs) return "bee";
             return null;

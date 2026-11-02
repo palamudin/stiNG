@@ -233,7 +233,7 @@ export const T = {
   // the counter (a person nobody had stung). At the year's end a wasp line with hornetXp in all and hornetStabs may wake
   // as hornets; one under beeXp and beeStabs is offered a honeybee colony, which starts as a swarm of beeSwarm.
   xp: { sting: 4, firstHuman: 6, full: 2, catch: 3, deposit: 1, rob: 4, release: 2, emerged: 0.1, load: 0.05, raised: 2,
-    hornetXp: 600, hornetStabs: 25, beeXp: 150, beeStabs: 5, beeSwarm: 60 },
+    hornetXp: 600, hornetStabs: 25, beeXp: 150, beeStabs: 5, beeSwarm: 60, waspXp: 300 }, // waspXp: a honeybee line's year that earns it a wasp queen (Q-19)
   // Skills: what the line's insects can do beyond the start, learned with XP. Unit skills (unit XP) are the line's
   // know-how, so every insect of it has them: unlocks cost what is listed; ranked ones (up to ranks) cost rankCost times
   // the rank and add their figure per rank (landR: landing reach and lock-on range, feedR: feeding reach, grabR: grab
