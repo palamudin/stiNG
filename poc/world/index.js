@@ -192,7 +192,7 @@ export class World {
     U.uIce.value = this.source.sea > -1e5 ? S.freeze : 0;
     U.uMap.value = E.map || 0; U.uSnowLine.value = this.uniforms.uSnowLine.value - (this.source.sea > -1e5 ? this.source.sea : 0);
     // sun, sky and the light they give
-    if (E.auto) sunAtSeason(E.hour, S.dec, this.sunDir); else sunAt(E.hour, this.sunDir);
+    if (E.day !== undefined) sunAtSeason(E.hour, S.dec, this.sunDir); else sunAt(E.hour, this.sunDir); // a caller with a calendar gets the real track
     // the camera's height above sea level for the air: a source without water counts from 0 (its sea is a sentinel)
     const camH = Math.max(1, eye.y - (this.source.sea > -1e5 ? this.source.sea : 0));
     this.sky.update(this.sunDir, camH, E.haze);
