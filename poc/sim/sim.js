@@ -4966,8 +4966,8 @@ export class Sim {
     if (this.isRival(w) && w.role === 'protein' && !spOf(col).perennial && col.nestAlive && col.sited && col.larvae >= 1
       && dist2(home, ne) < sq(T.rival.raidRange) && h32(w.id, this.tick, 94) < SP.raid) { ai.target = { kind: 'phive', key: this.nest.key, i: 0, c: 999 }; ai.mode = 'outbound'; return; }
     // a protein forager setting out sometimes goes instead to raid an enemy nest near home for a larva: a rival
-    // colony's, or another player's; hornets most often (GDD 9.3)
-    if (!this.isRival(w) && w.role === 'protein' && SP.hunts && h32(w.id, this.tick, 94) < SP.raid) {
+    // colony's, or another player's; hornets most often, and only by day: after dark a hornet hunts moths (GDD 9.3)
+    if (!this.isRival(w) && w.role === 'protein' && SP.hunts && isDaylight(this.minute) && h32(w.id, this.tick, 94) < SP.raid) {
       const rt = this._raidTarget(home);
       if (rt) { ai.target = rt; ai.mode = 'outbound'; return; }
     }

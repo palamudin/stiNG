@@ -143,6 +143,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 115 | Moths at the porch lights can be locked on to and caught with assisted flight | 7.9 | 25 |
 | 116 | Fireflies on summer evenings: dozens drifting over the lawns at dusk, each flashing on its own beat; catch one and the wasp spits it out, as real hunters do (they taste foul) | 5.3, 7.9 | 25 |
 | 117 | Swarms seen: a honeybee swarm pours out, hangs as a beard on a nearby branch for hours, then flies to its new tree and only then is a colony; the daughter queen flies to a drone congregation area to mate, and the hive lays nothing till she is back | 6.7, T2-11 | 25 |
+| 118 | AI raids: AI protein foragers now and then raid a rival's or another player's nest within 120 m for a larva by day (hornets 15% of trips, wasps 4%, bees never), with the guards after them; rivals raid the player's wasp nest the same way | 9.3 | 25 |
 
 ## Verified
 
@@ -170,7 +171,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 - Assisted flight steers round what is within a metre ahead (a trunk, a fence) but plans no route: a hedge or a house wall longer than it can see past still needs the player, and it does not dodge swats or birds.
 - Progression is at T0 (GDD 18.48, 18.49, 18.57): each line's XP and tree, the wasp in hand's job skills, five roles levelled by masters, multi-colony play and the gauge. a trained wasp that goes home retires inside rather than flying again; the XP, mastery and gauge figures are first guesses to tune with play. The PoC runs progression `open`, so any species can also be picked on the start screen.
 - A bee colony's drones are drawn only at their congregation area, and its young queen's flight carries no risk of being lost.
-- A raid on another player's nest takes one larva at a time, by the player's own wasp; AI workers do not raid other players' nests, as they do not raid rival nests.
+- A raid on a nest takes one larva at a time, whoever makes it; an AI raider makes no choice of nest beyond the nearest in range.
 
 ## Controls
 

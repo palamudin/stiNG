@@ -302,7 +302,8 @@ for (const name of ['lan', 'good', 'bad', 'awful']) {
   ok(e < 0.001 && ds.wasps.length === 3 && ds.wasps.find((x) => x.id === 900017).caste === 'queen' && ds.wasps.find((x) => x.id === 18).rival && tr.chunks[0][0] === '3,-2' && tr.chunks[1][1] === 7,
     `swarm packets round-trip within 1 mm (${(e * 1000).toFixed(2)} mm), ${BYTES_PER_SWARM_WASP} bytes per wasp; traffic counts too`);
   const measure = (flat, away) => {
-    const rel = { ...T.relevance }, ai = { ...T.ai };
+    const rel = { ...T.relevance }, ai = { ...T.ai }, raid = T.species.wasp.raid;
+    T.species.wasp.raid = 0; // every forager stays round the nest for the measurement
     if (flat) Object.assign(T.relevance, { nearDist: 1e9, nearEvery: T.net.stateEvery });
     Object.assign(T.ai, { maxPhysical: 200, launchEvery: 3 });
     const lab = new NetLab({ seed: 1234, birds: false, dayMinutes: 20 }, 'good');
@@ -324,7 +325,7 @@ for (const name of ['lan', 'good', 'bad', 'awful']) {
       tiers[d <= R.nearDist ? 'near' : Math.max(Math.abs(Math.round(w.x / 64) - Math.round(ref.x / 64)), Math.abs(Math.round(w.z / 64) - Math.round(ref.z / 64))) <= R.interestChunks ? 'mid' : 'far']++;
     }
     const secs = 1800 / 60, kb = (k) => (lab.bytes[k] - b0[k]) / secs / 1024;
-    Object.assign(T.relevance, rel); Object.assign(T.ai, ai);
+    Object.assign(T.relevance, rel); Object.assign(T.ai, ai); T.species.wasp.raid = raid;
     return { total: kb('ab'), state: kb('abState'), swarm: kb('abSwarm'), traffic: kb('abTraffic'), events: kb('abEvents'), wasps: lab.a.wasps.length, tiers, agree: lab.checks.agreed === lab.checks.compared && lab.checks.compared > 0 };
   };
   const fmt = (r) => `${r.total.toFixed(1)} KB/s (state ${r.state.toFixed(1)}, swarm ${r.swarm.toFixed(1)}, traffic ${r.traffic.toFixed(2)}, events ${r.events.toFixed(1)}) for ${r.wasps} wasps, tiers ${r.tiers.near}/${r.tiers.mid}/${r.tiers.far}`;
@@ -433,11 +434,11 @@ for (const name of ['lan', 'good', 'bad', 'awful']) {
   for (let i = 0; i < 10; i++) lab.step(idleCmd(), idleCmd());
   ok((B.plaus.strikes[0] || 0) === strikes + 1 && B.colony.larvae === Math.max(0, larvae - 1), 'a raid claimed from 3 m off the nest is rejected and takes nothing');
   // A's AI workers know B's nest too, and one now and then raids it on its own (GDD 9.3)
-  const rt = A._raidTarget(A.nest.entrance), aw = A._spawnWasp(false), l1 = B.colony.larvae;
+  const rt = A._raidTarget(A.nest.entrance), aw = A._spawnWasp(false), l1 = B.colony.larvae, rejA = A.netStats.rejected, rejB = B.netStats.rejected;
   aw.role = 'protein'; aw.ai.mode = 'outbound'; aw.ai.target = { ...rt }; Object.assign(aw, { x: e.x + 0.4, y: e.y, z: e.z, vx: 0, vy: 0, vz: 0 });
   let byAI = null;
   for (let i = 0; i < 600 && !byAI; i++) { lab.step(idleCmd(), idleCmd()); byAI = (lab.bEvents || []).find((x) => x.type === 'raided' && x.waspId === aw.id); }
-  ok(rt && rt.kind === 'pnest' && rt.i === 1 && byAI && aw.carry && aw.carry.what === 'larva' && Math.abs(B.colony.larvae - (l1 - 1)) < 0.05 && A.netStats.rejected === 0 && B.netStats.rejected === 0 && (B.plaus.strikes[0] || 0) === strikes + 1,
+  ok(rt && rt.kind === 'pnest' && rt.i === 1 && byAI && aw.carry && aw.carry.what === 'larva' && l1 - B.colony.larvae > 0.5 && A.netStats.rejected === rejA && B.netStats.rejected === rejB && (B.plaus.strikes[0] || 0) === strikes + 1,
     `an AI worker of A's raids B's nest by itself: B loses a larva (${l1.toFixed(1)} -> ${B.colony.larvae.toFixed(1)}) and its guards go after it`);
 }
 

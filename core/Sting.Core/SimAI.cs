@@ -531,8 +531,8 @@ namespace Sting.Core
             if (IsRival(w) && w.role == "protein" && Colony.Sp(pc).perennial == 0 && pc.nestAlive && pc.sited && pc.larvae >= 1
                 && D2(home, ne) < Sq(T.rival.raidRange) && H32(w.id, tick, 94) < SP.raid) { ai.target = new AiTarget { kind = "phive", key = nest.key, i = 0, c = 999 }; ai.mode = "outbound"; return; }
             // a protein forager setting out sometimes goes instead to raid an enemy nest near home for a larva: a rival
-            // colony's, or another player's; hornets most often (GDD 9.3)
-            if (!IsRival(w) && w.role == "protein" && SP.hunts != 0 && H32(w.id, tick, 94) < SP.raid)
+            // colony's, or another player's; hornets most often, and only by day: after dark a hornet hunts moths (GDD 9.3)
+            if (!IsRival(w) && w.role == "protein" && SP.hunts != 0 && IsDaylight(minute) && H32(w.id, tick, 94) < SP.raid)
             {
                 var rt = RaidTarget(home);
                 if (rt != null) { ai.target = rt; ai.mode = "outbound"; return; }
