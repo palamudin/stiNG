@@ -4,17 +4,35 @@
 // water, trails, paving or under a dense canopy), and builds the clump: blades that taper, curve, lean and bend with
 // the wind (a gust field that travels across the ground). No CPU work per blade.
 //
-// Two rings: dense near, sparser and larger further out, cross-faded by thinning. When the camera rises the rings
-// scale with its height above the ground, and past a few tens of metres the grass gives way to the ground's colour.
+// Three rings: thousands of blades a square metre round the camera (a lawn is green because it is solid grass), fewer
+// and broader further out, cross-faded by thinning; the ground under them is the lawn's own dark thatch (terrain.js),
+// so a gap between blades reads as more grass, not as painted ground. When the camera rises the rings scale with its
+// height above the ground, and past a few tens of metres the grass gives way to the ground's colour.
 // At a wasp's height a blade is a wall; from a person's height it is a lawn.
+//
+// Wear (the fourth channel below 0.3, sources/sting.js): where people sit, stand and walk the lawn is shorter and the
+// earth shows through in patches that open as the wear grows (w2bare, shared with the ground's shading, so the bare
+// earth is where the blades are missing). In woods the grass grows long and thin.
 import * as THREE from 'three';
 import { NOISE_GLSL } from './noise.js';
 
 export const GRASS = {
-  blades: 5, segs: 4,
-  rings: [ { spacing: 0.1, radius: 7 }, { spacing: 0.28, radius: 22 } ],
+  // spacing: metres between clumps; width: a blade's width at its root; hMul: taller far out, so the far ring still covers
+  rings: [
+    { spacing: 0.045, radius: 3, blades: 6, segs: 3, width: 0.006, hMul: 1 },
+    { spacing: 0.1, radius: 9, blades: 5, segs: 3, width: 0.011, hMul: 1.1 },
+    { spacing: 0.28, radius: 24, blades: 5, segs: 2, width: 0.02, hMul: 1.4 },
+  ],
   flowers: { spacing: 0.55, radius: 18 },
 };
+// The ground's wear, read the same way by the grass and the ground under it
+export const WEAR_GLSL = /* glsl */ `
+float w2wear(float w) { return w < 0.3 ? clamp(w / 0.2, 0.0, 1.0) : 0.0; } // 0 untouched .. 1 trodden
+float w2bare(vec2 p, float wear) { // bare earth in patches that open as the wear grows
+  float n = 0.5 + 0.32 * w2noise(p / 1.1, 207) + 0.18 * w2noise(p / 0.3, 208);
+  return smoothstep(n - 0.07, n + 0.07, wear * 0.97);
+}
+`;
 
 function clumpGeometry(blades, segs, seed) {
   // per vertex: aT (0 root .. 1 tip), aSide (-1, 1), aB (angle, offset x, offset z, random)
@@ -39,7 +57,7 @@ function clumpGeometry(blades, segs, seed) {
 
 const GRASS_VERT_HEAD = /* glsl */ `
 attribute float aT, aSide; attribute vec4 aB; attribute vec2 aCell;
-uniform float uSpacing, uRadius, uInner, uScale, uTime, uSea, uDensity, uFlower, uAlt, uShore, uSnowLine; uniform vec2 uGrassH; uniform vec2 uWind; uniform vec3 uCamG;
+uniform float uSpacing, uRadius, uInner, uScale, uTime, uSea, uDensity, uFlower, uAlt, uShore, uSnowLine, uBladeW, uHMul, uWoodH; uniform vec2 uGrassH; uniform vec2 uWind; uniform vec3 uCamG;
 varying float vT, vCol, vRootK; varying vec3 vGW; varying vec3 vTint; varying float vKill;
 vec3 gPos; vec3 gNor;
 `;
@@ -55,8 +73,10 @@ const GRASS_BUILD = /* glsl */ `
   vec4 gd = clipAt(base); vec3 gn = clipNormal(base);
   float hgt = gd.x - uSea, slope = 1.0 - gn.y;
   // what grows here: meadow full, under trees thin, nothing on stone, sand, water, trails or paving
-  float dens = (1.0 - smoothstep(0.32, 0.45, slope)) * mix(1.0, smoothstep(1.3, 2.2, hgt), uShore) * (1.0 - smoothstep(0.18, 0.45, gd.w)) * mix(1.0, 0.35, smoothstep(0.4, 0.8, gd.z));
+  float dens = (1.0 - smoothstep(0.32, 0.45, slope)) * mix(1.0, smoothstep(1.3, 2.2, hgt), uShore) * (1.0 - smoothstep(0.3, 0.45, gd.w)) * mix(1.0, 0.35, smoothstep(0.4, 0.8, gd.z));
   dens *= uDensity * (1.0 - smoothstep(uSnowLine - 10.0, uSnowLine + 10.0, hgt));
+  float wr = w2wear(gd.w);
+  dens *= 1.0 - w2bare(base, wr); // trodden: bare in patches
   if (uFlower > 0.5) dens *= smoothstep(0.1, 0.6, w2noise(base / 9.0, 211) + 0.35 * (gd.y - 0.5)) * (1.0 - smoothstep(0.3, 0.6, gd.z));
   // thin out toward the edge of the ring (and inside the inner ring, for the outer one), so the rings cross-fade
   float edge = 1.0 - smoothstep(R * 0.65, R, dist);
@@ -64,9 +84,11 @@ const GRASS_BUILD = /* glsl */ `
   float keep = dens * edge * inner * (1.0 - smoothstep(8.0, 30.0, uAlt));
   vKill = w2hash01(ci.x, ci.y, 203) > keep ? 1.0 : 0.0;
   float rnd = w2hash01(ci.x, ci.y, 204);
-  float H = mix(uGrassH.x, uGrassH.y, gd.y) * (0.55 + 0.9 * aB.w) * (0.75 + 0.5 * rnd) * mix(1.0, 1.5, step(0.5, uInner)) * (uFlower > 0.5 ? 1.3 : 1.0);
+  float H = mix(uGrassH.x, uGrassH.y, gd.y) * (0.55 + 0.9 * aB.w) * (0.75 + 0.5 * rnd) * uHMul * (uFlower > 0.5 ? 1.3 : 1.0);
+  H *= mix(1.0, uWoodH, smoothstep(0.85, 1.0, gd.z)); // long in the woods, where nobody mows
+  H *= mix(1.0, 0.45, wr); // short where it is walked on
   H *= 0.4 + 0.6 * smoothstep(0.0, 0.35, keep); // short where it thins
-  float W = (uFlower > 0.5 ? 0.006 : 0.012) * (0.8 + 0.5 * aB.w) * sqrt(uScale) * (uInner > 0.0 ? 1.7 : 1.0);
+  float W = (uFlower > 0.5 ? 0.006 : uBladeW) * (0.8 + 0.5 * aB.w) * sqrt(uScale);
   // blade frame: it faces its own way and leans away from the clump centre
   float ang = aB.x + rnd * 6.283;
   vec2 fdir = vec2(cos(ang), sin(ang)), side = vec2(-fdir.y, fdir.x);
@@ -105,8 +127,8 @@ export class Grass {
     this.group = new THREE.Group(); this.group.name = 'world2-grass';
     const clip = world.clip.glsl();
     this.meshes = [];
-    const mk = (spacing, radius, inner, flower, blades) => {
-      const geo = clumpGeometry(blades, flower ? 3 : GRASS.segs, spacing * 1000);
+    const mk = (spacing, radius, inner, flower, blades, segs, width, hMul) => {
+      const geo = clumpGeometry(blades, segs, spacing * 1000);
       const n = Math.ceil(radius / spacing), cells = [];
       for (let j = -n; j <= n; j++) for (let i = -n; i <= n; i++) { const d = Math.hypot(i, j) * spacing; if (d <= radius && d >= inner * 0.55) cells.push(i, j); }
       geo.setAttribute('aCell', new THREE.InstancedBufferAttribute(new Float32Array(cells), 2));
@@ -114,13 +136,14 @@ export class Grass {
       const U = {
         ...world.clip.uniforms, uTime: world.uniforms.uTime, uSea: { value: world.source.sea }, uShore: world.uniforms.uShore, uSnowLine: world.uniforms.uSnowLine, uSunDir: world.uniforms.uSunDir, uSunColor: world.sky.uniforms.uSunColor,
         uSpacing: { value: spacing }, uRadius: { value: radius }, uInner: { value: inner }, uScale: { value: 1 }, uDensity: { value: this.density }, uFlower: { value: flower ? 1 : 0 },
+        uBladeW: { value: width }, uHMul: { value: hMul }, uWoodH: { value: world.source.grassWood ?? 1 },
         uWind: { value: new THREE.Vector2(0.8, 0.3) }, uCamG: { value: new THREE.Vector3() }, uAlt: { value: 0 },
         uGrassH: { value: new THREE.Vector2(...(world.source.grassHeight || [0.1, 0.42])) }, // metres, dry to wet ground
       };
       const mat = new THREE.MeshStandardMaterial({ roughness: 0.75, metalness: 0, side: THREE.DoubleSide });
       mat.onBeforeCompile = (sh) => {
         Object.assign(sh.uniforms, U);
-        sh.vertexShader = `${clip}\n${NOISE_GLSL}\n${GRASS_VERT_HEAD}\n` + sh.vertexShader
+        sh.vertexShader = `${clip}\n${NOISE_GLSL}\n${WEAR_GLSL}\n${GRASS_VERT_HEAD}\n` + sh.vertexShader
           .replace('#include <beginnormal_vertex>', GRASS_BUILD + '\n  vec3 objectNormal = gNor;')
           .replace('#include <begin_vertex>', 'vec3 transformed = gPos;')
           .replace('#include <project_vertex>', '#include <project_vertex>\n  if (vKill > 0.5) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);');
@@ -138,7 +161,7 @@ export class Grass {
     reflectedLight.directDiffuse *= mix(1.0, 0.7 + 0.3 * vT, vRootK);
   }`);
       };
-      mat.customProgramCacheKey = () => 'w2grass' + (flower ? 'f' : '') + (inner > 0 ? 'o' : 'i');
+      mat.customProgramCacheKey = () => 'w2grass' + (flower ? 'f' : '');
       const mesh = new THREE.Mesh(geo, mat);
       mesh.frustumCulled = false; mesh.receiveShadow = true; mesh.castShadow = false;
       mesh.userData.U = U; mesh.userData.instances = cells.length / 2;
@@ -146,10 +169,10 @@ export class Grass {
       return mesh;
     };
     const d = Math.sqrt(this.density);
-    const R0 = GRASS.rings[0], R1 = GRASS.rings[1];
-    mk(R0.spacing / d, R0.radius, 0, false, GRASS.blades);
-    mk(R1.spacing / d, R1.radius, R0.radius, false, GRASS.blades);
-    if (opts.flowers !== false) mk(GRASS.flowers.spacing / d, GRASS.flowers.radius, 0, true, 3);
+    let inner = 0;
+    for (const R of GRASS.rings) { mk(R.spacing / d, R.radius, inner, false, R.blades, R.segs, R.width, R.hMul); inner = R.radius; }
+    if (opts.flowers !== false) mk(GRASS.flowers.spacing / d, GRASS.flowers.radius, 0, true, 3, 3, 0.006, 1);
+    this.reach = 0; // how far the blades go this frame (0 when hidden): the ground lays thatch under them
   }
   update(eye, ground) {
     const alt = Math.max(0.05, eye.y - ground);
@@ -160,6 +183,7 @@ export class Grass {
       U.uWind.value.set(...this.world.env.wind);
     }
     this.group.visible = alt < 30;
+    this.reach = this.group.visible ? GRASS.rings[GRASS.rings.length - 1].radius * scale * (1 - Math.min(1, Math.max(0, (alt - 8) / 22))) : 0;
   }
   get instances() { return this.meshes.reduce((a, m) => a + m.userData.instances, 0); }
 }

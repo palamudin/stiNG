@@ -35,6 +35,7 @@ export class World {
   constructor(renderer, scene, camera, source, opts = {}) {
     this.renderer = renderer; this.scene = scene; this.camera = camera; this.source = source;
     this.q = { ...QUALITY[opts.quality || 'high'] };
+    if (opts.dof === false) this.q.dof = false; // a game camera that has to read the scene, not a macro lens
     this.shadowMin = opts.shadowBox ?? 3; // the shadow box's least half-width (the game wants the people round the wasp)
     this.time = 0;
     this.env = { hour: 16.5, haze: 1, mist: 1, wet: 0, wind: [0.8, 0.3] };
@@ -119,6 +120,7 @@ export class World {
     this.uniforms.uWet.value = E.wet;
     this.forest.update(eye, dt);
     this.grass.update(eye, Math.max(this.heightAt(eye.x, eye.z), this.source.sea));
+    this.uniforms.uGrassR.value = this.grass.reach;
     // clouds
     this.clouds.update(eye.x, eye.z, this.time, [6, 2.4], this.source.params.seed || 1);
     Object.assign(this.clouds.uniforms, {});

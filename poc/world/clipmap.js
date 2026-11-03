@@ -134,7 +134,7 @@ void main() {
       for (; J.j < J.nj + W; J.j++) {
         for (; J.i < J.ni + W; J.i++) {
           if (J.oi !== null && J.i >= J.oi && J.i < J.oi + W && J.j >= J.oj && J.j < J.oj + W) continue; // already held
-          this.source.sample(J.i * L.s, J.j * L.s, smp);
+          this.source.sample(J.i * L.s, J.j * L.s, smp, L.s); // the texel's size: a source may leave small things to finer levels
           const o = (((J.j & 127) << 7) | (J.i & 127)) * 4;
           L.cpu[o] = smp[0]; L.cpu[o + 1] = smp[1]; L.cpu[o + 2] = smp[2]; L.cpu[o + 3] = smp[3];
           this.stats.filledTexels++;

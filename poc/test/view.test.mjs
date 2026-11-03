@@ -5,7 +5,7 @@ import { applyTuning } from '../sim/tunefile.js';
 import { groundAt, generateChunk, pavingOf, chunkOf } from '../sim/world.js';
 import { DEFAULT_SETTINGS, u64 } from '../sim/index.js';
 import { Rings, RING, ringGrid } from '../view/rings.js';
-import { stingSource } from '../world/sources/sting.js';
+import { stingSource, WEAR_FULL } from '../world/sources/sting.js';
 import { placeTile } from '../world/scatter.js';
 import { treeDesign } from '../world/mesh.js';
 applyTuning(T, readFileSync(new URL('../../tuning/sting.tune', import.meta.url), 'utf8'));
@@ -91,6 +91,35 @@ const ok = (c, msg) => { console.log((c ? 'PASS ' : 'FAIL ') + msg); if (!c) fai
   const oak = treeDesign('oak', 1), bare = treeDesign('oak', 1, { trunk: false }), birch = treeDesign('birch', 1, { trunk: false });
   ok(n > 20 && same === n && oak.wood(0, 0.5, 0) < 0 && bare.wood(0, 0.5, 0) > 0.5 && birch.wood(0, 0.5, 0) > 0.5 && src.trunks === false,
     `World v2 draws the sim's ${n} trees over 49 chunks one for one, crowns only: the game draws their trunks`);
+}
+
+// World v2's lawn (GDD 20.5): worn where people sit, stand and walk, shaded under crowns, a walk from each door to the
+// street; far clipmap levels leave those small things to the fine ones
+{
+  const settings = { ...DEFAULT_SETTINGS, terrain: 2 }, sim = { seed: u64(7), settings, records: new Map() }, src = stingSource(sim);
+  const wearAt = (x, z, cell = 0) => { const w = src.sample(x, z, undefined, cell)[3]; return w < 0.3 ? w / WEAR_FULL : NaN; };
+  let tables = 0, worn = 0, flowers = 0, bare = 0, open = 0, quiet = 0, doors = 0, walks = 0, shade = 0, trees = 0;
+  for (let cz = -2; cz <= 2; cz++) for (let cx = -2; cx <= 2; cx++) {
+    const c = generateChunk(sim.seed, cx, cz, settings);
+    for (const t of c.tables) { if (src.sample(t.x, t.z)[3] >= 0.3) continue; tables++; if (wearAt(t.x, t.z) > 0.8) worn++; } // tables on a square stand on paving
+    for (const f of c.flowers) { if (src.sample(f.x, f.z)[3] >= 0.3) continue; flowers++; if (wearAt(f.x, f.z) > 0.95) bare++; }
+    for (const t of c.trees) { trees++; const o = src.sample(t.x + t.cr * 0.3, t.z); if (o[2] > 0.6) shade++; }
+    for (const b of c.sheds) if (b.house) {
+      doors++;
+      const ds = Math.sign(cz * 64 - b.z) || 1;
+      if (src.sample(b.x, b.z + ds * (b.hd + 2.5))[3] >= 0.5) walks++; // the walk, or a cul-de-sac right at the door
+    }
+    // open lawn: away from everything, the land use's own wear only
+    for (let k = 0; k < 40; k++) {
+      const x = cx * 64 + (k * 13.7 % 60) - 30, z = cz * 64 + (k * 29.3 % 60) - 30, w = wearAt(x, z);
+      const far = [...c.tables.map((t) => [t.x, t.z, 4]), ...c.flowers.map((f) => [f.x, f.z, 1]), ...c.trees.map((t) => [t.x, t.z, t.cr + 1]), ...c.humans.map((h) => [h.x, h.z, 2.5])].every(([px, pz, r]) => Math.hypot(x - px, z - pz) > r);
+      if (!far || Number.isNaN(w) || c.use !== 'yards' && c.use !== 'park') continue;
+      open++; if (w < 0.2) quiet++;
+    }
+  }
+  const t = generateChunk(sim.seed, 0, 0, settings).tables[0];
+  ok(tables > 0 && worn === tables && flowers > 10 && bare === flowers && open > 50 && quiet >= open * 0.99 && trees > 5 && shade === trees && doors > 4 && walks === doors && wearAt(t.x, t.z, 4) < 0.2,
+    `the lawn is worn at all ${tables} tables and bare round all ${flowers} flowers, untouched on ${quiet} of ${open} open spots, shaded under all ${trees} crowns; all ${doors} houses have a walk to the street; a 4 m texel leaves the table to finer levels`);
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');

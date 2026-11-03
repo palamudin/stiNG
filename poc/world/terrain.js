@@ -13,6 +13,7 @@
 import * as THREE from 'three';
 import { clipGrid } from './clipmap.js';
 import { NOISE_GLSL } from './noise.js';
+import { WEAR_GLSL } from './grass.js';
 
 export const TERRAIN_SHADE_GLSL = /* glsl */ `
 // the palette: sRGB picks, made linear by L()
@@ -30,6 +31,8 @@ const vec3 T_SNOW = L(0.95, 0.96, 0.98);
 const vec3 T_CANOPY = L(0.17, 0.32, 0.10);
 const vec3 T_ASPHALT = L(0.29, 0.29, 0.30);
 const vec3 T_WALK = L(0.66, 0.64, 0.60);
+const vec3 T_THATCH = L(0.22, 0.30, 0.10); // under the blades of a lawn: their own shade, roots and old leaves
+const vec3 T_EARTH = L(0.50, 0.40, 0.28);  // trodden earth
 `;
 
 export function makeTerrain(clip, opts = {}) {
@@ -54,6 +57,7 @@ export function makeTerrain(clip, opts = {}) {
     uWet: { value: 0 },
     uShore: { value: opts.shore ?? 1 },       // 1: the source has water, so beaches and mud
     uSnowLine: { value: opts.snowLine ?? 215 }, // metres above the water where snow starts
+    uGrassR: { value: 0 },  // how far the grass blades reach round the camera (grass.js); the lawn's thatch lies under them
   };
   const CLIP = clip.glsl();
   const VERT_HEAD = `${CLIP}\nattribute float aLevel;\nvarying vec3 vW;\n`;
@@ -71,8 +75,8 @@ export function makeTerrain(clip, opts = {}) {
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, U);
     sh.vertexShader = VERT_HEAD + sh.vertexShader.replace('#include <begin_vertex>', VERT_BODY);
-    sh.fragmentShader = `${CLIP}\n${NOISE_GLSL}\n${TERRAIN_SHADE_GLSL}
-uniform float uSea, uShadowFar, uTreeFar, uPaving, uTime, uWet, uShore, uSnowLine; uniform vec3 uSunDir;
+    sh.fragmentShader = `${CLIP}\n${NOISE_GLSL}\n${WEAR_GLSL}\n${TERRAIN_SHADE_GLSL}
+uniform float uSea, uShadowFar, uTreeFar, uPaving, uTime, uWet, uShore, uSnowLine, uGrassR; uniform vec3 uSunDir;
 varying vec3 vW;
 float hfShadow(vec2 p, float h0, float dist) {
   // march toward the sun through the clipmap; soft by the closest miss (Quilez's penumbra trick)
@@ -103,8 +107,14 @@ float hfShadow(vec2 p, float h0, float dist) {
   vec3 col = mix(T_GRASS_DRY, T_GRASS, smoothstep(0.1, 0.42, TD.y + pa * 0.25));
   col = mix(col, T_GRASS_WET, smoothstep(0.65, 0.95, TD.y + pa * 0.15));
   col *= 1.0 + 0.2 * w2noise(P / 0.7, 73) * NF(0.7);
+  // under the blades near the camera the lawn's ground is its own dark thatch, so gaps read as more grass
+  float under = (1.0 - smoothstep(uGrassR * 0.5, uGrassR, dist)) * step(0.01, uGrassR);
+  col = mix(col, T_THATCH * (0.85 + 0.3 * w2noise(P / 0.5, 82) * NF(0.5)), under);
   // forest floor under the trees
   col = mix(col, T_FLOOR, smoothstep(0.35, 0.75, TD.z));
+  // trodden ground: earth in the patches where the grass is gone (the same patches as grass.js); far off, their share
+  float wr = w2wear(TD.w), br = mix(wr * 0.6, w2bare(P, wr), NF(0.6));
+  col = mix(col, T_EARTH * (0.9 + 0.2 * w2noise(P / 0.4, 81) * NF(0.4)), br);
   // far forest: the canopy painted in where the trees end
   float canopy = smoothstep(0.3, 0.6, TD.z) * smoothstep(uTreeFar * 0.45, uTreeFar, dist);
   float bump = w2noise(P / 7.0, 74) * 0.6 * NF(7.0) + w2noise(P / 3.0, 75) * 0.4 * NF(3.0);

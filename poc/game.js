@@ -3252,7 +3252,7 @@ function w2Attach() {
   if (!W2on) return;
   const src = W2M[2].stingSource(sim), w = sim.wasp;
   if (world2) { world2.setSource(src, w.x, w.z); return; }
-  world2 = new W2M[0].World(renderer, scene, camera, src, { quality: $('gfx').value === 'low' || touch.on ? 'low' : 'medium', clip: { levels: W2_LEVELS }, sun, hemi, shadowBox: 18, lens: { fstop: 8 } });
+  world2 = new W2M[0].World(renderer, scene, camera, src, { quality: $('gfx').value === 'low' || touch.on ? 'low' : 'medium', clip: { levels: W2_LEVELS }, sun, hemi, shadowBox: 18, dof: false }); // depth of field at a wasp's distance blurs the whole world away
   Object.assign(LIFT, world2.clip.uniforms);
   world2.build(w.x, w.z);
 }
