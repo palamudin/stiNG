@@ -8,6 +8,7 @@ import { Rings, RING, ringGrid } from '../view/rings.js';
 import { stingSource, WEAR_FULL } from '../world/sources/sting.js';
 import { placeTile } from '../world/scatter.js';
 import { treeDesign } from '../world/mesh.js';
+import { Batch, place } from '../view/merge.js';
 applyTuning(T, readFileSync(new URL('../../tuning/sting.tune', import.meta.url), 'utf8'));
 
 let failures = 0;
@@ -120,6 +121,25 @@ const ok = (c, msg) => { console.log((c ? 'PASS ' : 'FAIL ') + msg); if (!c) fai
   const t = generateChunk(sim.seed, 0, 0, settings).tables[0];
   ok(tables > 0 && worn === tables && flowers > 10 && bare === flowers && open > 50 && quiet >= open * 0.99 && trees > 5 && shade === trees && doors > 4 && walks === doors && wearAt(t.x, t.z, 4) < 0.2,
     `the lawn is worn at all ${tables} tables and bare round all ${flowers} flowers, untouched on ${quiet} of ${open} open spots, shaded under all ${trees} crowns; all ${doors} houses have a walk to the street; a 4 m texel leaves the table to finer levels`);
+}
+
+// S2 (GDD 21.4). Meshes from code: parts merged per material keep their places, their normals (turned and scaled
+// with them, renormalised), their winding when mirrored, and their per-part values
+{
+  const tri = { position: new Float32Array([0, 0, 0, 1, 0, 0, 0, 0, 1]), normal: new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0]), index: new Uint16Array([0, 2, 1]) };
+  const B = new Batch();
+  B.add('a', tri, place(5, 1, 2, 2, 3, 4), { aTop: [7] });
+  B.add('a', tri, place(0, 0, 0, 1, 1, 1, 0, 0, Math.PI / 2));
+  B.add('a', tri, place(0, 0, 0, -1, 1, 1));
+  B.add('b', tri, place(0, 0, 0));
+  const out = B.build({ aTop: [0] }), a = out.find((o) => o.key === 'a'), near = (u, v) => Math.abs(u - v) < 1e-6;
+  const P = a.position, N = a.normal, I = a.index, top = a.attrs.aTop.array;
+  ok(out.length === 2 && P.length === 27 && near(P[3], 7) && near(P[5], 2) && near(P[8], 6) && near(N[1], 1) && near(N[9], -1) && near(N[10], 0)
+    && I[0] === 0 && I[1] === 2 && I[6] === 6 && I[7] === 7 && I[8] === 8 && top[0] === 7 && top[3] === 0 && a.parts === 3,
+    'parts merged per material keep their places, normals, mirrored winding and per-part values (two bins, three parts in one)');
+  const big = new Batch(), many = { position: new Float32Array(3 * 40000), normal: null, index: null };
+  big.add('x', many, place(0, 0, 0)).add('x', many, place(0, 0, 0));
+  ok(big.build()[0].index instanceof Uint32Array, 'a bin past 65535 vertices takes 32-bit indices');
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');

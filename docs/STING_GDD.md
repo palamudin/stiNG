@@ -2226,6 +2226,37 @@ Houses, shops, malls, lots, streets and ponds were already graded (18.68, 18.73)
 - Of 1097 small things in 289 chunks on a hilly world (554 tables, 274 sheds, 223 birdbaths, 26 bee boxes, 20 pond benches), every one stands level to 1e-9 m. For 1042 of them, the ground round them falls away by more than 5 cm.
 - The water of every pond is still level, now sampled inside its lobed edge.
 
+### 18.76 Meshes made from code (S2)
+
+**What.** A chunk's static parts are no longer one mesh each. They are put into bins as they are built, and a bin becomes one geometry (`view/merge.js`, our own code):
+- walls, roofs, doors, gables, shopfronts, awnings, trunks, table legs, bee boxes, birdbaths and garden lights;
+- one bin per kind of surface: a part's colour goes into its vertices, so every house's siding in a chunk is one draw, whatever its colour.
+
+**Instanced repeats.**
+- Fences, benches and table tops: one shape, many boxes. Each keeps its own colour, so it still pales as wasps strip its pulp.
+- Cups with their drinks, lids and spill puddles: posed again only when one changes.
+- Tree crowns.
+
+**Movement on the GPU.** Crowns sway in their vertex shader, each with its own phase. JS sets only the wind and the time; it moved every crown every frame before.
+
+**Distance.** Small things (legs, bee boxes, baths, cups, flowers, webs, grills) are in a near group per chunk, not drawn past 90 m. Buildings, trees and fences are drawn to the fog.
+
+**Fake AO.** Walls, trunks, legs and posts darken toward their foot: a smoothstep on the height above the ground, before the lift. It costs one varying.
+
+**Measured** on the nine yards chunks round the home, on the low setting:
+
+| | Before | After |
+|---|---|---|
+| Drawn objects | 921 | 177 |
+| Draw calls a frame, from above | 470 | 294 |
+| Draw calls a frame, by a house | 287 | 201 |
+
+Triangles are the same, to 3%. The draw calls left are mostly people, wasps, the ground and the shadow pass.
+
+**Checks.**
+- The view suite merges parts with turns, scales and mirrors. Places, normals, winding and per-part values hold, and a bin past 65,535 vertices takes 32-bit indices.
+- Houses, sheds, tables and cups look as before; a house, a backyard table and the yards from above were compared.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -2234,7 +2265,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (131 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony; the T0 of progression (18.48): XP, unit and hive skills, the year's turn; multi-colony play with the player gauge (18.49); wintering in somewhere warm (18.50); chasing moving prey with a lock, with a colony view you can click (18.51); obstacle avoidance in assisted flight (18.52); reaching what moves under a lock (18.53); the lock ending on arrival (18.54); Shift hurrying an assisted flight (18.55); landing at speed with hovering round a lock (18.56); lines, the wasp in hand and roles passed on by masters (18.57); playing with a controller only, Xbox included (18.58); touch controls for phones and tablets (18.59); the map: minimap sizes, the big map and a phone HUD (18.60); colony switching through the relay (18.61); auto grab (18.62); the year's turn for hornet and honeybee lines (18.63); lockable moths with fireflies on summer evenings (18.64); swarms seen with a young queen's mating flight (18.65); AI raids on enemy nests (18.66); ground v2 (18.67); ground rings with graded ground (18.68); flight that feels the slope (18.69); the loading screen with warm-up and a menu over the live world (18.70); the quality controller (18.71); and the T3-1 leftovers: AI wasps kept out of walls, routes past long walls, the spot on a walker and the hover the player sets (18.72); and World v2, taken over from the world-building thread and offered as the menu's Look (20.5); ponds (18.73); surfaces drawn on request with work kept in tables (18.74); and footings under small things (18.75). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (132 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony; the T0 of progression (18.48): XP, unit and hive skills, the year's turn; multi-colony play with the player gauge (18.49); wintering in somewhere warm (18.50); chasing moving prey with a lock, with a colony view you can click (18.51); obstacle avoidance in assisted flight (18.52); reaching what moves under a lock (18.53); the lock ending on arrival (18.54); Shift hurrying an assisted flight (18.55); landing at speed with hovering round a lock (18.56); lines, the wasp in hand and roles passed on by masters (18.57); playing with a controller only, Xbox included (18.58); touch controls for phones and tablets (18.59); the map: minimap sizes, the big map and a phone HUD (18.60); colony switching through the relay (18.61); auto grab (18.62); the year's turn for hornet and honeybee lines (18.63); lockable moths with fireflies on summer evenings (18.64); swarms seen with a young queen's mating flight (18.65); AI raids on enemy nests (18.66); ground v2 (18.67); ground rings with graded ground (18.68); flight that feels the slope (18.69); the loading screen with warm-up and a menu over the live world (18.70); the quality controller (18.71); and the T3-1 leftovers: AI wasps kept out of walls, routes past long walls, the spot on a walker and the hover the player sets (18.72); and World v2, taken over from the world-building thread and offered as the menu's Look (20.5); ponds (18.73); surfaces drawn on request with work kept in tables (18.74); and footings under small things (18.75); and meshes made from code (18.76). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -2610,7 +2641,7 @@ Each is built, tested in JS and both C# builds where the sim is touched, documen
 
 **S1. Things stand level. Built (18.75).** Footings under small things; buildings and paving were already graded.
 
-**S2. Meshes from code.**
+**S2. Meshes from code. Built (18.76).**
 - **What.** 21.4, on what the world holds today. The drawing turns each chunk's houses, sheds, shops, fences and furniture into a list of parts. A builder makes the meshes from the parts:
   - merged per chunk and material;
   - instanced repeats;
@@ -2618,7 +2649,7 @@ Each is built, tested in JS and both C# builds where the sim is touched, documen
   - sway in the vertex shader;
   - fake AO.
 - **Done when:**
-  - draw calls fall by at least half in a yards chunk;
+  - draw calls fall by at least half in a yards chunk (the chunk's objects fell by 81%; the frame's calls by 30–37%, since people, wasps and shadows stay);
   - the frame is no slower than now on the low setting;
   - houses, sheds and shops look as they do now, or better.
 

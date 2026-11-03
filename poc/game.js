@@ -8,6 +8,7 @@ import {
   NetLab, LINKS, pondsOf, pondEdge, POND_PATH, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetVel, CHASE, targetLabel, assistPilot, swoopPilot, hoverPilot, hoverSetting, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE, SKILLS, SKILL_UNLOCKS, SKILL_RANKED, SKILL_HIVE, skillCost, ROLES,
 } from './sim/index.js';
 import { Rings, RING, ringGrid, ringGLSL } from './view/rings.js';
+import { Batch, place } from './view/merge.js';
 // World v2 (GDD 20.4): the ground, forests, grass, sky and post chain of world/, drawing the sim's own world. Chosen on
 // the menu (Look) or with ?world2, read once at load: every lifted material is compiled against one ground or the other.
 const W2_ASKED = (() => { try { return new URLSearchParams(location.search).has('world2') || localStorage.getItem('sting.world2') === '1'; } catch { return false; } })();
@@ -102,6 +103,14 @@ function mat(color, opts = {}) {
   if (!matCache.has(key)) matCache.set(key, new THREE.MeshLambertMaterial({ color, ...opts }));
   return matCache.get(key);
 }
+// a material for parts merged or instanced per chunk (GDD 21.4): Lambert with the fake AO
+const amatCache = new Map();
+function amat(color, opts = {}) {
+  const key = color + JSON.stringify(opts);
+  let m = amatCache.get(key);
+  if (!m) { m = new THREE.MeshLambertMaterial({ color, ...opts }); m.defines = { FAKE_AO: '' }; amatCache.set(key, m); }
+  return m;
+}
 function canvasTex(w, h, draw, repeat) {
   const c = document.createElement('canvas'); c.width = w; c.height = h;
   draw(c.getContext('2d'));
@@ -157,6 +166,29 @@ THREE.ShaderChunk.begin_vertex += `
   float th = ringHeightAt(tw.xz);
   transformed += inverse(mat3(tm)) * vec3(0.0, th, 0.0);
 }
+#endif
+`;
+// Fake ambient occlusion (GDD 21.4): a part darkens toward its foot, by a smoothstep on its height above the ground
+// (before the lift), so walls, trunks, legs and posts look set on the ground. Cheap: one varying, no extra pass.
+THREE.ShaderChunk.common += `
+#ifdef FAKE_AO
+varying float vAOy;
+#endif
+`;
+THREE.ShaderChunk.begin_vertex += `
+#ifdef FAKE_AO
+{
+  mat4 am = modelMatrix;
+#ifdef USE_INSTANCING
+  am = modelMatrix * instanceMatrix;
+#endif
+  vAOy = (am * vec4(position, 1.0)).y;
+}
+#endif
+`;
+THREE.ShaderChunk.color_fragment += `
+#ifdef FAKE_AO
+  diffuseColor.rgb *= mix(0.66, 1.0, smoothstep(0.0, 0.5, vAOy));
 #endif
 `;
 function terrPatch(m) {
@@ -357,6 +389,73 @@ function segBox(alongX, n) {
   return g;
 }
 
+// a geometry's arrays for a Batch (view/merge.js), kept per geometry
+const geoArrs = new WeakMap();
+function geoArr(geo) {
+  let a = geoArrs.get(geo);
+  if (!a) { a = { position: geo.attributes.position.array, normal: geo.attributes.normal ? geo.attributes.normal.array : null, index: geo.index ? geo.index.array : null }; geoArrs.set(geo, a); }
+  return a;
+}
+// The shared material a merged part draws with, its own colour going into its vertices: every Lambert part with the
+// fake AO into one, every wall, roof or shopfront into one per kind of surface (and side). Null: drawn as it is.
+const vcBases = new Map();
+function vcBase(m) {
+  if (!m.defines || m.defines.FAKE_AO === undefined || m.vertexColors) return null;
+  const kind = m.defines.SURF_KIND, key = kind + '|' + m.side;
+  let b = vcBases.get(key);
+  if (!b) {
+    if (kind === undefined) { b = new THREE.MeshLambertMaterial({ color: '#ffffff', vertexColors: true, side: m.side }); b.defines = { FAKE_AO: '' }; }
+    else b = surfMat('#ffffff', kind, { vertexColors: true, side: m.side }, true);
+    vcBases.set(key, b);
+  }
+  return b;
+}
+// a Batch's bins as meshes, one per material
+function batchMeshes(B, mats, parent) {
+  for (const b of B.build({ aBox: [0, 0, 1e3, 1e3], color: [1, 1, 1] })) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(b.position, 3));
+    geo.setAttribute('normal', new THREE.BufferAttribute(b.normal, 3));
+    for (const [n, a] of Object.entries(b.attrs)) geo.setAttribute(n, new THREE.BufferAttribute(a.array, a.itemSize));
+    geo.setIndex(new THREE.BufferAttribute(b.index, 1));
+    geo.computeBoundingSphere();
+    const m = new THREE.Mesh(geo, mats.get(b.key)); m.castShadow = m.receiveShadow = true; m.userData.parts = b.parts; m.userData.own = true;
+    parent.add(m);
+  }
+}
+// Crowns sway in their vertex shader (GDD 21.4): the wind and the time are uniforms, each crown its own phase; JS
+// touches nothing per frame. Drawn instanced, one draw call a chunk.
+const SWAY = { uWind: { value: new THREE.Vector2() }, uTime: { value: 0 } };
+const crownMat = new THREE.MeshLambertMaterial({ color: '#ffffff', flatShading: true });
+crownMat.onBeforeCompile = (sh) => {
+  Object.assign(sh.uniforms, SWAY);
+  sh.vertexShader = sh.vertexShader
+    .replace('#include <common>', '#include <common>\nattribute float aPh; uniform vec2 uWind; uniform float uTime;')
+    .replace('#include <begin_vertex>', `#include <begin_vertex>
+  { float sc = length(instanceMatrix[0].xyz), s = 0.035 * (1.0 + 0.45 * sin(uTime * 1.7 + aPh)); transformed.xz += uWind * s / sc; }`);
+};
+crownMat.customProgramCacheKey = () => 'crown';
+// wooden boxes (fences, benches, table tops) drawn instanced per shape, each its own colour so it can pale as wasps
+// strip its pulp (T1-12)
+const woodMat = new THREE.MeshLambertMaterial({ color: '#ffffff' }); woodMat.defines = { FAKE_AO: '' };
+const geoBulb = new THREE.SphereGeometry(0.05, 6, 4), BULB_MAT = new THREE.MeshBasicMaterial({ color: '#ffe7a8' }), geoPost = new THREE.CylinderGeometry(0.05, 0.05, 2.9, 6);
+// cups (instanced per chunk): the shared materials take each cup's colour per instance
+const CUP_OUT = new THREE.MeshLambertMaterial({ color: '#ffffff', side: THREE.FrontSide }), CUP_IN = new THREE.MeshLambertMaterial({ color: '#b9b4a8', side: THREE.BackSide });
+const CUP_DRINK = new THREE.MeshLambertMaterial({ color: '#ffffff' }), CUP_PUD = new THREE.MeshLambertMaterial({ color: '#b07a1e', transparent: true, opacity: 0.75 }), CUP_LID = new THREE.MeshLambertMaterial({ color: '#ffffff' });
+const geoPud = new THREE.CircleGeometry(0.075, 18), geoLid = new THREE.CylinderGeometry(0.05, 0.05, 0.006, 14);
+const _cm = new THREE.Matrix4(), _cr = new THREE.Matrix4(), _cZero = new THREE.Matrix4().makeScale(0, 0, 0), _cCol = new THREE.Color();
+function cupPose(C, i, down, lid, lv) {
+  const can = C.cans[i];
+  _cm.makeRotationZ(down ? Math.PI / 2 : 0).setPosition(can.x, down ? 0.785 : 0.81, can.z);
+  C.outer.setMatrixAt(i, _cm); C.inner.setMatrixAt(i, _cm);
+  if (down) C.drink.setMatrixAt(i, _cZero);
+  else { _cr.makeRotationX(-Math.PI / 2).setPosition(can.x, C.level[i], can.z); C.drink.setMatrixAt(i, _cr); }
+  if (down) { _cr.makeRotationX(-Math.PI / 2).setPosition(can.x + 0.06, 0.752, can.z); C.pud.setMatrixAt(i, _cr); } else C.pud.setMatrixAt(i, _cZero);
+  if (lid) { _cr.makeTranslation(can.x, 0.874, can.z); C.lid.setMatrixAt(i, _cr); } else C.lid.setMatrixAt(i, _cZero);
+  C.lid.setColorAt(i, _cCol.set(lv >= 2 ? '#d9d4c7' : '#c99a7a'));
+}
+const NEAR_DRAW = 90; // small things (legs, hives, baths, cups, flowers, webs) are not drawn past this, m
+
 // ------------------------------------------------------------------ surfaces drawn on request (no textures, no meshes)
 // Walls, roofs and paving are shaded from their own world coordinates in the fragment shader: siding, planks, plaster
 // and panels; windows in rows per storey with frames, glass that catches the sky and, at night, a few lit; shingles;
@@ -443,12 +542,12 @@ const SURF_FRAG = `
 }
 `;
 const surfCache = new Map();
-function surfMat(color, kind, opts = {}) {
-  const key = color + '|' + kind + JSON.stringify(opts);
+function surfMat(color, kind, opts = {}, ao = false) {
+  const key = color + '|' + kind + JSON.stringify(opts) + (ao ? '|ao' : '');
   let m = surfCache.get(key);
   if (m) return m;
   m = new THREE.MeshLambertMaterial({ color, ...opts });
-  m.defines = { ...(m.defines || {}), SURF_KIND: kind };
+  m.defines = { ...(m.defines || {}), SURF_KIND: kind, ...(ao ? { FAKE_AO: '' } : {}) };
   const prev = m.onBeforeCompile;
   m.onBeforeCompile = (sh, r) => {
     Object.assign(sh.uniforms, SURF);
@@ -486,14 +585,23 @@ const geoBowl = new THREE.SphereGeometry(0.27, 20, 10, 0, Math.PI * 2, Math.PI /
 const geoGrillLeg = new THREE.CylinderGeometry(0.012, 0.012, 0.72, 6);
 const geoGrate = new THREE.CircleGeometry(0.26, 16, 0, Math.PI * 2);
 const geoPuff = new THREE.SphereGeometry(0.06, 8, 6);
-const STRIPPED = new THREE.Color('#c9c5bb');
+const STRIPPED = new THREE.Color('#c9c5bb'), _pale = new THREE.Color();
 const geoFlame = new THREE.ConeGeometry(0.008, 0.025, 6);
 const webMat = new THREE.LineBasicMaterial({ color: '#f4f4f4', transparent: true, opacity: 0.32 });
 
 function buildChunk(rec) {
-  const g = new THREE.Group();
+  const g = new THREE.Group(), near = new THREE.Group(); // near: small things, hidden past NEAR_DRAW m (GDD 21.4)
+  g.add(near);
   const c = rec.content;
-  const dyn = { lids: [], traps: [], candles: [], cans: [], puddles: [], crowns: [], grills: [], wood: [], rain: [], rainDay: -2 };
+  const dyn = { traps: [], candles: [], grills: [], wood: [], rain: [], rainDay: -2, near, cx: rec.cx * 64, cz: rec.cz * 64 };
+  // static parts merged per material (GDD 21.4, view/merge.js): buildings and trunks drawn far, small things near
+  const BF = new Batch(), BN = new Batch(), bmats = new Map();
+  const put = (B, material, geo, M, vals) => {
+    const vb = vcBase(material); // one material per kind of surface, each part's colour in its vertices
+    if (vb) { vals = { ...(vals || {}), color: [material.color.r, material.color.g, material.color.b] }; material = vb; }
+    bmats.set(material.uuid, material); B.add(material.uuid, geoArr(geo), M, vals);
+  };
+  const top = (h, box) => ({ aTop: [h], aBox: box });
   // birdbaths (T2-1): a stone basin on a pedestal, water to the brim
   // a pond (GEN_VERSION 8): its water at the ground, a muddy margin round it (World v2 draws both itself)
   // lobed as the sim's (pondEdge); a park pond's gravel path round it
@@ -513,17 +621,16 @@ function buildChunk(rec) {
   }
   for (const b of c.baths || []) {
     if (b.fountain) { // a town fountain (T2-5): a low stone basin, a jet in the middle
-      const rim = new THREE.Mesh(new THREE.CylinderGeometry(b.r + 0.15, b.r + 0.2, b.h - 0.02, 28), mat('#b8b0a2')); rim.position.set(b.x, (b.h - 0.02) / 2, b.z); rim.receiveShadow = true;
+      put(BF, amat('#b8b0a2'), new THREE.CylinderGeometry(b.r + 0.15, b.r + 0.2, b.h - 0.02, 28), place(b.x, (b.h - 0.02) / 2, b.z));
       const water = new THREE.Mesh(new THREE.CircleGeometry(b.r, 28), WATER_MAT); water.rotation.x = -Math.PI / 2; water.position.set(b.x, b.h + 0.002, b.z);
       const jet = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.12, 1.2, 8), new THREE.MeshLambertMaterial({ color: '#d8ecf6', transparent: true, opacity: 0.6 })); jet.position.set(b.x, b.h + 0.6, b.z);
-      g.add(rim, water, jet);
+      g.add(water, jet);
       continue;
     }
-    const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.11, b.h - 0.08, 10), mat('#a9a49a')); ped.position.set(b.x, (b.h - 0.08) / 2, b.z);
-    const basin = new THREE.Mesh(new THREE.CylinderGeometry(b.r + 0.03, b.r * 0.55, 0.1, 18), mat('#bdb8ad')); basin.position.set(b.x, b.h - 0.055, b.z); // its rim just under the water line
+    put(BN, amat('#a9a49a'), new THREE.CylinderGeometry(0.07, 0.11, b.h - 0.08, 10), place(b.x, (b.h - 0.08) / 2, b.z));
+    put(BN, amat('#bdb8ad'), new THREE.CylinderGeometry(b.r + 0.03, b.r * 0.55, 0.1, 18), place(b.x, b.h - 0.055, b.z)); // its rim just under the water line
     const water = new THREE.Mesh(new THREE.CircleGeometry(b.r, 20), WATER_MAT); water.rotation.x = -Math.PI / 2; water.position.set(b.x, b.h + 0.002, b.z);
-    for (const m of [ped, basin]) { m.castShadow = m.receiveShadow = true; }
-    g.add(ped, basin, water);
+    near.add(water);
   }
   // garden sheds: plank walls, a pitched roof, a crack in one wall and a gap under one eave (nest sites)
   // land use (T1-12): the ground of a yard is a mown lawn, a forest floor is dark; streets, cul-de-sacs, parking lots
@@ -553,96 +660,90 @@ function buildChunk(rec) {
   const SHOP = ['#c98f6b', '#d8c7a4', '#9fb3a1', '#b8a1c4', '#e0d0b8', '#a8bccd'], AWN = ['#7a2f24', '#2f5f7a', '#3f7a2f', '#7a6a2f', '#5a2f7a', '#7a2f5a'];
   for (const sh of c.shops || []) {
     // shopfronts and upper windows are drawn on the walls by their shader (surfMat), not as meshes
-    const b = new THREE.Mesh(withTop(new THREE.BoxGeometry(sh.hw * 2, sh.h, sh.hd * 2), sh.h, [sh.x, sh.z, sh.hw, sh.hd]), surfMat(SHOP[sh.color % SHOP.length], 1)); b.position.set(sh.x, sh.h / 2, sh.z); b.castShadow = b.receiveShadow = true;
-    const awn = new THREE.Mesh(new THREE.BoxGeometry(sh.hw * 2 + 0.8, 0.12, sh.hd * 2 + 0.8), mat(AWN[sh.color % AWN.length])); awn.position.set(sh.x, 2.75, sh.z); awn.castShadow = true;
-    g.add(b, awn);
+    put(BF, surfMat(SHOP[sh.color % SHOP.length], 1, {}, true), geoBox, place(sh.x, sh.h / 2, sh.z, sh.hw * 2, sh.h, sh.hd * 2), top(sh.h, [sh.x, sh.z, sh.hw, sh.hd]));
+    put(BF, amat(AWN[sh.color % AWN.length]), geoBox, place(sh.x, 2.75, sh.z, sh.hw * 2 + 0.8, 0.12, sh.hd * 2 + 0.8));
   }
   for (const gd of c.gardens || []) {
-    const lights = new THREE.Group(), bulb = new THREE.SphereGeometry(0.05, 6, 4), on = new THREE.MeshBasicMaterial({ color: '#ffe7a8' });
     for (const [ax, az, bx, bz] of [[-1, -1, 1, -1], [1, -1, 1, 1], [1, 1, -1, 1], [-1, 1, -1, -1], [-1, 0, 1, 0]]) {
-      for (let k = 0; k <= 12; k++) { const f = k / 12, x = gd.x + (ax + (bx - ax) * f) * gd.hw, z = gd.z + (az + (bz - az) * f) * gd.hd; const m = new THREE.Mesh(bulb, on); m.position.set(x, 2.8 - 0.35 * Math.sin(Math.PI * f), z); lights.add(m); }
+      for (let k = 0; k <= 12; k++) { const f = k / 12, x = gd.x + (ax + (bx - ax) * f) * gd.hw, z = gd.z + (az + (bz - az) * f) * gd.hd; put(BN, BULB_MAT, geoBulb, place(x, 2.8 - 0.35 * Math.sin(Math.PI * f), z)); }
     }
-    for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { const post = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2.9, 6), mat('#4a3a2c')); post.position.set(gd.x + sx * gd.hw, 1.45, gd.z + sz * gd.hd); lights.add(post); }
-    g.add(lights);
+    for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) put(BF, amat('#4a3a2c'), geoPost, place(gd.x + sx * gd.hw, 1.45, gd.z + sz * gd.hd));
   }
   for (const m of c.malls || []) {
-    const b = new THREE.Mesh(withTop(new THREE.BoxGeometry(m.hw * 2, m.h, m.hd * 2), m.h - 1.2, [m.x, m.z, m.hw, m.hd]), surfMat('#cdbfa6', 2)); b.position.set(m.x, m.h / 2, m.z); b.castShadow = b.receiveShadow = true;
-    const band = new THREE.Mesh(new THREE.BoxGeometry(m.hw * 2 + 0.1, 1.2, m.hd * 2 + 0.1), mat('#7a2f24')); band.position.set(m.x, m.h - 0.6, m.z);
-    g.add(b, band);
+    put(BF, surfMat('#cdbfa6', 2, {}, true), geoBox, place(m.x, m.h / 2, m.z, m.hw * 2, m.h, m.hd * 2), top(m.h - 1.2, [m.x, m.z, m.hw, m.hd]));
+    put(BF, amat('#7a2f24'), geoBox, place(m.x, m.h - 0.6, m.z, m.hw * 2 + 0.1, 1.2, m.hd * 2 + 0.1));
   }
   for (const sh of c.sheds || []) {
     const siding = sh.house ? ['#e3dccb', '#c9d3d6', '#dcc9a8', '#c7cdb6', '#efe9dd'][Math.abs(Math.round(sh.x * 7 + sh.z * 3)) % 5] : '#7a5a3c';
-    const walls = new THREE.Mesh(withTop(new THREE.BoxGeometry(sh.hw * 2, sh.h, sh.hd * 2), sh.h, [sh.x, sh.z, sh.hw, sh.hd]), surfMat(siding, sh.house ? 0 : 3)); // siding and windows, or a shed's planks
-    walls.position.set(sh.x, sh.h / 2, sh.z); walls.castShadow = walls.receiveShadow = true;
+    put(BF, surfMat(siding, sh.house ? 0 : 3, {}, true), geoBox, place(sh.x, sh.h / 2, sh.z, sh.hw * 2, sh.h, sh.hd * 2), top(sh.h, [sh.x, sh.z, sh.hw, sh.hd])); // siding and windows, or a shed's planks
     const long = sh.hw >= sh.hd, span = long ? sh.hd : sh.hw, len = (long ? sh.hw : sh.hd) * 2 + 0.2, rise = sh.house ? 1.9 : 0.55;
     if (sh.house) {
       // windows are drawn on the walls by their shader (surfMat); a door on the street side, the gable ends closed with a wedge
       const along = long ? [1, 0] : [0, 1], across = long ? [0, 1] : [1, 0], half = long ? sh.hw : sh.hd, depth = long ? sh.hd : sh.hw;
-      const door = new THREE.Mesh(new THREE.BoxGeometry(along[0] ? 1.0 : 0.06, 2.1, along[1] ? 1.0 : 0.06), mat('#6b3b2a'));
       const ds = long ? Math.sign(rec.cz * 64 - sh.z) || 1 : Math.sign(rec.cx * 64 - sh.x) || 1; // the door faces the street
-      door.position.set(sh.x + across[0] * ds * (depth + 0.02), 1.05, sh.z + across[1] * ds * (depth + 0.02)); g.add(door);
-      const gable = new THREE.Shape([new THREE.Vector2(-depth, 0), new THREE.Vector2(depth, 0), new THREE.Vector2(0, rise)]);
+      put(BF, amat('#6b3b2a'), geoBox, place(sh.x + across[0] * ds * (depth + 0.02), 1.05, sh.z + across[1] * ds * (depth + 0.02), along[0] ? 1.0 : 0.06, 2.1, along[1] ? 1.0 : 0.06));
+      const gableGeo = new THREE.ShapeGeometry(new THREE.Shape([new THREE.Vector2(-depth, 0), new THREE.Vector2(depth, 0), new THREE.Vector2(0, rise)]));
       for (const s of [-1, 1]) {
-        const gm = new THREE.Mesh(withTop(new THREE.ShapeGeometry(gable), 0), surfMat(siding, 0, { side: THREE.DoubleSide }));
-        gm.position.set(sh.x + along[0] * s * half, sh.h, sh.z + along[1] * s * half); gm.rotation.y = long ? Math.PI / 2 : 0; g.add(gm);
+        put(BF, surfMat(siding, 0, { side: THREE.DoubleSide }, true), gableGeo, place(sh.x + along[0] * s * half, sh.h, sh.z + along[1] * s * half, 1, 1, 1, 0, long ? Math.PI / 2 : 0, 0), top(0, [0, 0, 1e3, 1e3]));
       }
     }
     // the slabs' top faces lie on the solid roof the sim collides with (world.js shedRoof)
     const rf = shedRoof(sh), slope = rf.L, ang = Math.atan2(rf.rise, rf.S), th = sh.house ? 0.12 : 0.05;
     const cy = sh.h + rf.rise / 2 - rf.S / rf.L * th / 2, cu = rf.S / 2 - rf.rise / rf.L * th / 2;
     for (const side of [-1, 1]) {
-      const roof = new THREE.Mesh(new THREE.BoxGeometry(long ? rf.half * 2 : slope, th, long ? slope : rf.half * 2), surfMat(sh.house ? '#4e4b52' : '#3d3a36', 4)); // shingles
-      if (long) { roof.position.set(sh.x, cy, sh.z + side * cu); roof.rotation.x = side * ang; }
-      else { roof.position.set(sh.x + side * cu, cy, sh.z); roof.rotation.z = -side * ang; }
-      roof.castShadow = true; g.add(roof);
+      const rm = surfMat(sh.house ? '#4e4b52' : '#3d3a36', 4, {}, true), sx = long ? rf.half * 2 : slope, sz = long ? slope : rf.half * 2; // shingles
+      if (long) put(BF, rm, geoBox, place(sh.x, cy, sh.z + side * cu, sx, th, sz, side * ang, 0, 0));
+      else put(BF, rm, geoBox, place(sh.x + side * cu, cy, sh.z, sx, th, sz, 0, 0, -side * ang));
     }
     const ss = shedSites(sh);
-    const crack = new THREE.Mesh(new THREE.BoxGeometry(ss.wall.nx ? 0.012 : 0.05, 0.12, ss.wall.nz ? 0.012 : 0.05), mat('#0d0a07'));
-    crack.position.set(ss.wall.x - ss.wall.nx * 0.008, ss.wall.y, ss.wall.z - ss.wall.nz * 0.008);
-    const eave = new THREE.Mesh(new THREE.BoxGeometry(ss.attic.nx ? 0.012 : 0.4, 0.03, ss.attic.nz ? 0.012 : 0.4), mat('#0d0a07'));
-    eave.position.set(ss.attic.x - ss.attic.nx * 0.008, ss.attic.y, ss.attic.z - ss.attic.nz * 0.008);
-    g.add(walls, crack, eave);
+    put(BN, amat('#0d0a07'), geoBox, place(ss.wall.x - ss.wall.nx * 0.008, ss.wall.y, ss.wall.z - ss.wall.nz * 0.008, ss.wall.nx ? 0.012 : 0.05, 0.12, ss.wall.nz ? 0.012 : 0.05));
+    put(BN, amat('#0d0a07'), geoBox, place(ss.attic.x - ss.attic.nx * 0.008, ss.attic.y, ss.attic.z - ss.attic.nz * 0.008, ss.attic.nx ? 0.012 : 0.4, 0.03, ss.attic.nz ? 0.012 : 0.4));
   }
-  for (const t of c.trees) {
-    const trunk = new THREE.Mesh(geoTrunk, mat('#5b4330'));
-    trunk.scale.set(t.r, t.h, t.r); trunk.position.set(t.x, t.h / 2, t.z);
-    trunk.castShadow = trunk.receiveShadow = true;
-    const leaf = mat(new THREE.Color().setHSL(0.27 + t.shade * 0.06, 0.45, 0.26 + t.shade * 0.08).getStyle(), { flatShading: true });
-    g.add(trunk);
-    if (W2on) continue; // World v2 draws the crown (its forest, one for one with these trees); the trunk stays the sim's
-    const a = new THREE.Mesh(geoBlob, leaf); a.scale.setScalar(t.cr); a.position.set(t.x, t.h + t.cr * 0.35, t.z);
-    const b = new THREE.Mesh(geoBlob, leaf); b.scale.setScalar(t.cr * 0.7); b.position.set(t.x + t.cr * 0.45, t.h - t.cr * 0.1, t.z - t.cr * 0.3);
-    a.castShadow = b.castShadow = true;
-    for (const m of [a, b]) dyn.crowns.push({ m, x: m.position.x, z: m.position.z, ph: t.x * 0.7 + t.z * 0.3 });
-    g.add(a, b);
+  // trunks merged; crowns instanced, two blobs a tree, swaying in their vertex shader (World v2 draws its own crowns)
+  for (const t of c.trees) put(BF, amat('#5b4330'), geoTrunk, place(t.x, t.h / 2, t.z, t.r, t.h, t.r));
+  if (c.trees.length && !W2on) {
+    const n = c.trees.length * 2, cg = geoBlob.clone(), cm = new THREE.InstancedMesh(cg, crownMat, n), ph = new Float32Array(n), m4 = new THREE.Matrix4(), col = new THREE.Color();
+    c.trees.forEach((t, i) => {
+      col.setHSL(0.27 + t.shade * 0.06, 0.45, 0.26 + t.shade * 0.08);
+      m4.fromArray(place(t.x, t.h + t.cr * 0.35, t.z, t.cr, t.cr, t.cr)); cm.setMatrixAt(i * 2, m4); cm.setColorAt(i * 2, col);
+      m4.fromArray(place(t.x + t.cr * 0.45, t.h - t.cr * 0.1, t.z - t.cr * 0.3, t.cr * 0.7, t.cr * 0.7, t.cr * 0.7)); cm.setMatrixAt(i * 2 + 1, m4); cm.setColorAt(i * 2 + 1, col);
+      ph[i * 2] = ph[i * 2 + 1] = t.x * 0.7 + t.z * 0.3;
+    });
+    cg.setAttribute('aPh', new THREE.InstancedBufferAttribute(ph, 1)); cm.userData.own = true; cm.castShadow = true; cm.computeBoundingSphere(); g.add(cm);
   }
-  const wood = mat('#8a6440');
+  const wood = amat('#8a6440');
+  // fences in cedar, benches and table tops: instanced per shape, each box its own colour so it can pale as wasps strip
+  // its pulp (T1-12); a long box (a run of fence) is cut every metre along its length, so on a hilly world each cut
+  // follows the ground
+  const shapes = new Map();
   c.boxes.forEach((b, bi) => {
     if (b.hive || b.shed || b.mall || b.shop) return; // drawn with their own shapes (a shop's box drawn again over its walls fought them)
-    // fences in cedar; each wooden box keeps its own material so it can pale as wasps strip its pulp (T1-12)
-    // a long box (a run of fence) is cut every metre along its length, so on a hilly world each cut follows the ground
-    const len = Math.max(b.maxx - b.minx, b.maxz - b.minz), m = new THREE.Mesh(len > 1.5 ? segBox(b.maxx - b.minx > b.maxz - b.minz, Math.ceil(len)) : geoBox, b.wood ? mat(b.fence ? '#b98a55' : '#8a6440') : wood);
-    m.scale.set(b.maxx - b.minx, b.maxy - b.miny, b.maxz - b.minz);
-    m.position.set((b.minx + b.maxx) / 2, (b.miny + b.maxy) / 2, (b.minz + b.maxz) / 2);
-    m.castShadow = m.receiveShadow = true;
-    g.add(m);
-    if (b.wood) dyn.wood.push({ m, i: bi, base: new THREE.Color(b.fence ? '#b98a55' : '#8a6440'), shown: -1 });
+    const len = Math.max(b.maxx - b.minx, b.maxz - b.minz), geo = len > 1.5 ? segBox(b.maxx - b.minx > b.maxz - b.minz, Math.ceil(len)) : geoBox;
+    if (!shapes.has(geo)) shapes.set(geo, []);
+    shapes.get(geo).push([b, bi]);
   });
+  for (const [geo, list] of shapes) {
+    const im = new THREE.InstancedMesh(geo, woodMat, list.length), m4 = new THREE.Matrix4();
+    list.forEach(([b, bi], j) => {
+      m4.fromArray(place((b.minx + b.maxx) / 2, (b.miny + b.maxy) / 2, (b.minz + b.maxz) / 2, b.maxx - b.minx, b.maxy - b.miny, b.maxz - b.minz)); im.setMatrixAt(j, m4);
+      const base = new THREE.Color(b.wood && b.fence ? '#b98a55' : '#8a6440'); im.setColorAt(j, base);
+      if (b.wood) dyn.wood.push({ im, j, i: bi, base, shown: -1 });
+    });
+    im.castShadow = im.receiveShadow = true; im.computeBoundingSphere(); (list.every(([b]) => b.fence) ? g : near).add(im);
+  }
   c.tables.forEach((t, ti) => {
     const along = t.axisX ? [1, 0] : [0, 1], across = t.axisX ? [0, 1] : [1, 0];
     for (const s of [-0.8, 0.8]) for (const q of [-0.3, 0.3]) {
-      const leg = new THREE.Mesh(geoBox, wood); leg.scale.set(0.05, 0.71, 0.05);
-      leg.position.set(t.x + along[0] * s + across[0] * q, 0.355, t.z + along[1] * s + across[1] * q); leg.castShadow = true; g.add(leg);
+      put(BN, wood, geoBox, place(t.x + along[0] * s + across[0] * q, 0.355, t.z + along[1] * s + across[1] * q, 0.05, 0.71, 0.05));
     }
     for (const side of [-0.67, 0.67]) for (const s of [-0.75, 0.75]) {
-      const leg = new THREE.Mesh(geoBox, wood); leg.scale.set(0.05, 0.4, 0.05);
-      leg.position.set(t.x + along[0] * s + across[0] * side, 0.2, t.z + along[1] * s + across[1] * side); g.add(leg);
+      put(BN, wood, geoBox, place(t.x + along[0] * s + across[0] * side, 0.2, t.z + along[1] * s + across[1] * side, 0.05, 0.4, 0.05));
     }
     const candle = new THREE.Group();
     const cup = new THREE.Mesh(geoCandle, mat('#e8c547')); cup.position.y = 0.035;
     const flame = new THREE.Mesh(geoFlame, new THREE.MeshBasicMaterial({ color: '#ffb347' })); flame.position.y = 0.085;
     candle.add(cup, flame); candle.position.set(t.x, 0.75, t.z); candle.visible = false;
-    g.add(candle); dyn.candles.push(candle);
+    near.add(candle); dyn.candles.push(candle);
   });
   // kettle grills at some tables (T1-10): a black bowl on three legs, a grate, coals and smoke when lit, a plate
   for (const gr of sim.grillsIn(rec)) {
@@ -656,31 +757,29 @@ function buildChunk(rec) {
     const coals = new THREE.Mesh(new THREE.CircleGeometry(B.r * 0.8, 20), new THREE.MeshBasicMaterial({ color: '#ff6a1a' })); coals.rotation.x = -Math.PI / 2; coals.position.y = B.grateY - 0.06; coals.visible = false;
     const smoke = [];
     for (let k = 0; k < 6; k++) { const p = new THREE.Mesh(geoPuff, new THREE.MeshBasicMaterial({ color: '#c8c8c8', transparent: true, opacity: 0, depthWrite: false })); p.visible = false; grp.add(p); smoke.push(p); }
-    grp.add(bowl, grate, coals); g.add(grp);
-    const plate = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.09, 0.012, 20), mat('#f2efe8')); plate.position.set(gr.px, 0.757, gr.pz); plate.visible = false; g.add(plate);
+    grp.add(bowl, grate, coals); near.add(grp);
+    const plate = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.09, 0.012, 20), mat('#f2efe8')); plate.position.set(gr.px, 0.757, gr.pz); plate.visible = false; near.add(plate);
     dyn.grills.push({ gr, coals, smoke, plate });
   }
   const cups = sim.cupsIn(rec);
-  c.cans.forEach((can, ci) => {
-    // a hollow cup: painted outside, plain inside, the drink at its level
-    const m = new THREE.Group(); m.position.set(can.x, 0.81, can.z);
-    const outer = new THREE.Mesh(geoCan, new THREE.MeshLambertMaterial({ color: CANS[can.color], side: THREE.FrontSide })); outer.castShadow = true;
-    const inner = new THREE.Mesh(geoCanIn, new THREE.MeshLambertMaterial({ color: '#b9b4a8', side: THREE.BackSide }));
-    const drink = new THREE.Mesh(geoDrink, new THREE.MeshLambertMaterial({ color: DRINKS[can.color] })); drink.rotation.x = -Math.PI / 2; drink.position.y = cups[ci].level - 0.81;
-    m.add(outer, inner, drink); m.userData.drink = drink;
-    g.add(m); dyn.cans.push(m);
-    const pud = new THREE.Mesh(new THREE.CircleGeometry(0.075, 18), new THREE.MeshLambertMaterial({ color: '#b07a1e', transparent: true, opacity: 0.75 }));
-    pud.rotation.x = -Math.PI / 2; pud.position.set(can.x + 0.06, 0.752, can.z); pud.visible = false; g.add(pud); dyn.puddles.push(pud);
-    const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.006, 14), new THREE.MeshLambertMaterial({ color: '#d9d4c7' })); lid.position.set(can.x, 0.874, can.z); lid.visible = false;
-    g.add(lid); dyn.lids.push(lid);
-  });
+  if (c.cans.length) {
+    // cups, instanced (GDD 21.4): painted outside, plain inside, the drink at its level; a spilled one on its side by
+    // its puddle; a lid, or a hand over it. Posed again only when one changes (cupPose).
+    const n = c.cans.length, I = (geo, m) => { const im = new THREE.InstancedMesh(geo, m, n); near.add(im); return im; };
+    const C = { outer: I(geoCan, CUP_OUT), inner: I(geoCanIn, CUP_IN), drink: I(geoDrink, CUP_DRINK), pud: I(geoPud, CUP_PUD), lid: I(geoLid, CUP_LID), cans: c.cans, level: cups.map((q) => q.level), st: c.cans.map(() => -1) };
+    C.outer.castShadow = true;
+    const col = new THREE.Color();
+    c.cans.forEach((can, i) => { C.outer.setColorAt(i, col.set(CANS[can.color])); C.drink.setColorAt(i, col.set(DRINKS[can.color])); C.lid.setColorAt(i, col.set('#d9d4c7')); cupPose(C, i, false, false, 0); });
+    for (const im of [C.outer, C.inner, C.drink, C.pud, C.lid]) im.computeBoundingSphere();
+    dyn.cups = C;
+  }
   for (const tr of c.traps) {
     const grp = new THREE.Group();
     const bottle = new THREE.Mesh(geoBottle, new THREE.MeshLambertMaterial({ color: '#b9d6c9', transparent: true, opacity: 0.7 }));
     const liquid = new THREE.Mesh(new THREE.CylinderGeometry(0.033, 0.038, 0.08, 12), mat('#c98a2a')); liquid.position.y = -0.055;
     const string = new THREE.Mesh(new THREE.CylinderGeometry(0.002, 0.002, 0.15, 4), mat('#ddd')); string.position.y = 0.17;
     grp.add(bottle, liquid, string); grp.position.set(tr.x, tr.y, tr.z); grp.visible = false;
-    g.add(grp); dyn.traps.push(grp);
+    near.add(grp); dyn.traps.push(grp);
   }
   if (c.flowers.length) {
     const stems = new THREE.InstancedMesh(geoStem, mat('#4f7a2a'), c.flowers.length);
@@ -690,19 +789,15 @@ function buildChunk(rec) {
       m4.makeScale(1, f.y, 1).setPosition(f.x, f.y / 2, f.z); stems.setMatrixAt(i, m4);
       m4.makeTranslation(f.x, f.y, f.z); heads.setMatrixAt(i, m4); heads.setColorAt(i, col.set(FLOWERS[f.color]));
     });
-    g.add(stems, heads);
+    near.add(stems, heads);
     dyn.heads = heads; dyn.bloomKey = -1;
   }
   for (const hv of c.hives) {
-    const white = mat('#ece8dc'), roof = mat('#8d8a80');
-    const stand = new THREE.Mesh(geoBox, mat('#5b4330')); stand.scale.set(0.5, 0.4, 0.5); stand.position.set(hv.x, 0.2, hv.z);
-    const s1 = new THREE.Mesh(geoBox, white); s1.scale.set(0.45, 0.25, 0.45); s1.position.set(hv.x, 0.53, hv.z);
-    const s2 = new THREE.Mesh(geoBox, mat('#e2dccb')); s2.scale.set(0.45, 0.2, 0.45); s2.position.set(hv.x, 0.755, hv.z);
-    const lid = new THREE.Mesh(geoBox, roof); lid.scale.set(0.5, 0.06, 0.5); lid.position.set(hv.x, 0.885, hv.z);
-    const slot = new THREE.Mesh(geoBox, mat('#17120c')); slot.scale.set(hv.fx ? 0.01 : 0.16, 0.02, hv.fz ? 0.01 : 0.16);
-    slot.position.set(hv.ex, hv.ey - 0.05, hv.ez);
-    for (const m of [stand, s1, s2, lid]) { m.castShadow = m.receiveShadow = true; }
-    g.add(stand, s1, s2, lid, slot);
+    put(BN, amat('#5b4330'), geoBox, place(hv.x, 0.2, hv.z, 0.5, 0.4, 0.5));
+    put(BN, amat('#ece8dc'), geoBox, place(hv.x, 0.53, hv.z, 0.45, 0.25, 0.45));
+    put(BN, amat('#e2dccb'), geoBox, place(hv.x, 0.755, hv.z, 0.45, 0.2, 0.45));
+    put(BN, amat('#8d8a80'), geoBox, place(hv.x, 0.885, hv.z, 0.5, 0.06, 0.5));
+    put(BN, amat('#17120c'), geoBox, place(hv.ex, hv.ey - 0.05, hv.ez, hv.fx ? 0.01 : 0.16, 0.02, hv.fz ? 0.01 : 0.16));
   }
   dyn.webs = c.webs.map((wb) => {
     const pts = [];
@@ -715,7 +810,7 @@ function buildChunk(rec) {
     }
     const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
     const lines = new THREE.LineSegments(geo, webMat);
-    g.add(lines);
+    near.add(lines);
     return lines;
   });
   if (c.rival) {
@@ -726,13 +821,14 @@ function buildChunk(rec) {
     hole.rotation.x = Math.PI / 2; hole.position.set(rv.ex, rv.ey + 0.005, rv.ez);
     g.add(nest, hole);
   }
+  batchMeshes(BF, bmats, g); batchMeshes(BN, bmats, near);
   g.userData.dyn = dyn;
   return g;
 }
 
 function syncChunks() {
   const want = new Set(sim.activeChunks.map((r) => chunkKey(r.cx, r.cz)));
-  for (const [k, g] of chunkViews) if (!want.has(k)) { scene.remove(g); chunkViews.delete(k); }
+  for (const [k, g] of chunkViews) if (!want.has(k)) { scene.remove(g); chunkViews.delete(k); g.traverse((o) => { if (o.userData.own) o.geometry.dispose(); }); }
   for (const r of sim.activeChunks) {
     const k = chunkKey(r.cx, r.cz);
     if (!chunkViews.has(k)) { const g = buildChunk(r); g.userData.key = k; chunkViews.set(k, g); scene.add(g); }
@@ -743,25 +839,25 @@ function syncChunks() {
 }
 
 // Crowns lean and sway with the wind (presentation only; the sim's wind pushes wasps, GDD 5.3)
+// (in their vertex shader: here only the wind and the time are set, GDD 21.4); small things far off are not drawn
 function swayTrees(time) {
-  const w = sim.wind;
-  for (const g of chunkViews.values()) for (const c of g.userData.dyn.crowns) {
-    const s = 0.035 * (1 + 0.45 * Math.sin(time * 1.7 + c.ph));
-    c.m.position.x = c.x + w.x * s; c.m.position.z = c.z + w.z * s;
-  }
+  SWAY.uWind.value.set(sim.wind.x, sim.wind.z); SWAY.uTime.value = time;
+  const fx = camera.position.x, fz = camera.position.z, R = NEAR_DRAW + 46; // a chunk's corner is 45 m from its middle
+  for (const g of chunkViews.values()) { const d = g.userData.dyn, k = g.userData.key, cx = d.cx, cz = d.cz; d.near.visible = (cx - fx) * (cx - fx) + (cz - fz) * (cz - fz) < R * R; }
 }
 
 function updateChunkDynamics() {
   for (const [k, g] of chunkViews) {
     const lv = sim.escLevel(k), d = g.userData.dyn, torn = (sim.chunkState.get(k) || {}).webTorn || {};
     d.webs.forEach((l, i) => { l.visible = torn[i] !== sim.day; });
-    d.lids.forEach((l, i) => { l.visible = sim.cupCovered(k, i) && !sim.canSpilled(k, i); l.material.color.set(lv >= 2 ? '#d9d4c7' : '#c99a7a'); }); // a lid, or a hand over it
-    d.cans.forEach((m, i) => {
-      const down = sim.canSpilled(k, i);
-      m.rotation.z = down ? Math.PI / 2 : 0; m.position.y = down ? 0.785 : 0.81;
-      m.userData.drink.visible = !down;
-      d.puddles[i].visible = down;
-    });
+    if (d.cups) { // a lid, or a hand over it; a spilled cup on its side by its puddle
+      const C = d.cups; let ch = false;
+      C.cans.forEach((can, i) => {
+        const down = sim.canSpilled(k, i), lid = sim.cupCovered(k, i) && !down, key = (down ? 1 : 0) + (lid ? 2 : 0) + (lv >= 2 ? 4 : 0);
+        if (C.st[i] !== key) { C.st[i] = key; ch = true; cupPose(C, i, down, lid, lv); }
+      });
+      if (ch) for (const im of [C.outer, C.inner, C.drink, C.pud, C.lid]) { im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true; }
+    }
     for (const c of d.candles) c.visible = lv >= 2;
     // puddles after rain (T2-1): laid down when the ground gets wet, taken up when it dries
     const pd = sim.puddleDay();
@@ -797,8 +893,7 @@ function updateChunkDynamics() {
         if (n === wv.shown || !rec3) continue;
         wv.shown = n;
         const f = Math.min(1, n / sim.pulpLoads(rec3.content.boxes[wv.i]));
-        if (!wv.own) { wv.m.material = wv.m.material.clone(); wv.own = true; } // materials are shared until one is stripped
-        wv.m.material.color.copy(wv.base).lerp(STRIPPED, f * 0.85);
+        wv.im.setColorAt(wv.j, _pale.copy(wv.base).lerp(STRIPPED, f * 0.85)); wv.im.instanceColor.needsUpdate = true;
       }
     }
     // barbecues (T1-10): coals and smoke while lit, the plate while meat is served
@@ -3612,7 +3707,7 @@ warm.p = (async () => {
 })();
 
 // test hook for automated checks
-window.__sting = { get sim() { return sim; }, get lab() { return lab; }, input, padUI, touch, buildCmd, atlas, opts, start: () => $("bStart").click(), humanViews, waspViews, rings, toggleNest, toggleLab, saveWorld, camera, scene, warm, quality, get world2() { return world2; }, W2on };
+window.__sting = { get sim() { return sim; }, get lab() { return lab; }, input, padUI, touch, buildCmd, atlas, opts, start: () => $("bStart").click(), humanViews, waspViews, rings, toggleNest, toggleLab, saveWorld, camera, scene, warm, quality, get world2() { return world2; }, W2on, chunkViews, renderer };
 window.__garment = (hm) => garmentGraph(hm.tr, hm.clothing, hm.posture, hm.parts[hm.posture]);
 window.__toWorld = toWorld;
 window.__weather = dayWeather;
