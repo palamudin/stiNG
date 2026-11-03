@@ -170,6 +170,7 @@ namespace Sting.Core
                 // the work is in the airspeed: holding still in a breeze costs like flying
                 Num rx = w.vx - wd.x, rz = w.vz - wd.z, air = Sqrt(rx * rx + w.vy * w.vy + rz * rz);
                 Num drain = T.energy.cruisePerSec * T.DT * (T.energy.hoverShare + (1 - T.energy.hoverShare) * Min(air / T.wasp.cruise, 2)) * (burst ? T.energy.burstMul : 1);
+                if (w.vy > 0) drain += T.energy.climbPerM * w.vy * T.DT; // climbing is work (GDD 20 G4)
                 if (rain) drain *= T.weather.rainDrainMul;
                 if (NearCitronella(w)) drain *= T.esc.citronellaDrain;
                 Num air0 = Temperature;
@@ -192,6 +193,8 @@ namespace Sting.Core
                 w.vx = w.vx * 0.97 + wd.x * 0.03; w.vz = w.vz * 0.97 + wd.z * 0.03;
             }
             int n = T.wasp.substeps; Num h = T.DT / n; var p0 = w.P;
+            // on hills the air does not rise with the ground (GDD 20 G4): the wasp keeps its height above sea level
+            bool hills = settings.terrain != 0; Num g0 = hills ? Ground(w.x, w.z) : 0;
             for (int i = 0; i < n; i++)
             {
                 var v0 = new V3(w.vx, w.vy, w.vz); // the speed going in, before a collision stops it
@@ -199,6 +202,7 @@ namespace Sting.Core
                 Collide(w);
                 if (w.swoopUntil > tick && w.state == "fly" && SwoopHit(w, v0, cmd)) return;
             }
+            if (hills) { Num dg = Ground(w.x, w.z) - g0; if (dg != 0) { w.y -= dg; Collide(w); } }
             WebCheck(w, p0);
             CupCheck(w);
             if (OnHotGrate(w)) { Die(w, "burned on a grill", null); return; } // T1-10

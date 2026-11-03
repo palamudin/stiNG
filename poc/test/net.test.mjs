@@ -204,9 +204,10 @@ for (const name of ['lan', 'good', 'bad', 'awful']) {
   const botA = stingBot({ plan: 'jab', rest: 200 });
   const cut = [0, 0, 0];
   let disagreeAfter = 0;
-  for (let i = 0; i < 20000; i++) {
+  for (let i = 0, end = 40000; i < end; i++) { // on until a while after both honest peers have cut C off
     lab.step(botA(lab.sims[0]));
     lab.sims.forEach((s, p) => { for (const e of s.drainEvents()) if (e.type === 'quarantine' && e.peer === 2 && !cut[p]) cut[p] = s.tick; });
+    if (cut[0] && cut[1] && end === 40000) end = i + 1800;
     if (i % 60 === 0 && !lab.agree([0, 1]) && cut[0]) disagreeAfter++;
   }
   const [A, B] = lab.sims, c = lab.checks;

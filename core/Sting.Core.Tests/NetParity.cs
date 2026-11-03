@@ -28,7 +28,7 @@ namespace Sting.Core.Tests
             {
                 var d = new Digest(); var lab = new MeshLab(new Settings { seed = 1234 }, 3, "bad"); var botA = Bots.StingBot("jab", null, 200);
                 lab.tamper = (from, m, sim) => { if (from == 2 && sim.tick > 1500 && m is NetEv ev && ev.type == "sting") foreach (var sw in ev.swats) sw.start += 1000; };
-                for (int i = 0; i < 17400; i++) // the host cuts the cheater off near tick 16656
+                for (int i = 0; i < 31200; i++) // the host cuts the cheater off near tick 30381
                 {
                     lab.Step(botA(lab.sims[0]));
                     foreach (var s in lab.sims) foreach (var e in s.DrainEvents()) { d.S(e.type); d.F(e.t); }

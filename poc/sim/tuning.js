@@ -48,7 +48,8 @@ export const T = {
     substeps: 3, ceiling: 40, carrySpeedMul: 0.8, starveTicks: 900,
   },
   venom: { jab: 0.12, deepen: 0.2, regenPerSec: 1 / 90 },
-  energy: { cruisePerSec: 1 / 240, hoverShare: 0.45, burstMul: 2.6, refuelPerSec: 0.35, feedDist: 0.045, nestRefill: 0.6 },
+  // climbPerM: what each metre climbed costs on top (GDD 20 G4: a metre is a second of cruising)
+  energy: { cruisePerSec: 1 / 240, hoverShare: 0.45, burstMul: 2.6, refuelPerSec: 0.35, feedDist: 0.045, nestRefill: 0.6, climbPerM: 1 / 240 },
   sting: { jabTicks: 6, fullTicks: 30 },
   stunTicks: 70,
   respawnTicks: 150,

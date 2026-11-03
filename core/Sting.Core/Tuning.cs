@@ -83,7 +83,7 @@ namespace Sting.Core
             public static int substeps = 3, starveTicks = 900;
         }
         public static class venom { public static Num jab = 0.12, deepen = 0.2, regenPerSec = 1.0 / 90; }
-        public static class energy { public static Num cruisePerSec = 1.0 / 240, hoverShare = 0.45, burstMul = 2.6, refuelPerSec = 0.35, feedDist = 0.045, nestRefill = 0.6; }
+        public static class energy { public static Num cruisePerSec = 1.0 / 240, hoverShare = 0.45, burstMul = 2.6, refuelPerSec = 0.35, feedDist = 0.045, nestRefill = 0.6, climbPerM = 1.0 / 240; }
         public static class sting { public static int jabTicks = 6, fullTicks = 30; }
         public static int stunTicks = 70, respawnTicks = 150;
         public static class reach { public static Num arm = 0.5, flex = 0.3, girth = 0.2, age = 0.1, minReachToSwat = 0.25; }

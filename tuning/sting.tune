@@ -113,6 +113,7 @@ burstMul = 2.6
 refuelPerSec = 0.35
 feedDist = 0.045
 nestRefill = 0.6
+climbPerM = 0.004166666666666667
 
 [sting]
 jabTicks = 6

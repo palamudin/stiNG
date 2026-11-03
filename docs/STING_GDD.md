@@ -1488,7 +1488,7 @@ Agreed 2026-10-27: the PoC's known limits are worked through before terrain is t
 
 **What hills do.** A rise between two people blocks their sight line (checked every 4 m along it between their eye heights): on a hilly world 53 of 140 open sight lines across a park are blocked. Rain settles in hollows: on open ground a puddle takes the lowest of three spots (0.30 m against 0.98 m). The wind is stronger on a rise, by 5% a metre (0.516 against 0.429 m/s at the foot). Terrain is in the rules hash, the world tag ("rolling", "hilly") and saves (C# format 23). The height field is part of the `motion` parity digest, and JS and C# agree on every check.
 
-**Limits.** Flight does not feel the slope: a wasp flying level stays at the same height above the ground and climbs a hill without effort. Hills are not solid to sight lines between a wasp and a person, only between people. A building does not sit level on a slope; it leans with the ground.
+**Limits.** Flight did not feel the slope until 18.69. Hills are not solid to sight lines between a wasp and a person, only between people. A building did not sit level on a slope until 18.68; small sheds still lean with the ground.
 
 
 ### 18.45 Lock-on, assisted flight and feeding as built (7.9)
@@ -2096,6 +2096,19 @@ The rings' fragment shader reads them, fading from the fine canvas to the coarse
 
 Only the `motion` digest moved. 416 properties hold.
 
+### 18.69 Flight that feels the slope (GDD 20, G4)
+
+**The air does not rise with the ground.** The sim still works in height above the ground, but on a hilly world a flying or falling wasp now keeps its height above sea level. After each tick's movement, its height above the ground drops by as much as the ground rose under it, and rises where the ground fell away.
+- **Level flight.** A wasp flying level up a rise of 1.57 m keeps its altitude (within 0.1 mm) and ends 1.57 m nearer the ground. Flown into the slope, it slides along the ground slowed, as against a wall, until it climbs.
+- **Who it affects.** Assisted flight and the AI already steer for a height above their target, so they climb hills by themselves.
+- **Unchanged.** A landed or walking wasp, and every flat world's motion.
+
+**Climbing is work.** Each metre climbed now costs `energy.climbPerM`, one second of cruising, on top of the airspeed cost; a descent costs nothing extra. Holding a metre above the ground up that rise takes 34 thousandths of a tank, and down it 16. This applies on flat worlds too (a take-off to a nest high in a tree costs a little more), so most digests moved.
+
+**Knock-on.** The three-peer mesh's cheater is now cut off at tick 30,381 instead of 16,656, because the honest wasps' stings come at other times. The mesh digest and test run until a while after the cut.
+
+**Checks.** JS and both C# builds agree. 418 properties hold.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -2104,7 +2117,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (121 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony; the T0 of progression (18.48): XP, unit and hive skills, the year's turn; multi-colony play with the player gauge (18.49); wintering in somewhere warm (18.50); chasing moving prey with a lock, with a colony view you can click (18.51); obstacle avoidance in assisted flight (18.52); reaching what moves under a lock (18.53); the lock ending on arrival (18.54); Shift hurrying an assisted flight (18.55); landing at speed with hovering round a lock (18.56); lines, the wasp in hand and roles passed on by masters (18.57); playing with a controller only, Xbox included (18.58); touch controls for phones and tablets (18.59); the map: minimap sizes, the big map and a phone HUD (18.60); colony switching through the relay (18.61); auto grab (18.62); the year's turn for hornet and honeybee lines (18.63); lockable moths with fireflies on summer evenings (18.64); swarms seen with a young queen's mating flight (18.65); AI raids on enemy nests (18.66); ground v2 (18.67); and ground rings with graded ground (18.68). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (122 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony; the T0 of progression (18.48): XP, unit and hive skills, the year's turn; multi-colony play with the player gauge (18.49); wintering in somewhere warm (18.50); chasing moving prey with a lock, with a colony view you can click (18.51); obstacle avoidance in assisted flight (18.52); reaching what moves under a lock (18.53); the lock ending on arrival (18.54); Shift hurrying an assisted flight (18.55); landing at speed with hovering round a lock (18.56); lines, the wasp in hand and roles passed on by masters (18.57); playing with a controller only, Xbox included (18.58); touch controls for phones and tablets (18.59); the map: minimap sizes, the big map and a phone HUD (18.60); colony switching through the relay (18.61); auto grab (18.62); the year's turn for hornet and honeybee lines (18.63); lockable moths with fireflies on summer evenings (18.64); swarms seen with a young queen's mating flight (18.65); AI raids on enemy nests (18.66); ground v2 (18.67); ground rings with graded ground (18.68); and flight that feels the slope (18.69). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -2236,7 +2249,7 @@ Every piece below is our own code, apart from three.js, which the PoC already dr
   - the lean in 18.44's limits is gone;
   - JS and C# agree.
 
-**G4. Flight feels the slope (#46).**
+**G4. Flight feels the slope (#46). Built (18.69).**
 - **What.** A wasp flying level holds its height above sea level rather than above the ground. A hill is climbed with effort and a valley opens up beneath it. Assisted flight and the AI plan with it.
 - **Done when:**
   - climbing a 10% rise costs energy in proportion;

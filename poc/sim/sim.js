@@ -1111,6 +1111,7 @@ export class Sim {
       const rx = w.vx - wd.x, rz = w.vz - wd.z, air = Math.sqrt(rx * rx + w.vy * w.vy + rz * rz);
       const E = T.energy;
       let drain = E.cruisePerSec * DT * (E.hoverShare + (1 - E.hoverShare) * Math.min(air / W.cruise, 2)) * (burst ? E.burstMul : 1);
+      if (w.vy > 0) drain += E.climbPerM * w.vy * DT; // climbing is work (GDD 20 G4)
       if (rain) drain *= T.weather.rainDrainMul;
       if (this._nearCitronella(w)) drain *= T.esc.citronellaDrain;
       const X = T.extreme, air0 = this.temperature;
@@ -1130,12 +1131,16 @@ export class Sim {
       w.vx = w.vx * 0.97 + wd.x * 0.03; w.vz = w.vz * 0.97 + wd.z * 0.03;
     }
     const n = W.substeps, h = DT / n, p0 = { x: w.x, y: w.y, z: w.z };
+    // on hills the air does not rise with the ground (GDD 20 G4): the wasp keeps its height above sea level, so its
+    // height above the ground falls by as much as the ground rose under it, and a hill has to be climbed
+    const g0 = this.settings.terrain ? this.ground(w.x, w.z) : 0;
     for (let i = 0; i < n; i++) {
       const v0 = { x: w.vx, y: w.vy, z: w.vz }; // the speed going in, before a collision stops it
       w.x += w.vx * h; w.y += w.vy * h; w.z += w.vz * h;
       this._collide(w);
       if (w.swoopUntil > this.tick && w.state === 'fly' && this._swoopHit(w, v0, cmd)) return;
     }
+    if (this.settings.terrain) { const dg = this.ground(w.x, w.z) - g0; if (dg !== 0) { w.y -= dg; this._collide(w); } }
     this._webCheck(w, p0);
     this._cupCheck(w);
     if (this._onHotGrate(w)) { this._die(w, 'burned on a grill', null); return; } // T1-10

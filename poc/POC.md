@@ -149,6 +149,7 @@ Run the tests from this folder with `node test/sim.test.mjs`, `node test/net.tes
 | 119 | Ground v2: hills from a derivative-damped, rotated, domain-warped value noise on the seed's own lattice (soft valleys, sharper crests), with the slope, and ridge and terrace options in tuning | 4.8, 20 | 25 |
 | 120 | Ground rings: on hilly worlds the ground is five nested grids round the wasp (0.5 to 8 m cells), exact samples of the sim's ground, morphing into each other with no cracks; lawns and paving painted into the ground from the world | 20 | 25 |
 | 121 | Graded ground: streets level across with their sidewalks and smooth along, cul-de-sacs graded as their street, town squares on the broad shape, lots and house, mall and shop pads level | 20 | 25 |
+| 122 | Flight that feels the slope: over hills a wasp keeps its altitude, so it has to climb a rise; every metre climbed costs energy | 20 | 25 |
 
 ## Verified
 
@@ -172,7 +173,7 @@ Run the tests from this folder with `node test/sim.test.mjs`, `node test/net.tes
 - The colony economy is tuned against one simulated season with an idle player; it needs real play data.
 - After a late event the peers' humans differ until the chunk authority's correction commits (two seconds); what happened to those humans in between is lost on every peer alike.
 - AI wasps in state packets are not checked against solid geometry (their owner does not collide them far from its player).
-- With terrain on, flight does not feel the slope (the sim works in height above the ground; G4 in GDD 20), hills block sight lines between people only, and small sheds, tables and fences follow the ground rather than standing on level pads.
+- With terrain on, hills block sight lines between people only, and small sheds, tables and fences follow the ground rather than standing on level pads.
 - On hilly worlds the paving is painted into the ground; flat worlds still draw it as meshes. The frame rate on phones with ground rings is not yet measured (G5).
 - Assisted flight steers round what is within a metre ahead (a trunk, a fence) but plans no route: a hedge or a house wall longer than it can see past still needs the player, and it does not dodge swats or birds.
 - Progression is at T0 (GDD 18.48, 18.49, 18.57): each line's XP and tree, the wasp in hand's job skills, five roles levelled by masters, multi-colony play and the gauge. a trained wasp that goes home retires inside rather than flying again; the XP, mastery and gauge figures are first guesses to tune with play. The PoC runs progression `open`, so any species can also be picked on the start screen.

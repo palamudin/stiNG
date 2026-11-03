@@ -251,7 +251,7 @@ for (const sc of NET_SCENARIOS) {
 {
   const d = Digest(), lab = new MeshLab({ seed: 1234 }, 3, 'bad'), botA = stingBot({ plan: 'jab', rest: 200 });
   lab.tamper = (from, m, sim) => { if (from === 2 && sim.tick > 1500 && m.type === 'sting') for (const sw of m.swats) sw.start += 1000; };
-  for (let i = 0; i < 17400; i++) { // the host cuts the cheater off near tick 16656
+  for (let i = 0; i < 31200; i++) { // the host cuts the cheater off near tick 30381
     lab.step(botA(lab.sims[0]));
     for (const s of lab.sims) for (const e of s.drainEvents()) { d.s(e.type); d.f(e.t); }
     if (i % 60 === 0) { d.f(lab.agree([0, 1]) ? 1 : 0); for (const s of lab.sims) { d.s(s.stateHash()); d.s(s.humanHash()); } }

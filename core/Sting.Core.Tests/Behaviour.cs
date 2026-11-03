@@ -1672,6 +1672,27 @@ namespace Sting.Core.Tests
                 Ok(nr != null && rw.carry != null && rw.carry.what == "larva" && Math.Abs(D(s3.colony.larvae - (l0 - 1))) < 0.05 && guards >= 1,
                     $"a rival forager raids the player's wasp nest for a larva ({D(l0):0.0} -> {D(s3.colony.larvae):0.0}); {guards} guard(s) go after it");
             }
+            // 57. flight that feels the slope (GDD 20 G4): the wasp keeps its altitude over hills; climbing costs energy
+            {
+                var s = new Sim(new Settings { seed = 1234, birds = false, terrain = 2 }, new SimOpts { noAI = true }); RunS(s, 1);
+                Num bx = 0, bz = 0, br = 0; bool found = false;
+                for (int z = -200; z < 200; z += 3) for (int x = -200; x < 200; x += 3) { if (Math.Sqrt((double)x * x + (double)z * z) < 60) continue; Num a = s.Ground(x, z), b = s.Ground(x + 10, z); if (b - a > 0.8 && (!found || b - a > br)) { bx = x; bz = z; br = b - a; found = true; } }
+                var w = s.wasp;
+                void Fly(Num dx, Num dy, Num t) { var c = Idle(); c.hasDir = true; c.dirX = dx; c.dirY = dy; c.dirZ = 0; c.throttle = t; s.Step(c); }
+                w.state = "fly"; w.land = null; Place(w, P(bx - 3, 3, bz)); w.energy = 1;
+                Num alt0 = w.y + s.Ground(w.x, w.z), h0 = w.y; double dev = 0;
+                for (int k = 0; k < 240 && w.x < bx + 10; k++) { Fly(1, 0, 1); dev = Math.Max(dev, D(Abs(w.y + s.Ground(w.x, w.z) - alt0))); }
+                Num fell = h0 - w.y, rise = s.Ground(w.x, w.z) - s.Ground(bx - 3, bz);
+                Ok(dev < 0.005 && D(Abs(fell - rise)) < 0.01 && rise > 1, $"flying level up a rise of {D(rise):0.00} m, the wasp keeps its altitude (within {dev * 1000:0.0} mm) and its height above the ground falls by as much ({D(fell):0.00} m)");
+                Num Hold(int dir, Num x0)
+                {
+                    Place(w, P(x0, 1, bz)); w.energy = 1; int n = 0;
+                    while (n < 600 && (dir > 0 ? w.x < bx + 10 : w.x > bx - 3)) { Num vy = Max(-1, Min(1, (1 - w.y) * 3)), m = Sqrt(1 + vy * vy); Fly(dir / m, vy / m, 1); n++; }
+                    return 1 - w.energy;
+                }
+                Num up = Hold(1, bx - 3), down = Hold(-1, bx + 10);
+                Ok(up > down * 1.1 && D(Abs(w.y - 1)) < 0.3, $"holding a metre above the ground, up the rise costs {D(up) * 1000:0.0} and down it {D(down) * 1000:0.0} thousandths of a tank");
+            }
             // 46. feature modifiers (T2-6): woods, towns, water and hives set at world creation act on generation
             {
                 (int forest, int town, int baths, int hives, bool apart) Census(Settings st)

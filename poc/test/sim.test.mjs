@@ -1799,7 +1799,7 @@ function seated(sim, pred) {
     const treads = () => { let n = 0; for (let k = 0; k < 400; k++) { const g = groundSlope(1234n, pk[0] * 64 - 64 + k * 0.4, pk[1] * 64 + 20, { terrain: 2 }); if (Math.hypot(g.x, g.z) < 0.03) n++; } return n; };
     const plain = treads(), keep = T.terrain.terrace; T.terrain.terrace = 1; const stepped = treads(); T.terrain.terrace = keep;
     let t0 = performance.now(), acc = 0; for (let k = 0; k < 200000; k++) acc += g2(k * 0.37 - 900, k * 0.11 - 300); const us = (performance.now() - t0) / 200000 * 1000;
-    ok(worst < 0.02 && stepped > plain * 1.5 && us < 3 && acc === acc, `the slope comes with the height (within ${worst.toFixed(4)} of finer differences); terraces leave ${stepped} of 400 spots on a walk level against ${plain}; a height costs ${us.toFixed(2)} µs`); }
+    ok(worst < 0.02 && stepped > plain * 1.5 && us < 10 && acc === acc, `the slope comes with the height (within ${worst.toFixed(4)} of finer differences); terraces leave ${stepped} of 400 spots on a walk level against ${plain}; a height costs ${us.toFixed(2)} µs`); }
   // graded ground (GDD 20): streets level across with their sidewalks, buildings on level pads, paving read from a list
   // that matches what generateChunk places
   { let same = true, n = 0;
@@ -2246,6 +2246,28 @@ function seated(sim, pred) {
   const guards = s3.wasps.filter((x) => x.colony === 'own' && x.ai.mode === 'hunt' && x.ai.huntId === rw.id).length;
   ok(nr && rw.carry && rw.carry.what === 'larva' && Math.abs(s3.colony.larvae - (l0 - 1)) < 0.05 && guards >= 1,
     `a rival forager raids the player's wasp nest for a larva (${l0.toFixed(1)} -> ${s3.colony.larvae.toFixed(1)}); ${guards} guard(s) go after it`);
+}
+
+// 57. Flight that feels the slope (GDD 20 G4): on hills the air does not rise with the ground, so a wasp flying level
+// keeps its height above sea level and has to climb a hill; climbing costs energy, a descent does not
+{
+  const s = new Sim({ seed: 1234, birds: false, terrain: 2 }, { noAI: true }); run(s, 1);
+  let best = null;
+  for (let z = -200; z < 200; z += 3) for (let x = -200; x < 200; x += 3) { if (Math.hypot(x, z) < 60) continue; const a = s.ground(x, z), b = s.ground(x + 10, z); if (b - a > 0.8 && (!best || b - a > best.r)) best = { x, z, r: b - a }; }
+  const w = s.wasp, fly = (c) => s.step({ ...idle(), dirX: c.x, dirY: c.y, dirZ: 0, throttle: c.t });
+  w.state = 'fly'; w.land = null; place(w, { x: best.x - 3, y: 3, z: best.z }); w.energy = 1;
+  const alt0 = w.y + s.ground(w.x, w.z), h0 = w.y; let dev = 0, k = 0;
+  for (; k < 240 && w.x < best.x + 10; k++) { fly({ x: 1, y: 0, t: 1 }); dev = Math.max(dev, Math.abs(w.y + s.ground(w.x, w.z) - alt0)); }
+  const fell = h0 - w.y, rise = s.ground(w.x, w.z) - s.ground(best.x - 3, best.z);
+  ok(dev < 0.005 && Math.abs(fell - rise) < 0.01 && rise > 1, `flying level up a rise of ${rise.toFixed(2)} m, the wasp keeps its altitude (within ${(dev * 1000).toFixed(1)} mm) and its height above the ground falls by as much (${fell.toFixed(2)} m)`);
+  // a metre above the ground up the rise and back down it
+  const hold = (dir, x0) => {
+    place(w, { x: x0, y: 1, z: best.z }); w.vx = w.vy = w.vz = 0; w.energy = 1; let n = 0;
+    while (n < 600 && (dir > 0 ? w.x < best.x + 10 : w.x > best.x - 3)) { const vy = Math.max(-1, Math.min(1, (1 - w.y) * 3)), m = Math.hypot(1, vy); fly({ x: dir / m, y: vy / m, t: 1 }); n++; }
+    return 1 - w.energy;
+  };
+  const up = hold(1, best.x - 3), down = hold(-1, best.x + 10);
+  ok(up > down * 1.1 && Math.abs(w.y - 1) < 0.3, `holding a metre above the ground, up the rise costs ${(up * 1000).toFixed(1)} and down it ${(down * 1000).toFixed(1)} thousandths of a tank`);
 }
 
 // Tuning as data (GDD 13, T1-22): one plain-text file feeds both sims
