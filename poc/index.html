@@ -547,8 +547,9 @@
   // World v2 (GDD 20.4), when the menu's Look asks for it: its modules come down with the rest
   let w2 = false;
   try { w2 = new URLSearchParams(location.search).has('world2') || localStorage.getItem('sting.world2') === '1'; } catch { /* optional */ }
-  if (w2) FILES.push(['world/index.js', 9000], ['world/clipmap.js', 11000], ['world/terrain.js', 10000], ['world/trees.js', 12000], ['world/mesh.js', 11000], ['world/scatter.js', 4000],
-    ['world/grass.js', 9000], ['world/sky.js', 14000], ['world/post.js', 15000], ['world/water.js', 9000], ['world/noise.js', 3000], ['world/sources/sting.js', 4000]);
+  if (w2) FILES.push(['world/index.js', 13700], ['world/clipmap.js', 11600], ['world/terrain.js', 12700], ['world/trees.js', 12500], ['world/mesh.js', 12500], ['world/scatter.js', 4000],
+    ['world/grass.js', 14800], ['world/sky.js', 16300], ['world/post.js', 18700], ['world/water.js', 17200], ['world/waves.js', 10300], ['world/wavegpu.js', 9500], ['world/caustics.js', 5900],
+    ['world/noise.js', 2800], ['world/sources/sting.js', 9800]);
   const TIPS = [
     'A yellowjacket colony starts each spring from one queen who spent the winter alone, under bark or in a shed.',
     'A wasp nest is paper: workers scrape wood fibre from fences and sheds and chew it into pulp.',

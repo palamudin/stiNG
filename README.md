@@ -38,6 +38,7 @@ cd poc
 node test/sim.test.mjs   # simulation: determinism, replay, colony, humans, swats, bees, seasons, saves
 node test/net.test.mjs   # two peers over simulated links: agreement on every human, late join, rival fights
 node test/view.test.mjs  # drawing helpers with no browser: the ground rings meet without cracks; World v2 draws the sim's ground and trees
+node world/test/world.test.mjs  # World v2 with no browser: tree meshes, placement, the game's world, the wave spectrum
 ```
 
 **C# core** (.NET 8 SDK):

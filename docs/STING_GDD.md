@@ -2400,7 +2400,7 @@ The world-building thread delivered World v2 (`poc/world/`, with a template page
 - **Ground:** a 12-level clipmap from 25 cm cells (`world/clipmap.js`), the same snapping, windows, morph and triangle split as the rings (18.68), with four channels a texel (height, moisture, forest, paving) and blur-in while a level fills. A source with a GLSL twin fills on the GPU; the game's source (the sim's graded ground) fills on the CPU within a budget a frame.
 - **Forests:** trees meshed by its own surface nets over signed distance fields, three levels of detail, dithered between them (`world/mesh.js`, `world/trees.js`). Grass blades on the GPU (`world/grass.js`).
 - **Sky and air:** a multiple-scattering sky table, clouds, aerial perspective and mist (`world/sky.js`).
-- **Post chain:** god rays, depth of field from a thin lens, bloom, and AgX tone mapping (`world/post.js`). The game turns the depth of field off: focused on a wasp half a metre away, any real lens blurs the whole world away, and the player has to read the scene. Water with refraction and caustics (`world/water.js`) is for the wild world; the game's world has no open water yet.
+- **Post chain:** god rays, depth of field from a thin lens, bloom, and AgX tone mapping (`world/post.js`). The game turns the depth of field off: focused on a wasp half a metre away, any real lens blurs the whole world away, and the player has to read the scene. Water (`world/water.js`, `waves.js`, `wavegpu.js`, `caustics.js`) runs a measured wave spectrum on the GPU, with refraction and caustics. In the game's world it draws the sim's own water: birdbaths, fountains and a rainy day's puddles, with ripples from the day's wind at 10 m.
 
 **How the game uses it (the 20.4 points).**
 1. **The ground is the sim's.** The game's source (`world/sources/sting.js`) samples `groundAt` with its grading, the chunk's land use, and `pavingOf` for paving. Everything else is lifted by `clipLiftGLSL()`, which answers the `ringHeightAt` every patched material already calls; the camera rig and the sun use `world.heightAt`. The classic rings and cover maps stay off.
@@ -2423,6 +2423,7 @@ The world-building thread delivered World v2 (`poc/world/`, with a template page
   - flower beds, as bare earth round each plant;
   - a base per land use: a park is walked all over, a square's edges more, a yard little, a wood not at all.
 - **What wear does.** Worn lawn is shorter, down to under half. The earth shows through in patches that open as the wear grows. The grass and the ground share one patch function, so the bare earth is exactly where the blades are missing.
+- **Height.** As the camera climbs, the grass rings grow in whole steps (x1, x2, x4, x8), so a clump stays where it grew; between two steps the next step's clumps dissolve in one by one, so nothing slides.
 - **Shade.** Under each crown the lawn thins over a floor of earth and leaves. In woods nobody mows, so the grass grows three times as long.
 - **Walks.** Each house has a walk from its door to the street.
 - **Heights.** Mown lawns run 4 to 11 cm, dry to watered.
@@ -2432,7 +2433,7 @@ The world-building thread delivered World v2 (`poc/world/`, with a template page
 - Checked headless on software WebGL only.
 - Fence lines and walls keep no uncut strip; there are no desire paths between doors, gates and tables yet.
 - The game's own materials are lit by World v2's sun and sky without a pass over their colours.
-- No rain on the ground and no puddles; the game's own rain still falls.
+- No rain falling in World v2's air; the game's own rain still falls. Puddles are drawn where the sim has them.
 - Night is dark sky only (no moon or street light in the air).
 - Lots and squares lose their painted markings.
 - Changing Graphics needs a reload to change World v2's tier.
