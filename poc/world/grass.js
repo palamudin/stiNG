@@ -4,8 +4,8 @@
 // water, trails, paving or under a dense canopy), and builds the clump: blades that taper, curve, lean and bend with
 // the wind (a gust field that travels across the ground). No CPU work per blade.
 //
-// Three rings: thousands of blades a square metre round the camera (a lawn is green because it is solid grass), fewer
-// and broader further out, cross-faded by thinning; the ground under them is the lawn's own dark thatch (terrain.js),
+// Five rings: thousands of blades a square metre round the camera (a lawn is green because it is solid grass), fewer
+// and broader further out, each thinning over the band where the next thickens, clumps growing in rather than popping; the ground under them is the lawn's own dark thatch (terrain.js),
 // so a gap between blades reads as more grass, not as painted ground. When the camera rises the rings grow with its
 // height above the ground in whole steps (x1, x2, x4, x8), so every clump stays where it grew while the camera moves;
 // between two steps the coarser rings dissolve in over the last part of the range and the finer ones out, clump by
@@ -19,12 +19,20 @@ import * as THREE from 'three';
 import { NOISE_GLSL } from './noise.js';
 
 export const GRASS = {
-  // spacing: metres between clumps; width: a blade's width at its root; hMul: taller far out, so the far ring still covers
+  // Five rings, each about 1.7 times the last, overlapping by half: a ring thins out over the outer half of its radius
+  // while the next thickens over the same band, so the density changes gently with distance and never in a step.
+  // A blade's height belongs to its place (the same blade is as tall from 2 m as from 20 m); only its width grows with
+  // distance, as a pixel covers more ground (bladeW), so far blades cover like near ones without changing the lawn.
   rings: [
-    { spacing: 0.045, radius: 3, blades: 6, segs: 3, width: 0.008, hMul: 1 },
-    { spacing: 0.1, radius: 9, blades: 5, segs: 3, width: 0.016, hMul: 1.1 },
-    { spacing: 0.28, radius: 24, blades: 5, segs: 2, width: 0.03, hMul: 1.4 },
+    { spacing: 0.045, radius: 2.5, blades: 6, segs: 3 },
+    { spacing: 0.065, radius: 5, blades: 5, segs: 3 },
+    { spacing: 0.1, radius: 9, blades: 5, segs: 2 },
+    { spacing: 0.16, radius: 15, blades: 5, segs: 2 },
+    { spacing: 0.26, radius: 26, blades: 4, segs: 2 },
   ],
+  bladeW: { root: 0.0065, from: 1.5, power: 0.7 }, // width = root * max(1, distance / from) ^ power
+  band: 0.5,  // a ring thins over the outer (1 - band) of its radius; the next thickens over the same metres
+  growIn: 0.25, // a clump grows in (and shrinks out) over this share of the density, never popping
   flowers: { spacing: 0.55, radius: 18 },
   // the share of the next scale step's clumps in, over the last 30% of a step (log2 of the scale)
   dissolve: (t) => { const k = Math.min(1, Math.max(0, (t - 0.7) / 0.3)); return k * k * (3 - 2 * k); },
@@ -62,11 +70,13 @@ function clumpGeometry(blades, segs, seed) {
 
 const GRASS_VERT_HEAD = /* glsl */ `
 attribute float aT, aSide; attribute vec4 aB; attribute vec2 aCell;
-uniform float uSpacing, uRadius, uInner, uScale, uFade, uTime, uSea, uDensity, uFlower, uAlt, uShore, uSnowLine, uBladeW, uHMul, uWoodH; uniform vec2 uGrassH; uniform vec2 uWind; uniform vec3 uCamG;
+uniform float uSpacing, uRadius, uInner, uScale, uFade, uTime, uSea, uDensity, uFlower, uAlt, uShore, uSnowLine, uWoodH; uniform vec2 uGrassH; uniform vec2 uWind; uniform vec3 uCamG;
 varying float vT, vCol, vRootK; varying vec3 vGW; varying vec3 vTint; varying float vKill;
 vec3 gPos; vec3 gNor;
 `;
 // everything is computed in the normal stage (it comes first in three's vertex shader) and reused for the position
+const GRASS_BAND = GRASS.band.toFixed(3), GRASS_GROW = GRASS.growIn.toFixed(3);
+const GRASS_W = { root: GRASS.bladeW.root.toFixed(4), from: GRASS.bladeW.from.toFixed(2), power: GRASS.bladeW.power.toFixed(3) };
 const GRASS_BUILD = /* glsl */ `
   float sp = uSpacing * uScale;
   vec2 org = floor(uCamG.xz / sp) * sp;
@@ -83,21 +93,23 @@ const GRASS_BUILD = /* glsl */ `
   float wr = w2wear(gd.w);
   dens *= 1.0 - w2bare(base, wr); // trodden: bare in patches
   if (uFlower > 0.5) dens *= smoothstep(0.1, 0.6, w2noise(base / 9.0, 211) + 0.35 * (gd.y - 0.5)) * (1.0 - smoothstep(0.3, 0.6, gd.z));
-  // thin out toward the edge of the ring (and inside the inner ring, for the outer one), so the rings cross-fade
-  float edge = 1.0 - smoothstep(R * 0.65, R, dist);
-  float inner = uInner > 0.0 ? smoothstep(Ri * 0.6, Ri, dist) : 1.0;
-  float keep = dens * edge * inner * (1.0 - smoothstep(8.0, 30.0, uAlt));
-  // between two steps of scale: this step's clumps go (uFade > 0) or the next step's come (uFade < 0), clump by clump
-  float dis = w2hash01(ci.x, ci.y, 213);
-  if (uFade > 0.0 && dis < uFade) keep = 0.0;
-  if (uFade < 0.0 && dis >= -uFade) keep = 0.0;
-  vKill = w2hash01(ci.x, ci.y, 203) > keep ? 1.0 : 0.0;
+  // the share of clumps this ring grows here: it thins over the outer half of its radius as the next ring thickens over
+  // the same band (complementary, so the lawn's density is continuous), and between two altitude steps the outgoing
+  // step's clumps shrink away as the incoming step's grow (uFade)
+  float edge = 1.0 - smoothstep(R * ${GRASS_BAND}, R, dist);
+  float inner = uInner > 0.0 ? smoothstep(Ri * ${GRASS_BAND}, Ri, dist) : 1.0;
+  float keep = dens * edge * inner * (1.0 - smoothstep(8.0, 30.0, uAlt)) * (uFade >= 0.0 ? 1.0 - uFade : -uFade);
+  // each clump has its own threshold: below it the clump is not there, just past it the clump is short, and it reaches
+  // its full height a little further on. Moving the camera makes far clumps grow and shrink a little, never pop.
+  float grow = clamp((keep * (1.0 + ${GRASS_GROW}) - w2hash01(ci.x, ci.y, 203)) / ${GRASS_GROW}, 0.0, 1.0);
+  vKill = grow <= 0.0 ? 1.0 : 0.0;
   float rnd = w2hash01(ci.x, ci.y, 204);
-  float H = mix(uGrassH.x, uGrassH.y, gd.y) * (0.55 + 0.9 * aB.w) * (0.75 + 0.5 * rnd) * uHMul * (uFlower > 0.5 ? 1.3 : 1.0);
+  float H = mix(uGrassH.x, uGrassH.y, gd.y) * (0.55 + 0.9 * aB.w) * (0.75 + 0.5 * rnd) * (uFlower > 0.5 ? 1.3 : 1.0);
   H *= mix(1.0, uWoodH, smoothstep(0.85, 1.0, gd.z)); // long in the woods, where nobody mows
   H *= mix(1.0, 0.45, wr); // short where it is walked on
-  H *= 0.4 + 0.6 * smoothstep(0.0, 0.35, keep); // short where it thins
-  float W = (uFlower > 0.5 ? 0.006 : uBladeW) * (0.8 + 0.5 * aB.w) * sqrt(uScale);
+  H *= grow; // growing in or shrinking out
+  float pxd = max(dist, uAlt * 1.5); // how much ground a pixel covers here, roughly
+  float W = (uFlower > 0.5 ? 0.006 : ${GRASS_W.root} * pow(max(1.0, pxd / ${GRASS_W.from}), ${GRASS_W.power})) * (0.8 + 0.5 * aB.w);
   // blade frame: it faces its own way and leans away from the clump centre
   float ang = aB.x + rnd * 6.283;
   vec2 fdir = vec2(cos(ang), sin(ang)), side = vec2(-fdir.y, fdir.x);
@@ -136,16 +148,16 @@ export class Grass {
     this.group = new THREE.Group(); this.group.name = 'world2-grass';
     const clip = world.clip.glsl();
     this.meshes = [];
-    const mk = (spacing, radius, inner, flower, blades, segs, width, hMul) => {
+    const mk = (spacing, radius, inner, flower, blades, segs) => {
       const geo = clumpGeometry(blades, segs, spacing * 1000);
       const n = Math.ceil(radius / spacing), cells = [];
-      for (let j = -n; j <= n; j++) for (let i = -n; i <= n; i++) { const d = Math.hypot(i, j) * spacing; if (d <= radius && d >= inner * 0.55) cells.push(i, j); }
+      for (let j = -n; j <= n; j++) for (let i = -n; i <= n; i++) { const d = Math.hypot(i, j) * spacing; if (d <= radius && d >= inner * GRASS.band - spacing) cells.push(i, j); }
       geo.setAttribute('aCell', new THREE.InstancedBufferAttribute(new Float32Array(cells), 2));
       geo.instanceCount = cells.length / 2;
       const U = {
         ...world.clip.uniforms, uTime: world.uniforms.uTime, uSea: { value: world.source.sea }, uShore: world.uniforms.uShore, uSnowLine: world.uniforms.uSnowLine, uSunDir: world.uniforms.uSunDir, uSunColor: world.sky.uniforms.uSunColor,
         uSpacing: { value: spacing }, uRadius: { value: radius }, uInner: { value: inner }, uScale: { value: 1 }, uFade: { value: 0 }, uDensity: { value: this.density }, uFlower: { value: flower ? 1 : 0 },
-        uBladeW: { value: width }, uHMul: { value: hMul }, uWoodH: { value: world.source.grassWood ?? 1 },
+        uWoodH: { value: world.source.grassWood ?? 1 },
         uWind: { value: new THREE.Vector2(0.8, 0.3) }, uCamG: { value: new THREE.Vector3() }, uAlt: { value: 0 },
         uGrassH: { value: new THREE.Vector2(...(world.source.grassHeight || [0.1, 0.42])) }, // metres, dry to wet ground
       };
@@ -185,8 +197,8 @@ export class Grass {
     };
     const d = Math.sqrt(this.density);
     let inner = 0;
-    for (const R of GRASS.rings) { mk(R.spacing / d, R.radius, inner, false, R.blades, R.segs, R.width, R.hMul); inner = R.radius; }
-    if (opts.flowers !== false) mk(GRASS.flowers.spacing / d, GRASS.flowers.radius, 0, true, 3, 3, 0.006, 1);
+    for (const R of GRASS.rings) { mk(R.spacing / d, R.radius, inner, false, R.blades, R.segs); inner = R.radius; }
+    if (opts.flowers !== false) mk(GRASS.flowers.spacing / d, GRASS.flowers.radius, 0, true, 3, 3);
     this.reach = 0; // how far the blades go this frame (0 when hidden): the ground lays thatch under them
   }
   update(eye, ground) {
@@ -202,7 +214,8 @@ export class Grass {
       else { U.uScale.value = 2 ** L; U.uFade.value = f; }
     }
     this.group.visible = alt < 30;
-    this.reach = this.group.visible ? GRASS.rings[GRASS.rings.length - 1].radius * 2 ** (L + (f > 0 ? 1 : 0)) * (1 - Math.min(1, Math.max(0, (alt - 8) / 22))) : 0;
+    // the thatch under the blades follows the height smoothly (not in the rings' steps), so its edge never jumps
+    this.reach = this.group.visible ? GRASS.rings[GRASS.rings.length - 1].radius * Math.min(8, Math.max(1, alt / 2.0)) * (1 - Math.min(1, Math.max(0, (alt - 8) / 22))) : 0;
   }
   get instances() { return this.meshes.reduce((a, m) => a + (m.visible ? m.userData.instances : 0), 0); }
 }

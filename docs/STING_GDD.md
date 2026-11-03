@@ -2413,7 +2413,12 @@ The world-building thread delivered World v2 (`poc/world/`, with a template page
 8. **Own code.** No libraries beyond three.js.
 
 **The lawn (believable, not photoreal).** Green ground is green because it is solid grass; where it is not grass it is earth, stone, concrete or tarmac.
-- **Density.** Three rings of blades round the camera: thousands of blades a square metre within 3 m, then fewer and broader to 9 m and 24 m. The ground under the blades is the lawn's own dark thatch, so a gap between blades reads as more grass. Past the blades, the ground's colour stands for the lawn.
+- **Density.** Five rings of blades round the camera, each about 1.7 times the last (2.5, 5, 9, 15 and 26 m), with thousands of blades a square metre near the camera. The ground under the blades is the lawn's own dark thatch, so a gap between blades reads as more grass. Past the blades, the ground's colour stands for the lawn.
+- **Detail fades gently with distance.**
+  - Each ring thins over the outer half of its radius while the next thickens over the same band, so the density never steps.
+  - Every clump has its own threshold. Just past it the clump is short, and it reaches full height a little further in. Moving the camera makes far clumps grow and shrink a little; they never pop.
+  - A blade's height belongs to its place, the same from 2 m as from 20 m. Only its width grows with distance, as a pixel covers more ground.
+  - The thatch under the blades follows the camera's height smoothly.
 - **Wear, from where people are.** The game's source puts wear into the clipmap's fourth channel (below 0.3; paving keeps 0.5 to 1). It comes from the chunk itself:
   - picnic tables and their seats;
   - the spots where people stand about;
