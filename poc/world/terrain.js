@@ -31,8 +31,8 @@ const vec3 T_SNOW = L(0.95, 0.96, 0.98);
 const vec3 T_CANOPY = L(0.17, 0.32, 0.10);
 const vec3 T_ASPHALT = L(0.29, 0.29, 0.30);
 const vec3 T_WALK = L(0.66, 0.64, 0.60);
-const vec3 T_THATCH = L(0.22, 0.30, 0.10); // under the blades of a lawn: their own shade, roots and old leaves
-const vec3 T_EARTH = L(0.50, 0.40, 0.28);  // trodden earth
+const vec3 T_THATCH = L(0.30, 0.44, 0.13); // under the blades of a lawn: more blades, in their own shade
+const vec3 T_EARTH = L(0.47, 0.40, 0.31);  // trodden earth, dry and packed
 `;
 
 export function makeTerrain(clip, opts = {}) {
@@ -158,14 +158,14 @@ float hfShadow(vec2 p, float h0, float dist) {
   reflectedLight.indirectDiffuse *= mix(1.0, 0.7, canopy);
 `);
   };
-  mat.customProgramCacheKey = () => 'w2terrain';
+  mat.customProgramCacheKey = () => 'w2terrain' + C.levels; // the clipmap's level count is in the code
 
   const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
   depth.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, U);
     sh.vertexShader = VERT_HEAD + sh.vertexShader.replace('#include <begin_vertex>', VERT_BODY);
   };
-  depth.customProgramCacheKey = () => 'w2terrain-depth';
+  depth.customProgramCacheKey = () => 'w2terrain-depth' + C.levels;
 
   const mesh = new THREE.Mesh(geo, mat);
   mesh.customDepthMaterial = depth;

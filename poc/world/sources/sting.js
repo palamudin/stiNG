@@ -17,7 +17,8 @@ const MOIST = { park: 0.62, yards: 0.72, forest: 0.8, mall: 0.3, town: 0.42 };
 const FOREST = { park: 0.12, yards: 0.08, forest: 1, mall: 0, town: 0 };
 const WEAR = { park: 0.14, yards: 0.05, forest: 0, mall: 0.35, town: 0.3 };
 // wear round things people use: radius in metres, strength at the centre (falls off smoothly to the edge)
-const W = { table: [2.8, 0.9], stand: [1.5, 0.6], door: [1.6, 0.55], flower: [0.38, 1], trunk: [0.4, 0.75], hive: [1.3, 0.5] };
+const W = { table: [2.4, 0.9], tableAcross: 3.1, // a table's worn ground: its length, and across it its benches and the feet under them
+   stand: [1.5, 0.6], door: [1.6, 0.55], flower: [0.38, 1], trunk: [0.4, 0.75], hive: [1.3, 0.5] };
 export const WEAR_FULL = 0.2; // the paving channel's value for fully worn ground
 
 export function stingSource(sim) {
@@ -63,10 +64,10 @@ export function stingSource(sim) {
     if (wearCache.size > 1024) wearCache.clear();
     list = [];
     const x0 = cx * CS - CS / 2 - 3, x1 = cx * CS + CS / 2 + 3, z0 = cz * CS - CS / 2 - 3, z1 = cz * CS + CS / 2 + 3;
-    const add = (x, z, [r, s]) => { if (x + r > x0 && x - r < x1 && z + r > z0 && z - r < z1) list.push({ x, z, r, s }); };
+    const add = (x, z, [r, s], rz = r) => { if (x + r > x0 && x - r < x1 && z + rz > z0 && z - rz < z1) list.push({ x, z, ix: 1 / r, iz: 1 / rz, s }); };
     for (let j = cz - 1; j <= cz + 1; j++) for (let i = cx - 1; i <= cx + 1; i++) {
       const c = objects(i, j);
-      for (const t of c.tables || []) add(t.x, t.z, W.table);
+      for (const t of c.tables || []) if (t.axisX) add(t.x, t.z, W.table, W.tableAcross); else add(t.x, t.z, [W.tableAcross, W.table[1]], W.table[0]);
       for (const h of c.humans || []) if (h.posture === 'stand') add(h.x, h.z, W.stand);
       for (const f of c.flowers || []) add(f.x, f.z, W.flower);
       for (const t of c.trees || []) add(t.x, t.z, [t.r + W.trunk[0], W.trunk[1]]);
@@ -80,9 +81,9 @@ export function stingSource(sim) {
   function wear(x, z) {
     let w = landBlend(x, z, WEAR);
     for (const f of wearOf(chunkOf(x), chunkOf(z))) {
-      const d2 = (x - f.x) ** 2 + (z - f.z) ** 2;
-      if (d2 >= f.r * f.r) continue;
-      const t = 1 - Math.sqrt(d2) / f.r;
+      const d2 = ((x - f.x) * f.ix) ** 2 + ((z - f.z) * f.iz) ** 2; // an ellipse, in units of its radii
+      if (d2 >= 1) continue;
+      const t = 1 - Math.sqrt(d2);
       w = Math.max(w, f.s * t * t * (3 - 2 * t));
     }
     return Math.min(1, w);

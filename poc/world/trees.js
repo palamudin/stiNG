@@ -121,14 +121,14 @@ export class Forest {
     reflectedLight.directDiffuse += uSunColor * diffuseColor.rgb * (0.9 * back + 0.08) * 0.35;
   }`);
     };
-    mat.customProgramCacheKey = () => 'w2tree' + lod;
+    mat.customProgramCacheKey = () => 'w2tree' + lod + '/' + this.world.clip.cfg.levels; // the clipmap's level count is in the code
     const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
     depth.onBeforeCompile = (sh) => {
       Object.assign(sh.uniforms, U);
       sh.vertexShader = `${clip}\n${TREE_VERT_HEAD}\n` + sh.vertexShader.replace('#include <begin_vertex>', TREE_VERT);
       sh.fragmentShader = `${DITHER}\nvarying float vFade;\n` + sh.fragmentShader.replace('void main() {', 'void main() {\n  if (w2ign(gl_FragCoord.xy) > vFade) discard;');
     };
-    depth.customProgramCacheKey = () => 'w2treeD' + lod;
+    depth.customProgramCacheKey = () => 'w2treeD' + lod + '/' + this.world.clip.cfg.levels;
     const mesh = new THREE.Mesh(g, mat);
     mesh.customDepthMaterial = depth;
     mesh.frustumCulled = false; mesh.castShadow = lod < 2; mesh.receiveShadow = true;

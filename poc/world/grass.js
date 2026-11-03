@@ -19,9 +19,9 @@ import { NOISE_GLSL } from './noise.js';
 export const GRASS = {
   // spacing: metres between clumps; width: a blade's width at its root; hMul: taller far out, so the far ring still covers
   rings: [
-    { spacing: 0.045, radius: 3, blades: 6, segs: 3, width: 0.006, hMul: 1 },
-    { spacing: 0.1, radius: 9, blades: 5, segs: 3, width: 0.011, hMul: 1.1 },
-    { spacing: 0.28, radius: 24, blades: 5, segs: 2, width: 0.02, hMul: 1.4 },
+    { spacing: 0.045, radius: 3, blades: 6, segs: 3, width: 0.008, hMul: 1 },
+    { spacing: 0.1, radius: 9, blades: 5, segs: 3, width: 0.016, hMul: 1.1 },
+    { spacing: 0.28, radius: 24, blades: 5, segs: 2, width: 0.03, hMul: 1.4 },
   ],
   flowers: { spacing: 0.55, radius: 18 },
 };
@@ -29,8 +29,9 @@ export const GRASS = {
 export const WEAR_GLSL = /* glsl */ `
 float w2wear(float w) { return w < 0.3 ? clamp(w / 0.2, 0.0, 1.0) : 0.0; } // 0 untouched .. 1 trodden
 float w2bare(vec2 p, float wear) { // bare earth in patches that open as the wear grows
-  float n = 0.5 + 0.32 * w2noise(p / 1.1, 207) + 0.18 * w2noise(p / 0.3, 208);
-  return smoothstep(n - 0.07, n + 0.07, wear * 0.97);
+  // ragged at every scale: trodden ground breaks up into tufts and bald spots, never a clean-edged decal
+  float n = 0.5 + 0.28 * w2noise(p / 1.1, 207) + 0.16 * w2noise(p / 0.3, 208) + 0.12 * w2noise(p / 0.09, 209);
+  return smoothstep(n - 0.05, n + 0.05, wear * 0.92);
 }
 `;
 
@@ -109,7 +110,7 @@ const GRASS_BUILD = /* glsl */ `
   gNor = normalize(mix(gNor * sign(dot(gNor, vec3(fdir.x, 0.0, fdir.y)) + 1e-3), vec3(0.0, 1.0, 0.0), roundK));
   vT = t; vCol = rnd; vGW = gPos;
   // colour: dark at the root, light and drier at the tip, by moisture
-  vec3 root = vec3(0.05, 0.11, 0.015), tip = mix(vec3(0.44, 0.42, 0.13), vec3(0.2, 0.45, 0.06), smoothstep(0.25, 0.7, gd.y));
+  vec3 root = vec3(0.08, 0.17, 0.03), tip = mix(vec3(0.44, 0.42, 0.13), vec3(0.2, 0.45, 0.06), smoothstep(0.25, 0.7, gd.y));
   // a dense lawn hides its roots: up close each blade darkens toward its root, from further off the roots are hidden
   // by the blades in front, so the darkening fades with distance and height
   vRootK = 1.0 - smoothstep(3.0, 16.0, max(dist, uAlt * 2.0));
@@ -161,7 +162,7 @@ export class Grass {
     reflectedLight.directDiffuse *= mix(1.0, 0.7 + 0.3 * vT, vRootK);
   }`);
       };
-      mat.customProgramCacheKey = () => 'w2grass' + (flower ? 'f' : '');
+      mat.customProgramCacheKey = () => 'w2grass' + (flower ? 'f' : '') + world.clip.cfg.levels; // the clipmap's level count is in the code
       const mesh = new THREE.Mesh(geo, mat);
       mesh.frustumCulled = false; mesh.receiveShadow = true; mesh.castShadow = false;
       mesh.userData.U = U; mesh.userData.instances = cells.length / 2;
