@@ -124,6 +124,8 @@ float hfShadow(vec2 p, float h0, float dist) {
   col = mix(col, T_THATCH * (0.85 + 0.3 * w2noise(P / 0.5, 82) * NF(0.5)), under);
   // forest floor under the trees
   col = mix(col, T_FLOOR, smoothstep(0.35, 0.75, TD.z));
+  // a pond's bed and its muddy margin (moisture past 1, sources/sting.js): the water is drawn over it (post.js)
+  col = mix(col, T_MUD * (0.75 + 0.2 * w2noise(P / 0.6, 83) * NF(0.6)), smoothstep(0.98, 1.06, TD.y));
   // trodden ground: earth in the patches where the grass is gone (the same patches as grass.js); far off, their share
   float wr = w2wear(TD.w), br = mix(wr * 0.6, w2bare(P, wr), NF(0.6));
   col = mix(col, T_EARTH * (0.9 + 0.2 * w2noise(P / 0.4, 81) * NF(0.4)), br);
@@ -133,6 +135,15 @@ float hfShadow(vec2 p, float h0, float dist) {
   col = mix(col, T_CANOPY * (0.8 + 0.45 * bump), canopy);
   // trails (or paving in the game's world)
   vec3 trailCol = uPaving > 0.5 ? mix(T_WALK, T_ASPHALT, smoothstep(0.75, 0.95, TD.w)) : T_DIRT * (0.95 + 0.25 * w2noise(P / 0.5, 76) * NF(0.5));
+  if (uPaving > 0.5) { // the game's paving, drawn from world coordinates: asphalt grain and mended patches; sidewalk slabs;
+    // a town square's pavers (fourth channel 1, 0.5, 0.9)
+    float asph = smoothstep(0.75, 0.95, TD.w), square = 1.0 - smoothstep(0.02, 0.06, abs(TD.w - 0.9));
+    vec2 sq = P / 1.5, sj = abs(fract(sq) - 0.5), pq = P / 0.4, pj = abs(fract(pq) - 0.5);
+    float slab = (0.93 + 0.1 * w2hash01(int(floor(sq.x)), int(floor(sq.y)), 84)) * (1.0 - 0.3 * smoothstep(0.47, 0.495, max(sj.x, sj.y)) * NF(0.1));
+    float paver = (0.86 + 0.24 * w2hash01(int(floor(pq.x)), int(floor(pq.y)), 85)) * (1.0 - 0.35 * smoothstep(0.44, 0.49, max(pj.x, pj.y)) * NF(0.05));
+    float tar = (0.92 + 0.16 * w2noise(P * 9.0, 86) * NF(0.11)) * (0.9 + 0.12 * w2noise(P * 0.35, 87)) * (1.0 - 0.12 * step(0.44, w2noise(P * 0.13, 88)));
+    trailCol *= mix(mix(slab, mix(1.0, paver, NF(0.4)), square), tar, asph * (1.0 - square));
+  }
   // a trail is about 1.5 m wide: once a pixel covers much more, it is a fraction of the pixel, not a dash
   col = mix(col, trailCol, smoothstep(0.25, 0.6, TD.w) * (uPaving > 0.5 ? 1.0 : 1.0 - smoothstep(0.8, 3.0, fp)));
   // the shore: sand above the water, mud under it

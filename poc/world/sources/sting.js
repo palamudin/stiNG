@@ -11,7 +11,7 @@
 // Where people are comes from the chunk itself: picnic tables and their seats, the spots where people stand about,
 // door steps, flower beds (bare earth round each plant), the foot of every trunk, and hives. Each land use also has a
 // little wear of its own (a park is walked all over, a yard much less, a wood not at all).
-import { groundAt, landUse, pavingOf, chunkOf, chunkKey, generateChunk, T, hash, Domain } from '../../sim/index.js';
+import { groundAt, landUse, pavingOf, pondsOf, chunkOf, chunkKey, generateChunk, T, hash, Domain } from '../../sim/index.js';
 
 const MOIST = { park: 0.62, yards: 0.72, forest: 0.8, mall: 0.3, town: 0.42 };
 const FOREST = { park: 0.12, yards: 0.08, forest: 1, mall: 0, town: 0 };
@@ -21,17 +21,20 @@ const W = { table: [2.4, 0.9], tableAcross: 3.1, // a table's worn ground: its l
    stand: [1.5, 0.6], door: [1.6, 0.55], flower: [0.38, 1], trunk: [0.4, 0.75], hive: [1.3, 0.5] };
 export const WEAR_FULL = 0.2; // the paving channel's value for fully worn ground
 
+// numeric chunk keys for the source's own tables (no string per sample)
+const ck = (cx, cz) => (cx + 1048576) * 2097152 + (cz + 1048576);
+
 export function stingSource(sim) {
   const seed = sim.seed, settings = sim.settings, CS = T.chunk.size;
   const useCache = new Map(), paveCache = new Map(), objCache = new Map();
   const useOf = (cx, cz) => {
-    const k = chunkKey(cx, cz);
+    const k = ck(cx, cz);
     let u = useCache.get(k);
     if (u === undefined) { if (useCache.size > 8192) useCache.clear(); u = landUse(seed, cx, cz, settings); useCache.set(k, u); }
     return u;
   };
   const paveOf = (cx, cz) => {
-    const k = chunkKey(cx, cz);
+    const k = ck(cx, cz);
     let p = paveCache.get(k);
     if (!p) { if (paveCache.size > 4096) paveCache.clear(); p = pavingOf(seed, cx, cz, settings); paveCache.set(k, p); }
     return p;
@@ -58,7 +61,7 @@ export function stingSource(sim) {
   // what wears the ground, per chunk: its own things and its neighbours' within reach of its edge
   const wearCache = new Map();
   function wearOf(cx, cz) {
-    const k = chunkKey(cx, cz);
+    const k = ck(cx, cz);
     let list = wearCache.get(k);
     if (list) return list;
     if (wearCache.size > 1024) wearCache.clear();
@@ -106,10 +109,23 @@ export function stingSource(sim) {
   }
   // cell: the size of the clipmap texel being filled. Things smaller than a few texels are left to the finer levels
   // (a coarse level shows the land use's own shade and wear), so a far level never generates chunks for their trees.
+  // Ponds (the sim's, pondsOf): the moisture channel runs past 1 over a pond's bed (no grass; mud, under the water
+  // World v2 draws) and rises toward it over the shore, where the grass grows lush
+  const pondCache = new Map();
+  const pondsNear = (cx, cz) => { const k = ck(cx, cz); let p = pondCache.get(k); if (!p) { if (pondCache.size > 4096) pondCache.clear(); p = pondsOf(seed, cx, cz, settings); pondCache.set(k, p); } return p; };
+  const SHORE = 1.5, BED = 1.15;
+  function pondWet(x, z, m) {
+    for (const p of pondsNear(chunkOf(x), chunkOf(z))) {
+      const d = Math.sqrt((x - p.x) * (x - p.x) + (z - p.z) * (z - p.z)) - p.r;
+      if (d < 0) return BED;
+      if (d < SHORE) { const t = d / SHORE, s = t * t * (3 - 2 * t); m = 1 + (m - 1) * s; }
+    }
+    return m;
+  }
   function sample(x, z, out = [0, 0, 0, 0], cell = 0) {
     const fine = cell <= 1;
     out[0] = groundAt(seed, x, z, settings);
-    out[1] = landBlend(x, z, MOIST);
+    out[1] = pondWet(x, z, landBlend(x, z, MOIST));
     out[2] = fine ? shade(x, z) : landBlend(x, z, FOREST);
     const pv = paving(x, z);
     out[3] = pv > 0 ? pv : WEAR_FULL * (fine ? wear(x, z) : landBlend(x, z, WEAR));
@@ -117,8 +133,8 @@ export function stingSource(sim) {
   }
   // The sim's own chunk content: a discovered record if the sim has one, else generated here (same seed, same content)
   function objects(cx, cz) { // hoisted: wearOf and shade call it
-    const k = chunkKey(cx, cz);
-    const rec = sim.records && sim.records.get(k);
+    const k = ck(cx, cz);
+    const rec = sim.records && sim.records.get(chunkKey(cx, cz));
     if (rec) return rec.content;
     let c = objCache.get(k);
     if (!c) { if (objCache.size > 256) objCache.clear(); c = generateChunk(seed, cx, cz, settings); objCache.set(k, c); }
@@ -129,6 +145,7 @@ export function stingSource(sim) {
   // top: the water's height above the ground; depth and kind: the basin under it (1 a bowl, 2 flat, 3 the ground)
   function waters(cx, cz) {
     const c = objects(cx, cz), out = [];
+    for (const p of c.ponds || []) out.push({ x: p.x, z: p.z, r: p.r, top: 0.002, depth: Math.min(1.2, 0.25 + 0.1 * p.r), kind: 1 }); // a bowl in the ground
     for (const b of c.baths || []) out.push(b.fountain ? { x: b.x, z: b.z, r: b.r, top: b.h + 0.002, depth: 0.35, kind: 2 } : { x: b.x, z: b.z, r: b.r, top: b.h + 0.002, depth: 0.04, kind: 1 });
     const rec = sim.records && sim.records.get(chunkKey(cx, cz));
     if (rec && typeof sim.puddleDay === 'function') {

@@ -1749,6 +1749,30 @@ namespace Sting.Core.Tests
                 double turned = Math.Atan2(Math.Sin(a6 - a4), Math.Cos(a6 - a4));
                 Ok(Math.Abs(r4 - 0.6) < 0.05 && turned < -0.3 && wide.r == Assist.hoverRMax && wide.orbit == Assist.hoverOrbitMax, $"a hover set 60 cm off and the other way round holds {r4:0.00} m off and drifts {turned:0.00} rad in 2 s; settings past the ranges are held to them");
             }
+            // 60. ponds (GDD 6.2, GEN_VERSION 8): in some parks and woods, never the home park; level, clear, drinkable
+            {
+                var st = new Settings { terrain = 2 }; var ponds = new List<(Pond p, int cx, int cz, string use)>();
+                for (int cz = -10; cz <= 10; cz++) for (int cx = -10; cx <= 10; cx++) foreach (var q in World.PondsOf(1234, cx, cz, st)) ponds.Add((q, cx, cz, World.LandUse(1234, cx, cz, st)));
+                int flat = 0, clear = 0;
+                foreach (var (q, cx, cz, use) in ponds)
+                {
+                    double lo = double.MaxValue, hi = double.MinValue;
+                    for (int k = 0; k < 12; k++) { double a = k * 0.5236; double g = D(World.GroundAt(1234, q.x + Math.Cos(a) * D(q.r) * 0.95, q.z + Math.Sin(a) * D(q.r) * 0.95, st)); lo = Math.Min(lo, g); hi = Math.Max(hi, g); }
+                    if (hi - lo < 1e-6) flat++;
+                    var c = World.GenerateChunk(1234, cx, cz, st);
+                    bool In(Num x, Num z, Num r) => (x - q.x) * (x - q.x) + (z - q.z) * (z - q.z) < (q.r + r) * (q.r + r);
+                    if (c.ponds.Count == 1 && !c.trees.Any(t => In(t.x, t.z, t.r)) && !c.tables.Any(t => In(t.x, t.z, 1)) && !c.flowers.Any(f => In(f.x, f.z, 0.2))
+                        && !c.hives.Any(h => In(h.x, h.z, 0.5)) && !c.boxes.Any(b => In((b.minx + b.maxx) / 2, (b.minz + b.maxz) / 2, 0.5))) clear++;
+                }
+                Ok(ponds.Count > 10 && ponds.All(o => (o.use == "park" || o.use == "forest") && !(o.cx == 0 && o.cz == 0)) && flat == ponds.Count && clear == ponds.Count,
+                    $"{ponds.Count} ponds in 441 chunks, all in parks and woods, none in the home park; the ground under every one is level, and nothing stands in any");
+                var near = ponds.OrderBy(o => D(o.p.x * o.p.x + o.p.z * o.p.z)).First();
+                var s = new Sim(new Settings { seed = 1234, birds = false, terrain = 2 }, new SimOpts { noAI = true }); RunS(s, 1);
+                Place(s.wasp, P(near.p.x, 1, near.p.z)); RunS(s, 2);
+                Place(s.wasp, P(near.p.x + near.p.r * 0.5, 0.002 + T.wasp.radius, near.p.z));
+                var at = s.WaterNear(new V3(s.wasp.x, s.wasp.y, s.wasp.z)); var rec = s.records.Get(World.ChunkKey(near.cx, near.cz));
+                Ok(at != null && at.Value.kind == "pond" && at.Value.i == 12 && s.WaterIn(rec).Any(w => w.kind == "pond"), $"a wasp at the surface of the pond {Math.Round(Math.Sqrt(D(near.p.x * near.p.x + near.p.z * near.p.z)))} m from home can drink there ({at?.kind} {at?.i})");
+            }
             // 46. feature modifiers (T2-6): woods, towns, water and hives set at world creation act on generation
             {
                 (int forest, int town, int baths, int hives, bool apart) Census(Settings st)

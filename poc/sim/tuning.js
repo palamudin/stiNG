@@ -5,7 +5,7 @@ import { TUNE } from './tunefile.js';
 
 export const TICK_RATE = 60;
 export const DT = 1 / TICK_RATE;
-export const GEN_VERSION = 7; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11); 6: birdbaths (T2-1); 7: town centres (T2-5)
+export const GEN_VERSION = 8; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11); 6: birdbaths (T2-1); 7: town centres (T2-5); 8: ponds
 
 export const T = {
   population: 8200000000,
@@ -190,6 +190,8 @@ export const T = {
   // for water when the nest is hot and the store low, at the cost of food (divert).
   water: {
     bathShare: 0.35, bathPark: 0.5, bathR: 0.22, bathY: 0.72,
+    // ponds: in some parks and woods (times the water modifier), radius in metres; the ground round one is graded level
+    pondPark: 0.35, pondForest: 0.25, pondMin: 4, pondMax: 9, pondForestMin: 3, pondForestMax: 7,
     puddles: 5, puddleRMin: 0.25, puddleRMax: 0.9, wetAfter: 20, dryMinutes: 360,
     fillTicks: 60, amount: 1, reach: 0.025,
     capBase: 2, capPerAdult: 0.06, coolPerDay: 6, smoothing: 0.2,
@@ -383,7 +385,7 @@ export const T = {
   // (checked every sightStep m); puddles settle at the lowest of poolTries spots; the wind is stronger by exposure
   // per metre of rise. roll: how much each land use lets the ground roll (blended between chunk centres).
   terrain: { amp: 1.9, cell: 60, octaves: 5, warp: 0.5, ridge: 0, terrace: 0, terraceStep: 0.5,
-    grade: { oct: 2, walk: 1.6, road: 3, lot: 3, house: 2.5, shed: 1, reach: 3 }, flatR: 14, rise: 24, sightStep: 4, poolTries: 3, exposure: 0.05,
+    grade: { oct: 2, walk: 1.6, road: 3, lot: 3, house: 2.5, shed: 1, pond: 3, reach: 3 }, flatR: 14, rise: 24, sightStep: 4, poolTries: 3, exposure: 0.05,
     roll: { park: 1, forest: 1, yards: 0.45, mall: 0.12, town: 0.1 } },
   plaus: { futureTicks: 120, stingReach: 1.6, humanDrift: 3, maxSwatDelay: 240, maxSwats: 4, rateWindow: 120, rateMax: 6,
     maxSpeed: 12, strikes: 3, pickupReach: 0.3, solidDepth: 0.08, sipMax: 0.12, maxPain: 2 }, // maxPain: no species stings harder (GDD 6.8)

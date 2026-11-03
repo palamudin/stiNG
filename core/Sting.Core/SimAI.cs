@@ -596,7 +596,7 @@ namespace Sting.Core
             if (t.kind == "water")
             {
                 foreach (var s in WaterIn(rec))
-                    if (s.i == t.i && (t.i >= 16 ? s.kind == "puddle" : s.kind == "bath"))
+                    if (s.i == t.i && s.kind == (t.i >= 32 ? "puddle" : t.i >= 12 ? "pond" : "bath"))
                         return new V3(s.x + s.r * 0.4 * (H32(w.id, t.i, 61) - 0.5), s.y + T.wasp.radius + 0.006, s.z + s.r * 0.4 * (H32(w.id, t.i, 62) - 0.5));
                 return null;
             }

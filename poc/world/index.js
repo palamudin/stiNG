@@ -106,22 +106,33 @@ export class World {
   _bodies(eye) {
     const U = this.post.U, src = this.source;
     if (!src.waters) { U.uBodies.value = 0; return; }
+    // the list changes only as the eye moves or the puddles come and go: looked up again after a metre or half a second
+    const B = this._bodyMemo || (this._bodyMemo = { x: 1e9, z: 1e9, t: -1, slopes: new Map() });
+    if (Math.abs(eye.x - B.x) < 1 && Math.abs(eye.z - B.z) < 1 && this.time - B.t < 0.5) return;
+    B.x = eye.x; B.z = eye.z; B.t = this.time;
     const CS = src.chunkSize || 64, ci = Math.floor(eye.x / CS), cj = Math.floor(eye.z / CS), all = [];
-    for (let j = cj - 1; j <= cj + 1; j++) for (let i = ci - 1; i <= ci + 1; i++) for (const b of src.waters(i, j)) all.push(b);
+    for (let j = cj - 2; j <= cj + 2; j++) for (let i = ci - 2; i <= ci + 2; i++) for (const b of src.waters(i, j)) all.push(b); // two chunks out: a pond shows from across the park
     for (const b of all) b.d = Math.hypot(b.x - eye.x, b.z - eye.z) - b.r;
     all.sort((a, b) => a.d - b.d);
     const n = Math.min(all.length, WATER.bodies);
     for (let k = 0; k < n; k++) {
-      const b = all[k], e = Math.max(0.1, b.r * 0.5), h = (x, z) => src.height(x, z);
-      const gx = (h(b.x + e, b.z) - h(b.x - e, b.z)) / (2 * e), gz = (h(b.x, b.z + e) - h(b.x, b.z - e)) / (2 * e);
-      U.uBody.value[k].set(b.x, b.z, b.r, h(b.x, b.z) + b.top);
-      U.uBodyB.value[k].set(gx, gz, b.depth, b.kind);
+      const b = all[k], key = b.x * 7919 + b.z; // a body's plane never changes: worked out once, kept in a table
+      let pl = B.slopes.get(key);
+      if (!pl) {
+        const e = Math.max(0.1, b.r * 0.5), h = (x, z) => src.height(x, z);
+        pl = { gx: (h(b.x + e, b.z) - h(b.x - e, b.z)) / (2 * e), gz: (h(b.x, b.z + e) - h(b.x, b.z - e)) / (2 * e), h: h(b.x, b.z) };
+        if (B.slopes.size > 4096) B.slopes.clear();
+        B.slopes.set(key, pl);
+      }
+      U.uBody.value[k].set(b.x, b.z, b.r, pl.h + b.top);
+      U.uBodyB.value[k].set(pl.gx, pl.gz, b.depth, b.kind);
     }
     U.uBodies.value = n;
   }
   // A new world in the same session (the game's newWorld): the clipmap keeps its uniforms, the forest is rebuilt.
   setSource(source, x = 0, z = 0) {
     this.source = source;
+    this._bodyMemo = null; // a new world: its water bodies afresh
     this.clip.setSource(source);
     this.post.U.uSea.value = source.sea; this.post.U.uWaterOn.value = source.sea < -1e5 ? 0 : 1;
     this._water();

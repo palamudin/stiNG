@@ -12,7 +12,8 @@
 //   calibration).
 // - Gusts cross the grass as patches 3 m apart that travel downwind at 1.8 times the wind at the tops (canopy waves,
 //   "honami"; Finnigan 2000), with small eddies carried along in them.
-// - Each blade moves in one of eight ways (stiffness, flutter rate and phase), so neighbours rarely move alike.
+// - Each blade moves in one of eight ways (stiffness, sway rate and phase), so neighbours rarely move alike. The sways
+//   are slow (a few seconds each) and wide in a breeze, so the lawn glides rather than jitters.
 //
 // Five rings on nested grids (GRASS below): thousands of blades a square metre round the camera (a lawn is green
 // because it is solid grass), fewer further out. A blade stays where it grew and as tall as it grew whatever the camera
@@ -110,6 +111,7 @@ const GRASS_BUILD = /* glsl */ `
   // what grows here: meadow full, under trees thin, nothing on stone, sand, water, trails or paving (by place: fixed)
   float dens = (1.0 - smoothstep(0.32, 0.45, slope)) * mix(1.0, smoothstep(1.3, 2.2, hgt), uShore) * (1.0 - smoothstep(0.3, 0.45, gd.w)) * mix(1.0, 0.35, smoothstep(0.4, 0.8, gd.z));
   dens *= uDensity * (1.0 - smoothstep(uSnowLine - 10.0, uSnowLine + 10.0, hgt));
+  dens *= 1.0 - smoothstep(0.97, 1.03, gd.y); // a pond's bed (moisture past 1, sources/sting.js)
   float wr = w2wear(gd.w);
   dens *= 1.0 - w2bare(base, wr); // trodden: bare in patches
   if (uFlower > 0.5) dens *= smoothstep(0.1, 0.6, w2noise(base / 9.0, 211) + 0.35 * (gd.y - 0.5)) * (1.0 - smoothstep(0.3, 0.6, gd.z));
@@ -136,21 +138,24 @@ const GRASS_BUILD = /* glsl */ `
   // with about the square of it. Three scales, so no two blades move alike:
   //   gusts: patches 3 m apart running downwind at 1.8 times the wind at the tops (canopy waves, honami);
   //   eddies: small turbulence carried along with them (tens of centimetres), patch against patch;
-  //   the blade: one of eight ways of moving (stiffness, and flutter across the wind and along it at a rate set by its
-  //   length, a short blade quivering fast, a long one swaying), picked by the blade and its clump. Eight is plenty:
+  //   the blade: one of eight ways of moving (stiffness, and a slow sway across the wind and along it), picked by the
+  //   blade and its clump. Eight is plenty:
   //   neighbours rarely share one, and the gusts and eddies differ from place to place anyway.
   float U10 = length(uWind); vec2 wd = U10 > 0.01 ? uWind / U10 : vec2(0.83, 0.55), wp = vec2(-wd.y, wd.x);
   float Uh = max(U10 * log(max(H, 1.5 * uZ0) / uZ0) / log(10.0 / uZ0), 0.25);
-  float gust = 0.6 + 0.4 * sin(2.094 * dot(base, wd) - 2.094 * 1.8 * Uh * uTime + 3.0 * w2noise(base / 6.0, 205));
-  float eddy = w2noise((base - wd * uTime * 1.8 * Uh) / 0.7, 206); // -1..1, carried downwind with the gusts
+  // Smooth, never jittery: every motion here is a slow sine or a broad noise, so a blade glides from pose to pose.
+  // A breeze sways blades wide and slowly; a strong wind lays them over and only then quickens them a little.
+  float wk = smoothstep(0.25, 2.0, Uh); // 0 in a breath of air, 1 in a stiff wind
+  float gust = 0.6 + 0.4 * sin(1.571 * dot(base, wd) - 1.571 * (0.5 + 1.2 * Uh) * uTime + 3.0 * w2noise(base / 7.0, 205)); // 4 m waves
+  float eddy = 0.5 + 0.5 * w2noise((base - wd * uTime * (0.3 + 0.9 * Uh)) / 1.6, 206); // 0..1, broad and slow, carried downwind
   float mv = floor(fract(aB.w * 7.31 + rnd * 3.7) * 8.0); // which of the eight
   float bph = mv * 2.39996, bk = (mv + 0.5) / 8.0; // phases a golden angle apart
   float stiff = 0.65 + 0.7 * bk; // how far this blade gives
-  float rate = (3.2 + 3.5 * bk) * mix(1.4, 0.8, smoothstep(0.03, 0.2, H)); // flutters per second
-  float ug = Uh * gust * (0.85 + 0.3 * eddy) * stiff / 1.5;
-  float lay = min(0.85, ug * ug * 0.35); // 1.5 m/s at the tips lays a blade about a third over
-  float flu = min(Uh, 1.5) / 1.5 * (0.5 + 0.5 * abs(eddy)); // flutter grows with the wind
-  vec2 flutter = (wp * 0.13 * sin(uTime * rate + bph) + wd * 0.07 * sin(uTime * rate * 0.63 + bph * 1.7)) * flu;
+  float rate = (1.7 + 1.4 * bk) * (1.0 + 0.5 * wk); // radians a second: a sway every 2 to 4 s in a breeze
+  float ug = Uh * gust * (0.8 + 0.4 * eddy) * stiff / 1.5;
+  float lay = min(0.85, 0.05 + ug * ug * 0.35); // 1.5 m/s at the tips lays a blade about a third over
+  float amp = mix(0.16, 0.1, wk) * (0.75 + 0.5 * eddy); // a wide, slow sway in a breeze; tighter once laid over
+  vec2 flutter = (wp * sin(uTime * rate + bph) + wd * 0.5 * sin(uTime * rate * 0.71 + bph * 1.7)) * amp;
   vec2 bend = fdir * lean * t * t + (wd * lay + flutter) * H * t * t;
   float drop = (dot(bend, bend) / max(H, 1e-3)) * 0.45; // a bent blade is shorter
   vec2 xz = base + off + side * aSide * W * (1.0 - t * 0.85) + bend;

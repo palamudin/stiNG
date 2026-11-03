@@ -156,6 +156,8 @@ Run the tests from this folder with `node test/sim.test.mjs`, `node test/net.tes
 | 126 | Assisted flight plans past long walls: over the wall or round a corner of the whole wall (a run of fence counts as one), so a flower behind a house is reached from the front yard | 7.9, 19.6 | 25 |
 | 127 | On a walker, assisted flight slides along the body to the spot locked, allowing for the wind; the hover's distance and orbit (either way round) are set with the mouse wheel | 7.9, 19.6 | 25 |
 | 128 | Look: World v2 on the menu. The game's world drawn by the world module (clipmap ground from the sim's graded heights and paving, the sim's trees as meshed crowns on the game's own trunks, grass, a scattering sky, clouds, god rays, depth of field, bloom); everything is lifted onto its ground | 20.5 | 25 |
+| 129 | Ponds in some parks and woods: level ground, nothing standing in them, water to drink; drawn in both looks and on the map | 18.73 | 25 |
+| 130 | Walls, roofs and paving drawn by their shaders: siding, planks, plaster, panels, centred windows with lit rooms at night, shopfronts, shingles, asphalt, slabs, pavers; generator lookups, the sky's day and the map kept in tables | 18.74 | 25 |
 
 ## Verified
 

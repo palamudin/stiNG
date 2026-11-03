@@ -18,6 +18,8 @@ namespace Sting.Core
     public sealed class Cyl { public Num x, z, r, h; public bool wood, grill, bath; }
     /// a birdbath (T2-1): a basin on a pedestal; h is the water's surface
     public sealed class Bath { public Num x, z, r, h; public bool fountain; }
+    /// a pond (world.js pondsOf): its water at the ground
+    public sealed class Pond { public Num x, z, r; }
     /// A sugar source: a can, a flower, a puddle ('spill') or fallen 'fruit'. i identifies spills and fruit.
     public sealed class SugarNode { public Num x, y, z, rate; public string kind; public int table = -1, i; }
     public sealed class Bee { public bool guard; public Num p, w, tx, ty, tz; public int period, phase; }
@@ -62,6 +64,8 @@ namespace Sting.Core
         public string use = "park"; public List<Rect> roads = new List<Rect>(), lots = new List<Rect>(); public List<Loop> loops = new List<Loop>(); public List<Mall> malls = new List<Mall>();
         /// birdbaths (T2-1)
         public List<Bath> baths = new List<Bath>();
+        /// ponds (GEN_VERSION 8)
+        public List<Pond> ponds = new List<Pond>();
         /// a town centre's paving, its shop buildings, its beer garden (T2-5)
         public List<Rect> plazas = new List<Rect>(); public List<Shop> shops = new List<Shop>(); public List<Garden> gardens = new List<Garden>();
     }
@@ -398,12 +402,45 @@ namespace Sting.Core
         {
             public List<Rect> roads = new List<Rect>(), lots = new List<Rect>(), plazas = new List<Rect>();
             public List<Loop> loops = new List<Loop>(); public List<Mall> malls = new List<Mall>(); public List<Shop> shops = new List<Shop>(); public List<Shed> houses = new List<Shed>();
+            public List<Pond> ponds = new List<Pond>();
+        }
+        /// a chunk's pond (world.js pondsOf): some parks and woods, never the home park, clear of the picnic table, the walk
+        /// round a park and a wood's path; a few spots tried, the first that fits taken
+        public static List<Pond> PondsOf(ulong seed, int cx, int cz, Settings st = null)
+        {
+            var o = new List<Pond>();
+            if (cx == 0 && cz == 0) return o;
+            string use = LandUse(seed, cx, cz, st);
+            if (use != "park" && use != "forest") return o;
+            ulong H(long slot) => Hash(seed, Domain.WorldGen, U64(cx), U64(cz), U64(slot));
+            var F = Features(st); Num ox = cx * CS, oz = cz * CS; bool park = use == "park";
+            if (Unit(H(9100)) >= (park ? T.water.pondPark : T.water.pondForest) * F.water) return o;
+            Num r = park ? Range(H(9101), T.water.pondMin, T.water.pondMax) : Range(H(9101), T.water.pondForestMin, T.water.pondForestMax), m = 28 - r;
+            bool picnic = park && Unit(H(1)) < 0.6; Num px = 0, pz = 0;
+            if (picnic) { px = ox + Range(H(2), -20, 20); pz = oz + Range(H(3), -20, 20); }
+            Num walk = park && Unit(H(6000)) < 0.6 ? Range(H(6001), 12, 22) : 0;
+            bool path = !park && Unit(H(6300)) < 0.3;
+            for (int k = 0; k < 6; k++)
+            {
+                Num x = ox + Range(H(9102 + 2 * k), -m, m), z = oz + Range(H(9103 + 2 * k), -m, m);
+                if (picnic && (x - px) * (x - px) + (z - pz) * (z - pz) < (r + 6) * (r + 6)) continue;
+                if (walk != 0) { Num c = Max(Abs(x - ox), Abs(z - oz)); if (c - r * 1.42 < walk + 2 && c + r * 1.42 > walk - 2) continue; }
+                if (path)
+                {
+                    Num ax = x - (ox - 26), az = z - (oz - 20), t = Max(0, Min(1, (ax * 52 + az * 40) / (52 * 52 + 40 * 40))), dx = ax - 52 * t, dz = az - 40 * t;
+                    if (dx * dx + dz * dz < (r + 2) * (r + 2)) continue;
+                }
+                o.Add(new Pond { x = x, z = z, r = r });
+                return o;
+            }
+            return o;
         }
         public static Paving PavingOf(ulong seed, int cx, int cz, Settings st = null)
         {
             ulong H(long slot) => Hash(seed, Domain.WorldGen, U64(cx), U64(cz), U64(slot));
             Num ox = cx * CS, oz = cz * CS; var o = new Paving();
             if (cx == 0 && cz == 0) return o;
+            o.ponds = PondsOf(seed, cx, cz, st);
             string use = LandUse(seed, cx, cz, st);
             if (use == "yards")
             {
@@ -436,7 +473,7 @@ namespace Sting.Core
             }
             return o;
         }
-        /// graded ground (GDD 20): kinds 0 street (levelled across at hz), 1 level rect, 2 cul-de-sac, 3 broad-shaped rect
+        /// graded ground (GDD 20): kinds 0 street (levelled across at hz), 1 level rect, 2 cul-de-sac, 3 broad-shaped rect, 4 pond (level disc)
         sealed class Pad { public int k; public Num minx, maxx, minz, maxz, x, z, r, m, hx, hz, h; public bool hSet; }
         static readonly Dictionary<long, List<Pad>> pads = new Dictionary<long, List<Pad>>(); static string padTag;
         static List<Pad> PadsOf(ulong seed, int cx, int cz, Settings st)
@@ -457,6 +494,7 @@ namespace Sting.Core
                 foreach (var b in c.malls) R(1, b.x - b.hw, b.x + b.hw, b.z - b.hd, b.z + b.hd, T.terrain.grade.house, b.x, b.z);
                 foreach (var b in c.shops) R(1, b.x - b.hw, b.x + b.hw, b.z - b.hd, b.z + b.hd, T.terrain.grade.house, b.x, b.z);
                 foreach (var b in c.houses) R(1, b.x - b.hw, b.x + b.hw, b.z - b.hd, b.z + b.hd, T.terrain.grade.house, b.x, b.z);
+                foreach (var q in c.ponds) P.Add(new Pad { k = 4, x = q.x, z = q.z, r = q.r, m = T.terrain.grade.pond, hx = q.x, hz = q.z });
                 pads[key] = P;
                 return P;
             }
@@ -475,7 +513,7 @@ namespace Sting.Core
                     foreach (var p in PadsOf(seed, cx, cz, st))
                     {
                         Num d;
-                        if (p.k == 2) d = Max(0, Sqrt((x - p.x) * (x - p.x) + (z - p.z) * (z - p.z)) - p.r);
+                        if (p.k == 2 || p.k == 4) d = Max(0, Sqrt((x - p.x) * (x - p.x) + (z - p.z) * (z - p.z)) - p.r);
                         else { Num dx = Max(Max(p.minx - x, 0), x - p.maxx), dz = Max(Max(p.minz - z, 0), z - p.maxz); d = Sqrt(dx * dx + dz * dz); }
                         if (d >= p.m) continue;
                         Num hp;
@@ -505,7 +543,9 @@ namespace Sting.Core
             ulong H(long slot) => Hash(seed, Domain.WorldGen, U64(cx), U64(cz), U64(slot));
             Num ox = cx * CS, oz = cz * CS;
             var c = new ChunkContent { cx = cx, cz = cz, tint = Unit(H(0)) };
+            c.ponds = PondsOf(seed, cx, cz, st);
             var occupied = new List<Occ>();
+            foreach (var q in c.ponds) occupied.Add(new Occ { x = q.x, z = q.z, r = q.r + 1 }); // nothing stands in a pond
             bool isOrigin = cx == 0 && cz == 0;
             bool Free(Num x, Num z, Num r) { foreach (var o in occupied) { Num dx = x - o.x, dz = z - o.z; if (!(dx * dx + dz * dz > (r + o.r) * (r + o.r))) return false; } return true; }
             void AddFly(Num x, Num y, Num z, long slot)
@@ -597,6 +637,8 @@ namespace Sting.Core
                 {
                     Num x = px + Range(H(slot + 10 + i), -1.2, 1.2), z = pz + Range(H(slot + 30 + i), -1.2, 1.2);
                     Num y = Range(H(slot + 50 + i), 0.2, 0.55);
+                    bool wet = false; foreach (var q in c.ponds) if ((x - q.x) * (x - q.x) + (z - q.z) * (z - q.z) < (q.r + 0.3) * (q.r + 0.3)) wet = true;
+                    if (wet) continue; // not in a pond
                     c.flowers.Add(new Flower { x = x, y = y, z = z, color = color });
                     c.sugar.Add(new SugarNode { x = x, y = y + 0.02, z = z, rate = 0.35, kind = "flower" });
                     if (Unit(H(slot + 70 + i)) < T.prey.caterpillarChance) c.caterpillars.Add(new Caterpillar { x = x + 0.006, y = y * 0.6, z = z });

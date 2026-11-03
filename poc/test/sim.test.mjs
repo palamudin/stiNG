@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, humanParts, malesAbout, chunkOf, toLocal, dirToWorld, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, groundSlope, pavingOf, pickTarget, assistPilot, swoopPilot, hoverPilot, hoverSetting, HOVER, ROLES, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS,
+  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, groundSlope, pavingOf, pondsOf, pickTarget, assistPilot, swoopPilot, hoverPilot, hoverSetting, HOVER, ROLES, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS,
 } from '../sim/index.js';
 import { applyTuning, parseTuning, tuningHash, tuningLeaves, TUNE } from '../sim/tunefile.js';
 
@@ -2320,6 +2320,30 @@ function seated(sim, pred) {
   for (let k = 1; k <= 420; k++) { const rr = hoverPilot(s, s.wasp, t, idle(), set); s.step(rr.cmd); s.drainEvents(); const w = s.wasp; if (k === 300) { r4 = Math.hypot(w.x - f.x, w.z - f.z); a4 = Math.atan2(w.x - f.x, w.z - f.z); } if (k === 420) a6 = Math.atan2(w.x - f.x, w.z - f.z); }
   const turned = Math.atan2(Math.sin(a6 - a4), Math.cos(a6 - a4));
   ok(Math.abs(r4 - 0.6) < 0.05 && turned < -0.3 && wide.r === HOVER.rMax && wide.orbit === HOVER.orbitMax, `a hover set 60 cm off and the other way round holds ${r4.toFixed(2)} m off and drifts ${turned.toFixed(2)} rad in 2 s; settings past the ranges are held to them`);
+}
+
+// 60. Ponds (GDD 6.2, GEN_VERSION 8): some parks and woods have one, never the home park; the ground under it is level,
+// nothing stands in it, and a wasp at its surface can drink
+{
+  const st = { terrain: 2 }, ponds = [];
+  for (let cz = -10; cz <= 10; cz++) for (let cx = -10; cx <= 10; cx++) for (const p of pondsOf(1234n, cx, cz, st)) ponds.push({ ...p, cx, cz, use: landUse(1234n, cx, cz, st) });
+  let flat = 0, clear = 0;
+  for (const p of ponds) {
+    let lo = Infinity, hi = -Infinity;
+    for (let k = 0; k < 12; k++) { const a = k * 0.5236, g = groundAt(1234n, p.x + Math.cos(a) * p.r * 0.95, p.z + Math.sin(a) * p.r * 0.95, st); lo = Math.min(lo, g); hi = Math.max(hi, g); }
+    if (hi - lo < 1e-9) flat++;
+    const c = generateChunk(1234n, p.cx, p.cz, st), inside = (x, z, r) => (x - p.x) * (x - p.x) + (z - p.z) * (z - p.z) < (p.r + r) * (p.r + r);
+    if (c.ponds.length === 1 && !c.trees.some((t) => inside(t.x, t.z, t.r)) && !c.tables.some((t) => inside(t.x, t.z, 1)) && !c.flowers.some((f) => inside(f.x, f.z, 0.2))
+      && !c.hives.some((h) => inside(h.x, h.z, 0.5)) && !c.boxes.some((b) => inside((b.minx + b.maxx) / 2, (b.minz + b.maxz) / 2, 0.5))) clear++;
+  }
+  ok(ponds.length > 10 && ponds.every((p) => (p.use === 'park' || p.use === 'forest') && !(p.cx === 0 && p.cz === 0)) && flat === ponds.length && clear === ponds.length,
+    `${ponds.length} ponds in 441 chunks, all in parks and woods, none in the home park; the ground under every one is level, and nothing stands in any`);
+  const near = ponds.reduce((a, b) => (Math.hypot(a.x, a.z) < Math.hypot(b.x, b.z) ? a : b));
+  const s = new Sim({ seed: 1234, birds: false, terrain: 2 }, { noAI: true }); run(s, 1);
+  place(s.wasp, { x: near.x, y: 1, z: near.z }); run(s, 2);
+  place(s.wasp, { x: near.x + near.r * 0.5, y: 0.002 + T.wasp.radius, z: near.z });
+  const at = s._waterNear(s.wasp), rec = s.records.get(chunkKey(near.cx, near.cz));
+  ok(at && at.kind === 'pond' && at.i === 12 && s.waterIn(rec).some((q) => q.kind === 'pond'), `a wasp at the surface of the pond ${Math.round(Math.hypot(near.x, near.z))} m from home can drink there (${at && at.kind} ${at && at.i})`);
 }
 
 // Tuning as data (GDD 13, T1-22): one plain-text file feeds both sims

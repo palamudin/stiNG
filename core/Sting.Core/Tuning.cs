@@ -50,7 +50,7 @@ namespace Sting.Core
     {
         public const int TICK_RATE = 60;
         public static readonly Num DT = 1.0 / TICK_RATE;
-        public const int GEN_VERSION = 7; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11); 6: birdbaths (T2-1); 7: town centres (T2-5)
+        public const int GEN_VERSION = 8; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11); 6: birdbaths (T2-1); 7: town centres (T2-5); 8: ponds
 
         public static Num population = 8200000000;
         public static class chunk { public static Num size = 64; public static int activeRadius = 1, discoverRadius = 2; }
@@ -203,6 +203,8 @@ namespace Sting.Core
         public static class water
         {
             public static Num bathShare = 0.35, bathPark = 0.5, bathR = 0.22, bathY = 0.72;
+            /// ponds: in some parks and woods (times the water modifier), radius in metres; the ground round one graded level
+            public static Num pondPark = 0.35, pondForest = 0.25, pondMin = 4, pondMax = 9, pondForestMin = 3, pondForestMax = 7;
             public static int puddles = 5; public static Num puddleRMin = 0.25, puddleRMax = 0.9, wetAfter = 20, dryMinutes = 360;
             public static int fillTicks = 60; public static Num amount = 1, reach = 0.025;
             public static Num capBase = 2, capPerAdult = 0.06, coolPerDay = 6, smoothing = 0.2;
@@ -214,7 +216,7 @@ namespace Sting.Core
         {
             public static Num amp = 1.9, cell = 60, warp = 0.5, ridge = 0, terrace = 0, terraceStep = 0.5, flatR = 14, rise = 24, sightStep = 4, exposure = 0.05;
             public static int octaves = 5, poolTries = 3;
-            public static class grade { public static int oct = 2; public static Num walk = 1.6, road = 3, lot = 3, house = 2.5, shed = 1, reach = 3; }
+            public static class grade { public static int oct = 2; public static Num walk = 1.6, road = 3, lot = 3, house = 2.5, shed = 1, pond = 3, reach = 3; }
             public static class roll { public static Num park = 1, forest = 1, yards = 0.45, mall = 0.12, town = 0.1; }
         }
         public static class fruit { public static Num treeShare = 0.3, startFrac = 0.55, rate = 0.8, spread = 1.6; public static int perTree = 6, rotDays = 6; }

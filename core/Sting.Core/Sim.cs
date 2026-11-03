@@ -646,6 +646,7 @@ namespace Sting.Core
             foreach (var t in c.trees) { F(t.x); F(t.z); F(t.r); F(t.h); }
             foreach (var t in c.boxes) { F(t.minx); F(t.maxx); F(t.miny); F(t.maxy); F(t.minz); F(t.maxz); }
             foreach (var t in c.humans) { F(t.slot); F(t.x); F(t.z); }
+            foreach (var q in c.ponds) { F(q.x); F(q.z); F(q.r); }
             F(c.sugar.Count); F(c.hives.Count); F(c.webs.Count); F(c.sheds.Count);
             return h;
         }

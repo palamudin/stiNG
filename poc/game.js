@@ -348,6 +348,124 @@ let camDist = 0.1, eyeBlend = 0;
 const geoTrunk = new THREE.CylinderGeometry(0.8, 1, 1, 9);
 const geoBlob = new THREE.IcosahedronGeometry(1, 1);
 const geoBox = new THREE.BoxGeometry(1, 1, 1);
+
+// ------------------------------------------------------------------ surfaces drawn on request (no textures, no meshes)
+// Walls, roofs and paving are shaded from their own world coordinates in the fragment shader: siding, planks, plaster
+// and panels; windows in rows per storey with frames, glass that catches the sky and, at night, a few lit; shingles;
+// asphalt grain and patches, sidewalk slabs, square pavers. Nothing is loaded and no window is a mesh: one material per
+// kind of surface, whatever the building's size, and the pattern is the same at any distance it is seen from.
+// aTop (per geometry): the wall's height above the ground, so windows stop below the eaves. uNight: 0 by day, 1 at night.
+const SURF = { uNight: { value: 0 } };
+const SURF_GLSL = `
+uniform float uNight; varying vec3 vSP; varying vec3 vSN; varying float vTop; varying vec4 vBox;
+float sHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float sNoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(sHash(i), sHash(i + vec2(1, 0)), f.x), mix(sHash(i + vec2(0, 1)), sHash(i + vec2(1, 1)), f.x), f.y); }
+// a soft-edged box in 1D: 1 inside [-h, h], fading over e
+float sBand(float x, float h, float e) { return 1.0 - smoothstep(h - e, h + e, abs(x)); }
+`;
+// kind: 0 house siding, 1 shop plaster, 2 mall panels, 3 shed planks, 4 roof shingles; 10 asphalt, 11 sidewalk slabs,
+// 12 square pavers, 13 lot asphalt
+const SURF_FRAG = `
+{
+  vec3 P = vSP; vec3 N = normalize(vSN); float vert = 1.0 - smoothstep(0.35, 0.65, abs(N.y));
+  bool alongZ = abs(N.x) > abs(N.z);
+  float u = alongZ ? P.z : P.x, v = P.y, px = length(fwidth(P)) + 1e-4; // metres under this pixel
+  float uc = alongZ ? vBox.y : vBox.x, uh = alongZ ? vBox.w : vBox.z; // the wall's middle and half length (aBox)
+  float far = smoothstep(0.02, 0.12, px); // fine patterns fade to their average once smaller than a pixel
+  vec3 base = diffuseColor.rgb; vec3 col = base; vec3 glow = vec3(0.0);
+#if SURF_KIND < 4
+  if (vert > 0.5) {
+    #if SURF_KIND == 0
+      col *= mix(1.0 - 0.18 * (1.0 - smoothstep(0.0, 0.025, fract(v / 0.19))), 0.97, far); // lap siding: a shadow line under each board
+      float FL = 2.8, SP = 2.7, WW = 1.0, WH = 1.15, WC = 1.55, B0 = 0.9;
+    #elif SURF_KIND == 1
+      col *= 0.93 + 0.12 * sNoise(vec2(u, v) * 3.1) * (1.0 - far);
+      float FL = 3.0, SP = 2.4, WW = 1.1, WH = 1.4, WC = 1.75, B0 = 3.0;
+    #elif SURF_KIND == 2
+      col *= mix(1.0 - 0.12 * (1.0 - smoothstep(0.0, 0.03, min(fract(u / 1.5), fract(v / 1.2)))), 0.95, far);
+      float FL = 3.6, SP = 3.0, WW = 1.4, WH = 1.3, WC = 2.2, B0 = 3.6;
+    #else
+      col *= mix(1.0 - 0.25 * (1.0 - smoothstep(0.0, 0.04, fract(u / 0.16))), 0.92, far) * (0.9 + 0.15 * sHash(vec2(floor(u / 0.16), 3.0)));
+      float FL = 99.0, SP = 99.0, WW = 0.0, WH = 0.0, WC = 0.0, B0 = 1e9;
+    #endif
+    // windows in a row centred on the wall, as many as fit with a clear margin at the corners
+    float nW = max(1.0, floor((2.0 * uh - 1.2) / SP)), du = u - uc + (mod(nW, 2.0) < 0.5 ? SP * 0.5 : 0.0);
+    float fl = floor(v / FL), fy = v - fl * FL, cu = (fract(du / SP + 0.5) - 0.5) * SP;
+    float room = step(B0 * 0.999 - (SURF_KIND == 0 ? B0 : 0.0), v) * step(v + 0.45, vTop) * step(0.3, v) * step(abs(u - uc), nW * SP * 0.5); // not under the eaves, not round a corner
+    #if SURF_KIND == 0
+      if (fl < 0.5 && mod(nW, 2.0) > 0.5 && abs(u - uc) < SP * 0.5) room = 0.0; // the door's place on the ground floor
+    #endif
+    #if SURF_KIND == 1 || SURF_KIND == 2
+      // the ground floor of a shop or mall is a shopfront: wide glass with mullions
+      if (v < B0) { float m = SURF_KIND == 2 ? 1.5 : 3.2; float cm = (fract(u / m + 0.5) - 0.5) * m;
+        float g = sBand(v - 1.45, 1.05, 0.02) * (1.0 - sBand(cm, 0.05, 0.01)) * step(abs(u - uc), uh - 0.4); room = 0.0;
+        vec3 gl = mix(vec3(0.05, 0.07, 0.09), vec3(0.32, 0.4, 0.46), smoothstep(0.4, 2.5, v));
+        col = mix(col, gl, g); glow += vec3(1.0, 0.82, 0.55) * 0.5 * uNight * g; }
+    #endif
+    float wx = sBand(cu, WW * 0.5, 0.012), wy = sBand(fy - WC, WH * 0.5, 0.012);
+    float fx = sBand(cu, WW * 0.5 + 0.07, 0.012), fz = sBand(fy - WC, WH * 0.5 + 0.07, 0.012);
+    float frame = fx * fz * room * (1.0 - far * 0.5), glass = wx * wy * room;
+    col = mix(col, vec3(0.92, 0.9, 0.86), frame * (1.0 - glass));
+    float id = sHash(vec2(floor(du / SP + 0.5) + floor(vBox.x + 0.5) * 1.3, fl + floor(vBox.y + 0.5) * 0.7)); // per window: floors only (an interpolated input would speckle)
+    vec3 gl = mix(vec3(0.07, 0.09, 0.12), vec3(0.42, 0.5, 0.58), smoothstep(-0.5, 0.6, (fy - WC) / WH)) * (0.8 + 0.4 * id);
+    gl = mix(gl, vec3(0.75, 0.68, 0.55), step(0.82, id) * 0.6); // a drawn curtain now and then
+    col = mix(col, gl, glass);
+    glow += vec3(1.0, 0.78, 0.48) * 0.7 * uNight * step(0.55, id) * glass; // some rooms lit at night
+  } else col *= 0.9; // a flat top
+#elif SURF_KIND == 4
+  // roof shingles: courses across the slope, each tab its own shade, a shadow line under each course
+  float row = floor(v / 0.22), tab = floor(u / 0.36 + row * 0.5);
+  col *= mix((0.86 + 0.22 * sHash(vec2(tab, row))) * (1.0 - 0.3 * (1.0 - smoothstep(0.0, 0.04, fract(v / 0.22)))), 0.95, far);
+#elif SURF_KIND == 10 || SURF_KIND == 13
+  // asphalt: grain, darker patches where it was mended, a lighter wheel track wear
+  vec2 q = P.xz;
+  col *= (0.92 + 0.16 * sNoise(q * 9.0) * (1.0 - far)) * (0.9 + 0.12 * sNoise(q * 0.35)) * (1.0 - 0.12 * step(0.72, sNoise(q * 0.13 + 7.0)));
+#elif SURF_KIND == 11
+  // sidewalk: 1.5 m slabs with joints, each slab a touch different
+  vec2 q = P.xz / 1.5; vec2 j = abs(fract(q) - 0.5);
+  col *= mix((0.93 + 0.1 * sHash(floor(q))) * (1.0 - 0.3 * smoothstep(0.47, 0.495, max(j.x, j.y))), 0.97, far) * (0.95 + 0.08 * sNoise(P.xz * 6.0) * (1.0 - far));
+#elif SURF_KIND == 12
+  // a town square: 40 cm square pavers, each a little different, dark joints
+  vec2 q = P.xz / 0.4; vec2 j = abs(fract(q) - 0.5);
+  col *= mix((0.86 + 0.24 * sHash(floor(q))) * (1.0 - 0.35 * smoothstep(0.44, 0.49, max(j.x, j.y))), 0.95, far);
+#endif
+  diffuseColor.rgb = col;
+  surfGlow = glow;
+}
+`;
+const surfCache = new Map();
+function surfMat(color, kind, opts = {}) {
+  const key = color + '|' + kind + JSON.stringify(opts);
+  let m = surfCache.get(key);
+  if (m) return m;
+  m = new THREE.MeshLambertMaterial({ color, ...opts });
+  m.defines = { ...(m.defines || {}), SURF_KIND: kind };
+  const prev = m.onBeforeCompile;
+  m.onBeforeCompile = (sh, r) => {
+    Object.assign(sh.uniforms, SURF);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float aTop; attribute vec4 aBox; varying vec3 vSP; varying vec3 vSN; varying float vTop; varying vec4 vBox;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vSP = (modelMatrix * vec4(position, 1.0)).xyz; vSN = mat3(modelMatrix) * normal; vTop = aTop; vBox = aBox;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\n' + SURF_GLSL)
+      .replace('#include <color_fragment>', '#include <color_fragment>\n  vec3 surfGlow = vec3(0.0);\n' + SURF_FRAG)
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += surfGlow;');
+    if (prev) prev.call(m, sh, r);
+  };
+  m.customProgramCacheKey = () => 'surf' + kind;
+  surfCache.set(key, m);
+  return m;
+}
+// a building's walls for surfMat: their height above the ground, and the footprint (middle x, z, half widths) the
+// windows are laid out in (one value each for the whole geometry)
+function withTop(geo, top, box = [0, 0, 1e3, 1e3]) {
+  const n = geo.attributes.position.count, b = new Float32Array(n * 4);
+  for (let i = 0; i < n; i++) b.set(box, i * 4);
+  geo.setAttribute('aTop', new THREE.BufferAttribute(new Float32Array(n).fill(top), 1));
+  geo.setAttribute('aBox', new THREE.BufferAttribute(b, 4));
+  return geo;
+}
 const geoCan = new THREE.CylinderGeometry(0.033, 0.033, 0.12, 18, 1, true); // hollow: open at the top (GDD 7.5)
 const geoCanIn = new THREE.CylinderGeometry(0.030, 0.030, 0.12, 18, 1, true);
 const geoDrink = new THREE.CircleGeometry(0.030, 18);
@@ -369,6 +487,12 @@ function buildChunk(rec) {
   const c = rec.content;
   const dyn = { lids: [], traps: [], candles: [], cans: [], puddles: [], crowns: [], grills: [], wood: [], rain: [], rainDay: -2 };
   // birdbaths (T2-1): a stone basin on a pedestal, water to the brim
+  // a pond (GEN_VERSION 8): its water at the ground, a muddy margin round it (World v2 draws both itself)
+  for (const p of c.ponds || []) {
+    const water = new THREE.Mesh(new THREE.CircleGeometry(p.r, 56), WATER_MAT); water.rotation.x = -Math.PI / 2; water.position.set(p.x, 0.004, p.z);
+    g.add(water);
+    if (!W2on) { const mud = new THREE.Mesh(new THREE.RingGeometry(p.r - 0.05, p.r + 0.7, 56, 1), mat('#5d4c37', ONGROUND)); mud.rotation.x = -Math.PI / 2; mud.position.set(p.x, 0.003, p.z); mud.receiveShadow = true; g.add(mud); }
+  }
   for (const b of c.baths || []) {
     if (b.fountain) { // a town fountain (T2-5): a low stone basin, a jet in the middle
       const rim = new THREE.Mesh(new THREE.CylinderGeometry(b.r + 0.15, b.r + 0.2, b.h - 0.02, 28), mat('#b8b0a2')); rim.position.set(b.x, (b.h - 0.02) / 2, b.z); rim.receiveShadow = true;
@@ -391,12 +515,13 @@ function buildChunk(rec) {
     const tint = new THREE.Mesh(new THREE.PlaneGeometry(64, 64, 16, 16), new THREE.MeshLambertMaterial({ color: c.use === 'yards' ? '#7fbf4a' : c.use === 'forest' ? '#3d4a22' : '#8f9a6a', transparent: true, opacity: c.use === 'yards' ? 0.28 : 0.45, depthWrite: false }));
     tint.rotation.x = -Math.PI / 2; tint.position.set(rec.cx * 64, 0.002, rec.cz * 64); tint.receiveShadow = true; g.add(tint);
   }
-  const flat = (minx, maxx, minz, maxz, color, y) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(maxx - minx, maxz - minz, Math.max(1, Math.ceil((maxx - minx) / 4)), Math.max(1, Math.ceil((maxz - minz) / 4))), mat(color, ONGROUND)); m.rotation.x = -Math.PI / 2; m.position.set((minx + maxx) / 2, y, (minz + maxz) / 2); m.receiveShadow = true; g.add(m); };
+  const PAVE = { '#45464a': 10, '#b9b4a8': 11, '#bdb4a4': 12, '#4b4c50': 13 }; // asphalt, sidewalk slabs, square pavers, a lot's asphalt
+  const flat = (minx, maxx, minz, maxz, color, y) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(maxx - minx, maxz - minz, Math.max(1, Math.ceil((maxx - minx) / 4)), Math.max(1, Math.ceil((maxz - minz) / 4))), PAVE[color] !== undefined ? surfMat(color, PAVE[color], ONGROUND) : mat(color, ONGROUND)); m.rotation.x = -Math.PI / 2; m.position.set((minx + maxx) / 2, y, (minz + maxz) / 2); m.receiveShadow = true; g.add(m); };
   for (const r of painted ? [] : c.roads || []) {
     flat(r.minx, r.maxx, r.minz - 1.6, r.minz, '#b9b4a8', 0.004); flat(r.minx, r.maxx, r.maxz, r.maxz + 1.6, '#b9b4a8', 0.004); // sidewalks
     flat(r.minx, r.maxx, r.minz, r.maxz, '#45464a', 0.005);
   }
-  for (const l of painted ? [] : c.loops || []) { const m = new THREE.Mesh(new THREE.RingGeometry(0, l.r, 40, 4), mat('#45464a', ONGROUND)); m.rotation.x = -Math.PI / 2; m.position.set(l.x, 0.006, l.z); m.receiveShadow = true; g.add(m); }
+  for (const l of painted ? [] : c.loops || []) { const m = new THREE.Mesh(new THREE.RingGeometry(0, l.r, 40, 4), surfMat('#45464a', 10, ONGROUND)); m.rotation.x = -Math.PI / 2; m.position.set(l.x, 0.006, l.z); m.receiveShadow = true; g.add(m); }
   for (const l of painted ? [] : c.lots || []) {
     flat(l.minx, l.maxx, l.minz, l.maxz, '#4b4c50', 0.005);
     const along = l.maxx - l.minx > l.maxz - l.minz;
@@ -409,13 +534,10 @@ function buildChunk(rec) {
   }
   const SHOP = ['#c98f6b', '#d8c7a4', '#9fb3a1', '#b8a1c4', '#e0d0b8', '#a8bccd'], AWN = ['#7a2f24', '#2f5f7a', '#3f7a2f', '#7a6a2f', '#5a2f7a', '#7a2f5a'];
   for (const sh of c.shops || []) {
-    const b = new THREE.Mesh(new THREE.BoxGeometry(sh.hw * 2, sh.h, sh.hd * 2), mat(SHOP[sh.color % SHOP.length])); b.position.set(sh.x, sh.h / 2, sh.z); b.castShadow = b.receiveShadow = true;
-    // shop windows on every side: one pane across the x faces, one across the z faces
-    const glass = new THREE.Mesh(new THREE.BoxGeometry(sh.hw * 2 - 1, 2.2, sh.hd * 2 + 0.06), mat('#2c3a44')); glass.position.set(sh.x, 1.4, sh.z);
-    const glass2 = new THREE.Mesh(new THREE.BoxGeometry(sh.hw * 2 + 0.06, 2.2, sh.hd * 2 - 1), mat('#2c3a44')); glass2.position.set(sh.x, 1.4, sh.z);
-    const awn = new THREE.Mesh(new THREE.BoxGeometry(sh.hw * 2 + 0.8, 0.12, sh.hd * 2 + 0.8), mat(AWN[sh.color % AWN.length])); awn.position.set(sh.x, 2.75, sh.z);
-    for (let fl = 1; fl < Math.floor(sh.h / 3); fl++) { const wv = new THREE.Mesh(new THREE.BoxGeometry(sh.hw * 2 + 0.04, 1.0, sh.hd * 2 + 0.04), mat('#3a4652')); wv.scale.set(0.8, 1, 0.8); wv.position.set(sh.x, fl * 3 + 1.4, sh.z); g.add(wv); }
-    g.add(b, glass, glass2, awn);
+    // shopfronts and upper windows are drawn on the walls by their shader (surfMat), not as meshes
+    const b = new THREE.Mesh(withTop(new THREE.BoxGeometry(sh.hw * 2, sh.h, sh.hd * 2), sh.h, [sh.x, sh.z, sh.hw, sh.hd]), surfMat(SHOP[sh.color % SHOP.length], 1)); b.position.set(sh.x, sh.h / 2, sh.z); b.castShadow = b.receiveShadow = true;
+    const awn = new THREE.Mesh(new THREE.BoxGeometry(sh.hw * 2 + 0.8, 0.12, sh.hd * 2 + 0.8), mat(AWN[sh.color % AWN.length])); awn.position.set(sh.x, 2.75, sh.z); awn.castShadow = true;
+    g.add(b, awn);
   }
   for (const gd of c.gardens || []) {
     const lights = new THREE.Group(), bulb = new THREE.SphereGeometry(0.05, 6, 4), on = new THREE.MeshBasicMaterial({ color: '#ffe7a8' });
@@ -426,31 +548,24 @@ function buildChunk(rec) {
     g.add(lights);
   }
   for (const m of c.malls || []) {
-    const b = new THREE.Mesh(new THREE.BoxGeometry(m.hw * 2, m.h, m.hd * 2), mat('#cdbfa6')); b.position.set(m.x, m.h / 2, m.z); b.castShadow = b.receiveShadow = true;
+    const b = new THREE.Mesh(withTop(new THREE.BoxGeometry(m.hw * 2, m.h, m.hd * 2), m.h - 1.2, [m.x, m.z, m.hw, m.hd]), surfMat('#cdbfa6', 2)); b.position.set(m.x, m.h / 2, m.z); b.castShadow = b.receiveShadow = true;
     const band = new THREE.Mesh(new THREE.BoxGeometry(m.hw * 2 + 0.1, 1.2, m.hd * 2 + 0.1), mat('#7a2f24')); band.position.set(m.x, m.h - 0.6, m.z);
-    const glass = new THREE.Mesh(new THREE.BoxGeometry(m.hw * 2 - 1, 2.4, m.hd * 2 + 0.06), mat('#2c3a44')); glass.position.set(m.x, 1.5, m.z);
-    if (m.hd > m.hw) glass.scale.set((m.hw * 2 + 0.06) / (m.hw * 2 - 1), 1, (m.hd * 2 - 1) / (m.hd * 2 + 0.06));
-    g.add(b, band, glass);
+    g.add(b, band);
   }
   for (const sh of c.sheds || []) {
     const siding = sh.house ? ['#e3dccb', '#c9d3d6', '#dcc9a8', '#c7cdb6', '#efe9dd'][Math.abs(Math.round(sh.x * 7 + sh.z * 3)) % 5] : '#7a5a3c';
-    const walls = new THREE.Mesh(new THREE.BoxGeometry(sh.hw * 2, sh.h, sh.hd * 2), mat(siding));
+    const walls = new THREE.Mesh(withTop(new THREE.BoxGeometry(sh.hw * 2, sh.h, sh.hd * 2), sh.h, [sh.x, sh.z, sh.hw, sh.hd]), surfMat(siding, sh.house ? 0 : 3)); // siding and windows, or a shed's planks
     walls.position.set(sh.x, sh.h / 2, sh.z); walls.castShadow = walls.receiveShadow = true;
     const long = sh.hw >= sh.hd, span = long ? sh.hd : sh.hw, len = (long ? sh.hw : sh.hd) * 2 + 0.2, rise = sh.house ? 1.9 : 0.55;
     if (sh.house) {
-      // windows on the long sides, a door on one, and the gable ends closed with a wedge
-      const win = mat('#33404a'), along = long ? [1, 0] : [0, 1], across = long ? [0, 1] : [1, 0], half = long ? sh.hw : sh.hd, depth = long ? sh.hd : sh.hw;
-      for (const s of [-1, 1]) for (let k = -1; k <= 1; k++) for (const y of [1.5, sh.h - 1.4]) {
-        if (s === (long ? Math.sign(rec.cz * 64 - sh.z) || 1 : Math.sign(rec.cx * 64 - sh.x) || 1) && k === 0 && y < 2) continue; // the door goes there
-        const wv = new THREE.Mesh(new THREE.BoxGeometry(along[0] ? 1.1 : 0.06, 1.0, along[1] ? 1.1 : 0.06), win);
-        wv.position.set(sh.x + along[0] * k * half * 0.6 + across[0] * s * (depth + 0.02), y, sh.z + along[1] * k * half * 0.6 + across[1] * s * (depth + 0.02)); g.add(wv);
-      }
+      // windows are drawn on the walls by their shader (surfMat); a door on the street side, the gable ends closed with a wedge
+      const along = long ? [1, 0] : [0, 1], across = long ? [0, 1] : [1, 0], half = long ? sh.hw : sh.hd, depth = long ? sh.hd : sh.hw;
       const door = new THREE.Mesh(new THREE.BoxGeometry(along[0] ? 1.0 : 0.06, 2.1, along[1] ? 1.0 : 0.06), mat('#6b3b2a'));
       const ds = long ? Math.sign(rec.cz * 64 - sh.z) || 1 : Math.sign(rec.cx * 64 - sh.x) || 1; // the door faces the street
       door.position.set(sh.x + across[0] * ds * (depth + 0.02), 1.05, sh.z + across[1] * ds * (depth + 0.02)); g.add(door);
       const gable = new THREE.Shape([new THREE.Vector2(-depth, 0), new THREE.Vector2(depth, 0), new THREE.Vector2(0, rise)]);
       for (const s of [-1, 1]) {
-        const gm = new THREE.Mesh(new THREE.ShapeGeometry(gable), mat(siding, { side: THREE.DoubleSide }));
+        const gm = new THREE.Mesh(withTop(new THREE.ShapeGeometry(gable), 0), surfMat(siding, 0, { side: THREE.DoubleSide }));
         gm.position.set(sh.x + along[0] * s * half, sh.h, sh.z + along[1] * s * half); gm.rotation.y = long ? Math.PI / 2 : 0; g.add(gm);
       }
     }
@@ -458,7 +573,7 @@ function buildChunk(rec) {
     const rf = shedRoof(sh), slope = rf.L, ang = Math.atan2(rf.rise, rf.S), th = sh.house ? 0.12 : 0.05;
     const cy = sh.h + rf.rise / 2 - rf.S / rf.L * th / 2, cu = rf.S / 2 - rf.rise / rf.L * th / 2;
     for (const side of [-1, 1]) {
-      const roof = new THREE.Mesh(new THREE.BoxGeometry(long ? rf.half * 2 : slope, th, long ? slope : rf.half * 2), mat(sh.house ? '#4e4b52' : '#3d3a36'));
+      const roof = new THREE.Mesh(new THREE.BoxGeometry(long ? rf.half * 2 : slope, th, long ? slope : rf.half * 2), surfMat(sh.house ? '#4e4b52' : '#3d3a36', 4)); // shingles
       if (long) { roof.position.set(sh.x, cy, sh.z + side * cu); roof.rotation.x = side * ang; }
       else { roof.position.set(sh.x + side * cu, cy, sh.z); roof.rotation.z = -side * ang; }
       roof.castShadow = true; g.add(roof);
@@ -1631,6 +1746,7 @@ function lighting() {
   sunDir.set(Math.cos(Math.PI * f) * 0.8, Math.max(0.08, elev), 0.35).normalize();
   sun.intensity = (sim.raining ? (storm ? 0.25 : 0.5) : 2.1) * dayAmt;
   hemi.intensity = 0.18 + 0.97 * dayAmt * (storm ? 0.6 : 1) + flash * 1.5;
+  SURF.uNight.value = 1 - dayAmt; // lit windows after dark
 }
 
 // ------------------------------------------------------------------ sound (procedural, presentation only)
@@ -2531,38 +2647,59 @@ function mapStep(kind, d) {
   mapView[kind] = list[Math.max(0, Math.min(list.length - 1, i + d))];
   applyMapView();
 }
+// Map tiles: what a chunk shows that does not change (its ground, streets, buildings, ponds, tables, and zoomed in its
+// trees and birdbaths) is drawn once per chunk and zoom into a small canvas kept in a table, and the map only copies the
+// tiles each time it is drawn; what moves or changes is drawn over them.
+const mapTiles = new Map();
+let mapColors = null; // the theme's colours, read once (getComputedStyle is slow)
+function mapTile(rec, cell, detail, dpr) {
+  const px = Math.max(4, Math.round(cell * dpr)), key = rec.cx + ',' + rec.cz + '|' + px + (detail ? 'd' : '');
+  let cv = mapTiles.get(key);
+  if (cv) return cv;
+  if (mapTiles.size > 1500) mapTiles.clear();
+  cv = document.createElement('canvas'); cv.width = cv.height = px;
+  const g = cv.getContext('2d'), CSZ = T.chunk.size, sc = px / CSZ, ex = (rec.cx + 0.5) * CSZ, ez = (rec.cz + 0.5) * CSZ, c = rec.content;
+  const L = (x, z) => [(ex - x) * sc, (ez - z) * sc]; // the map's own mirror: x and z run right to left and down to up
+  const use = c.use || 'park';
+  g.fillStyle = use === 'yards' ? 'hsla(95, 22%, 31%, 0.92)' : use === 'forest' ? 'hsla(100, 35%, 14%, 0.95)' : use === 'mall' ? 'hsla(40, 6%, 30%, 0.92)' : use === 'town' ? 'hsla(30, 18%, 42%, 0.95)' : `hsla(${88 + c.tint * 20}, 30%, ${21 + c.tint * 8}%, 0.92)`;
+  g.fillRect(dpr, dpr, px - 2 * dpr, px - 2 * dpr);
+  g.fillStyle = 'rgba(30,30,32,.75)';
+  for (const r of c.roads || []) { const [x0, y0] = L(r.maxx, r.maxz), [x1, y1] = L(r.minx, r.minz); g.fillRect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.max(2 * dpr, Math.abs(y1 - y0))); }
+  for (const l of c.loops || []) { const [x, y] = L(l.x, l.z); g.beginPath(); g.arc(x, y, l.r * sc, 0, Math.PI * 2); g.fill(); }
+  g.fillStyle = 'rgba(79,140,190,.9)';
+  for (const p of c.ponds || []) { const [x, y] = L(p.x, p.z); g.beginPath(); g.arc(x, y, Math.max(1.5 * dpr, p.r * sc), 0, Math.PI * 2); g.fill(); }
+  g.fillStyle = 'rgba(214,206,190,.55)';
+  for (const sh of c.sheds || []) if (sh.house) { const [x, y] = L(sh.x, sh.z); g.fillRect(x - sh.hw * sc, y - sh.hd * sc, sh.hw * 2 * sc, sh.hd * 2 * sc); }
+  for (const m of c.malls || []) { const [x, y] = L(m.x, m.z); g.fillRect(x - m.hw * sc, y - m.hd * sc, m.hw * 2 * sc, m.hd * 2 * sc); }
+  if (detail) {
+    g.fillStyle = 'rgba(40,70,30,.9)';
+    for (const t of c.trees) { const [x, y] = L(t.x, t.z); g.beginPath(); g.arc(x, y, Math.max(1.5 * dpr, (t.r || 0.3) * 3 * sc), 0, Math.PI * 2); g.fill(); }
+    const k = Math.max(1, Math.min(2.2, cell / 48));
+    g.fillStyle = 'rgba(79,160,220,.9)';
+    for (const b of c.baths || []) { const [x, y] = L(b.x, b.z); g.beginPath(); g.arc(x, y, 2.5 * k * dpr, 0, Math.PI * 2); g.fill(); }
+  }
+  g.fillStyle = 'rgba(243,238,226,.4)';
+  for (const t of c.tables) { const [x, y] = L(t.x, t.z); g.fillRect(x - 2 * dpr, y - 2 * dpr, 4 * dpr, 4 * dpr); }
+  mapTiles.set(key, cv);
+  return cv;
+}
 function drawMapTo(ctx, W, H, ox, oz, cell, o = {}) {
   const CSZ = T.chunk.size, w = sim.wasp || { x: 0, z: 0 }, k = Math.max(1, Math.min(2.2, cell / 48)); // markers grow a little when zoomed in
   const toS = (x, z) => [W / 2 - (x - ox) / CSZ * cell, H / 2 - (z - oz) / CSZ * cell];
   const ccx = chunkOf(ox), ccz = chunkOf(oz), sx0 = Math.ceil(W / 2 / cell) + 1, sz0 = Math.ceil(H / 2 / cell) + 1;
   ctx.clearRect(0, 0, W, H);
-  const yellow = css('--yellow'), red = css('--red'), orange = css('--orange');
+  mapColors = mapColors || { yellow: css('--yellow'), red: css('--red'), orange: css('--orange') };
+  const { yellow, red, orange } = mapColors, dpr = ctx.getTransform().a || 1;
   const wc = chunkOf(w.x), wz = chunkOf(w.z);
   for (let dz = -sz0; dz <= sz0; dz++) for (let dx = -sx0; dx <= sx0; dx++) {
     const cx = ccx + dx, cz = ccz + dz, key = chunkKey(cx, cz);
     const [sx, sy] = toS((cx + 0.5) * CSZ, (cz + 0.5) * CSZ);
     const rec = sim.records.get(key);
     if (rec) {
-      const use = rec.content.use || 'park';
-      ctx.fillStyle = use === 'yards' ? 'hsla(95, 22%, 31%, 0.92)' : use === 'forest' ? 'hsla(100, 35%, 14%, 0.95)' : use === 'mall' ? 'hsla(40, 6%, 30%, 0.92)' : use === 'town' ? 'hsla(30, 18%, 42%, 0.95)' : `hsla(${88 + rec.content.tint * 20}, 30%, ${21 + rec.content.tint * 8}%, 0.92)`;
-      ctx.fillRect(sx + 1, sy + 1, cell - 2, cell - 2);
-      // streets and buildings (T1-12)
-      ctx.fillStyle = 'rgba(30,30,32,.75)';
-      for (const r of rec.content.roads || []) { const [x0, y0] = toS(r.maxx, r.maxz), [x1, y1] = toS(r.minx, r.minz); ctx.fillRect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.max(2, Math.abs(y1 - y0))); }
-      for (const l of rec.content.loops || []) { const [x, y] = toS(l.x, l.z); ctx.beginPath(); ctx.arc(x, y, l.r / CSZ * cell, 0, Math.PI * 2); ctx.fill(); }
-      ctx.fillStyle = 'rgba(214,206,190,.55)';
-      for (const sh of rec.content.sheds || []) if (sh.house) { const [x, y] = toS(sh.x, sh.z); ctx.fillRect(x - sh.hw / CSZ * cell, y - sh.hd / CSZ * cell, sh.hw * 2 / CSZ * cell, sh.hd * 2 / CSZ * cell); }
-      for (const m of rec.content.malls || []) { const [x, y] = toS(m.x, m.z); ctx.fillRect(x - m.hw / CSZ * cell, y - m.hd / CSZ * cell, m.hw * 2 / CSZ * cell, m.hd * 2 / CSZ * cell); }
-      if (o.detail) { // the atlas, zoomed in: trees and water too
-        ctx.fillStyle = 'rgba(40,70,30,.9)';
-        for (const t of rec.content.trees) { const [x, y] = toS(t.x, t.z); ctx.beginPath(); ctx.arc(x, y, Math.max(1.5, (t.r || 0.3) * 3 / CSZ * cell), 0, Math.PI * 2); ctx.fill(); }
-        ctx.fillStyle = 'rgba(79,160,220,.9)';
-        for (const b of rec.content.baths || []) { const [x, y] = toS(b.x, b.z); ctx.beginPath(); ctx.arc(x, y, 2.5 * k, 0, Math.PI * 2); ctx.fill(); }
-      }
+      // the chunk's still parts, from the tile table (ground, streets, buildings, ponds, tables; zoomed in, trees and baths)
+      ctx.drawImage(mapTile(rec, cell, !!o.detail, dpr), sx, sy, cell, cell);
       const lv = sim.escLevel(key);
       if (lv) { ctx.fillStyle = `rgba(229,65,45,${0.1 + lv * 0.1})`; ctx.fillRect(sx + 1, sy + 1, cell - 2, cell - 2); }
-      ctx.fillStyle = 'rgba(243,238,226,.4)';
-      for (const t of rec.content.tables) { const [x, y] = toS(t.x, t.z); ctx.fillRect(x - 2, y - 2, 4, 4); }
       ctx.fillStyle = '#ece8dc';
       for (const hv of sim.hivesIn(rec)) { const [x, y] = toS(hv.x, hv.z); ctx.fillRect(x - 3 * k, y - 3 * k, 6 * k, 6 * k); }
       if (rec.content.rival) { const [x, y] = toS(rec.content.rival.x, rec.content.rival.z); ctx.strokeStyle = orange; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 4 * k, 0, Math.PI * 2); ctx.stroke(); }
@@ -3286,6 +3423,7 @@ function newWorld(s, restored = null) {
   for (const o of oldNestViews) if (o) scene.remove(o);
   nestView = null; nestSig = ''; oldNestViews.length = 0;
   rings.reset(); for (const C of COVER) C.sig = ''; // a new world: fill the rings and paint the cover afresh
+  mapTiles.clear(); // and draw its map tiles afresh
   input.lock = input.pilot = input.swoopLock = null; input.turning = false;
   for (const v of lineViews.values()) scene.remove(v); lineViews.clear();
   if (restored) { sim = restored.sim; loadSnap = restored.json; lab = null; settings = sim.settings; }

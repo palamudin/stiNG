@@ -713,7 +713,7 @@ namespace Sting.Core
             return -1;
         }
         public long PuddleDay() => PuddleDay(minute);
-        /// the puddles a rainy day leaves in a chunk: i = day * 16 + k
+        /// the puddles a rainy day leaves in a chunk: i = 32 + day * 32 + k
         public List<WaterSrc> PuddlesIn(ChunkRec rec, long d)
         {
             if (rec.puddles != null && rec.puddleDay == d) return rec.puddles;
@@ -736,7 +736,7 @@ namespace Sting.Core
                 foreach (var b in c.boxes) if (x > b.minx - r && x < b.maxx + r && z > b.minz - r && z < b.maxz + r) { blocked = true; break; }
                 if (!blocked) foreach (var cy in c.cylinders) if (Sq(x - cy.x) + Sq(z - cy.z) < Sq(cy.r + r)) { blocked = true; break; }
                 if (blocked) continue;
-                list.Add(new WaterSrc { x = x, y = 0.003, z = z, r = r, kind = "puddle", i = (int)(d * 16 + k) });
+                list.Add(new WaterSrc { x = x, y = 0.003, z = z, r = r, kind = "puddle", i = (int)(32 + d * 32 + k) });
             }
             rec.puddleDay = d; rec.puddles = list;
             return list;
@@ -747,6 +747,7 @@ namespace Sting.Core
         {
             var o = new List<WaterSrc>();
             for (int i = 0; i < rec.content.baths.Count; i++) { var b = rec.content.baths[i]; o.Add(new WaterSrc { x = b.x, y = b.h, z = b.z, r = b.r, kind = "bath", i = i }); }
+            for (int j = 0; j < rec.content.ponds.Count; j++) { var q = rec.content.ponds[j]; o.Add(new WaterSrc { x = q.x, y = 0.002, z = q.z, r = q.r, kind = "pond", i = 12 + j }); } // baths from 0, ponds from 12, puddles from 32
             long d = PuddleDay(m);
             if (d >= 0) o.AddRange(PuddlesIn(rec, d));
             return o;

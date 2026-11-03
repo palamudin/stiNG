@@ -183,6 +183,26 @@ export const REGION = 8;
 export function features(s) {
   return { woods: s?.woods ?? 1, towns: s?.towns ?? 1, water: s?.water ?? 1, hives: s?.hives ?? 1 };
 }
+// Memo tables (presentation speed, not sim state): what the generator works out about a chunk or a region from the seed
+// alone (its land use, region layout, ground roll, pond, paving and graded pads) is worked out once per world and kept,
+// keyed by number, not recomputed for every height sample. Pure functions of their keys, so a table only saves time;
+// each is emptied when it grows past its cap. One set of tables per seed and feature modifiers.
+const TABLE_CAP = 65536, tableSets = new Map();
+let lastTables = null;
+function worldTables(seed, s) {
+  const woods = s?.woods ?? 1, towns = s?.towns ?? 1, water = s?.water ?? 1, hives = s?.hives ?? 1, L = lastTables;
+  if (L && L.seed === seed && L.woods === woods && L.towns === towns && L.water === water && L.hives === hives) return L.t;
+  const tag = seed + ':' + woods + ',' + towns + ',' + water + ',' + hives;
+  let t = tableSets.get(tag);
+  if (!t) {
+    if (tableSets.size >= 8) tableSets.clear();
+    t = { use: new Map(), region: new Map(), roll: new Map(), ponds: new Map(), paving: new Map(), pads: new Map() };
+    tableSets.set(tag, t);
+  }
+  lastTables = { seed, woods, towns, water, hives, t };
+  return t;
+}
+function keep(map, key, v) { if (map.size >= TABLE_CAP) map.clear(); map.set(key, v); return v; }
 
 // Terrain (GDD 4.8, T2-6, ground v2 in GDD 20 G1): the ground's height is a derivative-damped fractal value noise,
 // rotated off its lattice and domain-warped (each octave is divided by one plus the squared gradient of the octaves
@@ -235,14 +255,9 @@ function groundShape(seed, x, z, oct = T.terrain.octaves) {
 // How much a chunk's land use lets the ground roll: a town square or a mall lot is near level, yards are graded
 // gently, parks and woods roll freely. Blended smoothly between chunk centres.
 const cellKey = (ix, iz) => (ix + 1048576) * 2097152 + (iz + 1048576); // exact in a double for |i| < 2^20
-const flatCache = { tag: null, map: new Map() };
 function chunkRoll(seed, cx, cz, settings) {
-  const F = features(settings), tag = seed + ':' + F.woods + ',' + F.towns;
-  if (flatCache.tag !== tag) { flatCache.tag = tag; flatCache.map.clear(); }
-  const k = cellKey(cx, cz);
-  let v = flatCache.map.get(k);
-  if (v === undefined) { if (flatCache.map.size > 4096) flatCache.map.clear(); v = T.terrain.roll[landUse(seed, cx, cz, settings)] ?? 1; flatCache.map.set(k, v); }
-  return v;
+  const m = worldTables(seed, settings).roll, k = cellKey(cx, cz), v = m.get(k);
+  return v !== undefined ? v : keep(m, k, T.terrain.roll[landUse(seed, cx, cz, settings)] ?? 1);
 }
 // The ground before grading: oct octaves, times the modifier, the home ring and land use
 function naturalGround(seed, x, z, settings, terrain, oct) {
@@ -258,15 +273,12 @@ function naturalGround(seed, x, z, settings, terrain, oct) {
 // across and follows only the broad shape of the land (the first `oct` octaves) along its length; a town square is
 // that broad shape; a cul-de-sac is graded as the street it ends; a lot and every building's pad are level, at the broad
 // shape's height at their middle. Kinds: 0 street (along x, levelled across at hz), 1 level rect, 2 cul-de-sac (a disc
-// graded as its street), 3 broad-shaped rect.
-const padCache = { tag: null, map: new Map() };
+// graded as its street), 3 broad-shaped rect, 4 pond (a level disc at the broad shape's height at its middle).
 function padsOf(seed, cx, cz, settings) {
-  const F = features(settings), tag = seed + ':' + F.woods + ',' + F.towns + ',' + F.water + ',' + F.hives;
-  if (padCache.tag !== tag) { padCache.tag = tag; padCache.map.clear(); }
-  const key = cellKey(cx, cz);
-  let P = padCache.map.get(key);
+  const pads = worldTables(seed, settings).pads, key = cellKey(cx, cz);
+  let P = pads.get(key);
   if (P) return P;
-  if (padCache.map.size > 4096) padCache.map.clear();
+  if (pads.size >= TABLE_CAP) pads.clear();
   const c = pavingOf(seed, cx, cz, settings), Gr = T.terrain.grade;
   P = [];
   const rect = (k, minx, maxx, minz, maxz, m, hx, hz) => P.push({ k, minx, maxx, minz, maxz, m, hx, hz, h: null });
@@ -277,15 +289,52 @@ function padsOf(seed, cx, cz, settings) {
   for (const b of c.malls) rect(1, b.x - b.hw, b.x + b.hw, b.z - b.hd, b.z + b.hd, Gr.house, b.x, b.z);
   for (const b of c.shops) rect(1, b.x - b.hw, b.x + b.hw, b.z - b.hd, b.z + b.hd, Gr.house, b.x, b.z);
   for (const b of c.houses) rect(1, b.x - b.hw, b.x + b.hw, b.z - b.hd, b.z + b.hd, Gr.house, b.x, b.z);
-  padCache.map.set(key, P);
+  for (const p of c.ponds) P.push({ k: 4, x: p.x, z: p.z, r: p.r, m: Gr.pond, hx: p.x, hz: p.z, h: null });
+  pads.set(key, P);
   return P;
+}
+// A chunk's pond (GDD 6.2): some parks and woods have one, never the home park. It keeps clear of what the chunk puts in
+// fixed places (a park's picnic table and its walk round the park, a wood's path), tries a few spots and takes the
+// first that fits, so the same seed gives the same pond with or without the rest of the chunk generated. The ground
+// under it and a shoulder round it are graded level (padsOf); its water is at the ground. A pure function.
+export function pondsOf(seed, cx, cz, settings) {
+  const m = worldTables(seed, settings).ponds, k = cellKey(cx, cz), v = m.get(k);
+  return v !== undefined ? v : keep(m, k, makePonds(seed, cx, cz, settings));
+}
+function makePonds(seed, cx, cz, settings) {
+  if (cx === 0 && cz === 0) return [];
+  const use = landUse(seed, cx, cz, settings);
+  if (use !== 'park' && use !== 'forest') return [];
+  const H = (slot) => hash(seed, Domain.WorldGen, u64(cx), u64(cz), BigInt(slot)), F = features(settings), W = T.water, ox = cx * CS, oz = cz * CS;
+  const park = use === 'park';
+  if (unit(H(9100)) >= (park ? W.pondPark : W.pondForest) * F.water) return [];
+  const r = park ? range(H(9101), W.pondMin, W.pondMax) : range(H(9101), W.pondForestMin, W.pondForestMax), m = 28 - r;
+  const picnic = park && unit(H(1)) < 0.6 ? { x: ox + range(H(2), -20, 20), z: oz + range(H(3), -20, 20) } : null;
+  const walk = park && unit(H(6000)) < 0.6 ? range(H(6001), 12, 22) : 0; // a square walk at this distance from the middle
+  const path = !park && unit(H(6300)) < 0.3; // a straight path from corner to corner
+  for (let k = 0; k < 6; k++) {
+    const x = ox + range(H(9102 + 2 * k), -m, m), z = oz + range(H(9103 + 2 * k), -m, m);
+    if (picnic && (x - picnic.x) * (x - picnic.x) + (z - picnic.z) * (z - picnic.z) < (r + 6) * (r + 6)) continue;
+    if (walk) { const c = Math.max(Math.abs(x - ox), Math.abs(z - oz)); if (c - r * 1.42 < walk + 2 && c + r * 1.42 > walk - 2) continue; }
+    if (path) { // the distance to the path from (ox-26, oz-20) to (ox+26, oz+20)
+      const ax = x - (ox - 26), az = z - (oz - 20), t = Math.max(0, Math.min(1, (ax * 52 + az * 40) / (52 * 52 + 40 * 40))), dx = ax - 52 * t, dz = az - 40 * t;
+      if (dx * dx + dz * dz < (r + 2) * (r + 2)) continue;
+    }
+    return [{ x, z, r }];
+  }
+  return [];
 }
 // A chunk's paving and buildings, as generateChunk places them, without generating the rest (the ground's grading
 // reads this for chunks far out that nothing has generated; a test holds the two to the same numbers)
 export function pavingOf(seed, cx, cz, settings) {
+  const m = worldTables(seed, settings).paving, k = cellKey(cx, cz), v = m.get(k);
+  return v !== undefined ? v : keep(m, k, makePaving(seed, cx, cz, settings));
+}
+function makePaving(seed, cx, cz, settings) {
   const H = (slot) => hash(seed, Domain.WorldGen, u64(cx), u64(cz), BigInt(slot)), ox = cx * CS, oz = cz * CS;
-  const out = { roads: [], loops: [], lots: [], plazas: [], malls: [], shops: [], houses: [] };
+  const out = { roads: [], loops: [], lots: [], plazas: [], malls: [], shops: [], houses: [], ponds: [] };
   if (cx === 0 && cz === 0) return out;
+  out.ponds = pondsOf(seed, cx, cz, settings);
   const use = landUse(seed, cx, cz, settings);
   if (use === 'yards') {
     const endW = landUse(seed, cx - 1, cz, settings) !== 'yards', endE = landUse(seed, cx + 1, cz, settings) !== 'yards';
@@ -317,7 +366,7 @@ export function groundAt(seed, x, z, settings) {
   for (let cz = c0z; cz <= c1z; cz++) for (let cx = c0x; cx <= c1x; cx++) {
     for (const p of padsOf(seed, cx, cz, settings)) {
       let d;
-      if (p.k === 2) d = Math.max(0, Math.sqrt((x - p.x) * (x - p.x) + (z - p.z) * (z - p.z)) - p.r);
+      if (p.k === 2 || p.k === 4) d = Math.max(0, Math.sqrt((x - p.x) * (x - p.x) + (z - p.z) * (z - p.z)) - p.r);
       else { const dx = Math.max(p.minx - x, 0, x - p.maxx), dz = Math.max(p.minz - z, 0, z - p.maxz); d = Math.sqrt(dx * dx + dz * dz); }
       if (d >= p.m) continue;
       let hp;
@@ -336,11 +385,11 @@ export function groundSlope(seed, x, z, settings) {
   const e = 0.25;
   return { x: (groundAt(seed, x + e, z, settings) - groundAt(seed, x - e, z, settings)) / (2 * e), z: (groundAt(seed, x, z + e, settings) - groundAt(seed, x, z - e, settings)) / (2 * e) };
 }
-const regionCache = new Map();
 export function regionLayout(seed, rx, rz, settings) {
-  const F = features(settings), key = seed + ':' + rx + ',' + rz + ':' + F.woods + ',' + F.towns;
-  let L = regionCache.get(key);
+  const regions = worldTables(seed, settings).region, key = cellKey(rx, rz);
+  let L = regions.get(key);
   if (L) return L;
+  const F = features(settings);
   const H = (slot) => hash(seed, Domain.WorldGen, u64(rx), u64(rz), BigInt(90000 + slot));
   L = { strip: rx === 0 && rz === 0 ? REGION / 2 : 2 + rangeInt(H(1), 0, 4), mallSide: rangeInt(H(2), 0, 4), mallFrom: rangeInt(H(3), 0, REGION - 2), forest: rangeInt(H(4), 0, 4) };
   // forest corners (2x2; a wooded world has two of 3x3, the second diagonally across)
@@ -362,8 +411,8 @@ export function regionLayout(seed, rx, rz, settings) {
       if (ok) { L.towns.push({ tx, tz, garden: rangeInt(H(t ? 10 : 7), 0, 4) }); break; }
     }
   }
-  if (regionCache.size > 256) regionCache.clear();
-  regionCache.set(key, L);
+  if (regions.size >= TABLE_CAP) regions.clear();
+  regions.set(key, L);
   return L;
 }
 // land use before the town centres are laid over it
@@ -385,6 +434,10 @@ export function townQuarter(seed, cx, cz, settings) {
   return null;
 }
 export function landUse(seed, cx, cz, settings) {
+  const m = worldTables(seed, settings).use, k = cellKey(cx, cz), v = m.get(k);
+  return v !== undefined ? v : keep(m, k, makeLandUse(seed, cx, cz, settings));
+}
+function makeLandUse(seed, cx, cz, settings) {
   if (cx === 0 && cz === 0) return 'park';
   const R = regionOf(cx, cz);
   if (townQuarter(seed, cx, cz, settings)) return 'town';
@@ -406,8 +459,9 @@ export function generateChunk(seed, cx, cz, settings) {
     use: 'park', roads: [], loops: [], lots: [], malls: [], // T1-12: land use, streets, cul-de-sacs, parking lots, mall buildings
     baths: [], // T2-1: birdbaths
     plazas: [], shops: [], gardens: [], // T2-5: a town centre's paving, its shop buildings, its beer garden
+    ponds: pondsOf(seed, cx, cz, settings), // ponds: { x, z, r }, the water at the ground
   };
-  const occupied = [];
+  const occupied = c.ponds.map((p) => ({ x: p.x, z: p.z, r: p.r + 1 })); // nothing stands in a pond
   const isOrigin = cx === 0 && cz === 0;
   const free = (x, z, r) => occupied.every((o) => { const dx = x - o.x, dz = z - o.z; return dx * dx + dz * dz > (r + o.r) * (r + o.r); });
   const addFly = (x, y, z, slot) => {
@@ -477,6 +531,7 @@ export function generateChunk(seed, cx, cz, settings) {
     for (let i = 0; i < n; i++) {
       const x = px + range(H(slot + 10 + i), -1.2, 1.2), z = pz + range(H(slot + 30 + i), -1.2, 1.2);
       const y = range(H(slot + 50 + i), 0.2, 0.55);
+      if (c.ponds.some((p) => (x - p.x) * (x - p.x) + (z - p.z) * (z - p.z) < (p.r + 0.3) * (p.r + 0.3))) continue; // not in a pond
       c.flowers.push({ x, y, z, color });
       c.sugar.push({ x, y: y + 0.02, z, rate: 0.35, kind: 'flower' });
       if (unit(H(slot + 70 + i)) < T.prey.caterpillarChance) c.caterpillars.push({ x: x + 0.006, y: y * 0.6, z });

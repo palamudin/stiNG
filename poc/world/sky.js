@@ -151,20 +151,30 @@ void main() {
     this._q = q;
     this.cam = new THREE.Camera();
     this._key = '';
+    this._day = new Map(); // the day table: per sun height, haze and altitude step, what _cpu reads out
     this.sunColor = new THREE.Color(); this.skyUp = new THREE.Color(); this.skyHorizon = new THREE.Color(); this.ground = new THREE.Color();
   }
-  // Rebuild the table when the sun, the haze or the camera's altitude changed enough to see.
+  // Rebuild the table when the sun's height, the haze or the camera's altitude changed enough to see. The table is laid
+  // out round the sun's azimuth (skyDir), so it depends on the sun's height alone. What the CPU reads out of it (the
+  // sun's colour, the sky's light on the ground and on walls) is kept per key in a day table: the first time through a
+  // day costs one read-back per step of the sun, every later time none (a read-back stalls the GPU).
   update(sunDir, camH, haze) {
     this.uniforms.uSun.value.copy(sunDir);
     this.uniforms.uHaze.value = haze;
     this.uniforms.uCamH.value = Math.max(1, camH);
-    const key = `${sunDir.x.toFixed(3)},${sunDir.y.toFixed(3)},${sunDir.z.toFixed(3)},${haze.toFixed(2)},${Math.round(Math.log2(Math.max(1, camH)) * 4)}`;
+    const key = `${sunDir.y.toFixed(3)},${haze.toFixed(2)},${Math.round(Math.log2(Math.max(1, camH)) * 4)}`;
     if (key !== this._key) {
       this._key = key;
       const r = this.renderer, prev = r.getRenderTarget();
       if (this._msHaze !== haze) { this._msHaze = haze; this._q.material = this.msMat; r.setRenderTarget(this.msRT); r.render(this.scene, this.cam); this._q.material = this.mat; }
       r.setRenderTarget(this.rt); r.render(this.scene, this.cam); r.setRenderTarget(prev);
-      this._cpu(sunDir, camH, haze);
+      const got = this._day.get(key);
+      if (got) { this.sunColor.copy(got.sun); this.skyUp.copy(got.up); this.skyHorizon.copy(got.hz); this.irradiance = got.irr; this.uniforms.uSunColor.value.copy(this.sunColor); }
+      else {
+        this._cpu(sunDir, camH, haze);
+        if (this._day.size > 8192) this._day.clear();
+        this._day.set(key, { sun: this.sunColor.clone(), up: this.skyUp.clone(), hz: this.skyHorizon.clone(), irr: this.irradiance });
+      }
     }
   }
   // Sun colour from the transmittance toward it (CPU twin of the same air). Sky light: the table read back and

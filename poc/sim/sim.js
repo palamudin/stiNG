@@ -1771,7 +1771,7 @@ export class Sim {
     return -1;
   }
   // The puddles a rainy day leaves in a chunk: on its streets and lots where it has them, else on open ground, never
-  // under a box or a trunk. A pure function of the seed, the chunk and the day; i = day * 16 + k.
+  // under a box or a trunk. A pure function of the seed, the chunk and the day; i = 32 + day * 32 + k.
   puddlesIn(rec, d) {
     const cache = rec._puddles || (rec._puddles = {});
     if (cache.d === d) return cache.list;
@@ -1789,14 +1789,16 @@ export class Sim {
       const r = W.puddleRMin + (W.puddleRMax - W.puddleRMin) * u(3);
       if (c.boxes.some((b) => x > b.minx - r && x < b.maxx + r && z > b.minz - r && z < b.maxz + r)) continue;
       if (c.cylinders.some((cy) => sq(x - cy.x) + sq(z - cy.z) < sq(cy.r + r))) continue;
-      list.push({ x, y: 0.003, z, r, kind: 'puddle', i: d * 16 + k });
+      list.push({ x, y: 0.003, z, r, kind: 'puddle', i: 32 + d * 32 + k });
     }
     cache.d = d; cache.list = list;
     return list;
   }
-  // Every water source in a chunk now: its birdbaths, and puddles while the ground is wet
+  // Every water source in a chunk now: its birdbaths, its pond, and puddles while the ground is wet. Numbered: baths
+  // from 0, ponds from 12, puddles from 32 (32 + day * 32 + k)
   waterIn(rec, m = this.minute) {
     const out = rec.content.baths.map((b, i) => ({ x: b.x, y: b.h, z: b.z, r: b.r, kind: 'bath', i }));
+    (rec.content.ponds || []).forEach((p, j) => out.push({ x: p.x, y: 0.002, z: p.z, r: p.r, kind: 'pond', i: 12 + j }));
     const d = this.puddleDay(m);
     return d < 0 ? out : out.concat(this.puddlesIn(rec, d));
   }
@@ -5032,7 +5034,7 @@ export class Sim {
     if (t.kind === 'spill') { const sp = this.spillsIn(t.key).find((x) => x.i === t.i); return sp ? { x: sp.x, y: sp.y + 0.012, z: sp.z } : null; }
     if (t.kind === 'bait') return this._baitsIn(t.key)[t.i] || null;
     if (t.kind === 'water') {
-      const s = this.waterIn(rec).find((q) => q.i === t.i && (t.i >= 16 ? q.kind === 'puddle' : q.kind === 'bath'));
+      const s = this.waterIn(rec).find((q) => q.i === t.i && q.kind === (t.i >= 32 ? 'puddle' : t.i >= 12 ? 'pond' : 'bath'));
       return s ? { x: s.x + s.r * 0.4 * (h32(w.id, t.i, 61) - 0.5), y: s.y + T.wasp.radius + 0.006, z: s.z + s.r * 0.4 * (h32(w.id, t.i, 62) - 0.5) } : null;
     }
     if (t.kind === 'wood') {
