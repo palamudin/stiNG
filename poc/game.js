@@ -3255,12 +3255,14 @@ function w2Attach() {
   world2 = new W2M[0].World(renderer, scene, camera, src, { quality: $('gfx').value === 'low' || touch.on ? 'low' : 'medium', clip: { levels: W2_LEVELS }, sun, hemi, shadowBox: 18, dof: false }); // depth of field at a wasp's distance blurs the whole world away
   Object.assign(LIFT, world2.clip.uniforms);
   world2.build(w.x, w.z);
+  WATER_MAT.visible = !world2.drawsWater; // World v2 draws the birdbaths', fountains' and puddles' water (WORLD.md, W2)
 }
 // the game's clock, weather and wind into World v2: its day runs 06:00 to 18:00 where the game's runs to 21:00
 function w2Frame(dt, focus) {
   const md = minuteOfDay(sim.minute) + (sim.tick % sim.tpm) / sim.tpm, f = (md - 360) / 900;
   const rain = sim.raining ? Math.min(1, 0.45 + 0.3 * sim.weatherToday.pour) : 0, wd = sim.wind;
-  world2.set({ hour: 6 + 12 * f, haze: 1 + rain, mist: 1 + 3 * rain, wet: rain, wind: [wd.x * 0.35, wd.z * 0.35] });
+  // wind10: the day's wind at 10 m for the waves; the sim's is at 3 m over a lawn (log law, z0 = 3 cm: x1.26)
+  world2.set({ hour: 6 + 12 * f, haze: 1 + rain, mist: 1 + 3 * rain, wet: rain, wind: [wd.x * 0.35, wd.z * 0.35], wind10: [wd.x * 1.26, wd.z * 1.26] });
   const fy = focus ? terrAt(focus.x, focus.z) : 0;
   const fd = focus ? Math.max(0.05, Math.hypot(camera.position.x - focus.x, camera.position.y - focus.y - fy, camera.position.z - focus.z)) : 10;
   world2.update(dt, camera.position, fd);
