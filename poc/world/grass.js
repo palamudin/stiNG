@@ -122,10 +122,22 @@ const GRASS_BUILD = /* glsl */ `
   vec2 off = aB.yz * uS0 * (uFlower > 0.5 ? 0.4 : 0.9); // a tuft the same size in every ring
   float t = aT;
   float lean = (0.25 + 0.35 * aB.w) * H;
-  // wind: a gust field travelling with the wind, bending blades toward the tip
-  float ws = length(uWind); vec2 wd = ws > 0.001 ? uWind / ws : vec2(1.0, 0.0);
-  float gust = 0.55 + 0.45 * sin(dot(base, wd) * 0.6 - uTime * 2.2 + w2noise(base / 6.0, 205) * 3.0) + 0.25 * sin(uTime * 4.1 + rnd * 6.283);
-  vec2 bend = fdir * lean * t * t + wd * ws * gust * H * 0.55 * t * t;
+  // wind, at three scales, so no two blades move alike:
+  //   gusts: broad waves rolling downwind across the lawn (metres), the whole patch leaning together;
+  //   eddies: small turbulence carried along by the wind (tens of centimetres), patch against patch;
+  //   the blade: one of eight ways of moving (stiffness, and flutter across the wind and along it at a rate set by its
+  //   length, a short blade quivering fast, a long one swaying), picked by the blade and its clump. Eight is plenty:
+  //   neighbours rarely share one, and the gusts and eddies differ from place to place anyway.
+  float ws = length(uWind); vec2 wd = ws > 0.001 ? uWind / ws : vec2(1.0, 0.0), wp = vec2(-wd.y, wd.x);
+  float gust = 0.5 + 0.5 * sin(dot(base, wd) * 0.35 - uTime * 1.6 + w2noise(base / 8.0, 205) * 3.0);
+  float eddy = w2noise((base - wd * uTime * (0.6 + 1.4 * ws)) / 0.7, 206); // -1..1, carried downwind
+  float mv = floor(fract(aB.w * 7.31 + rnd * 3.7) * 8.0); // which of the eight
+  float bph = mv * 2.39996, bk = (mv + 0.5) / 8.0; // phases a golden angle apart
+  float stiff = 0.65 + 0.7 * bk; // how far this blade gives
+  float rate = (3.2 + 3.5 * bk) * mix(1.4, 0.8, smoothstep(0.03, 0.2, H)); // flutters per second
+  float push = (0.3 * gust + 0.2 * (0.5 + 0.5 * eddy) + 0.06) * stiff;
+  vec2 flutter = wp * (0.13 * sin(uTime * rate + bph) * (0.5 + 0.5 * abs(eddy))) + wd * (0.07 * sin(uTime * rate * 0.63 + bph * 1.7));
+  vec2 bend = fdir * lean * t * t + (wd * push + flutter) * ws * H * t * t;
   float drop = (dot(bend, bend) / max(H, 1e-3)) * 0.45; // a bent blade is shorter
   vec2 xz = base + off + side * aSide * W * (1.0 - t * 0.85) + bend;
   gPos = vec3(xz.x, gd.x + t * H - drop * t, xz.y);

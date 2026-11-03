@@ -2421,7 +2421,7 @@ The world-building thread delivered World v2 (`poc/world/`, with a template page
   - Only a blade's width grows a little with distance, as a pixel covers more ground.
   - The camera's height counts toward the distance, so from above the fine rings give way to the coarse ones smoothly. The thatch under the blades follows the height smoothly too.
 - **Fireflies** are sparks, not bulbs: a lantern of a few millimetres with a small halo, sized in the world (a pinpoint across the garden, large only right at the camera), at a brightness held against the post chain's night exposure.
-- **Wind.** Blades bend with a gust field that travels downwind, and trees rock and flutter, on World v2's own clock. The game hands it the day's wind; on a still day a light breeze still moves the lawn a little, as real air near the ground always does.
+- **Wind.** Three scales, so no two blades move alike: broad gusts rolling downwind across the lawn; small eddies carried along by the wind, patch against patch; and each blade's own way of moving, one of eight (stiffness, and flutter across and along the wind at a rate set by its length), picked by blade and clump. Neighbours rarely share one. Trees rock and flutter on the same clock. The game hands World v2 the day's wind; on a still day a light breeze still moves the lawn a little, as real air near the ground always does.
 - **Wear, from where people are.** The game's source puts wear into the clipmap's fourth channel (below 0.3; paving keeps 0.5 to 1). It comes from the chunk itself:
   - picnic tables and their seats;
   - the spots where people stand about;
