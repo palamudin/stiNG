@@ -455,6 +455,8 @@ function cupPose(C, i, down, lid, lv) {
   C.lid.setColorAt(i, _cCol.set(lv >= 2 ? '#d9d4c7' : '#c99a7a'));
 }
 const NEAR_DRAW = 90;
+// a view-only hash in [0, 1) for scattering leaf blocks: the sim never sees them
+const vh = (x, z, j, k) => { const v = Math.sin(x * 12.9898 + z * 78.233 + j * 37.719 + k * 4.581) * 43758.5453; return v - Math.floor(v); };
 // shapes of the build list's parts, kept: a unit cylinder by its taper and sides, a gable by its size
 const shapeCache = new Map();
 function unitCyl(taper, n) { const k = 'c' + taper.toFixed(4) + ':' + n; let g = shapeCache.get(k); if (!g) shapeCache.set(k, g = new THREE.CylinderGeometry(taper, 1, 1, n)); return g; }
@@ -666,16 +668,23 @@ function buildChunk(rec) {
     const material = q.m === 6 ? BULB_MAT : q.m === 5 ? amat(q.c) : surfMat(q.c, q.m < 4 ? [0, 1, 2, 3][q.m] : 4, q.s === 2 ? { side: THREE.DoubleSide } : {}, true);
     put(B, material, geo, M, q.m < 4 ? { aTop: [q.top], aBox: q.wb } : undefined);
   }
-  // trunks merged; crowns instanced, two blobs a tree, swaying in their vertex shader (World v2 draws its own crowns)
+  // crowns of blocky foliage (GDD 21.5): each a loose cluster of leafy blocks with gaps between, so sun comes through
+  // in patches; instanced, one draw a chunk, swaying in their vertex shader (World v2 draws its own crowns)
   if (c.trees.length && !W2on) {
-    const n = c.trees.length * 2, cg = geoBlob.clone(), cm = new THREE.InstancedMesh(cg, crownMat, n), ph = new Float32Array(n), m4 = new THREE.Matrix4(), col = new THREE.Color();
-    c.trees.forEach((t, i) => {
-      col.setHSL(0.27 + t.shade * 0.06, 0.45, 0.26 + t.shade * 0.08);
-      m4.fromArray(place(t.x, t.h + t.cr * 0.35, t.z, t.cr, t.cr, t.cr)); cm.setMatrixAt(i * 2, m4); cm.setColorAt(i * 2, col);
-      m4.fromArray(place(t.x + t.cr * 0.45, t.h - t.cr * 0.1, t.z - t.cr * 0.3, t.cr * 0.7, t.cr * 0.7, t.cr * 0.7)); cm.setMatrixAt(i * 2 + 1, m4); cm.setColorAt(i * 2 + 1, col);
-      ph[i * 2] = ph[i * 2 + 1] = t.x * 0.7 + t.z * 0.3;
-    });
-    cg.setAttribute('aPh', new THREE.InstancedBufferAttribute(ph, 1)); cm.userData.own = true; cm.castShadow = true; cm.computeBoundingSphere(); g.add(cm);
+    const per = (t) => 6 + Math.min(6, Math.floor(t.cr * 2)), n = c.trees.reduce((q, t) => q + per(t), 0);
+    const cg = geoBox.clone(), cm = new THREE.InstancedMesh(cg, crownMat, n), ph = new Float32Array(n), m4 = new THREE.Matrix4(), col = new THREE.Color(), base = new THREE.Color();
+    let k = 0;
+    for (const t of c.trees) {
+      base.setHSL(0.27 + t.shade * 0.06, 0.45, 0.26 + t.shade * 0.08);
+      const cy = t.h + t.cr * 0.3, q = per(t);
+      for (let j = 0; j < q; j++) {
+        const r1 = vh(t.x, t.z, j, 1), r2 = vh(t.x, t.z, j, 2), r3 = vh(t.x, t.z, j, 3), r4 = vh(t.x, t.z, j, 4);
+        const a = r1 * 6.2832, u = r2 * 2 - 1, rr = Math.cbrt(r3) * t.cr * 0.6, sx = Math.sqrt(1 - u * u), sz = t.cr * (0.45 + 0.3 * r4); // a point in a squashed ball, a block's size
+        m4.fromArray(place(t.x + Math.cos(a) * sx * rr, cy + u * rr * 0.7, t.z + Math.sin(a) * sx * rr, sz, sz * 0.8, sz, 0, a, 0));
+        cm.setMatrixAt(k, m4); cm.setColorAt(k, col.copy(base).offsetHSL(0, 0, (r4 - 0.5) * 0.08)); ph[k] = t.x * 0.7 + t.z * 0.3; k++;
+      }
+    }
+    cg.setAttribute('aPh', new THREE.InstancedBufferAttribute(ph, 1)); cm.userData.own = true; cm.castShadow = cm.receiveShadow = true; cm.computeBoundingSphere(); g.add(cm);
   }
   // fences in cedar, benches and table tops: instanced per shape, each box its own colour so it can pale as wasps strip
   // its pulp (T1-12); a long box (a run of fence) is cut every metre along its length, so on a hilly world each cut
