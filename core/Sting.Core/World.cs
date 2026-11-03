@@ -14,12 +14,12 @@ namespace Sting.Core
     public sealed class Caterpillar { public Num x, y, z; }
     public sealed class Fly { public Num x, y, z, r, w1, w2, w3, p1, p2, p3; }
     public sealed class HumanSlot { public int slot; public Num x, z, fx, fz, exit; public string posture; public string act; public Num[] path; public bool evening; }
-    public sealed class Box { public Num minx, maxx, miny, maxy, minz, maxz; public bool wood, hive, shed, fence, mall, shop; }
+    public sealed class Box { public Num minx, maxx, miny, maxy, minz, maxz; public bool wood, hive, shed, fence, mall, shop, bench; }
     public sealed class Cyl { public Num x, z, r, h; public bool wood, grill, bath; }
     /// a birdbath (T2-1): a basin on a pedestal; h is the water's surface
     public sealed class Bath { public Num x, z, r, h; public bool fountain; }
     /// a pond (world.js pondsOf): its water at the ground
-    public sealed class Pond { public Num x, z, r; }
+    public sealed class Pond { public Num x, z, r, a, b; public bool park; }
     /// A sugar source: a can, a flower, a puddle ('spill') or fallen 'fruit'. i identifies spills and fruit.
     public sealed class SugarNode { public Num x, y, z, rate; public string kind; public int table = -1, i; }
     public sealed class Bee { public bool guard; public Num p, w, tx, ty, tz; public int period, phase; }
@@ -406,6 +406,16 @@ namespace Sting.Core
         }
         /// a chunk's pond (world.js pondsOf): some parks and woods, never the home park, clear of the picnic table, the walk
         /// round a park and a wood's path; a few spots tried, the first that fits taken
+        /// a pond's edge at bearing a: lobed, 0.72 to 1 times its radius (world.js pondEdge)
+        public static Num PondEdge(Pond p, Num a) => p.r * (0.86 + 0.08 * DSin(2 * a + p.a) + 0.06 * DSin(3 * a + p.b));
+        public static bool InPond(Pond p, Num x, Num z, Num m)
+        {
+            Num dx = x - p.x, dz = z - p.z, d2 = dx * dx + dz * dz;
+            if (d2 >= (p.r + m) * (p.r + m)) return false;
+            Num e = PondEdge(p, DAtan2(dz, dx)) + m;
+            return d2 < e * e;
+        }
+        public static class PondPath { public static Num inner = 1.2, outer = 2.2, bench = 2.9; }
         public static List<Pond> PondsOf(ulong seed, int cx, int cz, Settings st = null)
         {
             var o = new List<Pond>();
@@ -416,22 +426,23 @@ namespace Sting.Core
             var F = Features(st); Num ox = cx * CS, oz = cz * CS; bool park = use == "park";
             bool home = cx == -1 && cz == 0 && park; // the park beside the home park always has one
             if (!home && Unit(H(9100)) >= (park ? T.water.pondPark : T.water.pondForest) * F.water) return o;
-            Num r = park ? Range(H(9101), T.water.pondMin, T.water.pondMax) : Range(H(9101), T.water.pondForestMin, T.water.pondForestMax), m = 28 - r;
+            Num r = home ? Range(H(9101), T.water.pondMin, T.water.pondMin + 2) : park ? Range(H(9101), T.water.pondMin, T.water.pondMax) : Range(H(9101), T.water.pondForestMin, T.water.pondForestMax), ring = park ? PondPath.bench + 0.6 : 0, m = 28 - r - ring;
+            Num pa = Range(H(9120), 0, 6.28), pb = Range(H(9121), 0, 6.28);
             bool picnic = park && Unit(H(1)) < 0.6; Num px = 0, pz = 0;
             if (picnic) { px = ox + Range(H(2), -20, 20); pz = oz + Range(H(3), -20, 20); }
             Num walk = park && Unit(H(6000)) < 0.6 ? Range(H(6001), 12, 22) : 0;
             bool path = !park && Unit(H(6300)) < 0.3;
-            for (int k = 0; k < 6; k++)
+            for (int k = 0; k < (home ? 36 : 10); k++) // a few spots tried; the home pond tries harder, at last across the walk
             {
                 Num x = ox + Range(H(9102 + 2 * k), -m, m), z = oz + Range(H(9103 + 2 * k), -m, m);
-                if (picnic && (x - px) * (x - px) + (z - pz) * (z - pz) < (r + 6) * (r + 6)) continue;
-                if (walk != 0) { Num c = Max(Abs(x - ox), Abs(z - oz)); if (c - r * 1.42 < walk + 2 && c + r * 1.42 > walk - 2) continue; }
+                if (picnic && (x - px) * (x - px) + (z - pz) * (z - pz) < (r + ring + 6) * (r + ring + 6)) continue;
+                if (walk != 0 && !(home && k >= 12)) { Num c = Max(Abs(x - ox), Abs(z - oz)), e = r + ring; if (c - e < walk + 2 && c + e > walk - 2) continue; }
                 if (path)
                 {
                     Num ax = x - (ox - 26), az = z - (oz - 20), t = Max(0, Min(1, (ax * 52 + az * 40) / (52 * 52 + 40 * 40))), dx = ax - 52 * t, dz = az - 40 * t;
                     if (dx * dx + dz * dz < (r + 2) * (r + 2)) continue;
                 }
-                o.Add(new Pond { x = x, z = z, r = r });
+                o.Add(new Pond { x = x, z = z, r = r, a = pa, b = pb, park = park });
                 return o;
             }
             return o;
@@ -546,7 +557,7 @@ namespace Sting.Core
             var c = new ChunkContent { cx = cx, cz = cz, tint = Unit(H(0)) };
             c.ponds = PondsOf(seed, cx, cz, st);
             var occupied = new List<Occ>();
-            foreach (var q in c.ponds) occupied.Add(new Occ { x = q.x, z = q.z, r = q.r + 1 }); // nothing stands in a pond
+            foreach (var q in c.ponds) occupied.Add(new Occ { x = q.x, z = q.z, r = q.r + (q.park ? PondPath.outer + 0.3 : 1) }); // nothing stands in a pond or on its path
             bool isOrigin = cx == 0 && cz == 0;
             bool Free(Num x, Num z, Num r) { foreach (var o in occupied) { Num dx = x - o.x, dz = z - o.z; if (!(dx * dx + dz * dz > (r + o.r) * (r + o.r))) return false; } return true; }
             void AddFly(Num x, Num y, Num z, long slot)
@@ -638,7 +649,7 @@ namespace Sting.Core
                 {
                     Num x = px + Range(H(slot + 10 + i), -1.2, 1.2), z = pz + Range(H(slot + 30 + i), -1.2, 1.2);
                     Num y = Range(H(slot + 50 + i), 0.2, 0.55);
-                    bool wet = false; foreach (var q in c.ponds) if ((x - q.x) * (x - q.x) + (z - q.z) * (z - q.z) < (q.r + 0.3) * (q.r + 0.3)) wet = true;
+                    bool wet = false; foreach (var q in c.ponds) if (InPond(q, x, z, 0.3)) wet = true;
                     if (wet) continue; // not in a pond
                     c.flowers.Add(new Flower { x = x, y = y, z = z, color = color });
                     c.sugar.Add(new SugarNode { x = x, y = y + 0.02, z = z, rate = 0.35, kind = "flower" });
@@ -784,6 +795,28 @@ namespace Sting.Core
                 }
                 // someone crossing the square
                 if (Unit(H(7600)) < 0.7) { Num ax = ox + ix * 2, az = oz + iz * 26, bx = ox + ix * 26, bz = oz + iz * 2; AddActor(7610, ax, az, 0, -iz, "stand", "stroll", new Num[] { ax, az, bx, bz }); }
+            }
+
+            // a park pond's surroundings (world.js): two benches beside its path facing the water, now and then a walker round it
+            foreach (var p in c.ponds)
+            {
+                if (!p.park) continue;
+                Num a0 = Range(H(9130), 0, 6.28);
+                for (int k = 0; k < 2; k++)
+                {
+                    Num a = a0 + k * 3.1416 + Range(H(9131 + k), -0.6, 0.6), e = PondEdge(p, a) + PondPath.bench, ca = DCos(a), sa = DSin(a);
+                    Num x = p.x + e * ca, z = p.z + e * sa; bool alongX = Abs(sa) > Abs(ca);
+                    Num hw = alongX ? 0.8 : 0.2, hd = alongX ? 0.2 : 0.8, bx = alongX ? 0 : (ca > 0 ? 0.2 : -0.2), bz = alongX ? (sa > 0 ? 0.2 : -0.2) : 0;
+                    c.boxes.Add(new Box { minx = x - hw, maxx = x + hw, miny = 0.4, maxy = 0.46, minz = z - hd, maxz = z + hd, wood = true, bench = true });
+                    c.boxes.Add(new Box { minx = x + bx - (alongX ? hw : 0.03), maxx = x + bx + (alongX ? hw : 0.03), miny = 0.46, maxy = 0.9, minz = z + bz - (alongX ? 0.03 : hd), maxz = z + bz + (alongX ? 0.03 : hd), wood = true, bench = true });
+                    occupied.Add(new Occ { x = x, z = z, r = 1.2 });
+                }
+                if (Unit(H(9140)) < 0.7)
+                {
+                    var path = new Num[24];
+                    for (int k = 0; k < 12; k++) { Num a = k * TAU / 12, e = PondEdge(p, a) + (PondPath.inner + PondPath.outer) / 2; path[k * 2] = p.x + e * DCos(a); path[k * 2 + 1] = p.z + e * DSin(a); }
+                    AddActor(9150, path[0], path[1], 0, 1, "stand", "stroll", path);
+                }
             }
 
             if (isOrigin)

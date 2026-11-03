@@ -1761,7 +1761,7 @@ namespace Sting.Core.Tests
                     if (hi - lo < 1e-6) flat++;
                     var c = World.GenerateChunk(1234, cx, cz, st);
                     bool In(Num x, Num z, Num r) => (x - q.x) * (x - q.x) + (z - q.z) * (z - q.z) < (q.r + r) * (q.r + r);
-                    if (c.ponds.Count == 1 && !c.trees.Any(t => In(t.x, t.z, t.r)) && !c.tables.Any(t => In(t.x, t.z, 1)) && !c.flowers.Any(f => In(f.x, f.z, 0.2))
+                    if (c.ponds.Count == 1 && !c.trees.Any(t => In(t.x, t.z, t.r)) && !c.tables.Any(t => In(t.x, t.z, 1)) && !c.flowers.Any(f => World.InPond(q, f.x, f.z, 0.2))
                         && !c.hives.Any(h => In(h.x, h.z, 0.5)) && !c.boxes.Any(b => In((b.minx + b.maxx) / 2, (b.minz + b.maxz) / 2, 0.5))) clear++;
                 }
                 Ok(ponds.Count > 10 && ponds.All(o => (o.use == "park" || o.use == "forest") && !(o.cx == 0 && o.cz == 0)) && flat == ponds.Count && clear == ponds.Count,
@@ -1772,6 +1772,12 @@ namespace Sting.Core.Tests
                 Place(s.wasp, P(near.p.x + near.p.r * 0.5, 0.002 + T.wasp.radius, near.p.z));
                 var at = s.WaterNear(new V3(s.wasp.x, s.wasp.y, s.wasp.z)); var rec = s.records.Get(World.ChunkKey(near.cx, near.cz));
                 Ok(at != null && at.Value.kind == "pond" && at.Value.i == 12 && s.WaterIn(rec).Any(w => w.kind == "pond"), $"a wasp at the surface of the pond {Math.Round(Math.Sqrt(D(near.p.x * near.p.x + near.p.z * near.p.z)))} m from home can drink there ({at?.kind} {at?.i})");
+                var pd = rec.content.ponds[0]; var hm = s.active.FirstOrDefault(h => !h.special) ?? s.active[0];
+                hm.x = pd.x - pd.r - 2; hm.z = pd.z + 0.3;
+                int wet = 0, kk = 0;
+                for (; kk < 6000; kk++) { if (s.WalkToForTest(hm, pd.x + pd.r + 2, pd.z + 0.3, T.panic.walkSpeed)) break; if (World.InPond(pd, hm.x, hm.z, 0.3)) wet++; }
+                int benches = rec.content.boxes.Count(b => b.bench); bool walker = rec.content.humans.Any(h => h.slot == 9150);
+                Ok(kk < 6000 && wet == 0 && benches == 4 && pd.park, $"a person sent straight across the pond walks round it, never in the water, and arrives ({kk} steps); the park pond has two benches ({benches} boxes) and {(walker ? "someone walking round it" : "nobody walking round it today")}");
             }
             // 46. feature modifiers (T2-6): woods, towns, water and hives set at world creation act on generation
             {

@@ -61,14 +61,31 @@ namespace Sting.Core
             Emit("flee", ("humanHex", hm.hex));
         }
 
-        static bool WalkTo(Human hm, Num tx, Num tz, Num speed)
+        bool WalkTo(Human hm, Num tx, Num tz, Num speed)
         {
             Num step = 3 * T.DT * speed;
             Num dx = tx - hm.x, dz = tz - hm.z, d = Sqrt(dx * dx + dz * dz);
             if (d <= step) { hm.x = tx; hm.z = tz; return true; }
             hm.fx = dx / d; hm.fz = dz / d;
             hm.x += hm.fx * step; hm.z += hm.fz * step;
+            KeepDry(hm, tx, tz);
             return false;
+        }
+        internal bool WalkToForTest(Human hm, Num tx, Num tz, Num speed) => WalkTo(hm, tx, tz, speed);
+        /// people walk round a pond, not through it (sim.js _keepDry)
+        void KeepDry(Human hm, Num tx, Num tz)
+        {
+            if (!records.TryGet(ChunkKey(ChunkOf(hm.x), ChunkOf(hm.z)), out var rec) || rec.content.ponds.Count == 0) return;
+            foreach (var p in rec.content.ponds)
+            {
+                if (!World.InPond(p, hm.x, hm.z, T.water.pondKeep)) continue;
+                Num dx = hm.x - p.x, dz = hm.z - p.z, d = Sqrt(dx * dx + dz * dz);
+                if (d < 1e-9) continue;
+                Num nx = dx / d, nz = dz / d, e = World.PondEdge(p, DAtan2(dz, dx)) + T.water.pondKeep;
+                Num ux = -nz, uz = nx;
+                if (ux * (tx - hm.x) + uz * (tz - hm.z) < 0) { ux = nz; uz = -nx; }
+                hm.x = p.x + nx * e + ux * 0.04; hm.z = p.z + nz * e + uz * 0.04;
+            }
         }
 
         void Humans()
@@ -116,6 +133,7 @@ namespace Sting.Core
                 if (hm.state == "flee")
                 {
                     hm.x += hm.dirX * T.panic.fleeSpeed * 3 * T.DT; hm.z += hm.dirZ * T.panic.fleeSpeed * 3 * T.DT;
+                    KeepDry(hm, hm.x + hm.dirX, hm.z + hm.dirZ);
                     if (--hm.fleeSteps <= 0) hm.state = "return";
                 }
                 else if (hm.state == "return")
@@ -384,7 +402,7 @@ namespace Sting.Core
             hm.panic = Max(0, oldPanic * T.panic.decayPerStep);
             if (hm.state == "flee" || hm.state == "leave")
             {
-                if (hm.state == "flee") { hm.x += hm.dirX * T.panic.fleeSpeed * 3 * T.DT; hm.z += hm.dirZ * T.panic.fleeSpeed * 3 * T.DT; if (--hm.fleeSteps <= 0) hm.state = "leave"; }
+                if (hm.state == "flee") { hm.x += hm.dirX * T.panic.fleeSpeed * 3 * T.DT; hm.z += hm.dirZ * T.panic.fleeSpeed * 3 * T.DT; KeepDry(hm, hm.x + hm.dirX, hm.z + hm.dirZ); if (--hm.fleeSteps <= 0) hm.state = "leave"; }
                 else if (WalkTo(hm, hm.home.ax, hm.home.az, T.ext.speed)) ExtGone();
                 return;
             }

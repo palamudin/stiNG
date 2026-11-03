@@ -43,7 +43,7 @@ export class Post {
       uExposure: { value: 1 }, uSat: { value: 1.3 }, uPower: { value: 1.25 }, uVignette: { value: 0.22 }, uGrain: { value: 0.025 }, uBloom: { value: 0.045 },
       uTexel: { value: new THREE.Vector2() }, uBloomMax: { value: 1e4 }, uWind: { value: new THREE.Vector2(0.8, 0.3) },
       uWL: { value: new THREE.Vector4(1, 1, 1, 1) }, uWLost: { value: 0 }, uWPeak: { value: 0.05 }, uGlint: { value: WATER.glint },
-      uBody: { value: Array.from({ length: WATER.bodies }, () => new THREE.Vector4()) }, uBodyB: { value: Array.from({ length: WATER.bodies }, () => new THREE.Vector4()) }, uBodies: { value: 0 },
+      uBody: { value: Array.from({ length: WATER.bodies }, () => new THREE.Vector4()) }, uBodyB: { value: Array.from({ length: WATER.bodies }, () => new THREE.Vector4()) }, uBodyC: { value: Array.from({ length: WATER.bodies }, () => new THREE.Vector4()) }, uBodies: { value: 0 },
       tCaus: { value: null }, uCaus: { value: new THREE.Vector4(0, 0, 1, 0) },
       ...sky.uniforms,
     };
@@ -173,15 +173,15 @@ void main() {
   float outDist = dist; bool wet = false;
 #if W_CASCADES > 0
   // the nearest water: the sea (iterated onto its waves), then the bodies (discs on the ground's plane)
-  float tw = 1e10, kind = -1.0; vec2 x0 = vec2(0.0), gx = vec2(0.0), gy = vec2(0.0); vec4 bA = vec4(0.0), bB = vec4(0.0);
+  float tw = 1e10, kind = -1.0; vec2 x0 = vec2(0.0), gx = vec2(0.0), gy = vec2(0.0); vec4 bA = vec4(0.0), bB = vec4(0.0), bC = vec4(0.0);
   if (uWaterOn > 0.5 && v.y < 0.0 && uCamPos.y > uSea) { tw = wSeaHit(uv, v, uSea, x0, gx, gy); kind = 0.0; }
   for (int i = 0; i < ${WATER.bodies}; i++) {
     if (i >= uBodies) break;
     vec4 b = uBody[i], c2 = uBodyB[i]; vec3 c = vec3(b.x, b.w, b.y); vec3 n = vec3(-c2.x, 1.0, -c2.y);
     float den = dot(v, n); if (den >= 0.0 || dot(uCamPos - c, n) <= 0.0) continue; // only from above
     float t = dot(c - uCamPos, n) / den; if (t <= 0.0 || t >= tw) continue;
-    vec3 q = uCamPos + v * t; if (length(q.xz - c.xz) > b.z) continue;
-    tw = t; kind = c2.w; bA = b; bB = c2;
+    vec3 q = uCamPos + v * t; if (length(q.xz - c.xz) > wBodyR(b, uBodyC[i], q.xz - c.xz)) continue;
+    tw = t; kind = c2.w; bA = b; bB = c2; bC = uBodyC[i];
   }
   if (kind >= 0.0 && tw < dist) {
     vec3 P = uCamPos + v * tw;
@@ -189,7 +189,10 @@ void main() {
     else {
       vec3 c = vec3(bA.x, bA.w, bA.y);
       gx = wPlaneHit(uv + vec2(1.0 / uRes.x, 0.0), c, bB.xy).xz - P.xz; gy = wPlaneHit(uv + vec2(0.0, 1.0 / uRes.y), c, bB.xy).xz - P.xz;
-      col = waterShade(uv, v, P, P.xz, bB.xy, gx, gy, dist, col, kind, bB.z, c, bA.z);
+      // a pond's edge at this bearing: its bowl runs out there, and the last 30 cm are shallow enough to show the bank
+      float eR = wBodyR(bA, bC, P.xz - c.xz), eD = eR - length(P.xz - c.xz); vec3 bank = col;
+      col = waterShade(uv, v, P, P.xz, bB.xy, gx, gy, dist, col, kind, bB.z, c, bC.z > 0.5 ? eR : bA.z);
+      if (bC.z > 0.5) col = mix(bank, col, smoothstep(0.0, 0.3, eD));
     }
     outDist = tw; wet = true;
   }

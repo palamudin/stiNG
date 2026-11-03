@@ -747,7 +747,7 @@ namespace Sting.Core
         {
             var o = new List<WaterSrc>();
             for (int i = 0; i < rec.content.baths.Count; i++) { var b = rec.content.baths[i]; o.Add(new WaterSrc { x = b.x, y = b.h, z = b.z, r = b.r, kind = "bath", i = i }); }
-            for (int j = 0; j < rec.content.ponds.Count; j++) { var q = rec.content.ponds[j]; o.Add(new WaterSrc { x = q.x, y = 0.002, z = q.z, r = q.r, kind = "pond", i = 12 + j }); } // baths from 0, ponds from 12, puddles from 32
+            for (int j = 0; j < rec.content.ponds.Count; j++) { var q = rec.content.ponds[j]; o.Add(new WaterSrc { x = q.x, y = 0.002, z = q.z, r = q.r, kind = "pond", i = 12 + j, pond = q }); } // baths from 0, ponds from 12, puddles from 32
             long d = PuddleDay(m);
             if (d >= 0) o.AddRange(PuddlesIn(rec, d));
             return o;
@@ -760,7 +760,7 @@ namespace Sting.Core
                 foreach (var s in WaterIn(rec))
                 {
                     Num dy = w.y - s.y;
-                    if (dy < -0.005 || dy > reach || Sq(w.x - s.x) + Sq(w.z - s.z) > s.r * s.r) continue;
+                    if (dy < -0.005 || dy > reach || (s.pond != null ? !World.InPond(s.pond, w.x, w.z, 0) : Sq(w.x - s.x) + Sq(w.z - s.z) > s.r * s.r)) continue; // a pond's own lobed edge
                     return (rec.key, s.i, s.kind);
                 }
             return null;

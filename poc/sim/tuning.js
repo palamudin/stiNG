@@ -5,7 +5,7 @@ import { TUNE } from './tunefile.js';
 
 export const TICK_RATE = 60;
 export const DT = 1 / TICK_RATE;
-export const GEN_VERSION = 9; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11); 6: birdbaths (T2-1); 7: town centres (T2-5); 8: ponds; 9: a pond beside the home park
+export const GEN_VERSION = 10; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11); 6: birdbaths (T2-1); 7: town centres (T2-5); 8: ponds; 9: a pond beside the home park; 10: lobed ponds with a path, benches and a walker
 
 export const T = {
   population: 8200000000,
@@ -191,7 +191,7 @@ export const T = {
   water: {
     bathShare: 0.35, bathPark: 0.5, bathR: 0.22, bathY: 0.72,
     // ponds: in some parks and woods (times the water modifier), radius in metres; the ground round one is graded level
-    pondPark: 0.35, pondForest: 0.25, pondMin: 4, pondMax: 9, pondForestMin: 3, pondForestMax: 7,
+    pondPark: 0.35, pondForest: 0.25, pondMin: 4, pondMax: 9, pondForestMin: 3, pondForestMax: 7, pondKeep: 0.5, // people keep this far from a pond's water
     puddles: 5, puddleRMin: 0.25, puddleRMax: 0.9, wetAfter: 20, dryMinutes: 360,
     fillTicks: 60, amount: 1, reach: 0.025,
     capBase: 2, capPerAdult: 0.06, coolPerDay: 6, smoothing: 0.2,

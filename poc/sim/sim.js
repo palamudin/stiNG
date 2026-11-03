@@ -8,7 +8,7 @@ import {
 } from './body.js';
 import {
   chunkOf, chunkKey, NEST, NEST_ENTRANCE, SPAWN, generateChunk, ticksPerMinute, clockMinutes, dayOf, minuteOfDay,
-  isRaining, dayWeather, tempAt, windAt, isDaylight, humanWindow, flyPos, beePos, birdPos, dragonPos, shedSites, shedRoof, groundAt, makeNest,
+  isRaining, dayWeather, tempAt, windAt, isDaylight, humanWindow, flyPos, beePos, birdPos, dragonPos, shedSites, shedRoof, groundAt, makeNest, inPond, pondEdge,
 } from './world.js';
 import { newColony, colonyStep, destroyNest, colonyFinished, seasonPhase, reproShare, broodTotal, spOf } from './colony.js';
 
@@ -1798,7 +1798,7 @@ export class Sim {
   // from 0, ponds from 12, puddles from 32 (32 + day * 32 + k)
   waterIn(rec, m = this.minute) {
     const out = rec.content.baths.map((b, i) => ({ x: b.x, y: b.h, z: b.z, r: b.r, kind: 'bath', i }));
-    (rec.content.ponds || []).forEach((p, j) => out.push({ x: p.x, y: 0.002, z: p.z, r: p.r, kind: 'pond', i: 12 + j }));
+    (rec.content.ponds || []).forEach((p, j) => out.push({ x: p.x, y: 0.002, z: p.z, r: p.r, kind: 'pond', i: 12 + j, pond: p }));
     const d = this.puddleDay(m);
     return d < 0 ? out : out.concat(this.puddlesIn(rec, d));
   }
@@ -1808,7 +1808,7 @@ export class Sim {
     for (const rec of this.activeChunks) {
       for (const s of this.waterIn(rec)) {
         const dy = w.y - s.y;
-        if (dy < -0.005 || dy > reach || sq(w.x - s.x) + sq(w.z - s.z) > s.r * s.r) continue;
+        if (dy < -0.005 || dy > reach || (s.pond ? !inPond(s.pond, w.x, w.z) : sq(w.x - s.x) + sq(w.z - s.z) > s.r * s.r)) continue; // a pond's own lobed edge
         return { key: chunkKey(rec.cx, rec.cz), i: s.i, kind: s.kind };
       }
     }
@@ -2762,7 +2762,23 @@ export class Sim {
     if (d <= step) { hm.x = tx; hm.z = tz; return true; }
     hm.fx = dx / d; hm.fz = dz / d;
     hm.x += hm.fx * step; hm.z += hm.fz * step;
+    this._keepDry(hm, tx, tz);
     return false;
+  }
+  // People walk round a pond, not through it: a step that ends within half a metre of the water is put back on that
+  // line and a little along it, toward where they are going (the side the goal is on), so they skirt the bank
+  _keepDry(hm, tx, tz) {
+    const rec = this.records.get(chunkKey(chunkOf(hm.x), chunkOf(hm.z)));
+    if (!rec || !rec.content.ponds || !rec.content.ponds.length) return;
+    for (const p of rec.content.ponds) {
+      if (!inPond(p, hm.x, hm.z, T.water.pondKeep)) continue;
+      const dx = hm.x - p.x, dz = hm.z - p.z, d = Math.sqrt(dx * dx + dz * dz);
+      if (d < 1e-9) continue;
+      const nx = dx / d, nz = dz / d, e = pondEdge(p, datan2(dz, dx)) + T.water.pondKeep;
+      let ux = -nz, uz = nx;
+      if (ux * (tx - hm.x) + uz * (tz - hm.z) < 0) { ux = nz; uz = -nx; }
+      hm.x = p.x + nx * e + ux * 0.04; hm.z = p.z + nz * e + uz * 0.04;
+    }
   }
 
   // A wasp's top airspeed now, m/s: cruising, with burst, or in a swoop; slower carrying, as a queen or a male, in the
@@ -2814,6 +2830,7 @@ export class Sim {
       if ((hm.state === 'idle' || hm.state === 'cook' || hm.state === 'toGrill' || hm.state === 'stroll' || hm.state === 'garden') && hm.panic >= T.resolve.fleePanic) this._startFlee(hm, this.cs(hm.chunk).lastSting || null);
       if (hm.state === 'flee') {
         hm.x += hm.dirX * P.fleeSpeed * 3 * DT; hm.z += hm.dirZ * P.fleeSpeed * 3 * DT;
+        this._keepDry(hm, hm.x + hm.dirX, hm.z + hm.dirZ);
         if (--hm.fleeSteps <= 0) hm.state = 'return';
       } else if (hm.state === 'return') {
         if (hm.panic >= T.resolve.fleePanic) { this._startFlee(hm, this.cs(hm.chunk).lastSting || null); continue; }
@@ -3060,7 +3077,7 @@ export class Sim {
     const e = this.ext;
     hm.panic = Math.max(0, oldPanic * T.panic.decayPerStep);
     if (hm.state === 'flee' || hm.state === 'leave') {
-      if (hm.state === 'flee') { hm.x += hm.dirX * T.panic.fleeSpeed * 3 * DT; hm.z += hm.dirZ * T.panic.fleeSpeed * 3 * DT; if (--hm.fleeSteps <= 0) hm.state = 'leave'; }
+      if (hm.state === 'flee') { hm.x += hm.dirX * T.panic.fleeSpeed * 3 * DT; hm.z += hm.dirZ * T.panic.fleeSpeed * 3 * DT; this._keepDry(hm, hm.x + hm.dirX, hm.z + hm.dirZ); if (--hm.fleeSteps <= 0) hm.state = 'leave'; }
       else if (this._walkTo(hm, hm.home.ax, hm.home.az, T.ext.speed)) this._extGone(false);
       return;
     }

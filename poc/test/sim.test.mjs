@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, humanParts, malesAbout, chunkOf, toLocal, dirToWorld, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, groundSlope, pavingOf, pondsOf, pickTarget, assistPilot, swoopPilot, hoverPilot, hoverSetting, HOVER, ROLES, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS,
+  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, groundSlope, pavingOf, pondsOf, inPond, pickTarget, assistPilot, swoopPilot, hoverPilot, hoverSetting, HOVER, ROLES, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS,
 } from '../sim/index.js';
 import { applyTuning, parseTuning, tuningHash, tuningLeaves, TUNE } from '../sim/tunefile.js';
 
@@ -2333,7 +2333,7 @@ function seated(sim, pred) {
     for (let k = 0; k < 12; k++) { const a = k * 0.5236, g = groundAt(1234n, p.x + Math.cos(a) * p.r * 0.95, p.z + Math.sin(a) * p.r * 0.95, st); lo = Math.min(lo, g); hi = Math.max(hi, g); }
     if (hi - lo < 1e-9) flat++;
     const c = generateChunk(1234n, p.cx, p.cz, st), inside = (x, z, r) => (x - p.x) * (x - p.x) + (z - p.z) * (z - p.z) < (p.r + r) * (p.r + r);
-    if (c.ponds.length === 1 && !c.trees.some((t) => inside(t.x, t.z, t.r)) && !c.tables.some((t) => inside(t.x, t.z, 1)) && !c.flowers.some((f) => inside(f.x, f.z, 0.2))
+    if (c.ponds.length === 1 && !c.trees.some((t) => inside(t.x, t.z, t.r)) && !c.tables.some((t) => inside(t.x, t.z, 1)) && !c.flowers.some((f) => inPond(p, f.x, f.z, 0.2))
       && !c.hives.some((h) => inside(h.x, h.z, 0.5)) && !c.boxes.some((b) => inside((b.minx + b.maxx) / 2, (b.minz + b.maxz) / 2, 0.5))) clear++;
   }
   ok(ponds.length > 10 && ponds.every((p) => (p.use === 'park' || p.use === 'forest') && !(p.cx === 0 && p.cz === 0)) && flat === ponds.length && clear === ponds.length,
@@ -2344,6 +2344,13 @@ function seated(sim, pred) {
   place(s.wasp, { x: near.x + near.r * 0.5, y: 0.002 + T.wasp.radius, z: near.z });
   const at = s._waterNear(s.wasp), rec = s.records.get(chunkKey(near.cx, near.cz));
   ok(at && at.kind === 'pond' && at.i === 12 && s.waterIn(rec).some((q) => q.kind === 'pond'), `a wasp at the surface of the pond ${Math.round(Math.hypot(near.x, near.z))} m from home can drink there (${at && at.kind} ${at && at.i})`);
+  // a person sent straight across the pond walks round it, and arrives
+  const p = rec.content.ponds[0], hm = s.active.find((h) => !h.special) || s.active[0];
+  hm.x = p.x - p.r - 2; hm.z = p.z + 0.3;
+  let wet = 0, k = 0;
+  for (; k < 6000; k++) { if (s._walkTo(hm, p.x + p.r + 2, p.z + 0.3, T.panic.walkSpeed)) break; if (inPond(p, hm.x, hm.z, 0.3)) wet++; }
+  const benches = rec.content.boxes.filter((b) => b.bench).length, walker = rec.content.humans.some((h) => h.slot === 9150);
+  ok(k < 6000 && wet === 0 && benches === 4 && p.park, `a person sent straight across the pond walks round it, never in the water, and arrives (${k} steps); the park pond has two benches (${benches} boxes) and ${walker ? 'someone walking round it' : 'nobody walking round it today'}`);
 }
 
 // Tuning as data (GDD 13, T1-22): one plain-text file feeds both sims

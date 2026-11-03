@@ -2176,15 +2176,18 @@ Only the `motion` digest moved. 416 properties hold.
 
 **Checks.** JS and both C# builds agree. 422 properties hold. The digests did not move: none of this is in the sim's state.
 
-### 18.73 Ponds (6.2; generator version 9)
+### 18.73 Ponds (6.2; generator version 10)
 
 Until now the only water was birdbaths, fountains and puddles after rain. Now some parks and woods have a pond.
 - **Where.** A park has one with a chance of 0.35, a wood 0.25, both times the water modifier; never the home park. The park just west of it always has one, so there is water within reach of the first nest. A park pond is 4 to 9 m across the radius, a wood's 3 to 7 m.
+- **Shape.** No pond is a circle: its edge is lobed, between 0.72 and 1 times its radius, from two phases kept with it (`pondEdge`, the sim's own trig, so both builds agree). Drinking, keeping clear and drawing all use the lobed edge.
+- **Built round, in a park.** A park pond is a feature people made: a gravel path 1.2 to 2.2 m out from the water, trodden earth at its edges; two benches beside the path facing the water (solid, and wood); and on most days someone walking round it on the path. A pond in a wood is left wild.
+- **People keep dry.** Anyone walking or fleeing whose step would end within half a metre of the water is put back on that line and a little along it, toward where they are going, so they skirt the bank instead of wading through.
 - **Clear of what is fixed.** It keeps clear of a park's picnic table, of the walk round the park and of a wood's path. It tries six spots and takes the first that fits. It is placed before anything else in the chunk, so trees, hives, sheds, people and groups keep out of it, and flowers that would fall in are not planted.
 - **The ground.** It is graded level under the pond and over a 3 m shoulder round it, at the broad shape's height at its middle (pad kind 4). Its water is at the ground.
 - **A water source.** Wasps drink at its surface like at a bath. Water sources are numbered baths from 0, ponds from 12, puddles from 32; puddles used to share numbers with baths on day 0.
-- **Drawn.** In World v2 as a body of water with ripples, refraction and caustics, over a muddy bed with lush grass on its shore; in the classic look as a water disc with a mud margin. The map shows every pond in view, found or not: water is a landmark.
-- **Checks.** Over 441 chunks with seed 1234: 20 ponds, all in parks and woods, none in the home park, every one level, nothing standing in any; a wasp at the surface of the nearest drinks there. JS and both C# builds agree; the generator version is 9, so older saves are refused.
+- **Drawn.** In World v2 as a body of water with ripples, refraction and caustics, its last 30 cm shallow enough to show the bank, over a muddy bed with lush grass on its shore (ripples sized for a pond, caustics held to the shallows and faded with distance, so the surface reads as water, not glitter); in the classic look as a water disc with a mud margin. The map shows every pond in view, found or not: water is a landmark.
+- **Checks.** Over 441 chunks with seed 1234: 20 ponds, all in parks and woods, none in the home park, every one level, nothing standing in any; a wasp at the surface of the nearest drinks there. A person sent straight across the home pond walks round it, never in the water, and arrives; the park pond has its two benches. JS and both C# builds agree; the generator version is 10, so older saves are refused.
 
 ### 18.74 Surfaces drawn on request, and work kept in tables
 
@@ -2196,6 +2199,8 @@ Until now the only water was birdbaths, fountains and puddles after rain. Now so
 - **Paving.** Asphalt with grain and mended patches, sidewalks of 1.5 m slabs, a town square of 40 cm pavers.
 - **Cost.** A house was a dozen window meshes; it is now one box. Patterns fade to their average once smaller than a pixel.
 - **Z-fighting.** A shop's collision box was also drawn as a plain box exactly over its walls, and the two fought; at night the lit windows flickered through it. It is no longer drawn. A building's own values (its height and footprint) reach the shader unblended, so a window's colour cannot speckle.
+
+**Also fixed.** A sunbather who got up walked on lying flat (the lying turn was kept on two axes). A run of fence on a hilly world floated over dips: a long box is now cut every metre along its length, so each cut follows the ground.
 
 **Tables instead of repeated work.** Work that answers the same question again and again is done once and kept:
 - **The generator.** A chunk's land use, its region's layout, its ground roll, its pond, its paving and its graded pads are kept per world, by number. They are pure functions of the seed, so a table only saves time. World v2's ground source keeps its own lookups by number, not by string. Filling World v2's ground for a new world went from 4.1 s to 2.1 s, and the strips filled while flying from 590 to 370 ms per 256,000 samples.

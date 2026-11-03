@@ -491,6 +491,7 @@ pondMin = 4
 pondMax = 9
 pondForestMin = 3
 pondForestMax = 7
+pondKeep = 0.5
 puddles = 5
 puddleRMin = 0.25
 puddleRMax = 0.9

@@ -308,6 +308,17 @@ function padsOf(seed, cx, cz, settings) {
 // fixed places (a park's picnic table and its walk round the park, a wood's path), tries a few spots and takes the
 // first that fits, so the same seed gives the same pond with or without the rest of the chunk generated. The ground
 // under it and a shoulder round it are graded level (padsOf); its water is at the ground. A pure function.
+// A pond's edge at bearing a: lobed, between 0.72 and 1 times its radius, so no pond is a circle. The sim's own trig,
+// so both builds agree. inPond: is (x, z) in the water, or within m of it
+export function pondEdge(p, a) { return p.r * (0.86 + 0.08 * dsin(2 * a + p.a) + 0.06 * dsin(3 * a + p.b)); }
+export function inPond(p, x, z, m = 0) {
+  const dx = x - p.x, dz = z - p.z, d2 = dx * dx + dz * dz;
+  if (d2 >= (p.r + m) * (p.r + m)) return false;
+  const e = pondEdge(p, datan2(dz, dx)) + m;
+  return d2 < e * e;
+}
+// A park pond is built round: a path 1.2 to 2.2 m out from the water, two benches facing it, someone walking round it
+export const POND_PATH = { in: 1.2, out: 2.2, bench: 2.9 };
 export function pondsOf(seed, cx, cz, settings) {
   const m = worldTables(seed, settings).ponds, k = cellKey(cx, cz), v = m.get(k);
   return v !== undefined ? v : keep(m, k, makePonds(seed, cx, cz, settings));
@@ -320,19 +331,20 @@ function makePonds(seed, cx, cz, settings) {
   const park = use === 'park';
   const home = cx === -1 && cz === 0 && park; // the park beside the home park always has one: water within reach of the nest
   if (!home && unit(H(9100)) >= (park ? W.pondPark : W.pondForest) * F.water) return [];
-  const r = park ? range(H(9101), W.pondMin, W.pondMax) : range(H(9101), W.pondForestMin, W.pondForestMax), m = 28 - r;
+  const r = home ? range(H(9101), W.pondMin, W.pondMin + 2) : park ? range(H(9101), W.pondMin, W.pondMax) : range(H(9101), W.pondForestMin, W.pondForestMax), ring = park ? POND_PATH.bench + 0.6 : 0, m = 28 - r - ring;
+  const a = range(H(9120), 0, 6.28), b = range(H(9121), 0, 6.28);
   const picnic = park && unit(H(1)) < 0.6 ? { x: ox + range(H(2), -20, 20), z: oz + range(H(3), -20, 20) } : null;
   const walk = park && unit(H(6000)) < 0.6 ? range(H(6001), 12, 22) : 0; // a square walk at this distance from the middle
   const path = !park && unit(H(6300)) < 0.3; // a straight path from corner to corner
-  for (let k = 0; k < 6; k++) {
+  for (let k = 0; k < (home ? 36 : 10); k++) { // a few spots tried; the home pond tries harder, at last across the walk (people walk round it)
     const x = ox + range(H(9102 + 2 * k), -m, m), z = oz + range(H(9103 + 2 * k), -m, m);
-    if (picnic && (x - picnic.x) * (x - picnic.x) + (z - picnic.z) * (z - picnic.z) < (r + 6) * (r + 6)) continue;
-    if (walk) { const c = Math.max(Math.abs(x - ox), Math.abs(z - oz)); if (c - r * 1.42 < walk + 2 && c + r * 1.42 > walk - 2) continue; }
+    if (picnic && (x - picnic.x) * (x - picnic.x) + (z - picnic.z) * (z - picnic.z) < (r + ring + 6) * (r + ring + 6)) continue;
+    if (walk && !(home && k >= 12)) { const c = Math.max(Math.abs(x - ox), Math.abs(z - oz)), e = r + ring; if (c - e < walk + 2 && c + e > walk - 2) continue; } // a disc's farthest reach in the square's measure is its middle's plus its radius
     if (path) { // the distance to the path from (ox-26, oz-20) to (ox+26, oz+20)
       const ax = x - (ox - 26), az = z - (oz - 20), t = Math.max(0, Math.min(1, (ax * 52 + az * 40) / (52 * 52 + 40 * 40))), dx = ax - 52 * t, dz = az - 40 * t;
       if (dx * dx + dz * dz < (r + 2) * (r + 2)) continue;
     }
-    return [{ x, z, r }];
+    return [{ x, z, r, a, b, park }];
   }
   return [];
 }
@@ -473,7 +485,7 @@ export function generateChunk(seed, cx, cz, settings) {
     plazas: [], shops: [], gardens: [], // T2-5: a town centre's paving, its shop buildings, its beer garden
     ponds: pondsOf(seed, cx, cz, settings), // ponds: { x, z, r }, the water at the ground
   };
-  const occupied = c.ponds.map((p) => ({ x: p.x, z: p.z, r: p.r + 1 })); // nothing stands in a pond
+  const occupied = c.ponds.map((p) => ({ x: p.x, z: p.z, r: p.r + (p.park ? POND_PATH.out + 0.3 : 1) })); // nothing stands in a pond or on its path
   const isOrigin = cx === 0 && cz === 0;
   const free = (x, z, r) => occupied.every((o) => { const dx = x - o.x, dz = z - o.z; return dx * dx + dz * dz > (r + o.r) * (r + o.r); });
   const addFly = (x, y, z, slot) => {
@@ -543,7 +555,7 @@ export function generateChunk(seed, cx, cz, settings) {
     for (let i = 0; i < n; i++) {
       const x = px + range(H(slot + 10 + i), -1.2, 1.2), z = pz + range(H(slot + 30 + i), -1.2, 1.2);
       const y = range(H(slot + 50 + i), 0.2, 0.55);
-      if (c.ponds.some((p) => (x - p.x) * (x - p.x) + (z - p.z) * (z - p.z) < (p.r + 0.3) * (p.r + 0.3))) continue; // not in a pond
+      if (c.ponds.some((p) => inPond(p, x, z, 0.3))) continue; // not in a pond
       c.flowers.push({ x, y, z, color });
       c.sugar.push({ x, y: y + 0.02, z, rate: 0.35, kind: 'flower' });
       if (unit(H(slot + 70 + i)) < T.prey.caterpillarChance) c.caterpillars.push({ x: x + 0.006, y: y * 0.6, z });
@@ -679,6 +691,23 @@ export function generateChunk(seed, cx, cz, settings) {
     if (unit(H(7600)) < 0.7) { const a = { x: ox + ix * 2, z: oz + iz * 26 }, b = { x: ox + ix * 26, z: oz + iz * 2 }; addActor(7610, a.x, a.z, 0, -iz, 'stand', 'stroll', [a.x, a.z, b.x, b.z]); }
   };
 
+  // a park pond's surroundings: two benches beside its path facing the water, and now and then someone walking round it
+  for (const p of c.ponds) if (p.park) {
+    const a0 = range(H(9130), 0, 6.28);
+    for (let k = 0; k < 2; k++) {
+      const a = a0 + k * 3.1416 + range(H(9131 + k), -0.6, 0.6), e = pondEdge(p, a) + POND_PATH.bench, ca = dcos(a), sa = dsin(a);
+      const x = p.x + e * ca, z = p.z + e * sa, alongX = Math.abs(sa) > Math.abs(ca); // the bench runs across the line to the water
+      const hw = alongX ? 0.8 : 0.2, hd = alongX ? 0.2 : 0.8, bx = alongX ? 0 : (ca > 0 ? 0.2 : -0.2), bz = alongX ? (sa > 0 ? 0.2 : -0.2) : 0;
+      c.boxes.push({ minx: x - hw, maxx: x + hw, miny: 0.4, maxy: 0.46, minz: z - hd, maxz: z + hd, wood: true, bench: true }); // the seat
+      c.boxes.push({ minx: x + bx - (alongX ? hw : 0.03), maxx: x + bx + (alongX ? hw : 0.03), miny: 0.46, maxy: 0.9, minz: z + bz - (alongX ? 0.03 : hd), maxz: z + bz + (alongX ? 0.03 : hd), wood: true, bench: true }); // its back, away from the water
+      occupied.push({ x, z, r: 1.2 });
+    }
+    if (unit(H(9140)) < 0.7) {
+      const path = [];
+      for (let k = 0; k < 12; k++) { const a = k * TAU / 12, e = pondEdge(p, a) + (POND_PATH.in + POND_PATH.out) / 2; path.push(p.x + e * dcos(a), p.z + e * dsin(a)); }
+      addActor(9150, path[0], path[1], 0, 1, 'stand', 'stroll', path);
+    }
+  }
   if (isOrigin) {
     addTree(NEST.treeX, NEST.treeZ, 100);
     occupied.push({ x: NEST.treeX, z: NEST.treeZ, r: 3 });

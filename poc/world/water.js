@@ -45,7 +45,10 @@ uniform vec4 uWL; // tile sizes of the cascades
 ${cs.map((c) => `uniform sampler2D tWD${c}, tWS${c};`).join(' ')}
 uniform vec4 uBody[${B}];  // centre x, z, radius, water level at the centre
 uniform vec4 uBodyB[${B}]; // ground gradient x, z, floor depth (0: the floor is drawn), kind (0 none, 1 bowl, 2 flat)
+uniform vec4 uBodyC[${B}]; // a pond's lobes: phases a, b, and 1 when it has them (sources/sting.js pondEdge)
 uniform int uBodies;
+// a body's edge at a point's bearing: lobed for a pond, its radius otherwise
+float wBodyR(vec4 b, vec4 l, vec2 d) { if (l.z < 0.5) return b.z; float a = atan(d.y, d.x); return b.z * (0.86 + 0.08 * sin(2.0 * a + l.x) + 0.06 * sin(3.0 * a + l.y)); }
 const float W_N = ${f(WATER.n)};
 const vec3 W_ABS = vec3(${WATER.absorb.map(f).join(', ')});
 const vec3 W_SCA = vec3(${WATER.scatter.map(f).join(', ')});
@@ -197,8 +200,10 @@ vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, floa
     vec3 r0 = refract(L0, normalize(vec3(-s0.x, 1.0, -s0.y)), 1.0 / W_N), rx = refract(L0, normalize(vec3(-s0.x - de, 1.0, -s0.y)), 1.0 / W_N), rz = refract(L0, normalize(vec3(-s0.x, 1.0, -s0.y - de)), 1.0 / W_N);
     vec2 o0 = r0.xz / -r0.y, ox = rx.xz / -rx.y, oz = rz.xz / -rz.y;
     mat2 M = mat2((ox - o0) / de, (oz - o0) / de);
-    mat2 J = mat2(1.0) + D * M * H;
-    cz = clamp(1.0 / max(abs(determinant(J)), 0.12), 0.0, 8.0);
+    // held to the first 12 cm of depth and to 2.5x: past that the focus is finer than a pixel and reads as glitter; and
+    // faded with distance, where a pixel spans many ripples and sees only their average
+    mat2 J = mat2(1.0) + min(D, 0.12) * M * H;
+    cz = mix(1.0, clamp(1.0 / max(abs(determinant(J)), 0.35), 0.0, 2.5), exp(-tw * 0.2));
   }
   vec3 under = wUnder(floorCol, D, L, cz);
   // ---- reflection: the scene where SSR finds it, else the sky

@@ -11,7 +11,7 @@
 // Where people are comes from the chunk itself: picnic tables and their seats, the spots where people stand about,
 // door steps, flower beds (bare earth round each plant), the foot of every trunk, and hives. Each land use also has a
 // little wear of its own (a park is walked all over, a yard much less, a wood not at all).
-import { groundAt, landUse, pavingOf, pondsOf, chunkOf, chunkKey, generateChunk, T, hash, Domain } from '../../sim/index.js';
+import { groundAt, landUse, pavingOf, pondsOf, pondEdge, POND_PATH, chunkOf, chunkKey, generateChunk, T, hash, Domain } from '../../sim/index.js';
 
 const MOIST = { park: 0.62, yards: 0.72, forest: 0.8, mall: 0.3, town: 0.42 };
 const FOREST = { park: 0.12, yards: 0.08, forest: 1, mall: 0, town: 0 };
@@ -116,18 +116,28 @@ export function stingSource(sim) {
   const SHORE = 1.5, BED = 1.15;
   function pondWet(x, z, m) {
     for (const p of pondsNear(chunkOf(x), chunkOf(z))) {
-      const d = Math.sqrt((x - p.x) * (x - p.x) + (z - p.z) * (z - p.z)) - p.r;
+      const d = Math.sqrt((x - p.x) * (x - p.x) + (z - p.z) * (z - p.z)) - pondEdge(p, Math.atan2(z - p.z, x - p.x)); // to the lobed edge
       if (d < 0) return BED;
       if (d < SHORE) { const t = d / SHORE, s = t * t * (3 - 2 * t); m = 1 + (m - 1) * s; }
     }
     return m;
+  }
+  // a park pond's path: a gravel ring round the water (POND_PATH), drawn like a walk
+  function pondPath(x, z) {
+    for (const p of pondsNear(chunkOf(x), chunkOf(z))) {
+      if (!p.park) continue;
+      const d = Math.sqrt((x - p.x) * (x - p.x) + (z - p.z) * (z - p.z)) - pondEdge(p, Math.atan2(z - p.z, x - p.x));
+      if (d > POND_PATH.in - 0.35 && d < POND_PATH.out + 0.35) // gravel in the middle, trodden earth at its edges (below 0.3: wear)
+        return 0.5 * Math.min(1, (d - POND_PATH.in + 0.35) / 0.5, (POND_PATH.out + 0.35 - d) / 0.5);
+    }
+    return 0;
   }
   function sample(x, z, out = [0, 0, 0, 0], cell = 0) {
     const fine = cell <= 1;
     out[0] = groundAt(seed, x, z, settings);
     out[1] = pondWet(x, z, landBlend(x, z, MOIST));
     out[2] = fine ? shade(x, z) : landBlend(x, z, FOREST);
-    const pv = paving(x, z);
+    const pv = paving(x, z) || (fine ? pondPath(x, z) : 0);
     out[3] = pv > 0 ? pv : WEAR_FULL * (fine ? wear(x, z) : landBlend(x, z, WEAR));
     return out;
   }
@@ -145,7 +155,7 @@ export function stingSource(sim) {
   // top: the water's height above the ground; depth and kind: the basin under it (1 a bowl, 2 flat, 3 the ground)
   function waters(cx, cz) {
     const c = objects(cx, cz), out = [];
-    for (const p of c.ponds || []) out.push({ x: p.x, z: p.z, r: p.r, top: 0.002, depth: Math.min(1.2, 0.25 + 0.1 * p.r), kind: 1 }); // a bowl in the ground
+    for (const p of c.ponds || []) out.push({ x: p.x, z: p.z, r: p.r, top: 0.002, depth: Math.min(1.2, 0.25 + 0.1 * p.r), kind: 1, lobes: [p.a, p.b] }); // a bowl in the ground, lobed as the sim's
     for (const b of c.baths || []) out.push(b.fountain ? { x: b.x, z: b.z, r: b.r, top: b.h + 0.002, depth: 0.35, kind: 2 } : { x: b.x, z: b.z, r: b.r, top: b.h + 0.002, depth: 0.04, kind: 1 });
     const rec = sim.records && sim.records.get(chunkKey(cx, cz));
     if (rec && typeof sim.puddleDay === 'function') {
@@ -162,7 +172,7 @@ export function stingSource(sim) {
     params: { seed: Number(seed & 0xffffn), settings },
     cosmetic,
     sea: -1e6,                   // no open water in the sim's world: its water is the bodies below
-    water: { fetch: 6, cascades: [2.4, 0.3] }, // ripples on ponds (a breeze over a few metres of water); a birdbath barely stirs
+    water: { fetch: 6, cascades: [3, 0.9] }, // ripples on ponds (a breeze over a few metres of water); a birdbath barely stirs
     waters,
     sample,
     height: (x, z) => groundAt(seed, x, z, settings),

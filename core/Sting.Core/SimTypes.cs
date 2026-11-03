@@ -183,7 +183,7 @@ namespace Sting.Core
     }
 
     /// a water source (T2-1): a birdbath, or a puddle after rain
-    public sealed class WaterSrc { public Num x, y, z, r; public string kind; public int i; }
+    public sealed class WaterSrc { public Num x, y, z, r; public string kind; public int i; public Pond pond; }
     public sealed class ChunkRec
     {
         public int cx, cz, genVersion, discoveredTick; public uint contentHash; public ChunkContent content;

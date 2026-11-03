@@ -126,6 +126,7 @@ export class World {
       }
       U.uBody.value[k].set(b.x, b.z, b.r, pl.h + b.top);
       U.uBodyB.value[k].set(pl.gx, pl.gz, b.depth, b.kind);
+      U.uBodyC.value[k].set(b.lobes ? b.lobes[0] : 0, b.lobes ? b.lobes[1] : 0, b.lobes ? 1 : 0, 0);
     }
     U.uBodies.value = n;
   }

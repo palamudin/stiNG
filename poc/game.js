@@ -5,7 +5,7 @@ import {
   Sim, Act, T, DT, ZONES, ZoneName, SwatKind, SwatKindName, StyleName, TopName, BottomName, Top, Bottom,
   toWorld, toLocal, dirToWorld, chunkKey, chunkOf, hash, Domain, rangeInt, resolveSting, zoneCover, segClosest, classify, predictedKind,
   NEST, NEST_ENTRANCE, flyPos, beePos, fmtClock, minuteOfDay, isLowerZone, broodTotal, sugarCap, proteinCap, waterCap, garmentGraph, dayWeather,
-  NetLab, LINKS, pondsOf, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetVel, CHASE, targetLabel, assistPilot, swoopPilot, hoverPilot, hoverSetting, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE, SKILLS, SKILL_UNLOCKS, SKILL_RANKED, SKILL_HIVE, skillCost, ROLES,
+  NetLab, LINKS, pondsOf, pondEdge, POND_PATH, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetVel, CHASE, targetLabel, assistPilot, swoopPilot, hoverPilot, hoverSetting, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE, SKILLS, SKILL_UNLOCKS, SKILL_RANKED, SKILL_HIVE, skillCost, ROLES,
 } from './sim/index.js';
 import { Rings, RING, ringGrid, ringGLSL } from './view/rings.js';
 // World v2 (GDD 20.4): the ground, forests, grass, sky and post chain of world/, drawing the sim's own world. Chosen on
@@ -348,6 +348,14 @@ let camDist = 0.1, eyeBlend = 0;
 const geoTrunk = new THREE.CylinderGeometry(0.8, 1, 1, 9);
 const geoBlob = new THREE.IcosahedronGeometry(1, 1);
 const geoBox = new THREE.BoxGeometry(1, 1, 1);
+// a unit box cut into n segments along x or z, kept per (axis, n)
+const segBoxes = new Map();
+function segBox(alongX, n) {
+  const k = (alongX ? 'x' : 'z') + n;
+  let g = segBoxes.get(k);
+  if (!g) { g = alongX ? new THREE.BoxGeometry(1, 1, 1, n, 1, 1) : new THREE.BoxGeometry(1, 1, 1, 1, 1, n); segBoxes.set(k, g); }
+  return g;
+}
 
 // ------------------------------------------------------------------ surfaces drawn on request (no textures, no meshes)
 // Walls, roofs and paving are shaded from their own world coordinates in the fragment shader: siding, planks, plaster
@@ -488,10 +496,20 @@ function buildChunk(rec) {
   const dyn = { lids: [], traps: [], candles: [], cans: [], puddles: [], crowns: [], grills: [], wood: [], rain: [], rainDay: -2 };
   // birdbaths (T2-1): a stone basin on a pedestal, water to the brim
   // a pond (GEN_VERSION 8): its water at the ground, a muddy margin round it (World v2 draws both itself)
+  // lobed as the sim's (pondEdge); a park pond's gravel path round it
+  const pondShape = (p, off, hole) => { // the outline off metres out from the water's edge (the shape lies in x, -z before turning flat)
+    const sh = new THREE.Shape(), n = 72;
+    for (let k = 0; k <= n; k++) { const a = k / n * Math.PI * 2, e = pondEdge(p, a) + off, x = Math.cos(a) * e, y = -Math.sin(a) * e; if (k) sh.lineTo(x, y); else sh.moveTo(x, y); }
+    if (hole !== undefined) { const h = new THREE.Path(); for (let k = 0; k <= n; k++) { const a = k / n * Math.PI * 2, e = pondEdge(p, a) + hole, x = Math.cos(a) * e, y = -Math.sin(a) * e; if (k) h.lineTo(x, y); else h.moveTo(x, y); } sh.holes.push(h); }
+    return new THREE.ShapeGeometry(sh);
+  };
+  const flatAt = (geo, material, p, y) => { const m = new THREE.Mesh(geo, material); m.rotation.x = -Math.PI / 2; m.position.set(p.x, y, p.z); m.receiveShadow = true; g.add(m); return m; };
   for (const p of c.ponds || []) {
-    const water = new THREE.Mesh(new THREE.CircleGeometry(p.r, 56), WATER_MAT); water.rotation.x = -Math.PI / 2; water.position.set(p.x, 0.004, p.z);
-    g.add(water);
-    if (!W2on) { const mud = new THREE.Mesh(new THREE.RingGeometry(p.r - 0.05, p.r + 0.7, 56, 1), mat('#5d4c37', ONGROUND)); mud.rotation.x = -Math.PI / 2; mud.position.set(p.x, 0.003, p.z); mud.receiveShadow = true; g.add(mud); }
+    flatAt(pondShape(p, 0), WATER_MAT, p, 0.004);
+    if (!W2on) {
+      flatAt(pondShape(p, 0.7, -0.05), mat('#5d4c37', ONGROUND), p, 0.003); // the muddy bank
+      if (p.park) flatAt(pondShape(p, POND_PATH.out, POND_PATH.in), mat('#b8a988', ONGROUND), p, 0.003); // the gravel path
+    }
   }
   for (const b of c.baths || []) {
     if (b.fountain) { // a town fountain (T2-5): a low stone basin, a jet in the middle
@@ -602,7 +620,8 @@ function buildChunk(rec) {
   c.boxes.forEach((b, bi) => {
     if (b.hive || b.shed || b.mall || b.shop) return; // drawn with their own shapes (a shop's box drawn again over its walls fought them)
     // fences in cedar; each wooden box keeps its own material so it can pale as wasps strip its pulp (T1-12)
-    const m = new THREE.Mesh(geoBox, b.wood ? mat(b.fence ? '#b98a55' : '#8a6440') : wood);
+    // a long box (a run of fence) is cut every metre along its length, so on a hilly world each cut follows the ground
+    const len = Math.max(b.maxx - b.minx, b.maxz - b.minz), m = new THREE.Mesh(len > 1.5 ? segBox(b.maxx - b.minx > b.maxz - b.minz, Math.ceil(len)) : geoBox, b.wood ? mat(b.fence ? '#b98a55' : '#8a6440') : wood);
     m.scale.set(b.maxx - b.minx, b.maxy - b.miny, b.maxz - b.minz);
     m.position.set((b.minx + b.maxx) / 2, (b.miny + b.maxy) / 2, (b.minz + b.maxz) / 2);
     m.castShadow = m.receiveShadow = true;
@@ -1391,7 +1410,7 @@ function poseHuman(view, t, dt) {
   if (view.meshes.Veil) { view.meshes.Veil.position.copy(head); view.meshes.Brim.position.copy(head).add(new THREE.Vector3(0, r * 0.75, 0)); }
   const jolt = view.flinch > 0 ? Math.sin(view.flinch * 40) * 0.015 * view.flinch : 0;
   group.position.set(view.x + view.lean.x, jolt + view.bob, view.z + view.lean.z);
-  group.rotation.y = view.ang + (hm.state === 'watch' ? Math.sin(t * 0.03 + hm.lines) * 0.9 : 0); // scanning for flight lines (T1-7)
+  group.rotation.set(0, view.ang + (hm.state === 'watch' ? Math.sin(t * 0.03 + hm.lines) * 0.9 : 0), 0); // scanning for flight lines (T1-7); all three axes, or a sunbather who got up walked on lying flat
   if (hm.posture === 'lie') { // on a towel (T1-11): the standing body turned onto its back, head toward the facing
     group.quaternion.setFromAxisAngle(UP, view.ang).multiply(LIE_Q);
     group.position.y += T.days.lieLift;
@@ -2667,7 +2686,7 @@ function mapTile(rec, cell, detail, dpr) {
   for (const r of c.roads || []) { const [x0, y0] = L(r.maxx, r.maxz), [x1, y1] = L(r.minx, r.minz); g.fillRect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.max(2 * dpr, Math.abs(y1 - y0))); }
   for (const l of c.loops || []) { const [x, y] = L(l.x, l.z); g.beginPath(); g.arc(x, y, l.r * sc, 0, Math.PI * 2); g.fill(); }
   g.fillStyle = 'rgba(79,140,190,.9)';
-  for (const p of c.ponds || []) { const [x, y] = L(p.x, p.z); g.beginPath(); g.arc(x, y, Math.max(1.5 * dpr, p.r * sc), 0, Math.PI * 2); g.fill(); }
+  for (const p of c.ponds || []) { g.beginPath(); for (let k = 0; k <= 24; k++) { const a = k / 24 * Math.PI * 2, e = Math.max(1.5 * dpr / sc, pondEdge(p, a)), [x, y] = L(p.x + Math.cos(a) * e, p.z + Math.sin(a) * e); if (k) g.lineTo(x, y); else g.moveTo(x, y); } g.fill(); }
   g.fillStyle = 'rgba(214,206,190,.55)';
   for (const sh of c.sheds || []) if (sh.house) { const [x, y] = L(sh.x, sh.z); g.fillRect(x - sh.hw * sc, y - sh.hd * sc, sh.hw * 2 * sc, sh.hd * 2 * sc); }
   for (const m of c.malls || []) { const [x, y] = L(m.x, m.z); g.fillRect(x - m.hw * sc, y - m.hd * sc, m.hw * 2 * sc, m.hd * 2 * sc); }
