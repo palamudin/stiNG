@@ -2192,6 +2192,36 @@ function seated(sim, pred) {
   ok(s.wasp.state === 'fly' && lo > 0.2 && hi < 0.55, `H on a person strolling at ${Math.hypot(hm.vx, hm.vz).toFixed(2)} m/s: the wasp keeps pace, ${lo.toFixed(2)} to ${hi.toFixed(2)} m off them`);
 }
 
+// 56. AI raids (GDD 9.3): a protein forager setting out now and then goes instead for a larva from an enemy nest near
+// home, hornets most and bees never, and the rivals' guards go after it; a rival forager raids the player's wasp nest
+{
+  const mk = (sp) => new Sim({ seed: 1234, birds: false, species: sp });
+  const park = (sim) => { if (sim.wasp) place(sim.wasp, { x: sim.nest.entrance.x + 2, y: 1.5, z: sim.nest.entrance.z }); return idle(); };
+  const s = mk('hornet'), e = s.nest.entrance, rt = s._raidTarget(e), rv = rt && s.records.get(rt.key).content.rival, off = mk('hornet');
+  off.settings.rivals = false;
+  ok(rt && rt.kind === 'rnest' && Math.hypot(rv.ex - e.x, rv.ez - e.z) < T.rival.raidRange && !off._raidTarget(off.nest.entrance) && T.species.hornet.raid > T.species.wasp.raid && T.species.bee.raid === 0,
+    `a forager knows the rival nest ${rv ? Math.hypot(rv.ex - e.x, rv.ez - e.z).toFixed(0) : '?'} m from home (none with rivals off); hornets raid most (${T.species.hornet.raid} of trips against ${T.species.wasp.raid}), bees never`);
+  const keep = T.species.hornet.raid; T.species.hornet.raid = 1;
+  const s2 = mk('hornet'); let goes = null; for (let i = 0; i < 3600 && !goes; i += 30) { run(s2, 30, park); goes = s2.wasps.find((x) => x.colony === 'own' && x.ai.target && x.ai.target.kind === 'rnest'); }
+  T.species.hornet.raid = keep;
+  ok(goes && goes.role === 'protein' && goes.ai.target.key === rt.key, `a protein forager setting out picks the raid (worker ${goes ? goes.id : '?'}, ${goes ? goes.ai.mode : ''})`);
+  run(s, 1200, park);
+  const w = s._spawnWasp(false); w.role = 'protein'; w.ai.mode = 'outbound'; w.ai.target = { ...rt }; place(w, { x: rv.ex + 0.5, y: rv.ey, z: rv.ez });
+  let raid = null; for (let i = 0; i < 600 && !raid; i++) raid = run(s, 1, park).find((x) => x.type === 'raid' && x.id === w.id);
+  const hunted = s.wasps.filter((x) => s.isRival(x) && x.ai.mode === 'hunt' && x.ai.huntId === w.id).length;
+  ok(raid && !raid.driven && w.carry && w.carry.what === 'larva' && w.ai.mode === 'return' && hunted >= 1,
+    `the AI hornet flies in at the rival entrance, takes a larva and heads home with ${hunted} rival guard(s) after it`);
+  let home = null, died = null; for (let i = 0; i < 60 * 60 * 3 && !home && !died; i += 30) { const ev = run(s, 30, park); home = ev.find((x) => x.type === 'deposit' && x.id === w.id); died = ev.find((x) => x.type === 'waspDied' && x.id === w.id); }
+  ok(home && home.kind === 'protein', `it brings the larva home as protein (${home ? home.amount.toFixed(1) : died ? 'died: ' + died.cause : 'not home'})`);
+  const s3 = mk('wasp'); run(s3, 2400, park);
+  const rk = s3.activeChunks.find((r) => r.content.rival), rw = s3._spawnWasp(false), e3 = s3.nest.entrance, l0 = s3.colony.larvae;
+  rw.colony = chunkKey(rk.cx, rk.cz); rw.role = 'protein'; rw.ai.mode = 'outbound'; rw.ai.target = { kind: 'phive', key: s3.nest.key, i: 0, c: 999 }; place(rw, { x: e3.x + 0.4, y: e3.y, z: e3.z });
+  let nr = null; for (let i = 0; i < 600 && !nr; i++) nr = run(s3, 1, park).find((x) => x.type === 'nestRaided');
+  const guards = s3.wasps.filter((x) => x.colony === 'own' && x.ai.mode === 'hunt' && x.ai.huntId === rw.id).length;
+  ok(nr && rw.carry && rw.carry.what === 'larva' && Math.abs(s3.colony.larvae - (l0 - 1)) < 0.05 && guards >= 1,
+    `a rival forager raids the player's wasp nest for a larva (${l0.toFixed(1)} -> ${s3.colony.larvae.toFixed(1)}); ${guards} guard(s) go after it`);
+}
+
 // Tuning as data (GDD 13, T1-22): one plain-text file feeds both sims
 {
   const { unknown, missing } = TUNE_RESULT;

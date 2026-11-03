@@ -1305,7 +1305,7 @@ namespace Sting.Core
             // a forager home with food remembers where it was (site fidelity), and its load carries the scent of the
             // source to nestmates leaving soon after (GDD 7.3, T1-16)
             var from = w.ai.from;
-            if (deposited && from != null && w.role != null && from.kind != "wood" && from.kind != "bait")
+            if (deposited && from != null && w.role != null && from.kind != "wood" && from.kind != "bait" && from.kind != "rnest" && from.kind != "pnest")
             {
                 w.ai.known = new Known { role = w.role, t = from };
                 homeScent = new Known { role = w.role, t = from, until = tick + T.sense.homeScentTicks };

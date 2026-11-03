@@ -288,6 +288,14 @@ namespace Sting.Core.Tests
                 for (int i = 0; i < 10; i++) lab.Step(Idle(), Idle());
                 B.plaus.strikes.TryGetValue(0, out int strikes2);
                 Okn(strikes2 == strikes + 1 && B.colony.larvae == Max(0, larvae - 1), "a raid claimed from 3 m off the nest is rejected and takes nothing");
+                // A's AI workers know B's nest too, and one now and then raids it on its own (GDD 9.3)
+                var rt = A.RaidTarget(A.nest.entrance); var aw = A.SpawnWasp(false); Num l1 = B.colony.larvae;
+                aw.role = "protein"; aw.ai.mode = "outbound"; aw.ai.target = rt?.Copy(); aw.x = e.x + 0.4; aw.y = e.y; aw.z = e.z; aw.vx = aw.vy = aw.vz = 0;
+                SimEvent byAI = null;
+                for (int i = 0; i < 600 && byAI == null; i++) { lab.Step(Idle(), Idle()); byAI = lab.bEvents.FirstOrDefault(x => x.type == "raided" && (int)x["waspId"] == aw.id); }
+                B.plaus.strikes.TryGetValue(0, out int strikes3);
+                Okn(rt != null && rt.kind == "pnest" && rt.i == 1 && byAI != null && aw.carry != null && aw.carry.what == "larva" && D(Abs(B.colony.larvae - (l1 - 1))) < 0.05 && A.netStats.rejected == 0 && B.netStats.rejected == 0 && strikes3 == strikes + 1,
+                    $"an AI worker of A's raids B's nest by itself: B loses a larva ({D(l1):0.0} -> {D(B.colony.larvae):0.0}) and its guards go after it");
             }
         }
     }

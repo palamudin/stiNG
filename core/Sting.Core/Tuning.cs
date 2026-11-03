@@ -8,7 +8,7 @@ namespace Sting.Core
     /// A species' row (GDD 6.8): multipliers over the wasp's values and 0/1 flags for what differs in kind; see tuning.js
     public sealed class SpeciesRow
     {
-        public Num size, swatR, speed, drain, felt, pain, annoy, fight, start, lay, store, sugarIn, proteinIn, @out;
+        public Num size, swatR, speed, drain, felt, pain, annoy, fight, raid, start, lay, store, sugarIn, proteinIn, @out;
         public int night, barbed, hunts, pollen, wood, guards, perennial;
     }
 
@@ -234,11 +234,11 @@ namespace Sting.Core
         /// Species (GDD 6.8, T2-9 to T2-11): see tuning.js
         public static class species
         {
-            public static SpeciesRow wasp = new SpeciesRow { size = 1, swatR = 0, speed = 1, drain = 1, felt = 1, pain = 1, annoy = 1, night = 0, barbed = 0, hunts = 1, pollen = 0, wood = 1, fight = 0,
+            public static SpeciesRow wasp = new SpeciesRow { size = 1, swatR = 0, speed = 1, drain = 1, felt = 1, pain = 1, annoy = 1, night = 0, barbed = 0, hunts = 1, pollen = 0, wood = 1, fight = 0, raid = 0.04,
                 start = 1, lay = 1, store = 1, sugarIn = 1, proteinIn = 1, @out = 1, guards = 2, perennial = 0 };
-            public static SpeciesRow hornet = new SpeciesRow { size = 1.7, swatR = 0.006, speed = 1.15, drain = 1.3, felt = 0.65, pain = 1.8, annoy = 1.6, night = 1, barbed = 0, hunts = 1, pollen = 0, wood = 1, fight = 1.5,
+            public static SpeciesRow hornet = new SpeciesRow { size = 1.7, swatR = 0.006, speed = 1.15, drain = 1.3, felt = 0.65, pain = 1.8, annoy = 1.6, night = 1, barbed = 0, hunts = 1, pollen = 0, wood = 1, fight = 1.5, raid = 0.15,
                 start = 0.35, lay = 0.3, store = 1.5, sugarIn = 0.7, proteinIn = 1.4, @out = 0.5, guards = 2, perennial = 0 };
-            public static SpeciesRow bee = new SpeciesRow { size = 0.85, swatR = -0.001, speed = 0.9, drain = 0.8, felt = 1.15, pain = 0.9, annoy = 0.6, night = 0, barbed = 1, hunts = 0, pollen = 1, wood = 0, fight = 0,
+            public static SpeciesRow bee = new SpeciesRow { size = 0.85, swatR = -0.001, speed = 0.9, drain = 0.8, felt = 1.15, pain = 0.9, annoy = 0.6, night = 0, barbed = 1, hunts = 0, pollen = 1, wood = 0, fight = 0, raid = 0,
                 start = 2.5, lay = 1.5, store = 10, sugarIn = 1.3, proteinIn = 1, @out = 1.2, guards = 5, perennial = 1 };
             public static SpeciesRow Of(string sp) => sp switch { "hornet" => hornet, "bee" => bee, _ => wasp };
         }
@@ -318,7 +318,7 @@ namespace Sting.Core
         public static class rival
         {
             public static int maxPhysical = 3, remoteFightTimeout = 240, fightTicks = 40, huntTicks = 600;
-            public static Num fightRange = 0.025, remoteFightRange = 0.06, guardRadius = 1.5, raidProtein = 2, mash = 0.15;
+            public static Num fightRange = 0.025, remoteFightRange = 0.06, guardRadius = 1.5, raidProtein = 2, raidRange = 120, mash = 0.15;
         }
         public static class net { public static int commitTicks = 30, stateEvery = 3, remoteTimeout = 45, claimTicks = 120, fixEvery = 30, fixTicks = 120; }
         /// Relevance tiers (GDD 11.12, T1-21), judged per receiving peer from where its own wasp is

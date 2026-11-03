@@ -2812,7 +2812,11 @@ function handleEvents(events) {
       case 'birdMiss': toast('The bird missed', 'var(--yellow)', 1.2); break;
       case 'fight': if (e.driven) toast('Grappling a rival wasp · mash LMB', 'var(--red)', 1.8); break;
       case 'fightOver': logEvent(`fight: worker ${e.winner} killed worker ${e.loser}`); break;
-      case 'raid': toast(e.peer !== undefined ? `Stole a larva from player ${e.peer + 1}'s nest · get it home` : 'Stole a larva · their workers are coming', 'var(--orange)', 2.2); break;
+      case 'raid':
+        if (e.driven) toast(e.peer !== undefined ? `Stole a larva from player ${e.peer + 1}'s nest · get it home` : 'Stole a larva · their workers are coming', 'var(--orange)', 2.2);
+        else logEvent(e.peer !== undefined ? `a worker raided player ${e.peer + 1}'s nest` : 'a worker raided a rival nest');
+        break;
+      case 'nestRaided': toast('A rival wasp is stealing a larva · get it before it gets away', 'var(--red)', 2.4); logEvent('a rival raided the nest'); break;
       case 'slam': if (e.driven) toast(e.kind === 'person' ? 'Slammed onto them' : ['fly', 'caterpillar', 'bee', 'carrion', 'meat'].includes(e.kind) ? 'Snatched' : 'Down', 'var(--yellow)', 0.8); break;
       case 'raided': toast(`Player ${e.by + 1} stole a larva from your nest · your guards are after them`, 'var(--red)', 2.6); logEvent(`player ${e.by + 1} raided the nest`); break;
       case 'notice':

@@ -1303,7 +1303,37 @@ namespace Sting.Core
             w.carry = new Carry { kind = "protein", amount = T.rival.raidProtein, what = "larva" };
             RivalsHunt(key, w.id, w.P);
             if (net) Publish(new NetEv { type = "raid", key = key, id = w.id, x = w.x, y = w.y, z = w.z });
-            Emit("raid", ("id", w.id), ("key", key));
+            Emit("raid", ("id", w.id), ("key", key), ("driven", w.id == drivenId));
+        }
+
+        /// The nearest enemy nest within raidRange of an AI forager's home: a rival colony's (when rivals are on), or
+        /// another player's live one, not at the player's own nest (GDD 9.3)
+        internal AiTarget RaidTarget(V3 home)
+        {
+            AiTarget best = null; Num bd = Sq(T.rival.raidRange);
+            if (settings.rivals) foreach (var rec in activeChunks)
+            {
+                var rv = rec.content.rival;
+                if (rv == null) continue;
+                Num d = Sq(rv.ex - home.x) + Sq(rv.ey - home.y) + Sq(rv.ez - home.z);
+                if (d < bd) { bd = d; best = new AiTarget { kind = "rnest", key = rec.key, i = 0, c = 998 }; }
+            }
+            var own = nest.entrance;
+            foreach (var kv in peerNests)
+            {
+                var n = kv.Value; int pr = kv.Key;
+                if (!n.alive || plaus.quarantined.Contains(pr) || Sq(n.x - own.x) + Sq(n.y - own.y) + Sq(n.z - own.z) < 0.3 * 0.3) continue;
+                Num d = Sq(n.x - home.x) + Sq(n.y - home.y) + Sq(n.z - home.z);
+                if (d < bd || (d == bd && best != null && best.kind == "pnest" && pr < best.i)) { bd = d; best = new AiTarget { kind = "pnest", key = n.key, i = pr, c = 997 }; }
+            }
+            return best;
+        }
+        /// an AI raider at the entrance of the nest it set out for takes a larva, if it is there
+        void RaidAt(Wasp w, AiTarget t)
+        {
+            if (t.kind == "rnest") { var r = RivalNestNear(w); if (r != null && r.Value.key == t.key) Raid(w, r); return; }
+            var pn = PeerNestNear(w);
+            if (pn != null && pn.Value.peer == t.i) RaidPeer(w, pn.Value.peer);
         }
 
         void RivalsHunt(string key, int id, V3 at)
@@ -1400,6 +1430,7 @@ namespace Sting.Core
                     if (ai.target.kind == "prey") { var p = w.carry == null ? PreyNear(w) : null; if (p != null) { Catch(w, p); ai.mode = "return"; } else if (w.carry != null) ai.mode = "return"; else if (tick > ai.timer) ai.mode = "pick"; }
                     else if (ai.target.kind == "pollen") { if (w.carry != null) ai.mode = "return"; else if (tick > ai.timer + 300) ai.mode = "pick"; }
                     else if (ai.target.kind == "phive") { RobHive(w); ai.mode = "return"; ai.target = null; }
+                    else if (ai.target.kind == "rnest" || ai.target.kind == "pnest") { if (w.carry == null) RaidAt(w, ai.target); ai.mode = "return"; ai.target = null; }
                     else if (ai.target.kind == "bait") { if (w.carry == null) TakeBait(w); ai.mode = "return"; ai.target = null; }
                     else if (ai.cargo >= 0.95 || tick > ai.timer + 300) ai.mode = "return";
                 }

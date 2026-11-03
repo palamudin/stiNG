@@ -213,18 +213,19 @@ export const T = {
   // sting does to a person (panic and alert points); annoy: how fast a buzzing one is noticed; night: forages after
   // dark; barbed: a worker that stings a person dies; hunts: takes prey (else none, and no raids or baits); pollen:
   // gathers protein as pollen at flowers; wood: chews pulp (else builds wax from sugar); fight: added to its score when
-  // wrestling another colony's wasp; start, lay, store: the colony's starting size, laying and sugar store; out: AI
-  // workers out at once, as a share of T.ai.maxPhysical; guards: at the entrance; perennial: the colony winters as a
-  // cluster instead of dying.
+  // wrestling another colony's wasp; raid: the chance that an AI protein forager setting out goes instead to raid an
+  // enemy nest within T.rival.raidRange m of home for a larva; start, lay, store: the colony's starting size, laying
+  // and sugar store; out: AI workers out at once, as a share of T.ai.maxPhysical; guards: at the entrance; perennial:
+  // the colony winters as a cluster instead of dying.
   // bio (Appendix C): European hornet workers to 25 mm, colonies of 200-400 (to 1,000), nocturnal, hunting flies,
   // grasshoppers and yellowjackets; honeybee colonies of 2,000-60,000 that winter as a cluster on honey, swarm to
   // reproduce, and whose workers die when they sting a person.
   species: {
-    wasp: { size: 1, swatR: 0, speed: 1, drain: 1, felt: 1, pain: 1, annoy: 1, night: 0, barbed: 0, hunts: 1, pollen: 0, wood: 1, fight: 0,
+    wasp: { size: 1, swatR: 0, speed: 1, drain: 1, felt: 1, pain: 1, annoy: 1, night: 0, barbed: 0, hunts: 1, pollen: 0, wood: 1, fight: 0, raid: 0.04,
       start: 1, lay: 1, store: 1, sugarIn: 1, proteinIn: 1, out: 1, guards: 2, perennial: 0 },
-    hornet: { size: 1.7, swatR: 0.006, speed: 1.15, drain: 1.3, felt: 0.65, pain: 1.8, annoy: 1.6, night: 1, barbed: 0, hunts: 1, pollen: 0, wood: 1, fight: 1.5,
+    hornet: { size: 1.7, swatR: 0.006, speed: 1.15, drain: 1.3, felt: 0.65, pain: 1.8, annoy: 1.6, night: 1, barbed: 0, hunts: 1, pollen: 0, wood: 1, fight: 1.5, raid: 0.15,
       start: 0.35, lay: 0.3, store: 1.5, sugarIn: 0.7, proteinIn: 1.4, out: 0.5, guards: 2, perennial: 0 },
-    bee: { size: 0.85, swatR: -0.001, speed: 0.9, drain: 0.8, felt: 1.15, pain: 0.9, annoy: 0.6, night: 0, barbed: 1, hunts: 0, pollen: 1, wood: 0, fight: 0,
+    bee: { size: 0.85, swatR: -0.001, speed: 0.9, drain: 0.8, felt: 1.15, pain: 0.9, annoy: 0.6, night: 0, barbed: 1, hunts: 0, pollen: 1, wood: 0, fight: 0, raid: 0,
       start: 2.5, lay: 1.5, store: 10, sugarIn: 1.3, proteinIn: 1, out: 1.2, guards: 5, perennial: 1 },
   },
   // Progression (GDD 6.8, T0 of the growth tree). Unit XP comes from what the insect you fly does (sting a person,
@@ -357,7 +358,7 @@ export const T = {
   perch: { crawlSpeed: 0.06, tickleBase: 4, bareMul: 1, thinMul: 2, backMul: 1.5, faceMul: 0.4, movingMul: 2, cooldown: 90, panic: 0.05 },
   // People remember stings by recency and place (GDD 8.10, T1-18): wary for a couple of days, most where it happened
   memory: { fasterPerSting: 0.08, minFactor: 0.6, panicPerSting: 0.15, maxStings: 4, keep: 8, forgetMinutes: 2880, nearDist: 4, farShare: 0.35 },
-  rival: { maxPhysical: 3, fightRange: 0.025, remoteFightRange: 0.06, remoteFightTimeout: 240, fightTicks: 40, guardRadius: 1.5, raidProtein: 2, huntTicks: 600, mash: 0.15 },
+  rival: { maxPhysical: 3, fightRange: 0.025, remoteFightRange: 0.06, remoteFightTimeout: 240, fightTicks: 40, guardRadius: 1.5, raidProtein: 2, raidRange: 120, huntTicks: 600, mash: 0.15 },
 
   // Networking (GDD 11): human-side effects of events commit at the end of the consequence window
   // claimTicks (T1-19): how long a pickup waits for the chunk authority's word before it is taken as granted

@@ -95,6 +95,11 @@ namespace Sting.Core
                         if (w.carry == null && HiveLoadsLeft(t.key, t.i) > 0) { StartRob(w, t.key, t.i); return cmd; }
                         ai.mode = "return"; ai.target = null;
                     }
+                    else if (t.kind == "rnest" || t.kind == "pnest") // in at the entrance for a larva, then away before the guards
+                    {
+                        if (w.carry == null) RaidAt(w, t);
+                        ai.mode = "return"; ai.target = null;
+                    }
                     else if (t.kind == "pollen") // stay at the flower until the baskets are full (T2-11)
                     {
                         if (w.carry != null) { ai.mode = "return"; ai.target = null; } else if (tick > ai.timer + 300) ai.mode = "pick";
@@ -518,10 +523,20 @@ namespace Sting.Core
             // a forager goes back to a source that paid (site fidelity), then to the one whose scent a nestmate brought home
             if (ai.known != null && ai.known.role == w.role && StillThere(w.role, ai.known.t, Spw(w))) { ai.target = ai.known.t.Copy(); ai.mode = "outbound"; return; }
             ai.known = null;
-            // a rival knows where the player's bee hive is and some days goes to rob it of honey and brood (T2-11)
-            var pc = colony; var ne = nest.entrance;
+            // a rival knows where the player's bee hive is and some days goes to rob it of honey and brood (T2-11); a wasp
+            // or hornet nest near its own it raids now and then for a larva, as the player's protein foragers raid it (GDD 9.3)
+            var pc = colony; var ne = nest.entrance; var SP = Spw(w);
             if (IsRival(w) && (w.role == "sugar" || w.role == "protein") && Colony.Sp(pc).perennial != 0 && pc.nestAlive && pc.sited && pc.sugar >= T.hive.robHoney
                 && D2(w, ne) < T.hive.robRange * T.hive.robRange && H32(w.id, day, 92) < T.hive.robChance) { ai.target = new AiTarget { kind = "phive", key = nest.key, i = 0, c = 999 }; ai.mode = "outbound"; return; }
+            if (IsRival(w) && w.role == "protein" && Colony.Sp(pc).perennial == 0 && pc.nestAlive && pc.sited && pc.larvae >= 1
+                && D2(home, ne) < Sq(T.rival.raidRange) && H32(w.id, tick, 94) < SP.raid) { ai.target = new AiTarget { kind = "phive", key = nest.key, i = 0, c = 999 }; ai.mode = "outbound"; return; }
+            // a protein forager setting out sometimes goes instead to raid an enemy nest near home for a larva: a rival
+            // colony's, or another player's; hornets most often (GDD 9.3)
+            if (!IsRival(w) && w.role == "protein" && SP.hunts != 0 && H32(w.id, tick, 94) < SP.raid)
+            {
+                var rt = RaidTarget(home);
+                if (rt != null) { ai.target = rt; ai.mode = "outbound"; return; }
+            }
             var hs = homeScent;
             if (w.colony == "own" && hs != null && hs.until > tick && hs.role == w.role && D2(w, nest.entrance) < 1 && StillThere(w.role, hs.t, Spw(w))) { ai.target = hs.t.Copy(); ai.mode = "outbound"; return; }
             var t = Sense(w);
@@ -571,7 +586,9 @@ namespace Sting.Core
             }
             if (t.kind == "trap") { var tr = c.traps[t.i]; return new V3(tr.x, tr.y, tr.z); }
             if (t.kind == "pollen") { if (t.i >= c.flowers.Count || !InBloom(rec, t.i)) return null; var f = c.flowers[t.i]; return new V3(f.x, f.y + 0.012, f.z); }
-            if (t.kind == "phive") return Colony.Sp(colony).perennial != 0 && colony.nestAlive ? nest.entrance : (V3?)null;
+            if (t.kind == "phive") return colony.nestAlive ? nest.entrance : (V3?)null;
+            if (t.kind == "rnest") return c.rival != null ? new V3(c.rival.ex, c.rival.ey, c.rival.ez) : (V3?)null;
+            if (t.kind == "pnest") return peerNests.TryGetValue(t.i, out var pn) && pn.alive && !plaus.quarantined.Contains(t.i) ? new V3(pn.x, pn.y, pn.z) : (V3?)null;
             if (t.kind == "hive") { var hvs = HivesIn(rec); return t.i < hvs.Count ? new V3(hvs[t.i].ex, hvs[t.i].ey, hvs[t.i].ez) : (V3?)null; }
             if (t.kind == "fruit") { foreach (var f in FruitIn(rec)) if (f.i == t.i) return new V3(f.x, f.y + 0.015, f.z); return null; }
             if (t.kind == "spill") { foreach (var sp in SpillsIn(t.key)) if (sp.i == t.i) return new V3(sp.x, sp.y + 0.012, sp.z); return null; }
@@ -635,15 +652,16 @@ namespace Sting.Core
             cmd.throttle = Clamp(Sqrt(2 * T.wasp.accel * d) * 0.7 / T.wasp.cruise, 0.06, 1);
         }
 
-        /// a rival forager in at the player's bee hive: honey in its crop, a larva in its jaws, the guards after it (T2-11)
+        /// a rival forager in at the player's bee hive: honey in its crop, a larva in its jaws, the guards after it (T2-11).
+        /// At a wasp or hornet nest it takes a larva only (GDD 9.3).
         void RobHive(Wasp w)
         {
-            var col = colony;
-            if (Colony.Sp(col).perennial == 0 || !col.nestAlive || D2(w, nest.entrance) > Sq(T.ai.arrive * 2)) return;
-            col.sugar -= Min(col.sugar, T.hive.robHoney); w.ai.cargo = 1;
-            if (col.larvae >= 1) { col.larvae -= 1; w.carry = new Carry { kind = "protein", amount = T.rival.raidProtein, what = "bee brood" }; }
+            var col = colony; bool hive = Colony.Sp(col).perennial != 0;
+            if (!col.nestAlive || D2(w, nest.entrance) > Sq(T.ai.arrive * 2)) return;
+            if (hive) { col.sugar -= Min(col.sugar, T.hive.robHoney); w.ai.cargo = 1; }
+            if (col.larvae >= 1) { col.larvae -= 1; w.carry = new Carry { kind = "protein", amount = T.rival.raidProtein, what = hive ? "bee brood" : "larva" }; } else if (!hive) return;
             foreach (var g in Own()) if (g.role == "guard" && g.state == "fly" && g.id != drivenId) { g.ai.mode = "hunt"; g.ai.huntId = w.id; g.ai.timer = tick + T.guard.huntTicks; }
-            Emit("hiveRobbed", ("id", w.id));
+            Emit(hive ? "hiveRobbed" : "nestRaided", ("id", w.id));
         }
 
         /// After an AI sting: get out

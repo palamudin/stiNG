@@ -128,7 +128,7 @@ for (const name of ['lan', 'good', 'bad', 'awful']) {
       else hold(bw, { x: rv.ex + 3, y: rv.ey, z: rv.ez });
     } else if (bw && bw.state === 'fly') hold(bw, { x: rv.ex + 1, y: rv.ey, z: rv.ez });
     lab.step(idleCmd(), idleCmd({ act }));
-    for (const e of lab.bEvents || []) { if (e.type === 'raid') raided = true; if (e.type === 'fight' && e.remote) grappled++; }
+    for (const e of lab.bEvents || []) { if (e.type === 'raid' && e.driven) raided = true; if (e.type === 'fight' && e.remote) grappled++; }
     lab.a.drainEvents();
     if (raided) hunted = Math.max(hunted, lab.a.wasps.filter((w) => w.colony !== 'own' && w.ai.mode === 'hunt' && w.ai.huntId > 1000000).length);
   }
@@ -432,6 +432,13 @@ for (const name of ['lan', 'good', 'bad', 'awful']) {
   A._publish({ type: 'praid', toPeer: 1, waspId: w.id, x: e.x + 3, y: e.y, z: e.z });
   for (let i = 0; i < 10; i++) lab.step(idleCmd(), idleCmd());
   ok((B.plaus.strikes[0] || 0) === strikes + 1 && B.colony.larvae === Math.max(0, larvae - 1), 'a raid claimed from 3 m off the nest is rejected and takes nothing');
+  // A's AI workers know B's nest too, and one now and then raids it on its own (GDD 9.3)
+  const rt = A._raidTarget(A.nest.entrance), aw = A._spawnWasp(false), l1 = B.colony.larvae;
+  aw.role = 'protein'; aw.ai.mode = 'outbound'; aw.ai.target = { ...rt }; Object.assign(aw, { x: e.x + 0.4, y: e.y, z: e.z, vx: 0, vy: 0, vz: 0 });
+  let byAI = null;
+  for (let i = 0; i < 600 && !byAI; i++) { lab.step(idleCmd(), idleCmd()); byAI = (lab.bEvents || []).find((x) => x.type === 'raided' && x.waspId === aw.id); }
+  ok(rt && rt.kind === 'pnest' && rt.i === 1 && byAI && aw.carry && aw.carry.what === 'larva' && Math.abs(B.colony.larvae - (l1 - 1)) < 0.05 && A.netStats.rejected === 0 && B.netStats.rejected === 0 && (B.plaus.strikes[0] || 0) === strikes + 1,
+    `an AI worker of A's raids B's nest by itself: B loses a larva (${l1.toFixed(1)} -> ${B.colony.larvae.toFixed(1)}) and its guards go after it`);
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');

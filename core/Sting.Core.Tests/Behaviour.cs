@@ -1599,6 +1599,38 @@ namespace Sting.Core.Tests
                 }
                 Ok(s.wasp.state == "fly" && lo > 0.2 && hi < 0.55, $"H on a person strolling at {Hypot(hm.vx, hm.vz):0.00} m/s: the wasp keeps pace, {lo:0.00} to {hi:0.00} m off them");
             }
+            // 56. AI raids (GDD 9.3): a protein forager now and then goes for a larva from an enemy nest near home, hornets
+            // most and bees never, with the rivals' guards after it; a rival forager raids the player's wasp nest
+            {
+                Sim Mk(string sp) => new Sim(new Settings { seed = 1234, birds = false, species = sp });
+                Cmd Park(Sim sim, int i) { if (sim.wasp != null) Place(sim.wasp, P(sim.nest.entrance.x + 2, 1.5, sim.nest.entrance.z)); return Idle(); }
+                var s = Mk("hornet"); var e = s.nest.entrance; var rt = s.RaidTarget(e); var rv = rt != null ? s.records.Get(rt.key).content.rival : null;
+                var off = Mk("hornet"); off.settings.rivals = false;
+                double rd = rv != null ? Hypot(rv.ex - e.x, rv.ez - e.z) : 0;
+                Ok(rt != null && rt.kind == "rnest" && rd < D(T.rival.raidRange) && off.RaidTarget(off.nest.entrance) == null && T.species.hornet.raid > T.species.wasp.raid && T.species.bee.raid == 0,
+                    $"a forager knows the rival nest {rd:0} m from home (none with rivals off); hornets raid most ({D(T.species.hornet.raid)} of trips against {D(T.species.wasp.raid)}), bees never");
+                Num keep = T.species.hornet.raid; T.species.hornet.raid = 1;
+                var s2 = Mk("hornet"); Wasp goes = null;
+                for (int i = 0; i < 3600 && goes == null; i += 30) { RunS(s2, 30, Park); goes = s2.wasps.FirstOrDefault(x => x.colony == "own" && x.ai.target != null && x.ai.target.kind == "rnest"); }
+                T.species.hornet.raid = keep;
+                Ok(goes != null && goes.role == "protein" && goes.ai.target.key == rt.key, $"a protein forager setting out picks the raid (worker {goes?.id}, {goes?.ai.mode})");
+                RunS(s, 1200, Park);
+                var w = s.SpawnWasp(false); w.role = "protein"; w.ai.mode = "outbound"; w.ai.target = rt.Copy(); Place(w, P(rv.ex + 0.5, rv.ey, rv.ez));
+                SimEvent raid = null; for (int i = 0; i < 600 && raid == null; i++) raid = RunS(s, 1, Park).FirstOrDefault(x => x.type == "raid" && (int)x["id"] == w.id);
+                int hunted = s.wasps.Count(x => Sim.IsRival(x) && x.ai.mode == "hunt" && x.ai.huntId == w.id);
+                Ok(raid != null && !(bool)raid["driven"] && w.carry != null && w.carry.what == "larva" && w.ai.mode == "return" && hunted >= 1,
+                    $"the AI hornet flies in at the rival entrance, takes a larva and heads home with {hunted} rival guard(s) after it");
+                SimEvent home = null, died = null;
+                for (int i = 0; i < 60 * 60 * 3 && home == null && died == null; i += 30) { var ev = RunS(s, 30, Park); home = ev.FirstOrDefault(x => x.type == "deposit" && (int)x["id"] == w.id); died = ev.FirstOrDefault(x => x.type == "waspDied" && x["id"] is int di && di == w.id); }
+                Ok(home != null && (string)home["kind"] == "protein", $"it brings the larva home as protein ({(home != null ? D((Num)home["amount"]).ToString("0.0") : died != null ? "died: " + died["cause"] : "not home")})");
+                var s3 = Mk("wasp"); RunS(s3, 2400, Park);
+                var rk = s3.activeChunks.First(r => r.content.rival != null); var rw = s3.SpawnWasp(false); var e3 = s3.nest.entrance; Num l0 = s3.colony.larvae;
+                rw.colony = rk.key; rw.role = "protein"; rw.ai.mode = "outbound"; rw.ai.target = new AiTarget { kind = "phive", key = s3.nest.key, i = 0, c = 999 }; Place(rw, P(e3.x + 0.4, e3.y, e3.z));
+                SimEvent nr = null; for (int i = 0; i < 600 && nr == null; i++) nr = Find(RunS(s3, 1, Park), "nestRaided");
+                int guards = s3.wasps.Count(x => x.colony == "own" && x.ai.mode == "hunt" && x.ai.huntId == rw.id);
+                Ok(nr != null && rw.carry != null && rw.carry.what == "larva" && Math.Abs(D(s3.colony.larvae - (l0 - 1))) < 0.05 && guards >= 1,
+                    $"a rival forager raids the player's wasp nest for a larva ({D(l0):0.0} -> {D(s3.colony.larvae):0.0}); {guards} guard(s) go after it");
+            }
             // 46. feature modifiers (T2-6): woods, towns, water and hives set at world creation act on generation
             {
                 (int forest, int town, int baths, int hives, bool apart) Census(Settings st)

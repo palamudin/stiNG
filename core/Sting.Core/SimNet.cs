@@ -414,7 +414,7 @@ namespace Sting.Core
         {
             w.carry = new Carry { kind = "protein", amount = T.rival.raidProtein, what = "larva" };
             Publish(new NetEv { type = "praid", toPeer = toPeer, waspId = w.id, x = w.x, y = w.y, z = w.z });
-            Emit("raid", ("id", w.id), ("peer", toPeer));
+            Emit("raid", ("id", w.id), ("peer", toPeer), ("driven", w.id == drivenId));
         }
 
         // ---------------- late-event corrections (GDD 11.6); see sim.js

@@ -2028,7 +2028,7 @@ export class Sim {
     // a forager home with food remembers where it was (site fidelity), and its load carries the scent of the source
     // to nestmates leaving soon after (GDD 7.3, T1-16)
     const from = w.ai && w.ai.from;
-    if (deposited && from && w.role && from.kind !== 'wood' && from.kind !== 'bait') {
+    if (deposited && from && w.role && from.kind !== 'wood' && from.kind !== 'bait' && from.kind !== 'rnest' && from.kind !== 'pnest') {
       w.ai.known = { role: w.role, t: from };
       this.homeScent = { role: w.role, t: from, until: this.tick + T.sense.homeScentTicks };
     }
@@ -4178,7 +4178,32 @@ export class Sim {
     w.carry = { kind: 'protein', amount: T.rival.raidProtein, what: 'larva' };
     this._rivalsHunt(r.key, w.id, w);
     if (this.net) this._publish({ type: 'raid', key: r.key, id: w.id, x: w.x, y: w.y, z: w.z });
-    this.emit('raid', { id: w.id, key: r.key });
+    this.emit('raid', { id: w.id, key: r.key, driven: w.id === this.drivenId });
+  }
+
+  // The nearest enemy nest within raidRange of an AI forager's home: a rival colony's (when rivals are on), or another
+  // player's live one, not at the player's own nest (GDD 9.3)
+  _raidTarget(home) {
+    let best = null, bd = sq(T.rival.raidRange);
+    if (this.settings.rivals) for (const rec of this.activeChunks) {
+      const rv = rec.content.rival;
+      if (!rv) continue;
+      const d = sq(rv.ex - home.x) + sq(rv.ey - home.y) + sq(rv.ez - home.z);
+      if (d < bd) { bd = d; best = { kind: 'rnest', key: chunkKey(rec.cx, rec.cz), i: 0, c: 998 }; }
+    }
+    const own = this.nest.entrance;
+    for (const [peer, n] of this.peerNests) {
+      if (!n.alive || this.plaus.quarantined.includes(peer) || sq(n.x - own.x) + sq(n.y - own.y) + sq(n.z - own.z) < 0.3 * 0.3) continue;
+      const d = sq(n.x - home.x) + sq(n.y - home.y) + sq(n.z - home.z);
+      if (d < bd || (d === bd && best && best.kind === 'pnest' && peer < best.i)) { bd = d; best = { kind: 'pnest', key: n.key, i: peer, c: 997 }; }
+    }
+    return best;
+  }
+  // An AI raider at the entrance of the nest it set out for takes a larva, if it is there
+  _raidAt(w, t) {
+    if (t.kind === 'rnest') { const r = this._rivalNestNear(w); if (r && r.key === t.key) this._raid(w, r); return; }
+    const pn = this._peerNestNear(w);
+    if (pn && pn.peer === t.i) this._raidPeer(w, pn);
   }
 
   // ---------------- another player's nest (colony against colony)
@@ -4203,17 +4228,18 @@ export class Sim {
   _raidPeer(w, pn) {
     w.carry = { kind: 'protein', amount: T.rival.raidProtein, what: 'larva' };
     this._publish({ type: 'praid', toPeer: pn.peer, waspId: w.id, x: w.x, y: w.y, z: w.z });
-    this.emit('raid', { id: w.id, peer: pn.peer });
+    this.emit('raid', { id: w.id, peer: pn.peer, driven: w.id === this.drivenId });
   }
 
-  // A rival forager in at the player's bee hive: honey in its crop, a larva in its jaws, the guards after it (T2-11)
+  // A rival forager in at the player's bee hive: honey in its crop, a larva in its jaws, the guards after it (T2-11).
+  // At a wasp or hornet nest it takes a larva only (GDD 9.3).
   _robHive(w) {
-    const col = this.colony;
-    if (!spOf(col).perennial || !col.nestAlive || dist2(w, this.nest.entrance) > sq(T.ai.arrive * 2)) return;
-    col.sugar -= Math.min(col.sugar, T.hive.robHoney); w.ai.cargo = 1;
-    if (col.larvae >= 1) { col.larvae -= 1; w.carry = { kind: 'protein', amount: T.rival.raidProtein, what: 'bee brood' }; }
+    const col = this.colony, hive = spOf(col).perennial;
+    if (!col.nestAlive || dist2(w, this.nest.entrance) > sq(T.ai.arrive * 2)) return;
+    if (hive) { col.sugar -= Math.min(col.sugar, T.hive.robHoney); w.ai.cargo = 1; }
+    if (col.larvae >= 1) { col.larvae -= 1; w.carry = { kind: 'protein', amount: T.rival.raidProtein, what: hive ? 'bee brood' : 'larva' }; } else if (!hive) return;
     for (const g of this._own()) if (g.role === 'guard' && g.state === 'fly' && g.id !== this.drivenId) { g.ai.mode = 'hunt'; g.ai.huntId = w.id; g.ai.timer = this.tick + T.guard.huntTicks; }
-    this.emit('hiveRobbed', { id: w.id });
+    this.emit(hive ? 'hiveRobbed' : 'nestRaided', { id: w.id });
   }
 
   _rivalsHunt(key, id, at) {
@@ -4294,6 +4320,7 @@ export class Sim {
         if (ai.target.kind === 'prey') { const p = !w.carry ? this._preyNear(w) : null; if (p) { this._catch(w, p); ai.mode = 'return'; } else if (w.carry) ai.mode = 'return'; else if (this.tick > ai.timer) ai.mode = 'pick'; }
         else if (ai.target.kind === 'pollen') { if (w.carry) ai.mode = 'return'; else if (this.tick > ai.timer + 300) ai.mode = 'pick'; }
         else if (ai.target.kind === 'phive') { this._robHive(w); ai.mode = 'return'; ai.target = null; }
+        else if (ai.target.kind === 'rnest' || ai.target.kind === 'pnest') { if (!w.carry) this._raidAt(w, ai.target); ai.mode = 'return'; ai.target = null; }
         else if (ai.target.kind === 'bait') { if (!w.carry) this._takeBait(w); ai.mode = 'return'; ai.target = null; }
         else if ((ai.cargo || 0) >= 0.95 || this.tick > ai.timer + 300) ai.mode = 'return';
       }
@@ -4715,6 +4742,9 @@ export class Sim {
         } else if (t.kind === 'hive') {
           if (!w.carry && this.hiveLoadsLeft(t.key, t.i) > 0) { this._startRob(w, t.key, t.i); return cmd; }
           ai.mode = 'return'; ai.target = null;
+        } else if (t.kind === 'rnest' || t.kind === 'pnest') { // in at the entrance for a larva, then away before the guards
+          if (!w.carry) this._raidAt(w, t);
+          ai.mode = 'return'; ai.target = null;
         } else if (t.kind === 'pollen') { // stay at the flower until the baskets are full (T2-11)
           if (w.carry) { ai.mode = 'return'; ai.target = null; } else if (this.tick > ai.timer + 300) ai.mode = 'pick';
         } else if (t.kind === 'wood') {
@@ -4928,10 +4958,19 @@ export class Sim {
     // a forager goes back to a source that paid (site fidelity), then to the one whose scent a nestmate brought home
     if (ai.known && ai.known.role === w.role && this._stillThere(w.role, ai.known.t, spw(w))) { ai.target = { ...ai.known.t }; ai.mode = 'outbound'; return; }
     ai.known = null;
-    // a rival knows where the player's bee hive is and some days goes to rob it of honey and brood (T2-11)
-    const col = this.colony, ne = this.nest.entrance, H = T.hive;
+    // a rival knows where the player's bee hive is and some days goes to rob it of honey and brood (T2-11); a wasp or
+    // hornet nest near its own it raids now and then for a larva, as the player's protein foragers raid it (GDD 9.3)
+    const col = this.colony, ne = this.nest.entrance, H = T.hive, SP = spw(w);
     if (this.isRival(w) && (w.role === 'sugar' || w.role === 'protein') && spOf(col).perennial && col.nestAlive && col.sited && col.sugar >= H.robHoney
       && dist2(w, ne) < H.robRange * H.robRange && h32(w.id, this.day, 92) < H.robChance) { ai.target = { kind: 'phive', key: this.nest.key, i: 0, c: 999 }; ai.mode = 'outbound'; return; }
+    if (this.isRival(w) && w.role === 'protein' && !spOf(col).perennial && col.nestAlive && col.sited && col.larvae >= 1
+      && dist2(home, ne) < sq(T.rival.raidRange) && h32(w.id, this.tick, 94) < SP.raid) { ai.target = { kind: 'phive', key: this.nest.key, i: 0, c: 999 }; ai.mode = 'outbound'; return; }
+    // a protein forager setting out sometimes goes instead to raid an enemy nest near home for a larva: a rival
+    // colony's, or another player's; hornets most often (GDD 9.3)
+    if (!this.isRival(w) && w.role === 'protein' && SP.hunts && h32(w.id, this.tick, 94) < SP.raid) {
+      const rt = this._raidTarget(home);
+      if (rt) { ai.target = rt; ai.mode = 'outbound'; return; }
+    }
     const hs = this.homeScent;
     if (w.colony === 'own' && hs && hs.until > this.tick && hs.role === w.role && dist2(w, this.nest.entrance) < 1 && this._stillThere(w.role, hs.t, spw(w))) { ai.target = { ...hs.t }; ai.mode = 'outbound'; return; }
     const t = this._sense(w);
@@ -4977,7 +5016,9 @@ export class Sim {
     }
     if (t.kind === 'trap') return c.traps[t.i];
     if (t.kind === 'pollen') { const f = c.flowers[t.i]; return f && this.inBloom(rec, t.i) ? { x: f.x, y: f.y + 0.012, z: f.z } : null; }
-    if (t.kind === 'phive') return spOf(this.colony).perennial && this.colony.nestAlive ? this.nest.entrance : null;
+    if (t.kind === 'phive') return this.colony.nestAlive ? this.nest.entrance : null;
+    if (t.kind === 'rnest') return c.rival ? { x: c.rival.ex, y: c.rival.ey, z: c.rival.ez } : null;
+    if (t.kind === 'pnest') { const n = this.peerNests.get(t.i); return n && n.alive && !this.plaus.quarantined.includes(t.i) ? n : null; }
     if (t.kind === 'hive') { const hv = this.hivesIn(rec)[t.i]; return hv ? { x: hv.ex, y: hv.ey, z: hv.ez } : null; }
     if (t.kind === 'fruit') { const f = this.fruitIn(rec).find((x) => x.i === t.i); return f ? { x: f.x, y: f.y + 0.015, z: f.z } : null; }
     if (t.kind === 'spill') { const sp = this.spillsIn(t.key).find((x) => x.i === t.i); return sp ? { x: sp.x, y: sp.y + 0.012, z: sp.z } : null; }
