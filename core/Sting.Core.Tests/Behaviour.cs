@@ -1068,16 +1068,17 @@ namespace Sting.Core.Tests
             {
                 var S1 = new Settings { terrain = 1 }; var S2 = new Settings { terrain = 2 };
                 Num G1(Num x, Num z) => World.GroundAt(1234, x, z, S1); Num G2(Num x, Num z) => World.GroundAt(1234, x, z, S2);
-                bool flat = true, home = true, lin = true; Num hi = Num.MinValue, lo = Num.MaxValue;
+                bool flat = true, home = true, lin = true; Num hi = Num.MinValue, lo = Num.MaxValue, hiH = Num.MinValue, loH = Num.MaxValue;
                 for (int j = -40; j <= 40; j++) for (int i = -40; i <= 40; i++)
                 {
                     Num x = i * (Num)3.7, z = j * (Num)4.1, a = G1(x, z);
                     if (World.GroundAt(1234, x, z, new Settings()) != 0) flat = false;
                     if (Sqrt(x * x + z * z) <= T.terrain.flatR && a != 0) home = false;
-                    if (D(Abs(G2(x, z) - 2 * a)) > 1e-6) lin = false;
+                    Num b2 = G2(x, z); hiH = Max(hiH, b2); loH = Min(loH, b2);
                     hi = Max(hi, a); lo = Min(lo, a);
                 }
-                Ok(flat && home && lin && hi - lo > 2 && hi - lo < 9, $"the ground rolls {D(hi - lo):0.0} m over 300 m on a rolling world, twice that on a hilly one; a flat world and the home tree's ground stay level");
+                lin = hiH - loH > 1.6 * (hi - lo);
+                Ok(flat && home && lin && hi - lo > 2 && hi - lo < 9, $"the ground rolls {D(hi - lo):0.0} m over 300 m on a rolling world, {D(hiH - loH):0.0} on a hilly one; a flat world and the home tree's ground stay level");
                 Num Slope(Num cx, Num cz) { Num m = 0; for (int j = -5; j <= 5; j++) for (int i = -5; i <= 5; i++) { Num x = cx + i * 4, z = cz + j * 4; m = Max(m, Max(Abs(G2(x + 2, z) - G2(x - 2, z)) / 4, Abs(G2(x, z + 2) - G2(x, z - 2)) / 4)); } return m; }
                 var TL = World.Region(1234, 1, 0).towns[0]; Num tcx = (8 - 4 + TL.tx + (Num)0.5) * 64, tcz = (TL.tz - 4 + (Num)0.5) * 64;
                 int pkx = 0, pkz = 0; bool fpk = false;
@@ -1806,6 +1807,31 @@ namespace Sting.Core.Tests
                         }
                     }
                 Ok(n > 100 && level == n && lean > 10, $"{n} small things in 289 chunks ({string.Join(", ", kinds.Select(kv => kv.Value + " " + kv.Key))}) all stand level (worst {worst:E1} m); {lean} of them on ground that falls away by over 5 cm round them");
+            }
+            // 62. semi-urban to code (GDD 21.2, S4, GEN_VERSION 12): streets within 10%, drives within 15%, level house pads, 2:1 banks
+            {
+                var st = new Settings { terrain = 2 }; double G(double x, double z) => D(World.GroundAt(1234, x, z, st));
+                double street = 0, drive = 0, worst = 0; int pads = 0, level = 0, steep = 0, n = 0, chunks = 0;
+                for (int cz = -6; cz <= 6; cz++) for (int cx = -6; cx <= 6; cx++)
+                    {
+                        if (World.LandUse(1234, cx, cz, st) != "yards") continue;
+                        chunks++; var p = World.PavingOf(1234, cx, cz, st); double oz = cz * 64;
+                        foreach (var r in p.roads) { double zc = D((r.minz + r.maxz) / 2); for (double x = D(r.minx); x + 1 <= D(r.maxx); x += 1) street = Math.Max(street, Math.Abs(G(x + 1, zc) - G(x, zc))); }
+                        foreach (var h in p.houses)
+                        {
+                            double hx = D(h.x), hz = D(h.z), hw = D(h.hw), hd = D(h.hd); int sg = Math.Sign(hz - oz); double zw = oz + sg * 5.6, zf = hz - sg * hd;
+                            for (int k = 0; k < 10; k++) { double z0 = zw + (zf - zw) * k / 10, z1 = zw + (zf - zw) * (k + 1) / 10; drive = Math.Max(drive, Math.Abs(G(hx, z1) - G(hx, z0)) / Math.Abs(z1 - z0)); }
+                            pads++; double c0 = G(hx - hw, hz - hd);
+                            if (new[] { G(hx + hw, hz - hd), G(hx + hw, hz + hd), G(hx - hw, hz + hd), G(hx, hz) }.All(v => Math.Abs(v - c0) < 1e-6)) level++;
+                        }
+                        for (double z = oz - 31.5; z < oz + 32; z += 1) for (double x = cx * 64 - 31.5; x < cx * 64 + 32; x += 1)
+                            {
+                                double sl = Math.Sqrt(Math.Pow(G(x + 0.25, z) - G(x - 0.25, z), 2) + Math.Pow(G(x, z + 0.25) - G(x, z - 0.25), 2)) / 0.5; n++;
+                                if (sl > 0.5) steep++; worst = Math.Max(worst, sl);
+                            }
+                    }
+                Ok(chunks > 20 && street <= 0.1 + 1e-6 && drive <= 0.15 + 1e-6 && level == pads && (double)steep / n < 2e-4,
+                    $"on a hilly world over {chunks} yards chunks: streets at most {street * 100:0.0}% (10% allowed), drives at most {drive * 100:0.0}% (15%), all {pads} house pads level; {steep} of {n} spots steeper than 2:1 (steepest {worst:0.00}), where banks meet");
             }
             // 46. feature modifiers (T2-6): woods, towns, water and hives set at world creation act on generation
             {

@@ -1778,15 +1778,16 @@ function seated(sim, pred) {
 // Terrain (GDD 4.8, T2-6): a height field the sim works above; hills block sight, gather puddles, catch the wind
 {
   const g1 = (x, z) => groundAt(1234n, x, z, { terrain: 1 }), g2 = (x, z) => groundAt(1234n, x, z, { terrain: 2 });
-  let flat = true, home = true, lin = true, hi = -Infinity, lo = Infinity;
+  let flat = true, home = true, lin = true, hi = -Infinity, lo = Infinity, hi2 = -Infinity, lo2 = Infinity;
   for (let j = -40; j <= 40; j++) for (let i = -40; i <= 40; i++) {
     const x = i * 3.7, z = j * 4.1, a = g1(x, z);
     if (groundAt(1234n, x, z, {}) !== 0) flat = false;
     if (Math.hypot(x, z) <= T.terrain.flatR && a !== 0) home = false;
-    if (Math.abs(g2(x, z) - 2 * a) > 1e-6) lin = false;
+    const b2 = g2(x, z); hi2 = Math.max(hi2, b2); lo2 = Math.min(lo2, b2); // not exactly twice: streets keep their grade (GDD 21.2)
     hi = Math.max(hi, a); lo = Math.min(lo, a);
   }
-  ok(flat && home && lin && hi - lo > 2 && hi - lo < 9, `the ground rolls ${(hi - lo).toFixed(1)} m over 300 m on a rolling world, twice that on a hilly one; a flat world and the home tree's ground stay level`);
+  lin = hi2 - lo2 > 1.6 * (hi - lo);
+  ok(flat && home && lin && hi - lo > 2 && hi - lo < 9, `the ground rolls ${(hi - lo).toFixed(1)} m over 300 m on a rolling world, ${(hi2 - lo2).toFixed(1)} on a hilly one; a flat world and the home tree's ground stay level`);
   // a town square is graded nearly level, a park rolls
   // the steepest slope within 20 m of a point
   const slope = (cx, cz) => { let m = 0; for (let j = -5; j <= 5; j++) for (let i = -5; i <= 5; i++) { const x = cx + i * 4, z = cz + j * 4; m = Math.max(m, Math.abs(g2(x + 2, z) - g2(x - 2, z)) / 4, Math.abs(g2(x, z + 2) - g2(x, z - 2)) / 4); } return m; };
@@ -2378,6 +2379,30 @@ function seated(sim, pred) {
     }
   }
   ok(n > 100 && level === n && lean > 10, `${n} small things in 289 chunks (${Object.entries(kinds).map(([k, v]) => v + ' ' + k).join(', ')}) all stand level (worst ${worst.toExponential(1)} m); ${lean} of them on ground that falls away by over 5 cm round them`);
+}
+
+// 62. Semi-urban to code (GDD 21.2, S4, GEN_VERSION 12): on a hilly world every street keeps within 10%, every front
+// yard (the drive) within 15%, every house pad is level, and banks are 2:1 or gentler nearly everywhere
+{
+  const st = { terrain: 2 }, S = 1234n, g = (x, z) => groundAt(S, x, z, st);
+  let street = 0, drive = 0, pads = 0, level = 0, steep = 0, n = 0, worst = 0, chunks = 0;
+  for (let cz = -6; cz <= 6; cz++) for (let cx = -6; cx <= 6; cx++) {
+    if (landUse(S, cx, cz, st) !== 'yards') continue;
+    chunks++;
+    const p = pavingOf(S, cx, cz, st), oz = cz * 64;
+    for (const r of p.roads) { const zc = (r.minz + r.maxz) / 2; for (let x = r.minx; x + 1 <= r.maxx; x += 1) street = Math.max(street, Math.abs(g(x + 1, zc) - g(x, zc))); }
+    for (const h of p.houses) {
+      const s = Math.sign(h.z - oz), zw = oz + s * 5.6, zf = h.z - s * h.hd;
+      for (let k = 0; k < 10; k++) { const z0 = zw + (zf - zw) * k / 10, z1 = zw + (zf - zw) * (k + 1) / 10; drive = Math.max(drive, Math.abs(g(h.x, z1) - g(h.x, z0)) / Math.abs(z1 - z0)); }
+      pads++; const c0 = g(h.x - h.hw, h.z - h.hd); if ([g(h.x + h.hw, h.z - h.hd), g(h.x + h.hw, h.z + h.hd), g(h.x - h.hw, h.z + h.hd), g(h.x, h.z)].every((v) => Math.abs(v - c0) < 1e-9)) level++;
+    }
+    for (let z = oz - 31.5; z < oz + 32; z += 1) for (let x = cx * 64 - 31.5; x < cx * 64 + 32; x += 1) {
+      const sl = Math.hypot(g(x + 0.25, z) - g(x - 0.25, z), g(x, z + 0.25) - g(x, z - 0.25)) / 0.5; n++;
+      if (sl > 0.5) steep++; worst = Math.max(worst, sl);
+    }
+  }
+  ok(chunks > 20 && street <= 0.1 + 1e-9 && drive <= 0.15 + 1e-9 && level === pads && steep / n < 2e-4,
+    `on a hilly world over ${chunks} yards chunks: streets at most ${(street * 100).toFixed(1)}% (10% allowed), drives at most ${(drive * 100).toFixed(1)}% (15%), all ${pads} house pads level; ${steep} of ${n} spots steeper than 2:1 (steepest ${worst.toFixed(2)}), where banks meet`);
 }
 
 // Tuning as data (GDD 13, T1-22): one plain-text file feeds both sims

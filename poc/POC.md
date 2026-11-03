@@ -161,6 +161,7 @@ Run the tests from this folder with `node test/sim.test.mjs`, `node test/net.tes
 | 131 | Small things stand level on hills: picnic tables, sheds, bee boxes, benches and birdbaths each on a level footing cut into the slope, in the sim and both looks | 18.75 | 25 |
 | 132 | Meshes made from code: a chunk's static parts merged per kind of surface (colours in the vertices), fences, benches, cups and crowns instanced, crowns swaying in their vertex shader, small things culled past 90 m, fake AO at the foot of walls and trunks | 18.76 | 25 |
 | 133 | The build list: the sim lists what each chunk's buildings and furniture are made of (shape, surface, colour, size, turns), JS and C# held to one digest; the drawing makes its meshes from it | 18.77 | 25 |
+| 134 | Yards graded to code on hills: streets within 10% and smooth, drives within 15% from the sidewalk to a level house pad, banks no steeper than 2:1 | 18.78 | 25 |
 
 ## Verified
 

@@ -562,11 +562,18 @@ namespace Sting.Core
             return o;
         }
         /// graded ground (GDD 20): kinds 0 street (levelled across at hz), 1 level rect, 2 cul-de-sac, 3 broad-shaped rect, 4 pond (level disc)
-        sealed class Pad { public int k; public Num minx, maxx, minz, maxz, x, z, r, m, hx, hz, h; public bool hSet; }
+        sealed class Pad
+        {
+            public int k; public Num minx, maxx, minz, maxz, x, z, r, m, hx, hz, h; public bool hSet;
+            // a house pad (5) and its front-yard ramp (6), a street (0) or cul-de-sac (2), a footing: worked out per step of the
+            // modifier (GDD 21.2): height, shoulder, the ramp's start height
+            public Num z0, run, zw, zf, cap; public int sg; public bool road, @fixed; public Pad pad, ramp;
+            public readonly Num[] hT = new Num[4], mT = new Num[4], hwT = new Num[4]; public readonly bool[] tSet = new bool[4];
+        }
         static readonly Dictionary<long, List<Pad>> pads = new Dictionary<long, List<Pad>>(); static string padTag;
         static List<Pad> PadsOf(ulong seed, int cx, int cz, Settings st)
         {
-            var F = Features(st); string tag = seed + ":" + F.woods + "," + F.towns + "," + N(F.water) + "," + N(F.hives);
+            var F = Features(st); string tag = seed + ":" + F.woods + "," + F.towns + "," + N(F.water) + "," + N(F.hives) + ShapeTag();
             lock (pads)
             {
                 if (padTag != tag) { padTag = tag; pads.Clear(); }
@@ -575,18 +582,30 @@ namespace Sting.Core
                 if (pads.Count > 4096) pads.Clear();
                 var c = PavingOf(seed, cx, cz, st); P = new List<Pad>();
                 void R(int k, Num minx, Num maxx, Num minz, Num maxz, Num m, Num hx, Num hz) => P.Add(new Pad { k = k, minx = minx, maxx = maxx, minz = minz, maxz = maxz, m = m, hx = hx, hz = hz });
-                foreach (var r in c.roads) R(0, r.minx, r.maxx, r.minz - T.terrain.grade.walk, r.maxz + T.terrain.grade.walk, T.terrain.grade.road, 0, (r.minz + r.maxz) / 2);
                 foreach (var l in c.loops) P.Add(new Pad { k = 2, x = l.x, z = l.z, r = l.r, m = T.terrain.grade.road, hx = 0, hz = l.z });
                 foreach (var l in c.lots) R(1, l.minx, l.maxx, l.minz, l.maxz, T.terrain.grade.lot, (l.minx + l.maxx) / 2, (l.minz + l.maxz) / 2);
                 foreach (var q in c.plazas) R(3, q.minx, q.maxx, q.minz, q.maxz, T.terrain.grade.lot, 0, 0);
                 foreach (var b in c.malls) R(1, b.x - b.hw, b.x + b.hw, b.z - b.hd, b.z + b.hd, T.terrain.grade.house, b.x, b.z);
                 foreach (var b in c.shops) R(1, b.x - b.hw, b.x + b.hw, b.z - b.hd, b.z + b.hd, T.terrain.grade.house, b.x, b.z);
-                foreach (var b in c.houses) R(1, b.x - b.hw, b.x + b.hw, b.z - b.hd, b.z + b.hd, T.terrain.grade.house, b.x, b.z);
                 foreach (var q in c.ponds) P.Add(new Pad { k = 4, x = q.x, z = q.z, r = q.r, m = T.terrain.grade.pond, hx = q.x, hz = q.z });
+                foreach (var r in c.roads) R(0, r.minx, r.maxx, r.minz - T.terrain.grade.walk, r.maxz + T.terrain.grade.walk, T.terrain.grade.road, 0, (r.minz + r.maxz) / 2);
+                var ramps = new List<Pad>();
+                foreach (var b in c.houses) // a house's pad and its front-yard ramp (GDD 21.2), neither past the sidewalk
+                {
+                    var road = c.roads.Count > 0 ? c.roads[0] : null; Num rz = road != null ? (road.minz + road.maxz) / 2 : b.z;
+                    int sg = road == null ? 1 : b.z - rz > 0 ? 1 : b.z - rz < 0 ? -1 : 0;
+                    Num zw = road != null ? (sg > 0 ? road.maxz + T.terrain.grade.walk : road.minz - T.terrain.grade.walk) : b.z, zf = b.z - sg * b.hd;
+                    var pad = new Pad { k = 5, minx = b.x - b.hw, maxx = b.x + b.hw, minz = b.z - b.hd, maxz = b.z + b.hd, m = T.terrain.grade.house, hx = b.x, hz = b.z, z0 = rz, run = Abs(zf - zw), road = road != null, zw = zw, sg = sg };
+                    P.Add(pad);
+                    if (road != null) ramps.Add(pad.ramp = new Pad { k = 6, minx = b.x - b.hw, maxx = b.x + b.hw, minz = Min(zw, zf), maxz = Max(zw, zf), m = T.terrain.grade.house, zw = zw, zf = zf, sg = sg, z0 = rz, pad = pad });
+                }
+                P.AddRange(ramps);
                 pads[key] = P;
                 return P;
             }
         }
+        /// the terrain's shape tuning: a cache of pads, footings or street nodes is dropped when it changes (world.js shapeStamp)
+        static string ShapeTag() => "|" + N(T.terrain.amp) + "," + N(T.terrain.cell) + "," + T.terrain.octaves + "," + N(T.terrain.warp) + "," + N(T.terrain.ridge) + "," + N(T.terrain.terrace) + "," + N(T.terrain.terraceStep) + "," + T.terrain.grade.oct;
         static string N(Num v) => ((double)v).ToString("R", System.Globalization.CultureInfo.InvariantCulture);
         /// The ground's height: the shape times the modifier, flat when the terrain modifier is 0 and round the home
         /// tree, damped under built-up land, graded under streets, lots, squares and buildings. The sim works in height above it.
@@ -603,10 +622,11 @@ namespace Sting.Core
                         Num d;
                         if (p.k == 6) d = Max(0, Sqrt((x - p.x) * (x - p.x) + (z - p.z) * (z - p.z)) - p.r);
                         else { Num dx = Max(Max(p.minx - x, 0), x - p.maxx), dz = Max(Max(p.minz - z, 0), z - p.maxz); d = Sqrt(dx * dx + dz * dz); }
-                        if (d >= p.m) continue;
-                        lock (p) { if (!p.hSet) { p.h = GroundBase(seed, p.hx, p.hz, st, 1); p.hSet = true; } }
-                        Num w = 1 - Smooth(d / p.m);
-                        h += (p.h * terrain - h) * w;
+                        Footing(seed, p, st, terrain);
+                        Num pm = p.mT[terrain];
+                        if (d >= pm) continue;
+                        Num w = 1 - Smooth(d / pm);
+                        h += (p.hT[terrain] - h) * w;
                     }
             return h;
         }
@@ -616,7 +636,7 @@ namespace Sting.Core
         public static int FootingCount(ulong seed, int cx, int cz, Settings st) => FootingsOf(seed, cx, cz, st).Count;
         static List<Pad> FootingsOf(ulong seed, int cx, int cz, Settings st)
         {
-            var F = Features(st); string tag = seed + ":" + F.woods + "," + F.towns + "," + N(F.water) + "," + N(F.hives);
+            var F = Features(st); string tag = seed + ":" + F.woods + "," + F.towns + "," + N(F.water) + "," + N(F.hives) + ShapeTag();
             lock (feet)
             {
                 if (feetTag != tag) { feetTag = tag; feet.Clear(); }
@@ -628,10 +648,127 @@ namespace Sting.Core
                 foreach (var t in c.tables) { if (t.axisX) R(t.x, t.z, 0.95, 0.81); else R(t.x, t.z, 0.81, 0.95); }
                 foreach (var s in c.sheds) if (!s.house) R(s.x, s.z, s.hw, s.hd);
                 foreach (var hv in c.hives) R(hv.x, hv.z, 0.225, 0.225);
-                foreach (var b in c.boxes) if (b.bench && b.miny < 0.45) R((b.minx + b.maxx) / 2, (b.minz + b.maxz) / 2, (b.maxx - b.minx) / 2 + 0.25, (b.maxz - b.minz) / 2 + 0.25);
+                foreach (var b in c.boxes) if (b.bench && b.miny < 0.45) { R((b.minx + b.maxx) / 2, (b.minz + b.maxz) / 2, (b.maxx - b.minx) / 2 + 0.25, (b.maxz - b.minz) / 2 + 0.25); P[P.Count - 1].@fixed = true; }
                 foreach (var b in c.baths) P.Add(new Pad { k = 6, x = b.x, z = b.z, r = b.r + a, m = m, hx = b.x, hz = b.z });
+                var Bq = new List<(Num x, Num z, Num hw, Num hd)>(); // a footing's shoulder stops short of any building's pad
+                foreach (var q in c.sheds) if (q.house) Bq.Add((q.x, q.z, q.hw, q.hd));
+                foreach (var q in c.shops) Bq.Add((q.x, q.z, q.hw, q.hd));
+                foreach (var q in c.malls) Bq.Add((q.x, q.z, q.hw, q.hd));
+                foreach (var f in P)
+                {
+                    Num cap = T.terrain.grade.reach;
+                    foreach (var q in Bq)
+                    {
+                        Num dx = f.k == 6 ? Max(0, Abs(f.x - q.x) - q.hw - f.r) : Max(Max(0, q.x - q.hw - f.maxx), f.minx - q.x - q.hw), dz = f.k == 6 ? Max(0, Abs(f.z - q.z) - q.hd - f.r) : Max(Max(0, q.z - q.hd - f.maxz), f.minz - q.z - q.hd);
+                        cap = Min(cap, Sqrt(dx * dx + dz * dz));
+                    }
+                    f.cap = Max(0.25, cap);
+                }
                 feet[key] = P;
                 return P;
+            }
+        }
+        /// a footing's height and shoulder (2:1 banks at most), once per step of the modifier (world.js footing)
+        static void Footing(ulong seed, Pad p, Settings st, int terrain)
+        {
+            lock (p)
+            {
+                if (p.tSet[terrain]) return;
+                Num h = GroundBase(seed, p.hx, p.hz, st, terrain), drop = 0;
+                int[,] c4 = { { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } };
+                for (int k = 0; k < 4; k++)
+                {
+                    int ax = c4[k, 0], az = c4[k, 1];
+                    Num x = p.k == 6 ? p.x + ax * (p.r + 1) : ax < 0 ? p.minx - 1 : p.maxx + 1, z = p.k == 6 ? p.z + az * (p.r + 1) : az < 0 ? p.minz - 1 : p.maxz + 1;
+                    drop = Max(drop, Abs(h - GroundBase(seed, x, z, st, terrain)));
+                }
+                p.hT[terrain] = h; p.mT[terrain] = Min(p.cap, p.@fixed ? T.terrain.grade.shed : Max(T.terrain.grade.shed, Min(T.terrain.grade.reach, 4 * drop + 0.5))); p.tSet[terrain] = true;
+            }
+        }
+        /// a street's height along its length, held to its grade limit with no kinks (GDD 21.1; world.js streetAt): levels
+        /// at nodes from the mean of the highest and lowest lines of the limiting slope, a quadratic B-spline through them
+        static readonly Dictionary<long, Num> streetNodes = new Dictionary<long, Num>(), streetLevels = new Dictionary<long, Num>(); static string streetTag;
+        static Num StreetLevel(ulong seed, int i, int row, Num z0, Settings st, int terrain)
+        {
+            Num G = T.terrain.grade.street, Nn = T.terrain.grade.node; int K = (int)Ceil(T.terrain.grade.window / Nn); long ke = CellKey(i, row * 8 + terrain);
+            lock (streetNodes) { if (streetLevels.TryGetValue(ke, out var e0)) return e0; }
+            Num U = 0, L = 0; bool first = true;
+            for (int j = i - K; j <= i + K; j++)
+            {
+                Num b; long k = CellKey(j, row);
+                lock (streetNodes) { if (!streetNodes.TryGetValue(k, out b)) { if (streetNodes.Count > 65536) streetNodes.Clear(); b = NaturalGround(seed, j * Nn, z0, st, 1, T.terrain.grade.oct); streetNodes[k] = b; } }
+                Num d = Abs(i - j) * Nn, h = b * terrain;
+                if (first || h + G * d < U) U = h + G * d;
+                if (first || h - G * d > L) L = h - G * d;
+                first = false;
+            }
+            Num e = (U + L) / 2;
+            lock (streetNodes) { if (streetLevels.Count > 65536) streetLevels.Clear(); streetLevels[ke] = e; }
+            return e;
+        }
+        static Num StreetAt(ulong seed, Num x, Num z0, Settings st, int terrain)
+        {
+            var F = Features(st); string tag = seed + ":" + F.woods + "," + F.towns + "," + N(F.water) + "," + N(F.hives) + ShapeTag();
+            lock (streetNodes) { if (streetTag != tag) { streetTag = tag; streetNodes.Clear(); streetLevels.Clear(); } }
+            Num Nn = T.terrain.grade.node; int row = (int)Floor(z0 / CS + 0.5); Num u = x / Nn - 0.5; int i = (int)Floor(u); Num f = u - i;
+            Num a = StreetLevel(seed, i, row, z0, st, terrain), b = StreetLevel(seed, i + 1, row, z0, st, terrain), c = StreetLevel(seed, i + 2, row, z0, st, terrain);
+            return 0.5 * (1 - f) * (1 - f) * a + (0.5 + f - f * f) * b + 0.5 * f * f * c;
+        }
+        /// a street's shoulder: 2:1 banks at most (world.js streetBank)
+        static void StreetBank(ulong seed, Pad p, Settings st, int terrain)
+        {
+            lock (p)
+            {
+                if (p.tSet[terrain]) return;
+                int A = T.terrain.octaves; Num drop = 0;
+                if (p.k == 0)
+                {
+                    for (Num x = p.minx; x <= p.maxx; x += T.terrain.grade.node)
+                    {
+                        Num hs = StreetAt(seed, x, p.hz, st, terrain);
+                        drop = Max(drop, Abs(hs - NaturalGround(seed, x, p.minz - 3, st, terrain, A)));
+                        drop = Max(drop, Abs(hs - NaturalGround(seed, x, p.maxz + 3, st, terrain, A)));
+                    }
+                }
+                else for (int k = 0; k < 8; k++)
+                    {
+                        Num a = k * 0.7853981633974483, x = p.x + DCos(a) * (p.r + 3), z = p.z + DSin(a) * (p.r + 3);
+                        drop = Max(drop, Abs(StreetAt(seed, x, p.hz, st, terrain) - NaturalGround(seed, x, z, st, terrain, A)));
+                    }
+                p.mT[terrain] = Max(T.terrain.grade.road, Min(T.terrain.grade.bank, 4 * drop + 1)); p.tSet[terrain] = true;
+            }
+        }
+        /// a house's pad within its drive's grade of the street, its banks 2:1 at most (world.js housePad)
+        static void HousePad(ulong seed, Pad p, Settings st, int terrain)
+        {
+            lock (p)
+            {
+                if (p.tSet[terrain]) return;
+                int GO = T.terrain.grade.oct, A = T.terrain.octaves;
+                Num h = NaturalGround(seed, p.hx, p.hz, st, terrain, GO), hw = h;
+                if (p.road)
+                {
+                    hw = StreetAt(seed, p.hx, p.z0, st, terrain);
+                    Num a = StreetAt(seed, p.minx, p.z0, st, terrain), b2 = StreetAt(seed, p.maxx, p.z0, st, terrain), lim = T.terrain.grade.drive * p.run;
+                    Num lo = Max(Max(a, b2), hw) - lim, hi = Min(Min(a, b2), hw) + lim;
+                    h = lo <= hi ? Max(lo, Min(hi, h)) : (lo + hi) / 2;
+                }
+                Num m = 3; int[,] e8 = { { -1, -1 }, { 0, -1 }, { 1, -1 }, { 1, 0 }, { 1, 1 }, { 0, 1 }, { -1, 1 }, { -1, 0 } };
+                for (int pass = 0; pass < 2; pass++)
+                {
+                    Num drop = 0;
+                    for (int k = 0; k < 8; k++)
+                    {
+                        int ax = e8[k, 0], az = e8[k, 1];
+                        Num x = ax < 0 ? p.minx - m : ax > 0 ? p.maxx + m : p.hx, z = az < 0 ? p.minz - m : az > 0 ? p.maxz + m : p.hz;
+                        drop = Max(drop, Abs(h - NaturalGround(seed, x, z, st, terrain, A)));
+                    }
+                    if (p.ramp != null) { drop = Max(drop, Abs(hw - NaturalGround(seed, p.minx - m, p.ramp.zw, st, terrain, A))); drop = Max(drop, Abs(hw - NaturalGround(seed, p.maxx + m, p.ramp.zw, st, terrain, A))); }
+                    m = Max(m, Max(T.terrain.grade.house, Min(T.terrain.grade.bank, 4 * drop + 1)));
+                }
+                p.hT[terrain] = h; p.mT[terrain] = m;
+                if (p.ramp != null) { p.ramp.hwT[terrain] = hw; p.ramp.mT[terrain] = m; p.ramp.tSet[terrain] = true; }
+                p.tSet[terrain] = true;
             }
         }
         /// the ground graded under paving, buildings and ponds, before the footings
@@ -643,15 +780,22 @@ namespace Sting.Core
             for (int cz = c0z; cz <= c1z; cz++) for (int cx = c0x; cx <= c1x; cx++)
                     foreach (var p in PadsOf(seed, cx, cz, st))
                     {
+                        if (p.k >= 5) HousePad(seed, p.k == 6 ? p.pad : p, st, terrain);
+                        else if (p.k == 0 || p.k == 2) StreetBank(seed, p, st, terrain);
+                        Num pm = p.k >= 5 || p.k == 0 || p.k == 2 ? p.mT[terrain] : p.m;
+                        if (p.k >= 5 && p.sg * (z - p.zw) < 0) continue; // not past the sidewalk
                         Num d;
                         if (p.k == 2 || p.k == 4) d = Max(0, Sqrt((x - p.x) * (x - p.x) + (z - p.z) * (z - p.z)) - p.r);
                         else { Num dx = Max(Max(p.minx - x, 0), x - p.maxx), dz = Max(Max(p.minz - z, 0), z - p.maxz); d = Sqrt(dx * dx + dz * dz); }
-                        if (d >= p.m) continue;
+                        if (d >= pm) continue;
                         Num hp;
-                        if (p.k == 0 || p.k == 2) hp = NaturalGround(seed, x, p.hz, st, terrain, GO);
+                        if (p.k == 0 || p.k == 2) hp = StreetAt(seed, x, p.hz, st, terrain);
                         else if (p.k == 3) hp = NaturalGround(seed, x, z, st, terrain, GO);
+                        else if (p.k == 5) hp = p.hT[terrain];
+                        else if (p.k == 6) { Num f = Max(0, Min(1, (z - p.zw) / (p.zf - p.zw))), w0 = StreetAt(seed, x, p.z0, st, terrain); hp = w0 + (p.pad.hT[terrain] - w0) * f; }
                         else { lock (p) { if (!p.hSet) { p.h = NaturalGround(seed, p.hx, p.hz, st, 1, GO); p.hSet = true; } } hp = p.h * terrain; }
-                        Num w = 1 - Smooth(d / p.m);
+                        Num w = 1 - Smooth(d / pm);
+                        if (p.k == 5 && p.road) w *= Smooth(Min(1, p.sg * (z - p.zw) / p.run)); // a house's banks fade out across its front yard
                         h += (hp - h) * w;
                     }
             return h;

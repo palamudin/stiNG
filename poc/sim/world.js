@@ -267,7 +267,7 @@ function worldTables(seed, s) {
   let t = tableSets.get(tag);
   if (!t) {
     if (tableSets.size >= 8) tableSets.clear();
-    t = { use: new Map(), region: new Map(), roll: new Map(), ponds: new Map(), paving: new Map(), pads: new Map(), feet: new Map() };
+    t = { use: new Map(), region: new Map(), roll: new Map(), ponds: new Map(), paving: new Map(), pads: new Map(), feet: new Map(), street: new Map(), streetE: new Map() };
     tableSets.set(tag, t);
   }
   lastTables = { seed, woods, towns, water, hives, t };
@@ -364,14 +364,23 @@ function padsOf(seed, cx, cz, settings) {
   const c = pavingOf(seed, cx, cz, settings), Gr = T.terrain.grade;
   P = [];
   const rect = (k, minx, maxx, minz, maxz, m, hx, hz) => P.push({ k, minx, maxx, minz, maxz, m, hx, hz, h: null });
-  for (const r of c.roads) rect(0, r.minx, r.maxx, r.minz - Gr.walk, r.maxz + Gr.walk, Gr.road, 0, (r.minz + r.maxz) / 2);
-  for (const l of c.loops) P.push({ k: 2, x: l.x, z: l.z, r: l.r, m: Gr.road, hx: 0, hz: l.z, h: null });
+  for (const l of c.loops) P.push({ k: 2, x: l.x, z: l.z, r: l.r, m: Gr.road, hx: 0, hz: l.z, h: null, t: 0 });
   for (const l of c.lots) rect(1, l.minx, l.maxx, l.minz, l.maxz, Gr.lot, (l.minx + l.maxx) / 2, (l.minz + l.maxz) / 2);
   for (const p of c.plazas) rect(3, p.minx, p.maxx, p.minz, p.maxz, Gr.lot, 0, 0);
   for (const b of c.malls) rect(1, b.x - b.hw, b.x + b.hw, b.z - b.hd, b.z + b.hd, Gr.house, b.x, b.z);
   for (const b of c.shops) rect(1, b.x - b.hw, b.x + b.hw, b.z - b.hd, b.z + b.hd, Gr.house, b.x, b.z);
-  for (const b of c.houses) rect(1, b.x - b.hw, b.x + b.hw, b.z - b.hd, b.z + b.hd, Gr.house, b.x, b.z);
   for (const p of c.ponds) P.push({ k: 4, x: p.x, z: p.z, r: p.r, m: Gr.pond, hx: p.x, hz: p.z, h: null });
+  for (const r of c.roads) P.push({ k: 0, minx: r.minx, maxx: r.maxx, minz: r.minz - Gr.walk, maxz: r.maxz + Gr.walk, m: Gr.road, hx: 0, hz: (r.minz + r.maxz) / 2, h: null, t: 0 });
+  // a house (GDD 21.2, semi-urban to code): its pad level, no higher or lower than its drive allows above the street;
+  // its front yard a straight ramp from the sidewalk to the pad; its banks no steeper than 2:1 (pads 5 and 6, padHeight)
+  const ramps = [];
+  for (const b of c.houses) {
+    const road = c.roads[0], s = road ? Math.sign(b.z - (road.minz + road.maxz) / 2) : 1, zw = road ? (s > 0 ? road.maxz + Gr.walk : road.minz - Gr.walk) : b.z, zf = b.z - s * b.hd;
+    const pad = { k: 5, minx: b.x - b.hw, maxx: b.x + b.hw, minz: b.z - b.hd, maxz: b.z + b.hd, m: Gr.house, hx: b.x, hz: b.z, h: null, t: 0, z0: road ? (road.minz + road.maxz) / 2 : b.z, run: Math.abs(zf - zw), road: !!road, zw, sg: s };
+    P.push(pad);
+    if (road) ramps.push(pad.ramp = { k: 6, minx: b.x - b.hw, maxx: b.x + b.hw, minz: Math.min(zw, zf), maxz: Math.max(zw, zf), m: Gr.house, zw, zf, sg: s, z0: pad.z0, pad, t: 0 });
+  }
+  P.push(...ramps); // the front yards last; neither a pad nor a ramp reaches past the sidewalk, which stays level across
   pads.set(key, P);
   return P;
 }
@@ -453,6 +462,73 @@ function makePaving(seed, cx, cz, settings) {
   }
   return out;
 }
+// A street's height along its length (GDD 21.1, semi-urban to code): the broad shape of the land, held to the street's
+// grade limit by cutting where the land rises faster and filling where it falls, with no kinks. The broad shape is
+// sampled at nodes every `node` m on a fixed grid; at each node the street's level is the mean of the highest and
+// lowest lines of slope `street` through the nodes within `window` m (each keeps that slope, so their mean does); the
+// street is a quadratic B-spline through those levels, whose slope is a blend of neighbouring rises, so it keeps the
+// limit too, and bends smoothly. Both are kept in tables.
+function streetLevel(seed, i, row, z0, settings, terrain, t) {
+  const Gr = T.terrain.grade, G = Gr.street, N = Gr.node, K = Math.ceil(Gr.window / N), ke = cellKey(i, row * 8 + terrain);
+  let e = t.streetE.get(ke);
+  if (e !== undefined) return e;
+  let U = Infinity, L = -Infinity;
+  for (let j = i - K; j <= i + K; j++) {
+    const k = cellKey(j, row); let b = t.street.get(k);
+    if (b === undefined) b = keep(t.street, k, naturalGround(seed, j * N, z0, settings, 1, Gr.oct));
+    const d = Math.abs(i - j) * N, h = b * terrain;
+    if (h + G * d < U) U = h + G * d;
+    if (h - G * d > L) L = h - G * d;
+  }
+  return keep(t.streetE, ke, (U + L) / 2);
+}
+function streetAt(seed, x, z0, settings, terrain) {
+  const t = worldTables(seed, settings), stamp = shapeStamp();
+  if (t.streetStamp !== stamp) { t.streetStamp = stamp; t.street.clear(); t.streetE.clear(); }
+  const N = T.terrain.grade.node, row = Math.round(z0 / CS), u = x / N - 0.5, i = Math.floor(u), f = u - i;
+  const a = streetLevel(seed, i, row, z0, settings, terrain, t), b = streetLevel(seed, i + 1, row, z0, settings, terrain, t), c = streetLevel(seed, i + 2, row, z0, settings, terrain, t);
+  return 0.5 * (1 - f) * (1 - f) * a + (0.5 + f - f * f) * b + 0.5 * f * f * c;
+}
+// A street's (or cul-de-sac's) shoulder: wide enough that the bank between the graded street and the land beside it is
+// no steeper than 2:1, from the drop sampled every node m along it, at least road m and at most bank m
+function streetBank(seed, p, settings, terrain) {
+  const Gr = T.terrain.grade, A = T.terrain.octaves;
+  let drop = 0;
+  if (p.k === 0) for (let x = p.minx; x <= p.maxx; x += Gr.node) {
+    const hs = streetAt(seed, x, p.hz, settings, terrain);
+    for (const z of [p.minz - 3, p.maxz + 3]) drop = Math.max(drop, Math.abs(hs - naturalGround(seed, x, z, settings, terrain, A)));
+  } else for (let k = 0; k < 8; k++) {
+    const a = k * 0.7853981633974483, x = p.x + dcos(a) * (p.r + 3), z = p.z + dsin(a) * (p.r + 3);
+    drop = Math.max(drop, Math.abs(streetAt(seed, x, p.hz, settings, terrain) - naturalGround(seed, x, z, settings, terrain, A)));
+  }
+  p.m = Math.max(Gr.road, Math.min(Gr.bank, 4 * drop + 1)); p.t = terrain;
+}
+// A house's pad: level at the broad shape's height at its middle, but no further above or below the street than its
+// drive's grade allows over the front yard (`drive`); its shoulder wide enough that no bank is steeper than 2:1
+// (a smoothstep shoulder's steepest is 1.5 times the drop over its width), up to `bank` m. Its front-yard ramp starts
+// at the street's height in front of it.
+function housePad(seed, p, settings, terrain) {
+  const Gr = T.terrain.grade;
+  let h = naturalGround(seed, p.hx, p.hz, settings, terrain, Gr.oct), hw = h;
+  if (p.road) { // within the drive's grade of the sidewalk all across the front
+    hw = streetAt(seed, p.hx, p.z0, settings, terrain);
+    const a = streetAt(seed, p.minx, p.z0, settings, terrain), b = streetAt(seed, p.maxx, p.z0, settings, terrain), lim = Gr.drive * p.run;
+    const lo = Math.max(a, b, hw) - lim, hi = Math.min(a, b, hw) + lim;
+    h = lo <= hi ? Math.max(lo, Math.min(hi, h)) : (lo + hi) / 2;
+  }
+  let m = 3;
+  for (let pass = 0; pass < 2; pass++) { // the drop to the land round it at the shoulder's edge, then again at the wider edge it asks for
+    let drop = 0;
+    for (const [ax, az] of [[-1, -1], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0]]) {
+      const x = ax < 0 ? p.minx - m : ax > 0 ? p.maxx + m : p.hx, z = az < 0 ? p.minz - m : az > 0 ? p.maxz + m : p.hz;
+      drop = Math.max(drop, Math.abs(h - naturalGround(seed, x, z, settings, terrain, T.terrain.octaves)));
+    }
+    if (p.ramp) for (const ax of [-1, 1]) drop = Math.max(drop, Math.abs(hw - naturalGround(seed, ax < 0 ? p.minx - m : p.maxx + m, p.ramp.zw, settings, terrain, T.terrain.octaves)));
+    m = Math.max(m, Math.max(Gr.house, Math.min(Gr.bank, 4 * drop + 1)));
+  }
+  p.h = h; p.t = terrain; p.m = m;
+  if (p.ramp) { p.ramp.t = terrain; p.ramp.m = p.m; }
+}
 // Footings (GDD 18.75, G3): the small things that stand on the ground (picnic tables, garden sheds, bee boxes, benches,
 // birdbaths and fountains) each get a level pad, as a slab or a gravel bed is laid in life: their footprint and an apron
 // of `apron` m round it is level at the ground's height at their middle, cut into the slope uphill and built up downhill,
@@ -465,12 +541,22 @@ export function footingsOf(seed, cx, cz, settings) {
 }
 function makeFootings(seed, cx, cz, settings) {
   const c = generateChunk(seed, cx, cz, settings), Gr = T.terrain.grade, a = Gr.apron, m = Gr.shed, F = [];
-  const rect = (x, z, hw, hd) => F.push({ k: 5, minx: x - hw - a, maxx: x + hw + a, minz: z - hd - a, maxz: z + hd + a, m, hx: x, hz: z, h: null });
+  const rect = (x, z, hw, hd) => F.push({ k: 5, minx: x - hw - a, maxx: x + hw + a, minz: z - hd - a, maxz: z + hd + a, m, hx: x, hz: z, h: 0, t: 0 });
   for (const t of c.tables) if (t.axisX) rect(t.x, t.z, 0.95, 0.81); else rect(t.x, t.z, 0.81, 0.95); // the table and its benches
   for (const s of c.sheds) if (!s.house) rect(s.x, s.z, s.hw, s.hd);
   for (const h of c.hives) rect(h.x, h.z, 0.225, 0.225);
-  for (const b of c.boxes) if (b.bench && b.miny < 0.45) rect((b.minx + b.maxx) / 2, (b.minz + b.maxz) / 2, (b.maxx - b.minx) / 2 + 0.25, (b.maxz - b.minz) / 2 + 0.25); // a seat and its back
-  for (const b of c.baths) F.push({ k: 6, x: b.x, z: b.z, r: b.r + a, m, hx: b.x, hz: b.z, h: null });
+  for (const b of c.boxes) if (b.bench && b.miny < 0.45) { rect((b.minx + b.maxx) / 2, (b.minz + b.maxz) / 2, (b.maxx - b.minx) / 2 + 0.25, (b.maxz - b.minz) / 2 + 0.25); F[F.length - 1].fixed = true; } // a seat and its back, on the pond's graded path: its shoulder stays shed m, clear of the water
+  for (const b of c.baths) F.push({ k: 6, x: b.x, z: b.z, r: b.r + a, m, hx: b.x, hz: b.z, h: 0, t: 0 });
+  // a footing's shoulder stops short of any building's pad
+  const B = [...c.sheds.filter((q) => q.house), ...c.shops, ...c.malls];
+  for (const f of F) {
+    let cap = Gr.reach;
+    for (const q of B) {
+      const dx = f.k === 6 ? Math.max(0, Math.abs(f.x - q.x) - q.hw - f.r) : Math.max(0, q.x - q.hw - f.maxx, f.minx - q.x - q.hw), dz = f.k === 6 ? Math.max(0, Math.abs(f.z - q.z) - q.hd - f.r) : Math.max(0, q.z - q.hd - f.maxz, f.minz - q.z - q.hd);
+      cap = Math.min(cap, Math.sqrt(dx * dx + dz * dz));
+    }
+    f.cap = Math.max(0.25, cap);
+  }
   return F;
 }
 export function groundAt(seed, x, z, settings) {
@@ -483,13 +569,24 @@ export function groundAt(seed, x, z, settings) {
       let d;
       if (p.k === 6) d = Math.max(0, Math.sqrt((x - p.x) * (x - p.x) + (z - p.z) * (z - p.z)) - p.r);
       else { const dx = Math.max(p.minx - x, 0, x - p.maxx), dz = Math.max(p.minz - z, 0, z - p.maxz); d = Math.sqrt(dx * dx + dz * dz); }
+      if (p.t !== terrain) footing(seed, p, settings, terrain);
       if (d >= p.m) continue;
-      if (p.h === null) p.h = groundBase(seed, p.hx, p.hz, settings, 1); // the ground there without footings, kept per step of the modifier
       const w = 1 - smooth(d / p.m);
-      h += (p.h * terrain - h) * w;
+      h += (p.h - h) * w;
     }
   }
   return h;
+}
+// A footing's height (the ground there without footings) and its shoulder: wide enough for a bank of 2:1 at most, from
+// the drop to the ground a metre past its apron, at least shed m and at most the reach; once per step of the modifier
+function footing(seed, p, settings, terrain) {
+  const Gr = T.terrain.grade, h = groundBase(seed, p.hx, p.hz, settings, terrain);
+  let drop = 0;
+  for (const [ax, az] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+    const x = p.k === 6 ? p.x + ax * (p.r + 1) : ax < 0 ? p.minx - 1 : p.maxx + 1, z = p.k === 6 ? p.z + az * (p.r + 1) : az < 0 ? p.minz - 1 : p.maxz + 1;
+    drop = Math.max(drop, Math.abs(h - groundBase(seed, x, z, settings, terrain)));
+  }
+  p.h = h; p.m = Math.min(p.cap, p.fixed ? Gr.shed : Math.max(Gr.shed, Math.min(Gr.reach, 4 * drop + 0.5))); p.t = terrain;
 }
 // the ground graded under paving, buildings and ponds, before the footings
 function groundBase(seed, x, z, settings, terrain) {
@@ -497,15 +594,21 @@ function groundBase(seed, x, z, settings, terrain) {
   const Gr = T.terrain.grade, M = Gr.reach, c0x = chunkOf(x - M), c1x = chunkOf(x + M), c0z = chunkOf(z - M), c1z = chunkOf(z + M);
   for (let cz = c0z; cz <= c1z; cz++) for (let cx = c0x; cx <= c1x; cx++) {
     for (const p of padsOf(seed, cx, cz, settings)) {
+      if (p.k >= 5 && p.t !== terrain) housePad(seed, p.k === 6 ? p.pad : p, settings, terrain); // a house's pad and its ramp, worked out once per step of the modifier
+      else if ((p.k === 0 || p.k === 2) && p.t !== terrain) streetBank(seed, p, settings, terrain);
+      if (p.k >= 5 && p.sg * (z - p.zw) < 0) continue; // not past the sidewalk
       let d;
       if (p.k === 2 || p.k === 4) d = Math.max(0, Math.sqrt((x - p.x) * (x - p.x) + (z - p.z) * (z - p.z)) - p.r);
       else { const dx = Math.max(p.minx - x, 0, x - p.maxx), dz = Math.max(p.minz - z, 0, z - p.maxz); d = Math.sqrt(dx * dx + dz * dz); }
       if (d >= p.m) continue;
       let hp;
-      if (p.k === 0 || p.k === 2) hp = naturalGround(seed, x, p.hz, settings, terrain, Gr.oct); // a street and its cul-de-sac
+      if (p.k === 0 || p.k === 2) hp = streetAt(seed, x, p.hz, settings, terrain); // a street and its cul-de-sac, within their grade
       else if (p.k === 3) hp = naturalGround(seed, x, z, settings, terrain, Gr.oct);
+      else if (p.k === 5) hp = p.h;
+      else if (p.k === 6) { const f = Math.max(0, Math.min(1, (z - p.zw) / (p.zf - p.zw))), w0 = streetAt(seed, x, p.z0, settings, terrain); hp = w0 + (p.pad.h - w0) * f; } // the front yard: a straight ramp from the sidewalk
       else { if (p.h === null) p.h = naturalGround(seed, p.hx, p.hz, settings, 1, Gr.oct); hp = p.h * terrain; } // kept per step of the modifier
-      const w = 1 - smooth(d / p.m);
+      let w = 1 - smooth(d / p.m);
+      if (p.k === 5 && p.road) w *= smooth(Math.min(1, p.sg * (z - p.zw) / p.run)); // a house's banks fade out across its front yard, to nothing at the sidewalk
       h += (hp - h) * w;
     }
   }

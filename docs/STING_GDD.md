@@ -2274,6 +2274,37 @@ Houses, sheds, shops, malls, garden lights, birdbaths and fountains, trunks, tab
 - A new parity digest per seed (`build.*`) covers every part of 81 chunks. JS and both C# builds match all 32 digests (426/426).
 - Drawn from the list, a house view has the same draw calls as before (201) and 0.1% more triangles. Shops, houses and sheds look the same.
 
+### 18.78 Semi-urban to code: streets, drives and banks (S4, GEN_VERSION 12)
+
+**What.** On a hilly world the yards are graded to the rules of 21.1, in the sim with its C# twin.
+- **Streets keep within 10%.**
+  - The broad shape of the land is sampled every 8 m along a street.
+  - At each node the street's level is the mean of the highest and lowest lines of slope 0.1 through the nodes within 64 m. Each line keeps that slope, so their mean does: cut where the land rises faster, filled where it falls.
+  - The street is a quadratic B-spline through those levels. Its slope is a blend of neighbouring rises, so it keeps the limit too, and it bends smoothly (0.004 m over a metre, against 0.108 on the lawns).
+  - Cul-de-sacs follow the street they end, and sidewalks stay level across.
+- **Drives keep within 15%.**
+  - A house's pad is level at the broad shape's height at its middle, but no further above or below the sidewalk than 15% over its front yard, all across its width.
+  - The front yard is a straight ramp from the sidewalk to the pad.
+- **Banks of 2:1 at most.**
+  - Every street, house pad and footing has a shoulder wide enough for its drop to the land beside it, up to 9 m: a smoothstep shoulder's steepest is 1.5 times the drop over its width, and the shoulder is four times the drop plus a margin.
+  - A house's banks fade out across its front yard, to nothing at the sidewalk.
+  - A footing's shoulder stops short of any building's pad.
+- **Tables.** The street's nodes and levels are kept per world, and are dropped when the shape tuning changes. The C# caches now drop on a shape change too, as the JS did.
+
+**Before**, on 625 chunks of a hilly world:
+- streets reached 22%;
+- a front yard rose up to 33% from the sidewalk to the house;
+- 0.06% of the yards' ground was steeper than 2:1, up to 134%.
+
+**Checks.** JS and both C# builds agree; the `motion` digest changed and matches (32 digests, 427/427).
+- Over 124 yards chunks on a hilly world:
+  - streets are at most 9.8%;
+  - drives are at most 15.0%;
+  - all 437 house pads are level;
+  - 34 of 507,904 spots are steeper than 2:1 (at most 0.65), where two banks meet.
+- Streets are still level across their sidewalks, and the ponds and footings of 18.73 and 18.75 still hold.
+- The ground is no longer exactly twice as high on a hilly world as on a rolling one: streets keep their grade on both.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -2282,7 +2313,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (133 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony; the T0 of progression (18.48): XP, unit and hive skills, the year's turn; multi-colony play with the player gauge (18.49); wintering in somewhere warm (18.50); chasing moving prey with a lock, with a colony view you can click (18.51); obstacle avoidance in assisted flight (18.52); reaching what moves under a lock (18.53); the lock ending on arrival (18.54); Shift hurrying an assisted flight (18.55); landing at speed with hovering round a lock (18.56); lines, the wasp in hand and roles passed on by masters (18.57); playing with a controller only, Xbox included (18.58); touch controls for phones and tablets (18.59); the map: minimap sizes, the big map and a phone HUD (18.60); colony switching through the relay (18.61); auto grab (18.62); the year's turn for hornet and honeybee lines (18.63); lockable moths with fireflies on summer evenings (18.64); swarms seen with a young queen's mating flight (18.65); AI raids on enemy nests (18.66); ground v2 (18.67); ground rings with graded ground (18.68); flight that feels the slope (18.69); the loading screen with warm-up and a menu over the live world (18.70); the quality controller (18.71); and the T3-1 leftovers: AI wasps kept out of walls, routes past long walls, the spot on a walker and the hover the player sets (18.72); and World v2, taken over from the world-building thread and offered as the menu's Look (20.5); ponds (18.73); surfaces drawn on request with work kept in tables (18.74); and footings under small things (18.75); meshes made from code (18.76); and the build list (18.77). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (134 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony; the T0 of progression (18.48): XP, unit and hive skills, the year's turn; multi-colony play with the player gauge (18.49); wintering in somewhere warm (18.50); chasing moving prey with a lock, with a colony view you can click (18.51); obstacle avoidance in assisted flight (18.52); reaching what moves under a lock (18.53); the lock ending on arrival (18.54); Shift hurrying an assisted flight (18.55); landing at speed with hovering round a lock (18.56); lines, the wasp in hand and roles passed on by masters (18.57); playing with a controller only, Xbox included (18.58); touch controls for phones and tablets (18.59); the map: minimap sizes, the big map and a phone HUD (18.60); colony switching through the relay (18.61); auto grab (18.62); the year's turn for hornet and honeybee lines (18.63); lockable moths with fireflies on summer evenings (18.64); swarms seen with a young queen's mating flight (18.65); AI raids on enemy nests (18.66); ground v2 (18.67); ground rings with graded ground (18.68); flight that feels the slope (18.69); the loading screen with warm-up and a menu over the live world (18.70); the quality controller (18.71); and the T3-1 leftovers: AI wasps kept out of walls, routes past long walls, the spot on a walker and the hover the player sets (18.72); and World v2, taken over from the world-building thread and offered as the menu's Look (20.5); ponds (18.73); surfaces drawn on request with work kept in tables (18.74); and footings under small things (18.75); meshes made from code (18.76); the build list (18.77); and semi-urban grading to code (18.78). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -2674,7 +2705,7 @@ Each is built, tested in JS and both C# builds where the sim is touched, documen
 - **What.** The builder of 21.3, in the sim (JS and C#), run on today's layouts unchanged. The yards, mall and town become build lists of parts with their boxes. The sim reads its boxes from them, and the drawing reads the parts instead of making its own.
 - **Done when:** a generated chunk's content hash is unchanged on a flat world, and the parity digests match.
 
-**S4. Semi-urban to code.**
+**S4. Semi-urban to code. Grading built (18.78); garages, drives and porch steps to come.**
 - **What.** Yards rebuilt with the template: lot sizes, setbacks, drives and garages, porch steps, banks between pads, streets within grade.
 - **Done when:**
   - every lot passes the template's rules on hilly worlds;

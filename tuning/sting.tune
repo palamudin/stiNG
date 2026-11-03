@@ -956,6 +956,11 @@ shed = 1
 apron = 0.3
 pond = 3
 reach = 3
+street = 0.1
+node = 8
+window = 64
+drive = 0.15
+bank = 9
 
 [terrain.roll]
 park = 1
