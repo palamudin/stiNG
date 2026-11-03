@@ -244,6 +244,23 @@
     body.touch #touch .tbtns.right button { height: 44px; font-size: 10px; }
     body.touch #vitals { bottom: calc(200px + env(safe-area-inset-bottom, 0px)); width: 80vw; }
   }
+
+  /* Boot (GDD 12.1): shown at once, before any script has loaded; the menu comes up only when the world is warm */
+  #boot { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: var(--ink); transition: opacity .45s ease; }
+  #boot.gone { opacity: 0; pointer-events: none; }
+  #boot.over { background: rgba(13, 12, 10, .95); }
+  #boot .bootcard { width: min(520px, calc(100vw - 32px)); }
+  #boot .titlerow { margin-bottom: 18px; }
+  #boot .bar { height: 6px; background: rgba(246, 199, 0, .12); border: 1px solid var(--line); }
+  #boot .bar i { display: block; height: 100%; width: 0; background: var(--yellow); transition: width .25s ease; }
+  #boot .line { display: flex; justify-content: space-between; gap: 12px; margin: 10px 0 0; color: var(--muted); font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
+  #boot .line b { color: var(--fg); font-weight: 500; }
+  #boot .tip { margin: 26px 0 0; min-height: 3.2em; color: var(--muted); line-height: 1.55; }
+  #boot .tip::before { content: "Field note · "; color: var(--yellow); }
+  #boot .err { color: var(--red); margin-top: 18px; }
+  #boot .err button { margin-left: 10px; }
+  /* at the start menu the world behind it is a backdrop: no HUD, no map, no touch controls */
+  body.atmenu .hud, body.atmenu #mapBox, body.atmenu #touch { visibility: hidden; }
 </style>
 
 <canvas id="view" aria-label="STING game view"></canvas>
@@ -393,7 +410,16 @@
   </section>
 </aside>
 
-<div class="screen" id="startScreen">
+<div id="boot" role="status" aria-live="polite">
+  <div class="bootcard">
+    <div class="titlerow"><h1 class="title">STI<span>NG</span></h1><span class="seal" aria-hidden="true">螫</span></div>
+    <div class="bar"><i id="bootFill"></i></div>
+    <p class="line"><b id="bootStage">Starting</b><span id="bootPct">0%</span></p>
+    <p class="tip" id="bootTip"></p>
+    <p class="err" id="bootErr" hidden></p>
+  </div>
+</div>
+<div class="screen" id="startScreen" hidden>
   <div class="card">
     <div class="titlerow"><h1 class="title">STI<span>NG</span></h1><span class="seal" aria-hidden="true">螫</span></div>
     <p class="sub">stung 0 / 8,200,000,000</p>
@@ -504,5 +530,65 @@
   </div>
 </div>
 
-<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
-<script type="module" src="./game.js"></script>
+<script>
+// Boot (GDD 12.1). This plain script runs before any module: it shows the loading screen at once, downloads three.js
+// and the game with byte progress, maps three to the copy it fetched (so it is fetched once), then starts the game,
+// which reports its own stages (init, world, shaders) through STING_BOOT and hands over to the menu when warm.
+(() => {
+  const THREE_URL = 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+  // the stages and their share of the bar; the same list drives the Unity boot scene
+  const STAGES = { fetch: [0, 0.55, 'Downloading'], init: [0.55, 0.65, 'Starting the engine'], world: [0.65, 0.85, 'Building the world'], shaders: [0.85, 1, 'Warming up the shaders'] };
+  // what the page fetches, with sizes to weigh the bar (an estimate: a file that turns out bigger just fills its share)
+  const FILES = [[THREE_URL, 1273000], ['game.js', 237000], ['sim/sim.js', 297000], ['sim/world.js', 46000], ['sim/tuning.js', 38500], ['sim/assist.js', 27300],
+    ['sim/body.js', 19000], ['sim/net.js', 14300], ['tuning/sting.tune', 13200], ['sim/colony.js', 10600], ['sim/persist.js', 8200], ['view/rings.js', 7700],
+    ['sim/tunefile.js', 6200], ['sim/rng.js', 3500], ['sim/bots.js', 2500], ['sim/index.js', 400]];
+  const TIPS = [
+    'A yellowjacket colony starts each spring from one queen who spent the winter alone, under bark or in a shed.',
+    'A wasp nest is paper: workers scrape wood fibre from fences and sheds and chew it into pulp.',
+    'Only the young queens live through the winter. The workers and the old queen die in the autumn.',
+    'Late in summer the brood is done and the workers turn to sugar. That is when they find your drink.',
+    'European hornets fly after dark, and porch lights draw the moths they hunt.',
+    'A honeybee\'s sting is barbed. It stays in the skin, and the bee dies.',
+    'Yellowjackets raid weaker colonies for their brood, and hornets hunt yellowjackets.',
+    'A honeybee colony lives through the winter as a cluster, warmed by the bees shivering their flight muscles.',
+  ];
+  const $ = (id) => document.getElementById(id), boot = $('boot');
+  let tipAt = Math.floor(Math.random() * TIPS.length), tipTimer = 0, shown = 0;
+  const tip = () => { $('bootTip').textContent = TIPS[tipAt++ % TIPS.length]; };
+  const set = (id, frac) => {
+    const S = STAGES[id] || STAGES.init, f = Math.max(shown, S[0] + (S[1] - S[0]) * Math.min(1, Math.max(0, frac)));
+    shown = f; $('bootFill').style.width = (f * 100).toFixed(1) + '%'; $('bootPct').textContent = Math.round(f * 100) + '%'; $('bootStage').textContent = S[2];
+  };
+  window.STING_BOOT = {
+    stage: set,
+    // over the menu, for a world built when Fly is pressed with other settings
+    begin(label) { shown = STAGES.world[0]; boot.classList.add('over'); boot.classList.remove('gone'); boot.hidden = false; set('world', 0); if (label) $('bootStage').textContent = label; tip(); if (!tipTimer) tipTimer = setInterval(tip, 5200); },
+    done() { set('shaders', 1); boot.classList.add('gone'); clearInterval(tipTimer); tipTimer = 0; setTimeout(() => { if (boot.classList.contains('gone')) boot.hidden = true; }, 500); },
+    fail(msg) { $('bootErr').hidden = false; $('bootErr').innerHTML = ''; $('bootErr').append(document.createTextNode(msg)); const b = document.createElement('button'); b.className = 'ghost'; b.textContent = 'Try again'; b.onclick = () => location.reload(); $('bootErr').append(b); },
+  };
+  tip(); tipTimer = setInterval(tip, 5200);
+  const total = FILES.reduce((a, f) => a + f[1], 0), got = new Map();
+  const bump = () => { let n = 0; for (const [u, est] of FILES) n += Math.min(est, got.get(u) || 0); set('fetch', n / total); };
+  const pull = async ([url, est]) => {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(url + ' ' + r.status);
+    if (!r.body) { const b = await r.blob(); got.set(url, est); bump(); return b; }
+    const rd = r.body.getReader(), parts = []; let n = 0;
+    for (;;) { const { done, value } = await rd.read(); if (done) break; parts.push(value); n += value.length; got.set(url, n); bump(); }
+    got.set(url, est); bump();
+    return new Blob(parts, { type: 'text/javascript' });
+  };
+  (async () => {
+    let threeSrc = THREE_URL;
+    try {
+      const blobs = await Promise.all(FILES.map(pull)); // our own files land in the browser's cache for the imports
+      threeSrc = URL.createObjectURL(blobs[0]);
+    } catch (e) { console.warn('boot: downloading with progress failed, loading directly', e); }
+    const im = document.createElement('script'); im.type = 'importmap';
+    im.textContent = JSON.stringify({ imports: { three: threeSrc } });
+    document.head.appendChild(im);
+    set('init', 0);
+    try { await import('./game.js'); } catch (e) { console.error(e); window.STING_BOOT.fail('The game did not load: ' + (e && e.message || e)); }
+  })();
+})();
+</script>

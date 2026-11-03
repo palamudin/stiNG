@@ -9,6 +9,9 @@ import {
 } from './sim/index.js';
 import { Rings, RING, ringGrid, ringGLSL } from './view/rings.js';
 
+// Boot (GDD 12.1): the page's loading screen takes this module's stages; without it (tests) they go nowhere
+const BOOT = window.STING_BOOT || { stage() {}, begin() {}, done() {}, fail() {} };
+BOOT.stage('init', 0.1);
 // Tuning as data (GDD 13, T1-22): read tuning/sting.tune, served next to the page, before anything uses T. Without it
 // the game runs the built-in values, and the pause screen and rules hash say so.
 try {
@@ -18,6 +21,7 @@ try {
     if (unknown.length || missing.length) console.warn(`tuning ${TUNE.hash}: ${unknown.length} unknown keys, ${missing.length} left built-in`, unknown, missing);
   }
 } catch (e) { console.warn('tuning: running the built-in values', e.message); }
+BOOT.stage('init', 0.4);
 
 const $ = (id) => document.getElementById(id);
 // Edge on Xbox drives a mouse cursor with the controller unless a page opts out; opting out hands the controller to the
@@ -3102,9 +3106,13 @@ function updateCamera(p, dt) {
     look = pos.clone().add(d0.lerp(dir, k).normalize());
   }
   camPos.copy(pos); // in the sim's frame, height above the ground
-  if (TERR.on) { // lift the camera and its target onto the ground as drawn (T2-6)
-    pos = pos.clone(); pos.y += terrAt(pos.x, pos.z);
-    look = look.clone(); look.y += terrAt(look.x, look.z);
+  if (TERR.on) { // on hills (T2-6, GDD 20 G4) the camera rig is lifted as one with the wasp, by the ground under the wasp:
+    // nothing in the view follows the lie of the land, only the wasp's own flight; the camera is kept out of the ground
+    const fg = terrAt(focus.x, focus.z);
+    pos = pos.clone(); pos.y += fg;
+    look = look.clone(); look.y += fg;
+    const under = terrAt(pos.x, pos.z) + 0.02;
+    if (pos.y < under) { look.y += under - pos.y; pos.y = under; }
   }
   camera.position.copy(pos);
   camera.lookAt(look);
@@ -3135,6 +3143,10 @@ function frame(now) {
     }
     if (n === cap) acc = 0;
   }
+  // the start menu's backdrop (GDD 12.1): no HUD, and the camera drifts slowly round the wasp
+  const atMenu = !$('startScreen').hidden || !$('boot').hidden;
+  document.body.classList.toggle('atmenu', atMenu);
+  if (atMenu && sim && !running) input.yaw += dt * 0.06;
   if (sim) {
     const P = window.__prof, tm = P ? (k, t0) => { P[k] = (P[k] || 0) + performance.now() - t0; } : null;
     let t0 = performance.now();
@@ -3276,7 +3288,34 @@ $('bContinue').addEventListener('click', () => {
 });
 showContinue();
 
-$('bStart').addEventListener('click', () => { initAudio(); applyDisplaySettings(); newWorld(readSettings()); $('startScreen').hidden = true; running = true; lock(); });
+// Warm-up (GDD 12.1): the world the menu would start is built and drawn behind it, and every shader it uses compiled,
+// before the menu comes up; Fly then starts it at once. Other settings build their world behind the loading screen.
+const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
+const warm = { key: null, p: null, rebuilt: 0 };
+const warmKey = (st) => JSON.stringify(st, (k, v) => (typeof v === 'bigint' ? String(v) : v)) + '|' + $('gfx').value;
+async function warmWorld(st) {
+  BOOT.stage('world', 0); await nextFrame();
+  applyDisplaySettings();
+  newWorld(st);
+  BOOT.stage('world', 0.6); await nextFrame(); await nextFrame(); // a drawn frame or two: views built, hills patched in
+  BOOT.stage('shaders', 0); await nextFrame();
+  try { if (renderer.compileAsync) await renderer.compileAsync(scene, camera); else renderer.compile(scene, camera); } catch (e) { console.warn('warm-up: compile', e); }
+  BOOT.stage('shaders', 0.8); await nextFrame(); await nextFrame();
+  warm.key = warmKey(st);
+}
+let starting = false;
+$('bStart').addEventListener('click', async () => {
+  if (starting) return;
+  starting = true;
+  initAudio();
+  if (warm.p) await warm.p; // still warming the menu's world
+  const st = readSettings();
+  if (!sim || sim.tick > 0 || warm.key !== warmKey(st)) { warm.rebuilt++; BOOT.begin("Building the world"); await warmWorld(st); BOOT.done(); }
+  else applyDisplaySettings();
+  $('startScreen').hidden = true; running = true; lock();
+  starting = false;
+  warm.key = null; // once flown, this world is no longer a fresh one to start
+});
 // Winter (T1-15): one button per wintering site; where she wakes is where the next season starts
 function showWinter(text) {
   $('winterText').textContent = text;
@@ -3313,11 +3352,18 @@ $('bNewLine').addEventListener('click', () => { $('extinctScreen').hidden = true
 try { if (localStorage.getItem('sting.lab') === '1') toggleLab(); } catch { /* optional */ }
 if (matchMedia('(pointer: coarse)').matches) { useTouch(); $('startNote').textContent = 'Personal world. Touch: the stick flies, drag anywhere to look, the buttons do the rest. Phones run lighter graphics; a keyboard, mouse or controller works too.'; }
 
-newWorld({ seed: 1234n, dayMinutes: 2, humanDensity: 1, beeAggression: 1, seasonDays: 40 });
 requestAnimationFrame(frame);
+BOOT.stage('init', 1);
+// the menu's world, warmed behind the loading screen; then the menu comes up over it
+warm.p = (async () => {
+  try { await warmWorld(readSettings()); } catch (e) { console.error(e); BOOT.fail('The world could not be built: ' + e.message); return; }
+  $('startScreen').hidden = false;
+  BOOT.done();
+  warm.p = null;
+})();
 
 // test hook for automated checks
-window.__sting = { get sim() { return sim; }, get lab() { return lab; }, input, padUI, touch, buildCmd, atlas, opts, start: () => $("bStart").click(), humanViews, waspViews, rings, toggleNest, toggleLab, saveWorld, camera, scene };
+window.__sting = { get sim() { return sim; }, get lab() { return lab; }, input, padUI, touch, buildCmd, atlas, opts, start: () => $("bStart").click(), humanViews, waspViews, rings, toggleNest, toggleLab, saveWorld, camera, scene, warm };
 window.__garment = (hm) => garmentGraph(hm.tr, hm.clothing, hm.posture, hm.parts[hm.posture]);
 window.__toWorld = toWorld;
 window.__weather = dayWeather;
