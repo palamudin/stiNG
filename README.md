@@ -11,7 +11,7 @@ An open-world, multiplayer wasp colony simulator. You run a colony through its y
 | Path | What it is |
 |---|---|
 | [`docs/STING_GDD.md`](docs/STING_GDD.md) | The game design document: pillars, simulation architecture, world, colony (with the growth tree and the three playable species: wasps, hornets, honeybees), wasp, humans, bees, multiplayer, Unity contract, decisions, open questions, and findings from the PoC |
-| [`poc/`](poc/) | The three.js proof of concept. A deterministic simulation core (`poc/sim/`) that owns every outcome, and a presentation layer (`poc/game.js`) that only draws. See [`poc/POC.md`](poc/POC.md) for the feature list and what has been verified |
+| [`poc/`](poc/) | The three.js proof of concept. A deterministic simulation core (`poc/sim/`) that owns every outcome, and a presentation layer (`poc/game.js`) that only draws. `poc/world/` is World v2, the high-detail world drawing (clipmap ground, forests, grass, sky, post chain) the menu's Look switches to; `poc/world.html` shows it on its own (GDD 20.5). See [`poc/POC.md`](poc/POC.md) for the feature list and what has been verified |
 | [`tuning/`](tuning/) | `sting.tune`: every tuning value of the sim as plain text, read by the PoC and the C# core with their own parsers (GDD 13). Edit it to retune; its hash goes into saves and the rules peers compare |
 | [`core/`](core/) | `Sting.Core`, the simulation in C# for the Unity port: the whole PoC sim, network lab and saves. One source, two builds: doubles (bit-identical to the JS, 29 digests) and Q32.32 fixed point (the shipping build, GDD R-04). `Sting.Core.Tests` is the parity and behaviour runner, `Sting.Headless` the headless runner |
 | [`protocode/`](protocode/) | C# protocode for the Unity port (`Sting.Core`): Fix64, the counter-based RNG, human traits, the sting resolver, reach, chunk storage and authority, colony economy. Compiles with zero packages |
@@ -36,7 +36,7 @@ three.js r160 is the one outside dependency, loaded by exact version from jsDeli
 cd poc
 node test/sim.test.mjs   # simulation: determinism, replay, colony, humans, swats, bees, seasons, saves
 node test/net.test.mjs   # two peers over simulated links: agreement on every human, late join, rival fights
-node test/view.test.mjs  # drawing helpers with no browser: the ground rings meet without cracks
+node test/view.test.mjs  # drawing helpers with no browser: the ground rings meet without cracks; World v2 draws the sim's ground and trees
 ```
 
 **C# core** (.NET 8 SDK):

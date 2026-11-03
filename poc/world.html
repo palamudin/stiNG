@@ -1,0 +1,77 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>STING World v2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@800;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --ink: #0d0c0a; --panel: rgba(13, 12, 10, 0.72); --line: rgba(246, 199, 0, 0.25);
+    --fg: #f3eee2; --muted: #a59d8a; --yellow: #f6c700; --red: #e5412d;
+    --display: "Big Shoulders Display", "Arial Narrow", Impact, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+    color-scheme: dark;
+  }
+  html, body { height: 100%; margin: 0; background: var(--ink); color: var(--fg); font: 12px/1.45 var(--mono); overflow: hidden; }
+  #view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+  #view:active { cursor: grabbing; }
+  .hud { position: fixed; z-index: 2; pointer-events: none; text-shadow: 0 1px 5px rgba(0,0,0,.6); }
+  #title { top: calc(12px + env(safe-area-inset-top, 0px)); left: calc(16px + env(safe-area-inset-left, 0px)); }
+  #title .big { font: 900 34px/0.9 var(--display); letter-spacing: .01em; }
+  #title .big b { color: var(--yellow); font-weight: 900; }
+  #title .sub { color: rgba(243,238,226,.8); letter-spacing: .14em; text-transform: uppercase; font-size: 10.5px; margin-top: 4px; }
+  #stats { bottom: calc(10px + env(safe-area-inset-bottom, 0px)); left: calc(16px + env(safe-area-inset-left, 0px)); color: rgba(243,238,226,.85); font-size: 11px; white-space: pre; }
+  #panel { position: fixed; z-index: 3; top: calc(12px + env(safe-area-inset-top, 0px)); right: calc(12px + env(safe-area-inset-right, 0px)); width: min(300px, calc(100vw - 24px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px))); background: var(--panel);
+    border: 1px solid var(--line); backdrop-filter: blur(6px); padding: 10px 12px 12px; display: grid; gap: 8px; max-height: calc(100vh - 24px); overflow: auto; }
+  #panel h2 { margin: 0; font: 800 18px/1 var(--display); letter-spacing: .04em; text-transform: uppercase; display: flex; justify-content: space-between; align-items: center; }
+  #panel h2 button { font: 500 11px var(--mono); }
+  #panel.closed > :not(h2) { display: none; }
+  .row { display: grid; grid-template-columns: 92px 1fr 44px; gap: 8px; align-items: center; }
+  .row label { color: var(--muted); text-transform: uppercase; letter-spacing: .08em; font-size: 10px; }
+  .row output { text-align: right; font-variant-numeric: tabular-nums; color: var(--fg); }
+  input[type=range] { width: 100%; accent-color: var(--yellow); }
+  select, button { background: #1b1914; color: var(--fg); border: 1px solid var(--line); font: 12px var(--mono); padding: 4px 6px; }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--yellow); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--yellow); outline-offset: 2px; }
+  .seg { display: flex; gap: 4px; flex-wrap: wrap; }
+  .seg button.on { background: var(--yellow); color: #15130f; border-color: var(--yellow); }
+  .hint { color: var(--muted); font-size: 10.5px; }
+  .note { margin: -4px 0 2px; color: var(--muted); font-size: 10px; line-height: 1.35; }
+  #panel.compact .note { display: none; }
+  #boot { position: fixed; inset: 0; z-index: 9; display: grid; place-items: center; background: var(--ink); transition: opacity .6s; }
+  #boot .t { font: 900 46px/1 var(--display); } #boot .t b { color: var(--yellow); }
+  #boot .s { color: var(--muted); text-align: center; margin-top: 8px; letter-spacing: .12em; text-transform: uppercase; font-size: 10.5px; }
+  #boot.gone { opacity: 0; pointer-events: none; }
+  @media (max-width: 640px) { #panel { top: auto; bottom: calc(10px + env(safe-area-inset-bottom, 0px)); max-height: 46vh; } #stats { bottom: auto; top: 64px; } #title .big { font-size: 26px; } }
+</style>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
+<canvas id="view"></canvas>
+<div id="boot"><div><div class="t">STI<b>NG</b> WORLD</div><div class="s" id="bootMsg">building the world</div></div></div>
+<div class="hud" id="title"><div class="big">STI<b>NG</b> WORLD v2</div><div class="sub">world template · terrain · forests · water · sky</div></div>
+<div class="hud" id="stats"></div>
+<div id="panel">
+  <h2>World <span><button id="bNotes" aria-label="Show or hide notes">notes</button> <button id="bPanel" aria-label="Collapse panel">hide</button></span></h2>
+  <div class="seg" id="segSource"><button data-v="wild" class="on">Wild world</button><button data-v="sting">STING world</button></div>
+  <div class="row"><label for="seed">Seed</label><input id="seed" type="range" min="1" max="99" step="1" value="7"><output id="oSeed">7</output></div>
+  <p class="note">The whole world from one number: ground, water, forests, trails, rocks. Same seed, same world, on every machine. In the STING world it is the sim's seed.</p>
+  <div class="row"><label for="tod">Time of day</label><input id="tod" type="range" min="4.5" max="21" step="0.05" value="16.6"><output id="oTod"></output></div>
+  <p class="note">Moves the sun. Its colour, the sky, the ambient light and the haze all come from one atmosphere model (single and multiple scattering), so a low sun reddens because the air took the blue. Exposure follows the light.</p>
+  <div class="row"><label for="zoom">Zoom</label><input id="zoom" type="range" min="0" max="1" step="0.001" value="0.42"><output id="oZoom"></output></div>
+  <p class="note">Distance to the point you look at, 6 cm to 9 km. Ground detail is refined round the camera; new detail blurs in as it arrives. The lens is a real thin lens, so close views get a macro depth of field.</p>
+  <div class="row"><label for="blocky">Blocky stone</label><input id="blocky" type="range" min="0" max="1" step="0.01" value="0.6"><output id="oBlocky"></output></div>
+  <p class="note">Cuts mountains into ledges of 5 m: 0 is smooth slopes, 1 is sheer steps. Rebuilds the world. Hills and meadows are not stepped.</p>
+  <div class="row"><label for="fog">Haze</label><input id="fog" type="range" min="0" max="2" step="0.01" value="1"><output id="oFog"></output></div>
+  <p class="note">Aerosol in the air (Mie density) and a low mist that thins with height above the water. Changes how far you see and how the sun glows; does not change the clouds.</p>
+  <div class="row"><label for="wind">Wind</label><input id="wind" type="range" min="0" max="1.5" step="0.01" value="0.85"><output id="oWind"></output></div>
+  <p class="note">One wind for everything drawn: trees lean and rock, leaves flutter, grass bends in travelling gusts, waves grow. Presentation only; in the game the sim has its own wind.</p>
+  <div class="row"><label for="fstop">Aperture</label><input id="fstop" type="range" min="1.4" max="16" step="0.1" value="2.8"><output id="oFstop"></output></div>
+  <p class="note">The f-number of a 45 mm lens. Lower blurs more in front of and behind the focus. At landscape distances the blur is physically tiny at any setting.</p>
+  <div class="row"><label for="wet">Rain</label><input id="wet" type="range" min="0" max="1" step="0.01" value="0"><output id="oWet"></output></div>
+  <p class="note">Wets the ground (darker, glossier) and rings the water with drops. Falling rain and puddles are not drawn yet.</p>
+  <div class="seg" id="segQ"><button data-v="low">Low</button><button data-v="medium">Medium</button><button data-v="high" class="on">High</button><button data-v="ultra">Ultra</button></div>
+  <div class="seg"><button id="bTour">Zoom tour</button><button id="bDive">Dive to the ground</button><button id="bShot">Hide UI</button></div>
+  <div class="hint">Drag to look round. Wheel or pinch to zoom from kilometres down to a wasp's view. WASD or arrows move, Shift is fast. Double-click to dive to a spot.</div>
+</div>
+<script type="module" src="world/demo.js"></script>
+
+</body></html>

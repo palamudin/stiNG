@@ -1,0 +1,167 @@
+// The ground as one draw call: every clipmap level is an instance of the same 64 x 64 grid, lifted in the vertex
+// shader from the clipmap (clipmap.js), morphing into its parent near its edge, sunk out of sight where a finer
+// level covers it. Shading is per pixel from the clipmap itself (normal, moisture, forest, trail), so a coarse
+// level far away lights like the fine one it stands for.
+//
+// The look: a naive palette (grass by moisture, dry tops, forest floor, dirt trails, sand at the water, stone on
+// steep ground cut into soft blocks, snow on the peaks), lit by three.js's standard PBR lights so it takes the sun's
+// shadow map like everything else, plus:
+//   - a heightfield sun shadow marched through the clipmap for ground beyond the shadow map (hills shade valleys at
+//     km scale);
+//   - far forests drawn into the ground as a lumpy canopy past the trees' draw distance;
+//   - a little close-range detail (stone cells, soil speckle) that fades with distance.
+import * as THREE from 'three';
+import { clipGrid } from './clipmap.js';
+import { NOISE_GLSL } from './noise.js';
+
+export const TERRAIN_SHADE_GLSL = /* glsl */ `
+// the palette: sRGB picks, made linear by L()
+#define L(r, g, b) pow(vec3(r, g, b), vec3(2.2))
+const vec3 T_GRASS_WET = L(0.32, 0.56, 0.16);
+const vec3 T_GRASS = L(0.45, 0.66, 0.22);
+const vec3 T_GRASS_DRY = L(0.66, 0.66, 0.34);
+const vec3 T_FLOOR = L(0.30, 0.33, 0.17);
+const vec3 T_DIRT = L(0.55, 0.42, 0.28);
+const vec3 T_SAND = L(0.86, 0.78, 0.56);
+const vec3 T_MUD = L(0.42, 0.37, 0.27);
+const vec3 T_ROCK = L(0.52, 0.50, 0.47);
+const vec3 T_ROCK2 = L(0.40, 0.38, 0.36);
+const vec3 T_SNOW = L(0.95, 0.96, 0.98);
+const vec3 T_CANOPY = L(0.17, 0.32, 0.10);
+const vec3 T_ASPHALT = L(0.29, 0.29, 0.30);
+const vec3 T_WALK = L(0.66, 0.64, 0.60);
+`;
+
+export function makeTerrain(clip, opts = {}) {
+  const C = clip.cfg, g = clipGrid(C.cells);
+  const geo = new THREE.InstancedBufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(g.pos, 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(g.pos.length).fill(0).map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
+  geo.setIndex(new THREE.BufferAttribute(g.idx, 1));
+  const lv = new Float32Array(C.levels); for (let l = 0; l < C.levels; l++) lv[l] = l;
+  geo.setAttribute('aLevel', new THREE.InstancedBufferAttribute(lv, 1));
+  geo.instanceCount = C.levels;
+  geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e9);
+
+  const U = {
+    ...clip.uniforms,
+    uSea: { value: opts.sea ?? 0 },
+    uSunDir: { value: new THREE.Vector3(0.4, 0.8, 0.3).normalize() },
+    uShadowFar: { value: 30 },     // where the shadow map gives way to the heightfield shadow
+    uTreeFar: { value: 400 },      // where instanced trees end and the canopy is painted into the ground
+    uPaving: { value: opts.paving ? 1 : 0 },
+    uTime: { value: 0 },
+    uWet: { value: 0 },
+    uShore: { value: opts.shore ?? 1 },       // 1: the source has water, so beaches and mud
+    uSnowLine: { value: opts.snowLine ?? 215 }, // metres above the water where snow starts
+  };
+  const CLIP = clip.glsl();
+  const VERT_HEAD = `${CLIP}\nattribute float aLevel;\nvarying vec3 vW;\n`;
+  const VERT_BODY = /* glsl */ `
+  int lvl = int(aLevel);
+  vec4 LV = uClipLv[lvl];
+  vec2 pp = LV.xy + position.xz * LV.z;
+  float hh = clipSurface(lvl, pp).x;
+  if (lvl > 0) { vec4 F = uClipLv[lvl - 1]; vec2 q = abs(pp - F.xy); if (max(q.x, q.y) <= F.w - 2.0 * LV.z) hh -= 30.0 * LV.w; }
+  vec3 transformed = vec3(pp.x, hh, pp.y);
+  vW = transformed;
+`;
+
+  const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92, metalness: 0 });
+  mat.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, U);
+    sh.vertexShader = VERT_HEAD + sh.vertexShader.replace('#include <begin_vertex>', VERT_BODY);
+    sh.fragmentShader = `${CLIP}\n${NOISE_GLSL}\n${TERRAIN_SHADE_GLSL}
+uniform float uSea, uShadowFar, uTreeFar, uPaving, uTime, uWet, uShore, uSnowLine; uniform vec3 uSunDir;
+varying vec3 vW;
+float hfShadow(vec2 p, float h0, float dist) {
+  // march toward the sun through the clipmap; soft by the closest miss (Quilez's penumbra trick)
+  int l0 = clipFinest(p); float t = 2.0 * uClipLv[l0].z + 0.02 * dist; float res = 1.0;
+  for (int i = 0; i < 18; i++) {
+    vec3 q = vec3(p.x, h0, p.y) + uSunDir * t;
+    float th = clipHeight(q.xz);
+    res = min(res, 10.0 * (q.y - th) / t);
+    if (res < 0.0) break;
+    t *= 1.45;
+  }
+  return clamp(res, 0.0, 1.0);
+}
+` + sh.fragmentShader
+      .replace('#include <color_fragment>', /* glsl */ `
+  vec2 P = vW.xz;
+  int TL = clipFinest(P);
+  vec4 TD = clipSurface(TL, P);
+  vec3 TN = clipNormal(P);
+  float dist = length(cameraPosition - vW);
+  float fp = length(fwidth(P)) + 1e-4; // metres of ground under this pixel
+  #define NF(S) (1.0 - smoothstep(0.2 * (S), 0.55 * (S), fp))
+  float near = 1.0 - smoothstep(6.0, 60.0, dist);
+  float slope = 1.0 - TN.y;
+  float hgt = TD.x - uSea;
+  // grass by moisture, broken up in patches
+  float pa = w2noise(P / 9.0, 71) * 0.5 * NF(9.0) + w2noise(P / 2.1, 72) * 0.25 * NF(2.1);
+  vec3 col = mix(T_GRASS_DRY, T_GRASS, smoothstep(0.1, 0.42, TD.y + pa * 0.25));
+  col = mix(col, T_GRASS_WET, smoothstep(0.65, 0.95, TD.y + pa * 0.15));
+  col *= 1.0 + 0.2 * w2noise(P / 0.7, 73) * NF(0.7);
+  // forest floor under the trees
+  col = mix(col, T_FLOOR, smoothstep(0.35, 0.75, TD.z));
+  // far forest: the canopy painted in where the trees end
+  float canopy = smoothstep(0.3, 0.6, TD.z) * smoothstep(uTreeFar * 0.45, uTreeFar, dist);
+  float bump = w2noise(P / 7.0, 74) * 0.6 * NF(7.0) + w2noise(P / 3.0, 75) * 0.4 * NF(3.0);
+  col = mix(col, T_CANOPY * (0.8 + 0.45 * bump), canopy);
+  // trails (or paving in the game's world)
+  vec3 trailCol = uPaving > 0.5 ? mix(T_WALK, T_ASPHALT, smoothstep(0.75, 0.95, TD.w)) : T_DIRT * (0.95 + 0.25 * w2noise(P / 0.5, 76) * NF(0.5));
+  // a trail is about 1.5 m wide: once a pixel covers much more, it is a fraction of the pixel, not a dash
+  col = mix(col, trailCol, smoothstep(0.25, 0.6, TD.w) * (uPaving > 0.5 ? 1.0 : 1.0 - smoothstep(0.8, 3.0, fp)));
+  // the shore: wet mud under water, sand just above
+  float shore = uShore * (1.0 - smoothstep(0.6, 1.6 + 0.5 * pa, hgt));
+  col = mix(col, T_SAND * (0.97 + 0.12 * w2noise(P / 0.9, 77) * NF(0.9)), shore * (1.0 - smoothstep(0.35, 0.6, slope)));
+  col = mix(col, T_MUD, uShore * (1.0 - smoothstep(-0.4, 0.3, hgt)));
+  // stone on steep ground, in soft blocks
+  vec2 bc = floor(P / 0.75);
+  float block = w2hash01(int(bc.x), int(bc.y), 78);
+  vec3 rock = mix(mix(T_ROCK2, T_ROCK, 0.5), mix(T_ROCK2, T_ROCK, block), NF(0.75)) * (0.97 + 0.15 * w2noise(P / 3.5, 79) * NF(3.5));
+  float rk = smoothstep(0.32, 0.5, slope + 0.08 * pa) * (1.0 - smoothstep(0.85, 1.0, TD.w));
+  col = mix(col, rock, rk);
+  // snow on the peaks, not on cliffs
+  float snow = smoothstep(uSnowLine - 10.0, uSnowLine + 20.0, hgt + 25.0 * pa) * (1.0 - smoothstep(0.45, 0.65, slope));
+  col = mix(col, T_SNOW, snow);
+  col *= 1.0 - 0.35 * uWet * (1.0 - snow);
+  diffuseColor.rgb = col;
+  float TROUGH = mix(0.95, 0.75, rk) * (1.0 - 0.5 * uWet) * (1.0 - 0.4 * shore * step(hgt, 0.4));
+`)
+      .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = TROUGH;')
+      .replace('#include <normal_fragment_begin>', /* glsl */ `#include <normal_fragment_begin>
+  vec3 TNd = TN;
+  float cell = smoothstep(0.32, 0.5, slope);
+  if (near > 0.0) { // close detail: lumps on stone, soil speckle elsewhere
+    vec3 dn = w2noised(P / mix(0.6, 0.4, cell), 80) * NF(0.5);
+    TNd = normalize(TN + vec3(-dn.y, 0.0, -dn.z) * mix(0.05, 0.22, cell) * near);
+  }
+  if (canopy > 0.0) { vec3 cn = w2noised(P / 7.0, 74) * NF(7.0); TNd = normalize(mix(TNd, normalize(vec3(-cn.y * 1.2, 1.0, -cn.z * 1.2)), canopy)); }
+  normal = normalize((viewMatrix * vec4(TNd, 0.0)).xyz);
+`)
+      .replace('#include <lights_fragment_end>', /* glsl */ `#include <lights_fragment_end>
+  float hs = 1.0;
+  if (dist > uShadowFar * 0.6) hs = mix(1.0, hfShadow(P, TD.x + 0.05 + 0.0005 * dist, dist), smoothstep(uShadowFar * 0.6, uShadowFar, dist));
+  reflectedLight.directDiffuse *= hs; reflectedLight.directSpecular *= hs;
+  reflectedLight.indirectDiffuse *= mix(1.0, 0.7, canopy);
+`);
+  };
+  mat.customProgramCacheKey = () => 'w2terrain';
+
+  const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+  depth.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, U);
+    sh.vertexShader = VERT_HEAD + sh.vertexShader.replace('#include <begin_vertex>', VERT_BODY);
+  };
+  depth.customProgramCacheKey = () => 'w2terrain-depth';
+
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.customDepthMaterial = depth;
+  mesh.frustumCulled = false;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.name = 'world2-terrain';
+  return { mesh, uniforms: U, material: mat };
+}

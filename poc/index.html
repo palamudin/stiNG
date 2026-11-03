@@ -461,6 +461,7 @@
       <label class="label" for="hives">Beehives<select id="hives"><option value="0">None</option><option value="0.5">Few</option><option value="1" selected>Normal</option><option value="2">Many</option></select></label>
       <label class="label" for="terrain">Ground<select id="terrain"><option value="0" selected>Flat</option><option value="1">Rolling</option><option value="2">Hilly</option></select></label>
       <label class="label" for="gfx">Graphics<select id="gfx"><option value="high" selected>High</option><option value="low">Low (no shadows)</option></select></label>
+      <label class="label" for="look">Look<select id="look"><option value="classic" selected>Classic</option><option value="v2">World v2 (sky, forests, grass; experimental)</option></select></label>
       <label class="label" for="hudMode">HUD<select id="hudMode"><option value="full" selected>Full</option><option value="hardcore">Hardcore</option></select></label>
       <label class="label" for="netMode">Second player<select id="netMode"><option value="off" selected>Off</option><option value="lan">Bot over LAN</option><option value="good">Bot over good internet</option><option value="bad">Bot over bad internet</option><option value="awful">Bot past the window</option><option value="over">Bot well past the window</option><option value="good+late">Bot joins after 1 min</option></select></label>
       <fieldset class="systems"><legend class="label">Threats</legend>
@@ -543,6 +544,11 @@
   const FILES = [[THREE_URL, 1273000], ['game.js', 237000], ['sim/sim.js', 297000], ['sim/world.js', 46000], ['sim/tuning.js', 38500], ['sim/assist.js', 27300],
     ['sim/body.js', 19000], ['sim/net.js', 14300], ['tuning/sting.tune', 13200], ['sim/colony.js', 10600], ['sim/persist.js', 8200], ['view/rings.js', 7700],
     ['sim/tunefile.js', 6200], ['sim/rng.js', 3500], ['sim/bots.js', 2500], ['sim/index.js', 400]];
+  // World v2 (GDD 20.4), when the menu's Look asks for it: its modules come down with the rest
+  let w2 = false;
+  try { w2 = new URLSearchParams(location.search).has('world2') || localStorage.getItem('sting.world2') === '1'; } catch { /* optional */ }
+  if (w2) FILES.push(['world/index.js', 9000], ['world/clipmap.js', 11000], ['world/terrain.js', 10000], ['world/trees.js', 12000], ['world/mesh.js', 11000], ['world/scatter.js', 4000],
+    ['world/grass.js', 9000], ['world/sky.js', 14000], ['world/post.js', 15000], ['world/water.js', 9000], ['world/noise.js', 3000], ['world/sources/sting.js', 4000]);
   const TIPS = [
     'A yellowjacket colony starts each spring from one queen who spent the winter alone, under bark or in a shed.',
     'A wasp nest is paper: workers scrape wood fibre from fences and sheds and chew it into pulp.',

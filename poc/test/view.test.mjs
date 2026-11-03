@@ -2,8 +2,12 @@
 import { readFileSync } from 'node:fs';
 import { T } from '../sim/tuning.js';
 import { applyTuning } from '../sim/tunefile.js';
-import { groundAt } from '../sim/world.js';
+import { groundAt, generateChunk, pavingOf, chunkOf } from '../sim/world.js';
+import { DEFAULT_SETTINGS, u64 } from '../sim/index.js';
 import { Rings, RING, ringGrid } from '../view/rings.js';
+import { stingSource } from '../world/sources/sting.js';
+import { placeTile } from '../world/scatter.js';
+import { treeDesign } from '../world/mesh.js';
 applyTuning(T, readFileSync(new URL('../../tuning/sting.tune', import.meta.url), 'utf8'));
 
 let failures = 0;
@@ -63,6 +67,30 @@ const ok = (c, msg) => { console.log((c ? 'PASS ' : 'FAIL ') + msg); if (!c) fai
   const g = ringGrid();
   ok(most <= 2 * RING.win * (RING.margin + 2) && g.idx.length / 3 * RING.levels <= 100000,
     `flying at 12 m/s, a frame fills at most ${most} heights (at most ${tf.toFixed(1)} ms once warm; the first fill ${firstN} in ${first.toFixed(0)} ms); the ground is ${g.idx.length / 3 * RING.levels} triangles`);
+}
+
+// World v2 (GDD 20.4): drawing the sim's own world. The ground it samples is the sim's; its forest is the sim's trees one
+// for one; the game draws the trunks (the sim's solid cylinders), so the forest's trees have none
+{
+  const settings = { ...DEFAULT_SETTINGS, terrain: 2 }, sim = { seed: u64(7), settings, records: new Map() }, src = stingSource(sim);
+  let worst = 0, paved = 0, roads = 0;
+  for (let k = 0; k < 2000; k++) {
+    const x = (k * 37.7 % 700) - 350, z = (k * 53.3 % 700) - 350, o = src.sample(x, z);
+    worst = Math.max(worst, Math.abs(o[0] - groundAt(sim.seed, x, z, settings)));
+    for (const r of pavingOf(sim.seed, chunkOf(x), chunkOf(z), settings).roads) if (x > r.minx && x < r.maxx && z > r.minz && z < r.maxz) { roads++; if (o[3] === 1) paved++; }
+  }
+  ok(worst === 0 && roads > 0 && paved === roads, `World v2's ground is the sim's at 2000 spots (worst ${worst} m); all ${roads} spots on a street are paved`);
+  let n = 0, same = 0;
+  for (let cz = -3; cz <= 3; cz++) for (let cx = -3; cx <= 3; cx++) {
+    const trees = generateChunk(sim.seed, cx, cz, settings).trees, items = placeTile(src, cx, cz, ['oak', 'birch'], { tile: 64, variants: 3 }, { oak: treeDesign('oak', 1, { trunk: false }), birch: treeDesign('birch', 1, { trunk: false }) });
+    const drawn = items.flat().flatMap((a) => Array.from({ length: a.length / 8 }, (_, i) => [a[i * 8], a[i * 8 + 1]]));
+    n += trees.length;
+    for (const t of trees) if (drawn.some(([x, z]) => x === t.x && z === t.z)) same++;
+    if (drawn.length !== trees.length) same = -1e9;
+  }
+  const oak = treeDesign('oak', 1), bare = treeDesign('oak', 1, { trunk: false }), birch = treeDesign('birch', 1, { trunk: false });
+  ok(n > 20 && same === n && oak.wood(0, 0.5, 0) < 0 && bare.wood(0, 0.5, 0) > 0.5 && birch.wood(0, 0.5, 0) > 0.5 && src.trunks === false,
+    `World v2 draws the sim's ${n} trees over 49 chunks one for one, crowns only: the game draws their trunks`);
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');

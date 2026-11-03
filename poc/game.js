@@ -8,6 +8,11 @@ import {
   NetLab, LINKS, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetVel, CHASE, targetLabel, assistPilot, swoopPilot, hoverPilot, hoverSetting, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE, SKILLS, SKILL_UNLOCKS, SKILL_RANKED, SKILL_HIVE, skillCost, ROLES,
 } from './sim/index.js';
 import { Rings, RING, ringGrid, ringGLSL } from './view/rings.js';
+// World v2 (GDD 20.4): the ground, forests, grass, sky and post chain of world/, drawing the sim's own world. Chosen on
+// the menu (Look) or with ?world2, read once at load: every lifted material is compiled against one ground or the other.
+const W2_ASKED = (() => { try { return new URLSearchParams(location.search).has('world2') || localStorage.getItem('sting.world2') === '1'; } catch { return false; } })();
+const W2M = W2_ASKED ? await Promise.all([import('./world/index.js'), import('./world/clipmap.js'), import('./world/sources/sting.js')]).catch((e) => { console.warn('World v2 did not load', e); return null; }) : null;
+const W2_LEVELS = 11; // the clipmap's levels, fixed for the page (the lift GLSL is built from it)
 
 // Boot (GDD 12.1): the page's loading screen takes this module's stages; without it (tests) they go nowhere
 const BOOT = window.STING_BOOT || { stage() {}, begin() {}, done() {}, fail() {} };
@@ -37,6 +42,8 @@ const V = (p) => new THREE.Vector3(p.x, p.y, p.z);
 
 const canvas = $('view');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true });
+const W2on = !!W2M && renderer.capabilities.isWebGL2; // World v2 needs WebGL2 (array textures, texelFetch)
+let world2 = null; // the World, made with the first game world (w2Attach)
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -46,9 +53,9 @@ const SKY_FLASH = new THREE.Color('#e8ecff'), SKY_DAY = new THREE.Color('#a9cfe3
 const sky = SKY_DAY.clone();
 const scene = new THREE.Scene();
 scene.background = sky;
-scene.fog = new THREE.Fog(sky, 30, 115);
+scene.fog = W2on ? null : new THREE.Fog(sky, 30, 115); // World v2 draws the air itself (post chain)
 
-const camera = new THREE.PerspectiveCamera(70, 1, 0.002, 400);
+const camera = new THREE.PerspectiveCamera(70, 1, 0.002, W2on ? 20000 : 400); // World v2 draws to the horizon
 const hemi = new THREE.HemisphereLight('#dceefa', '#4d5b2c', 1.15);
 scene.add(hemi);
 const sun = new THREE.DirectionalLight('#fff3dc', 2.1);
@@ -132,9 +139,11 @@ const ringTex = rings.lv.map((L) => { const t = new THREE.DataTexture(L.data, RI
 const ringUniforms = { ringLv: { value: rings.lv.map(() => new THREE.Vector4()) } };
 ringTex.forEach((t, l) => { ringUniforms['ringMap' + l] = { value: t }; });
 const RING_GLSL = ringGLSL();
+// what lifts everything onto the ground: the rings, or World v2's clipmap answering ringHeightAt (world/clipmap.js)
+const LIFT = W2on ? {} : ringUniforms; // World v2's uniforms are put in once its world exists, before anything is drawn
 THREE.ShaderChunk.common += `
 #ifdef TERRAIN
-${RING_GLSL}
+${W2on ? W2M[1].clipLiftGLSL({ levels: W2_LEVELS }) : RING_GLSL}
 #endif
 `;
 THREE.ShaderChunk.begin_vertex += `
@@ -155,7 +164,7 @@ function terrPatch(m) {
   m.userData.terr = true;
   m.defines = { ...(m.defines || {}), TERRAIN: '' };
   const prev = m.onBeforeCompile;
-  m.onBeforeCompile = (sh, r) => { Object.assign(sh.uniforms, ringUniforms); if (prev) prev.call(m, sh, r); };
+  m.onBeforeCompile = (sh, r) => { Object.assign(sh.uniforms, LIFT); if (prev) prev.call(m, sh, r); };
   m.needsUpdate = true;
 }
 const terrDepth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
@@ -259,8 +268,14 @@ const ringMeshes = rings.lv.map((L, l) => {
   return mesh;
 });
 // the ground's height as drawn there, for the camera and the sun
-function terrAt(x, z) { return TERR.on ? rings.heightAt(x, z) : 0; }
+function terrAt(x, z) { return world2 ? world2.heightAt(x, z) : TERR.on ? rings.heightAt(x, z) : 0; }
 function terrFrame(focus) {
+  if (world2) { // World v2 draws the ground, flat or hilly; everything else is lifted onto it
+    TERR.on = true; ground.visible = false;
+    for (const m of ringMeshes) m.visible = false;
+    if (TERR.frame++ % 30 === 0) terrApply(scene);
+    return;
+  }
   TERR.on = !!(sim && sim.settings.terrain);
   if (!TERR.on) { // a flat world after a hilly one: materials already patched read flat rings
     if (TERR.filled) { for (const L of rings.lv) L.data.fill(0); for (const t of ringTex) t.needsUpdate = true; rings.reset(); TERR.filled = false; }
@@ -371,7 +386,7 @@ function buildChunk(rec) {
   // garden sheds: plank walls, a pitched roof, a crack in one wall and a gap under one eave (nest sites)
   // land use (T1-12): the ground of a yard is a mown lawn, a forest floor is dark; streets, cul-de-sacs, parking lots
   // on a hilly world the ground rings paint all of this into the ground itself (cover maps, GDD 20 G2)
-  const painted = !!(sim && sim.settings.terrain);
+  const painted = W2on || !!(sim && sim.settings.terrain); // World v2 shades paving and land use into its ground
   if (!painted && (c.use === 'yards' || c.use === 'forest' || c.use === 'mall')) {
     const tint = new THREE.Mesh(new THREE.PlaneGeometry(64, 64, 16, 16), new THREE.MeshLambertMaterial({ color: c.use === 'yards' ? '#7fbf4a' : c.use === 'forest' ? '#3d4a22' : '#8f9a6a', transparent: true, opacity: c.use === 'yards' ? 0.28 : 0.45, depthWrite: false }));
     tint.rotation.x = -Math.PI / 2; tint.position.set(rec.cx * 64, 0.002, rec.cz * 64); tint.receiveShadow = true; g.add(tint);
@@ -460,11 +475,13 @@ function buildChunk(rec) {
     trunk.scale.set(t.r, t.h, t.r); trunk.position.set(t.x, t.h / 2, t.z);
     trunk.castShadow = trunk.receiveShadow = true;
     const leaf = mat(new THREE.Color().setHSL(0.27 + t.shade * 0.06, 0.45, 0.26 + t.shade * 0.08).getStyle(), { flatShading: true });
+    g.add(trunk);
+    if (W2on) continue; // World v2 draws the crown (its forest, one for one with these trees); the trunk stays the sim's
     const a = new THREE.Mesh(geoBlob, leaf); a.scale.setScalar(t.cr); a.position.set(t.x, t.h + t.cr * 0.35, t.z);
     const b = new THREE.Mesh(geoBlob, leaf); b.scale.setScalar(t.cr * 0.7); b.position.set(t.x + t.cr * 0.45, t.h - t.cr * 0.1, t.z - t.cr * 0.3);
     a.castShadow = b.castShadow = true;
     for (const m of [a, b]) dyn.crowns.push({ m, x: m.position.x, z: m.position.z, ph: t.x * 0.7 + t.z * 0.3 });
-    g.add(trunk, a, b);
+    g.add(a, b);
   }
   const wood = mat('#8a6440');
   c.boxes.forEach((b, bi) => {
@@ -1609,7 +1626,7 @@ function lighting() {
   if (sim.raining) sky.lerp(SKY_RAIN, 0.7 * dayAmt + 0.2);
   if (storm) sky.multiplyScalar(0.6);
   if (flash > 0) sky.lerp(SKY_FLASH, flash * 0.8);
-  scene.fog.color.copy(sky);
+  if (scene.fog) scene.fog.color.copy(sky);
   sunDir.set(Math.cos(Math.PI * f) * 0.8, Math.max(0.08, elev), 0.35).normalize();
   sun.intensity = (sim.raining ? (storm ? 0.25 : 0.5) : 2.1) * dayAmt;
   hemi.intensity = 0.18 + 0.97 * dayAmt * (storm ? 0.6 : 1) + flash * 1.5;
@@ -3202,6 +3219,7 @@ function frame(now) {
     renderSprays();
     renderRain(focus, dt);
     lighting();
+    if (world2) w2Frame(dt, focus);
     updateAudio(dt);
     if (tm) { tm('fx', t0); t0 = performance.now(); }
     updateHud();
@@ -3220,7 +3238,7 @@ function frame(now) {
     if (tm) { tm('panels', t0); t0 = performance.now(); }
   }
   const r0 = performance.now();
-  renderer.render(scene, camera);
+  if (world2 && sim) world2.render(); else renderer.render(scene, camera);
   if (window.__prof) window.__prof.render = (window.__prof.render || 0) + performance.now() - r0;
   requestAnimationFrame(frame);
 }
@@ -3228,6 +3246,25 @@ function frame(now) {
 // ------------------------------------------------------------------ boot
 
 let loadSnap = null; // the snapshot a restored world started from, for the replay check
+// World v2: one World for the page (its clipmap's uniforms are the ones every lifted material was compiled with); a new
+// game world is a new source for it
+function w2Attach() {
+  if (!W2on) return;
+  const src = W2M[2].stingSource(sim), w = sim.wasp;
+  if (world2) { world2.setSource(src, w.x, w.z); return; }
+  world2 = new W2M[0].World(renderer, scene, camera, src, { quality: $('gfx').value === 'low' || touch.on ? 'low' : 'medium', clip: { levels: W2_LEVELS }, sun, hemi, shadowBox: 18, lens: { fstop: 8 } });
+  Object.assign(LIFT, world2.clip.uniforms);
+  world2.build(w.x, w.z);
+}
+// the game's clock, weather and wind into World v2: its day runs 06:00 to 18:00 where the game's runs to 21:00
+function w2Frame(dt, focus) {
+  const md = minuteOfDay(sim.minute) + (sim.tick % sim.tpm) / sim.tpm, f = (md - 360) / 900;
+  const rain = sim.raining ? Math.min(1, 0.45 + 0.3 * sim.weatherToday.pour) : 0, wd = sim.wind;
+  world2.set({ hour: 6 + 12 * f, haze: 1 + rain, mist: 1 + 3 * rain, wet: rain, wind: [wd.x * 0.35, wd.z * 0.35] });
+  const fy = focus ? terrAt(focus.x, focus.z) : 0;
+  const fd = focus ? Math.max(0.05, Math.hypot(camera.position.x - focus.x, camera.position.y - focus.y - fy, camera.position.z - focus.z)) : 10;
+  world2.update(dt, camera.position, fd);
+}
 function newWorld(s, restored = null) {
   for (const g of chunkViews.values()) scene.remove(g);
   for (const v of humanViews.values()) scene.remove(v.group);
@@ -3247,6 +3284,7 @@ function newWorld(s, restored = null) {
     sim = lab ? lab.a : new Sim(settings);
   }
   sim.drainEvents();
+  w2Attach();
   syncChunks();
   syncNests();
   const w = sim.wasp;
@@ -3278,12 +3316,19 @@ function applyDisplaySettings() {
   renderer.shadowMap.enabled = !low;
   sun.castShadow = !low;
   quality.base = low ? 1 : Math.min(devicePixelRatio, 2); if (!opts.autoRes) quality.scale = 1; quality.applied = 0; applyPixelRatio();
-  scene.fog.near = low ? 22 : 30; scene.fog.far = low ? 80 : 115;
+  if (scene.fog) { scene.fog.near = low ? 22 : 30; scene.fog.far = low ? 80 : 115; }
   resize();
   document.body.classList.toggle('hardcore', $('hudMode').value === 'hardcore');
   try { localStorage.setItem('sting.display', JSON.stringify({ gfx: $('gfx').value, hud: $('hudMode').value })); } catch { /* optional */ }
 }
 try { const d = JSON.parse(localStorage.getItem('sting.display') || 'null'); if (d) { $('gfx').value = d.gfx; $('hudMode').value = d.hud; } } catch { /* optional */ }
+// Look (GDD 20.4): the classic ground or World v2. Read once at load, so a change reloads the page into the other one
+$('look').value = W2on ? 'v2' : 'classic';
+if (W2_ASKED && !W2on) $('look').title = 'World v2 needs WebGL2, which this browser did not give';
+$('look').addEventListener('change', () => {
+  try { localStorage.setItem('sting.world2', $('look').value === 'v2' ? '1' : '0'); } catch { /* optional */ }
+  const u = new URL(location.href); u.searchParams.delete('world2'); location.replace(u.href);
+});
 
 // ------------------------------------------------------------------ save and continue (personal worlds)
 
@@ -3393,7 +3438,7 @@ warm.p = (async () => {
 })();
 
 // test hook for automated checks
-window.__sting = { get sim() { return sim; }, get lab() { return lab; }, input, padUI, touch, buildCmd, atlas, opts, start: () => $("bStart").click(), humanViews, waspViews, rings, toggleNest, toggleLab, saveWorld, camera, scene, warm, quality };
+window.__sting = { get sim() { return sim; }, get lab() { return lab; }, input, padUI, touch, buildCmd, atlas, opts, start: () => $("bStart").click(), humanViews, waspViews, rings, toggleNest, toggleLab, saveWorld, camera, scene, warm, quality, get world2() { return world2; }, W2on };
 window.__garment = (hm) => garmentGraph(hm.tr, hm.clothing, hm.posture, hm.parts[hm.posture]);
 window.__toWorld = toWorld;
 window.__weather = dayWeather;
