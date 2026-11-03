@@ -4,6 +4,16 @@
 // water, trails, paving or under a dense canopy), and builds the clump: blades that taper, curve, lean and bend with
 // the wind (a gust field that travels across the ground). No CPU work per blade.
 //
+// Wind: uWind is the wind at 10 m in m/s (World.env.wind10; without it, the drawing wind scaled to a breeze). At a
+// blade's top it is the log-law wind over the grass, with a roughness length of a tenth of the grass's height (the
+// usual rule; 2.6 cm for the wild meadow, 5.5 mm for the game's lawns): about 0.4 of the 10 m wind at 30 cm in the
+// meadow, 0.3 at the top of a lawn. Never less than 0.25 m/s there: the breath of air that always moves a lawn a little.
+// - Drag bends a blade with roughly the square of that wind: 1.5 m/s at the tips lays it about a third over (our
+//   calibration).
+// - Gusts cross the grass as patches 3 m apart that travel downwind at 1.8 times the wind at the tops (canopy waves,
+//   "honami"; Finnigan 2000).
+// - Each blade flutters on its own, more as the wind rises.
+//
 // Five rings: thousands of blades a square metre round the camera (a lawn is green because it is solid grass), fewer
 // and broader further out, each thinning over the band where the next thickens, clumps growing in rather than popping; the ground under them is the lawn's own dark thatch (terrain.js),
 // so a gap between blades reads as more grass, not as painted ground. When the camera rises the rings grow with its
@@ -70,8 +80,8 @@ function clumpGeometry(blades, segs, seed) {
 
 const GRASS_VERT_HEAD = /* glsl */ `
 attribute float aT, aSide; attribute vec4 aB; attribute vec2 aCell;
-uniform float uSpacing, uRadius, uInner, uScale, uFade, uTime, uSea, uDensity, uFlower, uAlt, uShore, uSnowLine, uWoodH; uniform vec2 uGrassH; uniform vec2 uWind; uniform vec3 uCamG;
-varying float vT, vCol, vRootK; varying vec3 vGW; varying vec3 vTint; varying float vKill;
+uniform float uSpacing, uRadius, uInner, uScale, uFade, uTime, uSea, uDensity, uFlower, uAlt, uShore, uSnowLine, uWoodH, uZ0; uniform vec2 uGrassH; uniform vec2 uWind; uniform vec3 uCamG;
+varying float vT, vCol, vRootK; varying vec3 vGW; varying vec3 vTint; varying float vKill; varying vec3 vPetal;
 vec3 gPos; vec3 gNor;
 `;
 // everything is computed in the normal stage (it comes first in three's vertex shader) and reused for the position
@@ -116,10 +126,13 @@ const GRASS_BUILD = /* glsl */ `
   vec2 off = aB.yz * sp * (uFlower > 0.5 ? 0.4 : 0.9);
   float t = aT;
   float lean = (0.25 + 0.35 * aB.w) * H;
-  // wind: a gust field travelling with the wind, bending blades toward the tip
-  float ws = length(uWind); vec2 wd = ws > 0.001 ? uWind / ws : vec2(1.0, 0.0);
-  float gust = 0.55 + 0.45 * sin(dot(base, wd) * 0.6 - uTime * 2.2 + w2noise(base / 6.0, 205) * 3.0) + 0.25 * sin(uTime * 4.1 + rnd * 6.283);
-  vec2 bend = fdir * lean * t * t + wd * ws * gust * H * 0.55 * t * t;
+  // wind (see the head of the file): log law to the blade's top, gust patches running downwind, drag ~ U^2, flutter
+  float U10 = length(uWind); vec2 wd = U10 > 0.01 ? uWind / U10 : vec2(0.83, 0.55);
+  float Uh = max(U10 * log(max(H, 1.5 * uZ0) / uZ0) / log(10.0 / uZ0), 0.25);
+  float gust = 0.6 + 0.4 * sin(2.094 * dot(base, wd) - 2.094 * 1.8 * Uh * uTime + 3.0 * w2noise(base / 6.0, 205));
+  float lay = min(0.85, (Uh * gust / 1.5) * (Uh * gust / 1.5) * 0.35);
+  float flut = 0.12 * min(Uh, 1.5) / 1.5 * sin(uTime * (7.0 + 5.0 * rnd) + rnd * 6.283 + aB.w * 6.283);
+  vec2 bend = fdir * lean * t * t + (wd * lay + side * flut) * H * t * t;
   float drop = (dot(bend, bend) / max(H, 1e-3)) * 0.45; // a bent blade is shorter
   vec2 xz = base + off + side * aSide * W * (1.0 - t * 0.85) + bend;
   gPos = vec3(xz.x, gd.x + t * H - drop * t, xz.y);
@@ -135,9 +148,10 @@ const GRASS_BUILD = /* glsl */ `
   // by the blades in front, so the darkening fades with distance and height
   vRootK = 1.0 - smoothstep(3.0, 16.0, max(dist, uAlt * 2.0));
   vTint = mix(root, tip, mix(1.0, smoothstep(0.0, 0.8, t), vRootK)) * (0.8 + 0.4 * rnd);
-  if (uFlower > 0.5 && t > 0.85) {
+  vPetal = vec3(-1.0); // a flower's colour is only its head (the fragment shader takes it above 90% of the stem)
+  if (uFlower > 0.5) {
     float k = floor(w2hash01(int(floor(base.x / 9.0)), int(floor(base.y / 9.0)), 212) * 5.0);
-    vTint = k < 1.0 ? vec3(0.9, 0.7, 0.05) : k < 2.0 ? vec3(0.85, 0.85, 0.8) : k < 3.0 ? vec3(0.45, 0.15, 0.6) : k < 4.0 ? vec3(0.8, 0.12, 0.08) : vec3(0.18, 0.3, 0.8);
+    vPetal = k < 1.0 ? vec3(0.9, 0.7, 0.05) : k < 2.0 ? vec3(0.85, 0.85, 0.8) : k < 3.0 ? vec3(0.45, 0.15, 0.6) : k < 4.0 ? vec3(0.8, 0.12, 0.08) : vec3(0.18, 0.3, 0.8);
   }
 `;
 
@@ -159,6 +173,7 @@ export class Grass {
         uSpacing: { value: spacing }, uRadius: { value: radius }, uInner: { value: inner }, uScale: { value: 1 }, uFade: { value: 0 }, uDensity: { value: this.density }, uFlower: { value: flower ? 1 : 0 },
         uWoodH: { value: world.source.grassWood ?? 1 },
         uWind: { value: new THREE.Vector2(0.8, 0.3) }, uCamG: { value: new THREE.Vector3() }, uAlt: { value: 0 },
+        uZ0: { value: 0.1 * ((world.source.grassHeight || [0.1, 0.42])[0] + (world.source.grassHeight || [0.1, 0.42])[1]) / 2 }, // roughness length
         uGrassH: { value: new THREE.Vector2(...(world.source.grassHeight || [0.1, 0.42])) }, // metres, dry to wet ground
       };
       const mat = new THREE.MeshStandardMaterial({ roughness: 0.75, metalness: 0, side: THREE.DoubleSide });
@@ -168,8 +183,8 @@ export class Grass {
           .replace('#include <beginnormal_vertex>', GRASS_BUILD + '\n  vec3 objectNormal = gNor;')
           .replace('#include <begin_vertex>', 'vec3 transformed = gPos;')
           .replace('#include <project_vertex>', '#include <project_vertex>\n  if (vKill > 0.5) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);');
-        sh.fragmentShader = `uniform vec3 uSunDir, uSunColor; varying float vT, vCol, vRootK; varying vec3 vGW, vTint; varying float vKill;\n` + sh.fragmentShader
-          .replace('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb = vTint;')
+        sh.fragmentShader = `uniform vec3 uSunDir, uSunColor; varying float vT, vCol, vRootK; varying vec3 vGW, vTint, vPetal; varying float vKill;\n` + sh.fragmentShader
+          .replace('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb = vPetal.x >= 0.0 && vT > 0.9 ? vPetal : vTint;')
           // both faces of a blade use its rounded normal: three.js flips it on back faces, which points a sky-leaning
           // normal into the ground and turns every blade seen from behind dark
           .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n  normal = normalize(vNormal);')
@@ -209,7 +224,8 @@ export class Grass {
     for (const m of this.meshes) {
       const U = m.userData.U;
       U.uCamG.value.copy(eye); U.uAlt.value = alt;
-      U.uWind.value.set(...this.world.env.wind);
+      const E = this.world.env, w10 = E.wind10 || [E.wind[0] * 8, E.wind[1] * 8]; // m/s at 10 m (as the waves)
+      U.uWind.value.set(w10[0], w10[1]);
       if (m.userData.next) { U.uScale.value = 2 ** (L + 1); U.uFade.value = -f; m.visible = f > 0; }
       else { U.uScale.value = 2 ** L; U.uFade.value = f; }
     }
