@@ -787,13 +787,14 @@ function drawCloud(c, n, t, from) { // n bees round c (x, y, z, r, hang), swirli
   }
   return i;
 }
-// fireflies: a dark body each, and a point of light that holds its size on screen when one flashes
+// fireflies: a dark body each, and when one flashes a spark: a lantern of a few millimetres with a small halo, sized in
+// the world (large only when it is right at the camera, a pinpoint across the garden), never a bulb
 const fireflyMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.004, 6, 5), mat('#2b2618'), MAXI); fireflyMesh.count = 0; fireflyMesh.frustumCulled = false; scene.add(fireflyMesh);
 const FF_MAX = 512, ffGeo = new THREE.BufferGeometry(), ffPos = new Float32Array(FF_MAX * 3);
 ffGeo.setAttribute('position', new THREE.BufferAttribute(ffPos, 3)); ffGeo.setDrawRange(0, 0);
 const ffDot = (() => { const c = document.createElement('canvas'); c.width = c.height = 32; const g = c.getContext('2d'), r = g.createRadialGradient(16, 16, 0, 16, 16, 16);
-  r.addColorStop(0, 'rgba(255,255,220,1)'); r.addColorStop(0.25, 'rgba(225,255,110,0.9)'); r.addColorStop(1, 'rgba(160,255,60,0)'); g.fillStyle = r; g.fillRect(0, 0, 32, 32); return new THREE.CanvasTexture(c); })();
-const ffGlow = new THREE.Points(ffGeo, new THREE.PointsMaterial({ map: ffDot, color: '#ffffff', size: 11, sizeAttenuation: false, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+  r.addColorStop(0, 'rgba(255,255,215,1)'); r.addColorStop(0.1, 'rgba(240,255,150,0.95)'); r.addColorStop(0.3, 'rgba(200,255,80,0.3)'); r.addColorStop(0.6, 'rgba(170,255,60,0.06)'); r.addColorStop(1, 'rgba(160,255,60,0)'); g.fillStyle = r; g.fillRect(0, 0, 32, 32); return new THREE.CanvasTexture(c); })();
+const ffGlow = new THREE.Points(ffGeo, new THREE.PointsMaterial({ map: ffDot, color: '#ffffff', size: 0.014, sizeAttenuation: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
 ffGlow.frustumCulled = false; scene.add(ffGlow);
 const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(1, 1, 1), _p = new THREE.Vector3();
 
@@ -3273,6 +3274,8 @@ function w2Frame(dt, focus) {
   const fy = focus ? terrAt(focus.x, focus.z) : 0;
   const fd = focus ? Math.max(0.05, Math.hypot(camera.position.x - focus.x, camera.position.y - focus.y - fy, camera.position.z - focus.z)) : 10;
   world2.update(dt, camera.position, fd);
+  // the fireflies' sparks: a fixed brightness on the post chain's exposure (it opens up at night), so they glint, not glare
+  ffGlow.material.color.setScalar(Math.min(1, 2.2 / Math.max(1, world2.post.U.uExposure.value)));
 }
 function newWorld(s, restored = null) {
   for (const g of chunkViews.values()) scene.remove(g);
