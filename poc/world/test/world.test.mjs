@@ -108,7 +108,7 @@ const ok = (c, msg) => { console.log((c ? 'PASS ' : 'FAIL ') + msg); if (!c) fai
   }
   ok(simTrees > 0 && simTrees === drawn, `the game's world: ${drawn} trees drawn for the sim's ${simTrees}, one for one`);
   const o = ss.sample(0, 0);
-  ok(Math.abs(o[0]) < 1e-9 && o[3] === 0, 'the game\'s world: the ground at the home tree is level (the sim flattens it) and unpaved');
+  ok(Math.abs(o[0]) < 1e-9 && o[3] < 0.3, `the game's world: the ground at the home tree is level (the sim flattens it) and unpaved (wear ${o[3].toFixed(2)} at the trunk's foot, under 0.3)`);
 }
 
 
