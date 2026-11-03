@@ -118,6 +118,16 @@ namespace Sting.Core.Tests
                 for (int cz = -4; cz <= 4; cz++) for (int cx = -4; cx <= 4; cx++) d.Chunk(World.GenerateChunk(seed, cx, cz));
                 Out($"chunks.{seed}", d.Hex);
             }
+            foreach (var seed in Seeds) // the build list (GDD 21.3, S3)
+            {
+                var d = new Digest();
+                for (int cz = -4; cz <= 4; cz++) for (int cx = -4; cx <= 4; cx++)
+                    {
+                        var P = World.BuildList(World.GenerateChunk(seed, cx, cz)); d.F(P.Count);
+                        foreach (var q in P) { d.F(q.s); d.F(q.m); d.F(q.n); d.S(q.c); foreach (var v in new[] { q.x, q.y, q.z, q.sx, q.sy, q.sz, q.rx, q.ry, q.rz, q.top }) d.F(v); foreach (var v in q.wb) d.F(v); d.F(q.near); }
+                    }
+                Out($"build.{seed}", d.Hex);
+            }
             foreach (var seed in Seeds)
             {
                 var d = new Digest();

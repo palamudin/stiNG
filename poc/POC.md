@@ -20,7 +20,7 @@ The tier-0 slice of the GDD, built in the browser so it can move to Unity. Same 
 | `test/sim.test.mjs` | 214 headless sim checks | `Sting.Core.Tests` |
 | `test/net.test.mjs` | 43 network checks | `Sting.Net.Tests` |
 | `test/view.test.mjs` | ground-ring checks (GDD 20) | presentation, Unity side |
-| `test/parity.mjs` | Writes `core/fixtures/parity.txt`: 29 digests the C# core must reproduce bit for bit | `core/Sting.Core.Tests` |
+| `test/parity.mjs` | Writes `core/fixtures/parity.txt`: 32 digests the C# core must reproduce bit for bit | `core/Sting.Core.Tests` |
 
 Run the tests from this folder with `node test/sim.test.mjs`, `node test/net.test.mjs` and `node test/view.test.mjs` (Node 18+, no packages). Play locally with `node serve.mjs`. Any change to `sim/` that changes behaviour must be made in `core/` too: rerun `node test/parity.mjs`, then `dotnet run -c Release` in `core/Sting.Core.Tests`. To retune, edit `../tuning/sting.tune`: the game, the tests, parity and the core all read it, and a different file gives a different tuning hash, so old saves and peers on the old file are refused.
 
@@ -160,6 +160,7 @@ Run the tests from this folder with `node test/sim.test.mjs`, `node test/net.tes
 | 130 | Walls, roofs and paving drawn by their shaders: siding, planks, plaster, panels, centred windows with lit rooms at night, shopfronts, shingles, asphalt, slabs, pavers; generator lookups, the sky's day and the map kept in tables | 18.74 | 25 |
 | 131 | Small things stand level on hills: picnic tables, sheds, bee boxes, benches and birdbaths each on a level footing cut into the slope, in the sim and both looks | 18.75 | 25 |
 | 132 | Meshes made from code: a chunk's static parts merged per kind of surface (colours in the vertices), fences, benches, cups and crowns instanced, crowns swaying in their vertex shader, small things culled past 90 m, fake AO at the foot of walls and trunks | 18.76 | 25 |
+| 133 | The build list: the sim lists what each chunk's buildings and furniture are made of (shape, surface, colour, size, turns), JS and C# held to one digest; the drawing makes its meshes from it | 18.77 | 25 |
 
 ## Verified
 

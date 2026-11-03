@@ -5,7 +5,7 @@ import {
   Sim, Act, T, DT, ZONES, ZoneName, SwatKind, SwatKindName, StyleName, TopName, BottomName, Top, Bottom,
   toWorld, toLocal, dirToWorld, chunkKey, chunkOf, hash, Domain, rangeInt, resolveSting, zoneCover, segClosest, classify, predictedKind,
   NEST, NEST_ENTRANCE, flyPos, beePos, fmtClock, minuteOfDay, isLowerZone, broodTotal, sugarCap, proteinCap, waterCap, garmentGraph, dayWeather,
-  NetLab, LINKS, pondsOf, pondEdge, POND_PATH, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetVel, CHASE, targetLabel, assistPilot, swoopPilot, hoverPilot, hoverSetting, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE, SKILLS, SKILL_UNLOCKS, SKILL_RANKED, SKILL_HIVE, skillCost, ROLES,
+  NetLab, LINKS, pondsOf, pondEdge, POND_PATH, buildList, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetVel, CHASE, targetLabel, assistPilot, swoopPilot, hoverPilot, hoverSetting, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE, SKILLS, SKILL_UNLOCKS, SKILL_RANKED, SKILL_HIVE, skillCost, ROLES,
 } from './sim/index.js';
 import { Rings, RING, ringGrid, ringGLSL } from './view/rings.js';
 import { Batch, place } from './view/merge.js';
@@ -454,7 +454,11 @@ function cupPose(C, i, down, lid, lv) {
   if (lid) { _cr.makeTranslation(can.x, 0.874, can.z); C.lid.setMatrixAt(i, _cr); } else C.lid.setMatrixAt(i, _cZero);
   C.lid.setColorAt(i, _cCol.set(lv >= 2 ? '#d9d4c7' : '#c99a7a'));
 }
-const NEAR_DRAW = 90; // small things (legs, hives, baths, cups, flowers, webs) are not drawn past this, m
+const NEAR_DRAW = 90;
+// shapes of the build list's parts, kept: a unit cylinder by its taper and sides, a gable by its size
+const shapeCache = new Map();
+function unitCyl(taper, n) { const k = 'c' + taper.toFixed(4) + ':' + n; let g = shapeCache.get(k); if (!g) shapeCache.set(k, g = new THREE.CylinderGeometry(taper, 1, 1, n)); return g; }
+function gableGeo(w, h) { const k = 'g' + w.toFixed(3) + ':' + h.toFixed(3); let g = shapeCache.get(k); if (!g) shapeCache.set(k, g = new THREE.ShapeGeometry(new THREE.Shape([new THREE.Vector2(-w, 0), new THREE.Vector2(w, 0), new THREE.Vector2(0, h)]))); return g; } // small things (legs, hives, baths, cups, flowers, webs) are not drawn past this, m
 
 // ------------------------------------------------------------------ surfaces drawn on request (no textures, no meshes)
 // Walls, roofs and paving are shaded from their own world coordinates in the fragment shader: siding, planks, plaster
@@ -601,7 +605,6 @@ function buildChunk(rec) {
     if (vb) { vals = { ...(vals || {}), color: [material.color.r, material.color.g, material.color.b] }; material = vb; }
     bmats.set(material.uuid, material); B.add(material.uuid, geoArr(geo), M, vals);
   };
-  const top = (h, box) => ({ aTop: [h], aBox: box });
   // birdbaths (T2-1): a stone basin on a pedestal, water to the brim
   // a pond (GEN_VERSION 8): its water at the ground, a muddy margin round it (World v2 draws both itself)
   // lobed as the sim's (pondEdge); a park pond's gravel path round it
@@ -621,14 +624,11 @@ function buildChunk(rec) {
   }
   for (const b of c.baths || []) {
     if (b.fountain) { // a town fountain (T2-5): a low stone basin, a jet in the middle
-      put(BF, amat('#b8b0a2'), new THREE.CylinderGeometry(b.r + 0.15, b.r + 0.2, b.h - 0.02, 28), place(b.x, (b.h - 0.02) / 2, b.z));
       const water = new THREE.Mesh(new THREE.CircleGeometry(b.r, 28), WATER_MAT); water.rotation.x = -Math.PI / 2; water.position.set(b.x, b.h + 0.002, b.z);
       const jet = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.12, 1.2, 8), new THREE.MeshLambertMaterial({ color: '#d8ecf6', transparent: true, opacity: 0.6 })); jet.position.set(b.x, b.h + 0.6, b.z);
       g.add(water, jet);
       continue;
     }
-    put(BN, amat('#a9a49a'), new THREE.CylinderGeometry(0.07, 0.11, b.h - 0.08, 10), place(b.x, (b.h - 0.08) / 2, b.z));
-    put(BN, amat('#bdb8ad'), new THREE.CylinderGeometry(b.r + 0.03, b.r * 0.55, 0.1, 18), place(b.x, b.h - 0.055, b.z)); // its rim just under the water line
     const water = new THREE.Mesh(new THREE.CircleGeometry(b.r, 20), WATER_MAT); water.rotation.x = -Math.PI / 2; water.position.set(b.x, b.h + 0.002, b.z);
     near.add(water);
   }
@@ -657,50 +657,16 @@ function buildChunk(rec) {
     flat(p.minx, p.maxx, p.minz, p.maxz, '#bdb4a4', 0.005);
     for (let k = -3; k <= 3; k++) { flat(p.minx, p.maxx, (p.minz + p.maxz) / 2 + k * 9 - 0.04, (p.minz + p.maxz) / 2 + k * 9 + 0.04, '#a99f8e', 0.006); flat((p.minx + p.maxx) / 2 + k * 9 - 0.04, (p.minx + p.maxx) / 2 + k * 9 + 0.04, p.minz, p.maxz, '#a99f8e', 0.006); }
   }
-  const SHOP = ['#c98f6b', '#d8c7a4', '#9fb3a1', '#b8a1c4', '#e0d0b8', '#a8bccd'], AWN = ['#7a2f24', '#2f5f7a', '#3f7a2f', '#7a6a2f', '#5a2f7a', '#7a2f5a'];
-  for (const sh of c.shops || []) {
-    // shopfronts and upper windows are drawn on the walls by their shader (surfMat), not as meshes
-    put(BF, surfMat(SHOP[sh.color % SHOP.length], 1, {}, true), geoBox, place(sh.x, sh.h / 2, sh.z, sh.hw * 2, sh.h, sh.hd * 2), top(sh.h, [sh.x, sh.z, sh.hw, sh.hd]));
-    put(BF, amat(AWN[sh.color % AWN.length]), geoBox, place(sh.x, 2.75, sh.z, sh.hw * 2 + 0.8, 0.12, sh.hd * 2 + 0.8));
-  }
-  for (const gd of c.gardens || []) {
-    for (const [ax, az, bx, bz] of [[-1, -1, 1, -1], [1, -1, 1, 1], [1, 1, -1, 1], [-1, 1, -1, -1], [-1, 0, 1, 0]]) {
-      for (let k = 0; k <= 12; k++) { const f = k / 12, x = gd.x + (ax + (bx - ax) * f) * gd.hw, z = gd.z + (az + (bz - az) * f) * gd.hd; put(BN, BULB_MAT, geoBulb, place(x, 2.8 - 0.35 * Math.sin(Math.PI * f), z)); }
-    }
-    for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) put(BF, amat('#4a3a2c'), geoPost, place(gd.x + sx * gd.hw, 1.45, gd.z + sz * gd.hd));
-  }
-  for (const m of c.malls || []) {
-    put(BF, surfMat('#cdbfa6', 2, {}, true), geoBox, place(m.x, m.h / 2, m.z, m.hw * 2, m.h, m.hd * 2), top(m.h - 1.2, [m.x, m.z, m.hw, m.hd]));
-    put(BF, amat('#7a2f24'), geoBox, place(m.x, m.h - 0.6, m.z, m.hw * 2 + 0.1, 1.2, m.hd * 2 + 0.1));
-  }
-  for (const sh of c.sheds || []) {
-    const siding = sh.house ? ['#e3dccb', '#c9d3d6', '#dcc9a8', '#c7cdb6', '#efe9dd'][Math.abs(Math.round(sh.x * 7 + sh.z * 3)) % 5] : '#7a5a3c';
-    put(BF, surfMat(siding, sh.house ? 0 : 3, {}, true), geoBox, place(sh.x, sh.h / 2, sh.z, sh.hw * 2, sh.h, sh.hd * 2), top(sh.h, [sh.x, sh.z, sh.hw, sh.hd])); // siding and windows, or a shed's planks
-    const long = sh.hw >= sh.hd, span = long ? sh.hd : sh.hw, len = (long ? sh.hw : sh.hd) * 2 + 0.2, rise = sh.house ? 1.9 : 0.55;
-    if (sh.house) {
-      // windows are drawn on the walls by their shader (surfMat); a door on the street side, the gable ends closed with a wedge
-      const along = long ? [1, 0] : [0, 1], across = long ? [0, 1] : [1, 0], half = long ? sh.hw : sh.hd, depth = long ? sh.hd : sh.hw;
-      const ds = long ? Math.sign(rec.cz * 64 - sh.z) || 1 : Math.sign(rec.cx * 64 - sh.x) || 1; // the door faces the street
-      put(BF, amat('#6b3b2a'), geoBox, place(sh.x + across[0] * ds * (depth + 0.02), 1.05, sh.z + across[1] * ds * (depth + 0.02), along[0] ? 1.0 : 0.06, 2.1, along[1] ? 1.0 : 0.06));
-      const gableGeo = new THREE.ShapeGeometry(new THREE.Shape([new THREE.Vector2(-depth, 0), new THREE.Vector2(depth, 0), new THREE.Vector2(0, rise)]));
-      for (const s of [-1, 1]) {
-        put(BF, surfMat(siding, 0, { side: THREE.DoubleSide }, true), gableGeo, place(sh.x + along[0] * s * half, sh.h, sh.z + along[1] * s * half, 1, 1, 1, 0, long ? Math.PI / 2 : 0, 0), top(0, [0, 0, 1e3, 1e3]));
-      }
-    }
-    // the slabs' top faces lie on the solid roof the sim collides with (world.js shedRoof)
-    const rf = shedRoof(sh), slope = rf.L, ang = Math.atan2(rf.rise, rf.S), th = sh.house ? 0.12 : 0.05;
-    const cy = sh.h + rf.rise / 2 - rf.S / rf.L * th / 2, cu = rf.S / 2 - rf.rise / rf.L * th / 2;
-    for (const side of [-1, 1]) {
-      const rm = surfMat(sh.house ? '#4e4b52' : '#3d3a36', 4, {}, true), sx = long ? rf.half * 2 : slope, sz = long ? slope : rf.half * 2; // shingles
-      if (long) put(BF, rm, geoBox, place(sh.x, cy, sh.z + side * cu, sx, th, sz, side * ang, 0, 0));
-      else put(BF, rm, geoBox, place(sh.x + side * cu, cy, sh.z, sx, th, sz, 0, 0, -side * ang));
-    }
-    const ss = shedSites(sh);
-    put(BN, amat('#0d0a07'), geoBox, place(ss.wall.x - ss.wall.nx * 0.008, ss.wall.y, ss.wall.z - ss.wall.nz * 0.008, ss.wall.nx ? 0.012 : 0.05, 0.12, ss.wall.nz ? 0.012 : 0.05));
-    put(BN, amat('#0d0a07'), geoBox, place(ss.attic.x - ss.attic.nx * 0.008, ss.attic.y, ss.attic.z - ss.attic.nz * 0.008, ss.attic.nx ? 0.012 : 0.4, 0.03, ss.attic.nz ? 0.012 : 0.4));
+  // buildings, trunks, legs, bee boxes, baths and garden lights: the sim's build list (GDD 21.3), merged per kind of
+  // surface; walls, roofs and shopfronts are drawn on them by their shaders (surfMat)
+  for (const q of buildList(c)) {
+    const sc = q.s === 0 ? [q.sx, q.sy, q.sz] : q.s === 1 ? [q.sz, q.sy, q.sz] : q.s === 2 ? [1, 1, 1] : [q.sx / 0.05, q.sx / 0.05, q.sx / 0.05];
+    const B = q.near ? BN : BF, M = place(q.x, q.y, q.z, sc[0], sc[1], sc[2], q.rx, q.ry, q.rz);
+    const geo = q.s === 0 ? geoBox : q.s === 1 ? unitCyl(q.sx / q.sz, q.n) : q.s === 2 ? gableGeo(q.sx, q.sy) : geoBulb;
+    const material = q.m === 6 ? BULB_MAT : q.m === 5 ? amat(q.c) : surfMat(q.c, q.m < 4 ? [0, 1, 2, 3][q.m] : 4, q.s === 2 ? { side: THREE.DoubleSide } : {}, true);
+    put(B, material, geo, M, q.m < 4 ? { aTop: [q.top], aBox: q.wb } : undefined);
   }
   // trunks merged; crowns instanced, two blobs a tree, swaying in their vertex shader (World v2 draws its own crowns)
-  for (const t of c.trees) put(BF, amat('#5b4330'), geoTrunk, place(t.x, t.h / 2, t.z, t.r, t.h, t.r));
   if (c.trees.length && !W2on) {
     const n = c.trees.length * 2, cg = geoBlob.clone(), cm = new THREE.InstancedMesh(cg, crownMat, n), ph = new Float32Array(n), m4 = new THREE.Matrix4(), col = new THREE.Color();
     c.trees.forEach((t, i) => {
@@ -711,7 +677,6 @@ function buildChunk(rec) {
     });
     cg.setAttribute('aPh', new THREE.InstancedBufferAttribute(ph, 1)); cm.userData.own = true; cm.castShadow = true; cm.computeBoundingSphere(); g.add(cm);
   }
-  const wood = amat('#8a6440');
   // fences in cedar, benches and table tops: instanced per shape, each box its own colour so it can pale as wasps strip
   // its pulp (T1-12); a long box (a run of fence) is cut every metre along its length, so on a hilly world each cut
   // follows the ground
@@ -733,12 +698,6 @@ function buildChunk(rec) {
   }
   c.tables.forEach((t, ti) => {
     const along = t.axisX ? [1, 0] : [0, 1], across = t.axisX ? [0, 1] : [1, 0];
-    for (const s of [-0.8, 0.8]) for (const q of [-0.3, 0.3]) {
-      put(BN, wood, geoBox, place(t.x + along[0] * s + across[0] * q, 0.355, t.z + along[1] * s + across[1] * q, 0.05, 0.71, 0.05));
-    }
-    for (const side of [-0.67, 0.67]) for (const s of [-0.75, 0.75]) {
-      put(BN, wood, geoBox, place(t.x + along[0] * s + across[0] * side, 0.2, t.z + along[1] * s + across[1] * side, 0.05, 0.4, 0.05));
-    }
     const candle = new THREE.Group();
     const cup = new THREE.Mesh(geoCandle, mat('#e8c547')); cup.position.y = 0.035;
     const flame = new THREE.Mesh(geoFlame, new THREE.MeshBasicMaterial({ color: '#ffb347' })); flame.position.y = 0.085;

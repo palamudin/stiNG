@@ -151,6 +151,77 @@ export function shedSites(sh) {
   return { wall: at(sh.crack, 1.0), attic: at(sh.eave, sh.h - 0.08) };
 }
 
+// The build list (GDD 21.3, S3): what a chunk's buildings and furniture are made of, as parts for the drawing to turn
+// into meshes (game.js merges them per kind of surface; Unity draws the same list). Pure, from the chunk as generated;
+// in C# too (World.BuildList), held to the same numbers by a parity digest. A part:
+// - s: shape. 0 a box sx by sy by sz; 1 a cylinder of radius sx at its top and sz at its foot, sy high, n sides;
+//   2 a gable, a triangle sx either side of its middle and sy high, in its own x-y plane; 3 a lamp bulb of radius sx;
+// - m: surface. 0 siding, 1 plaster, 2 panels, 3 planks, 4 shingles (each drawn by its shader), 5 plain, 6 lit;
+// - c: colour; x, y, z: its middle, y above the ground; rx, ry, rz: turns (three.js order XYZ);
+// - near: small, not drawn far off; top and wb (x, z, hw, hd): a wall's height and footprint, for its windows.
+export const SIDINGS = ['#e3dccb', '#c9d3d6', '#dcc9a8', '#c7cdb6', '#efe9dd'];
+export const SHOP_COLORS = ['#c98f6b', '#d8c7a4', '#9fb3a1', '#b8a1c4', '#e0d0b8', '#a8bccd'];
+export const AWNINGS = ['#7a2f24', '#2f5f7a', '#3f7a2f', '#7a6a2f', '#5a2f7a', '#7a2f5a'];
+const NOWALL = [0, 0, 1e3, 1e3];
+export function buildList(c) {
+  const P = [];
+  const part = (s, m, col, x, y, z, sx, sy, sz, near, o = {}) => P.push({ s, m, c: col, x, y, z, sx, sy, sz, rx: o.rx || 0, ry: o.ry || 0, rz: o.rz || 0, n: o.n || 0, near, top: o.top || 0, wb: o.wb || NOWALL });
+  for (const b of c.baths) {
+    if (b.fountain) { part(1, 5, '#b8b0a2', b.x, (b.h - 0.02) / 2, b.z, b.r + 0.15, b.h - 0.02, b.r + 0.2, false, { n: 28 }); continue; }
+    part(1, 5, '#a9a49a', b.x, (b.h - 0.08) / 2, b.z, 0.07, b.h - 0.08, 0.11, true, { n: 10 }); // the pedestal
+    part(1, 5, '#bdb8ad', b.x, b.h - 0.055, b.z, b.r + 0.03, 0.1, b.r * 0.55, true, { n: 18 }); // the basin, its rim just under the water line
+  }
+  for (const sh of c.shops) {
+    part(0, 1, SHOP_COLORS[sh.color % SHOP_COLORS.length], sh.x, sh.h / 2, sh.z, sh.hw * 2, sh.h, sh.hd * 2, false, { top: sh.h, wb: [sh.x, sh.z, sh.hw, sh.hd] });
+    part(0, 5, AWNINGS[sh.color % AWNINGS.length], sh.x, 2.75, sh.z, sh.hw * 2 + 0.8, 0.12, sh.hd * 2 + 0.8, false);
+  }
+  for (const gd of c.gardens) { // string lights on four posts
+    for (const [ax, az, bx, bz] of [[-1, -1, 1, -1], [1, -1, 1, 1], [1, 1, -1, 1], [-1, 1, -1, -1], [-1, 0, 1, 0]]) {
+      for (let k = 0; k <= 12; k++) { const f = k / 12; part(3, 6, '#ffe7a8', gd.x + (ax + (bx - ax) * f) * gd.hw, 2.8 - 0.35 * dsin(3.141592653589793 * f), gd.z + (az + (bz - az) * f) * gd.hd, 0.05, 0.05, 0.05, true); }
+    }
+    for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) part(1, 5, '#4a3a2c', gd.x + sx * gd.hw, 1.45, gd.z + sz * gd.hd, 0.05, 2.9, 0.05, false, { n: 6 });
+  }
+  for (const m of c.malls) {
+    part(0, 2, '#cdbfa6', m.x, m.h / 2, m.z, m.hw * 2, m.h, m.hd * 2, false, { top: m.h - 1.2, wb: [m.x, m.z, m.hw, m.hd] });
+    part(0, 5, '#7a2f24', m.x, m.h - 0.6, m.z, m.hw * 2 + 0.1, 1.2, m.hd * 2 + 0.1, false);
+  }
+  for (const sh of c.sheds) {
+    const siding = sh.house ? SIDINGS[Math.abs(Math.floor(sh.x * 7 + sh.z * 3 + 0.5)) % 5] : '#7a5a3c';
+    part(0, sh.house ? 0 : 3, siding, sh.x, sh.h / 2, sh.z, sh.hw * 2, sh.h, sh.hd * 2, false, { top: sh.h, wb: [sh.x, sh.z, sh.hw, sh.hd] }); // siding and windows, or planks
+    const long = sh.hw >= sh.hd, rf = shedRoof(sh);
+    if (sh.house) { // a door to the street; the gable ends closed
+      const along = long ? [1, 0] : [0, 1], across = long ? [0, 1] : [1, 0], half = long ? sh.hw : sh.hd, depth = long ? sh.hd : sh.hw;
+      const ds = (long ? Math.sign(c.cz * CS - sh.z) : Math.sign(c.cx * CS - sh.x)) || 1;
+      part(0, 5, '#6b3b2a', sh.x + across[0] * ds * (depth + 0.02), 1.05, sh.z + across[1] * ds * (depth + 0.02), along[0] ? 1.0 : 0.06, 2.1, along[1] ? 1.0 : 0.06, false);
+      for (const s of [-1, 1]) part(2, 0, siding, sh.x + along[0] * s * half, sh.h, sh.z + along[1] * s * half, depth, rf.rise, 0, false, { ry: long ? 1.5707963267948966 : 0 });
+    }
+    // the roof's slabs: their top faces lie on the solid roof the sim collides with (shedRoof)
+    const ang = datan2(rf.rise, rf.S), th = sh.house ? 0.12 : 0.05, cy = sh.h + rf.rise / 2 - rf.S / rf.L * th / 2, cu = rf.S / 2 - rf.rise / rf.L * th / 2;
+    const sx = long ? rf.half * 2 : rf.L, sz = long ? rf.L : rf.half * 2, col = sh.house ? '#4e4b52' : '#3d3a36';
+    for (const side of [-1, 1]) {
+      if (long) part(0, 4, col, sh.x, cy, sh.z + side * cu, sx, th, sz, false, { rx: side * ang });
+      else part(0, 4, col, sh.x + side * cu, cy, sh.z, sx, th, sz, false, { rz: -side * ang });
+    }
+    const ss = shedSites(sh); // the crack in a wall and the gap under an eave (nest sites)
+    part(0, 5, '#0d0a07', ss.wall.x - ss.wall.nx * 0.008, ss.wall.y, ss.wall.z - ss.wall.nz * 0.008, ss.wall.nx ? 0.012 : 0.05, 0.12, ss.wall.nz ? 0.012 : 0.05, true);
+    part(0, 5, '#0d0a07', ss.attic.x - ss.attic.nx * 0.008, ss.attic.y, ss.attic.z - ss.attic.nz * 0.008, ss.attic.nx ? 0.012 : 0.4, 0.03, ss.attic.nz ? 0.012 : 0.4, true);
+  }
+  for (const t of c.trees) part(1, 5, '#5b4330', t.x, t.h / 2, t.z, t.r * 0.8, t.h, t.r, false, { n: 9 }); // the trunk (crowns are drawn apart: they sway)
+  for (const t of c.tables) { // legs: the table's four, two under each bench end
+    const along = t.axisX ? [1, 0] : [0, 1], across = t.axisX ? [0, 1] : [1, 0];
+    for (const s of [-0.8, 0.8]) for (const q of [-0.3, 0.3]) part(0, 5, '#8a6440', t.x + along[0] * s + across[0] * q, 0.355, t.z + along[1] * s + across[1] * q, 0.05, 0.71, 0.05, true);
+    for (const side of [-0.67, 0.67]) for (const s of [-0.75, 0.75]) part(0, 5, '#8a6440', t.x + along[0] * s + across[0] * side, 0.2, t.z + along[1] * s + across[1] * side, 0.05, 0.4, 0.05, true);
+  }
+  for (const hv of c.hives) { // a bee box: stand, two supers, lid, the entrance slot
+    part(0, 5, '#5b4330', hv.x, 0.2, hv.z, 0.5, 0.4, 0.5, true);
+    part(0, 5, '#ece8dc', hv.x, 0.53, hv.z, 0.45, 0.25, 0.45, true);
+    part(0, 5, '#e2dccb', hv.x, 0.755, hv.z, 0.45, 0.2, 0.45, true);
+    part(0, 5, '#8d8a80', hv.x, 0.885, hv.z, 0.5, 0.06, 0.5, true);
+    part(0, 5, '#17120c', hv.ex, hv.ey - 0.05, hv.ez, hv.fx ? 0.01 : 0.16, 0.02, hv.fz ? 0.01 : 0.16, true);
+  }
+  return P;
+}
+
 // Bee k of a hive. Guards circle the entrance; foragers commute to a flower and back.
 export function beePos(hive, k, tick) {
   const b = hive.bees[k];

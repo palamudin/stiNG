@@ -4,7 +4,7 @@ import { writeFileSync, readFileSync } from 'node:fs';
 import { T, SKILLS } from '../sim/tuning.js';
 import { applyTuning } from '../sim/tunefile.js';
 applyTuning(T, readFileSync(new URL('../../tuning/sting.tune', import.meta.url), 'utf8')); // T1-22: the shipped tuning
-import { generateChunk, dayWeather, windAt, humanWindow, flyPos, beePos, birdPos, dragonPos, makeNest, shedSites, shedRoof, groundAt, groundSlope } from '../sim/world.js';
+import { generateChunk, buildList, dayWeather, windAt, humanWindow, flyPos, beePos, birdPos, dragonPos, makeNest, shedSites, shedRoof, groundAt, groundSlope } from '../sim/world.js';
 import { hash, Domain, u64, datan2, dsin, h32 } from '../sim/rng.js';
 import { newColony, colonyStep, destroyNest, colonyFinished, seasonPhase, sugarCap, proteinCap, waterCap } from '../sim/colony.js';
 import { Sim } from '../sim/sim.js';
@@ -67,6 +67,15 @@ for (const seed of seeds) {
   const d = Digest();
   for (let cz = -4; cz <= 4; cz++) for (let cx = -4; cx <= 4; cx++) digestChunk(generateChunk(seed, cx, cz), d);
   out(`chunks.${seed}`, d.hex());
+}
+// the build list (GDD 21.3, S3): the parts the drawing makes meshes of
+for (const seed of seeds) {
+  const d = Digest();
+  for (let cz = -4; cz <= 4; cz++) for (let cx = -4; cx <= 4; cx++) {
+    const P = buildList(generateChunk(seed, cx, cz)); d.f(P.length);
+    for (const q of P) { d.f(q.s); d.f(q.m); d.f(q.n); d.s(q.c); for (const k of ['x', 'y', 'z', 'sx', 'sy', 'sz', 'rx', 'ry', 'rz', 'top']) d.f(q[k]); for (const v of q.wb) d.f(v); d.f(q.near); }
+  }
+  out(`build.${seed}`, d.hex());
 }
 // weather and schedules
 for (const seed of seeds) {
