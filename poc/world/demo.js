@@ -47,6 +47,22 @@ async function makeWorld() {
   }
   world = new World(renderer, scene, camera, src, { quality: state.quality });
   world.build(cam.fx, cam.fz);
+  standIns();
+}
+// In the game's world the game draws the birdbaths and fountains (World v2 draws their water). Here, with no game, the
+// same basins are stood in, at the game's sizes, so the water has its floor and rim.
+let stands = null;
+function standIns() {
+  if (stands) { scene.remove(stands); stands.traverse((o) => o.geometry && o.geometry.dispose()); stands = null; }
+  if (state.source !== 'sting') return;
+  stands = new THREE.Group(); stands.userData.ring = true;
+  const stone = new THREE.MeshStandardMaterial({ color: new THREE.Color('#bdb8ad'), roughness: 0.9 }), dark = new THREE.MeshStandardMaterial({ color: new THREE.Color('#a9a49a'), roughness: 0.9 });
+  for (let j = -3; j <= 3; j++) for (let i = -3; i <= 3; i++) for (const b of src.objects(i, j).baths || []) {
+    const y = src.height(b.x, b.z), add = (geo, m, yy) => { const o = new THREE.Mesh(geo, m); o.position.set(b.x, y + yy, b.z); o.castShadow = o.receiveShadow = true; stands.add(o); };
+    if (b.fountain) add(new THREE.CylinderGeometry(b.r + 0.15, b.r + 0.2, b.h - 0.02, 28), stone, (b.h - 0.02) / 2);
+    else { add(new THREE.CylinderGeometry(0.07, 0.11, b.h - 0.08, 10), dark, (b.h - 0.08) / 2); add(new THREE.CylinderGeometry(b.r + 0.03, b.r * 0.55, 0.1, 18), stone, b.h - 0.055); }
+  }
+  scene.add(stands);
 }
 
 // ------------------------------------------------------------ frame
@@ -69,7 +85,7 @@ function step(dt) {
   cam.fz += (-Math.cos(cam.yaw) * fwd - Math.sin(cam.yaw) * side) * sp * dt;
   if (cam.tour) cam.tour(dt);
   cam.dist += (zoomToDist(state.zoom) - cam.dist) * Math.min(1, dt * 6);
-  const gy = Math.max(world.heightAt(cam.fx, cam.fz), src.sea);
+  const gy = cam.fy ?? Math.max(world.heightAt(cam.fx, cam.fz), src.sea); // cam.fy: a focus height of its own (tests)
   focus.set(cam.fx, gy, cam.fz);
   const pitch = cam.pitchOverride ?? pitchFor(cam.dist);
   const cx = cam.fx + Math.sin(cam.yaw) * Math.cos(pitch) * cam.dist, cz = cam.fz + Math.cos(cam.yaw) * Math.cos(pitch) * cam.dist;

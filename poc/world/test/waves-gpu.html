@@ -1,0 +1,45 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>World v2 waves: GPU against CPU</title>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
+<pre id="out">running</pre>
+<script type="module">
+// The GPU spectrum and inverse FFT against a direct double-precision sum over every wave vector (waves.js), at grid
+// points of each cascade's tile; and the surface's height variance against the spectrum's.
+import * as THREE from 'three';
+import { WaveField } from '../wavegpu.js';
+import { seaState, fieldAtCPU, WAVES } from '../waves.js';
+const renderer = new THREE.WebGLRenderer();
+const res = {};
+for (const [name, U, fetch, cascades] of [['lake', 6.8, 600, [48, 6.9, 1.0, 0.14]], ['birdbath', 2.5, 0.8, [0.6, 0.085]]]) {
+  const wf = new WaveField(renderer, { cascades, fetch, salt: 77 });
+  const wind = [U * 0.8, U * 0.6], time = 37.25;
+  wf.update(time, wind, 1e9);
+  const N = wf.N, C = wf.C;
+  // read the assembled textures back (half floats)
+  const get = (rt) => { const a = new Uint16Array(N * N * 4); renderer.readRenderTargetPixels(rt, 0, 0, N, N, a); return Array.from(a, THREE.DataUtils.fromHalfFloat); };
+  const disp = wf.disp.map(get), slope = wf.slope.map(get);
+  // twelve texels; each cascade is compared at its own texel centres, x = i L / N
+  const pts = [];
+  for (let s = 0; s < 12; s++) pts.push((s * 37 + 5) % N, (s * 53 + 11) % N);
+  // compare cascade by cascade: the CPU sum for one cascade alone at its own texel centres (x = i L / N)
+  let maxH = 0, maxS = 0, refH = 0, refS = 0;
+  for (let c = 0; c < C; c++) {
+    const L = cascades[c], P = seaState(U, fetch), wd = [wf.U.uWindDir.value.x, wf.U.uWindDir.value.y];
+    const xs = []; for (let s = 0; s < pts.length; s += 2) xs.push([pts[s] * L / N, pts[s + 1] * L / N]);
+    const one = fieldAtCPU(P, cascades, wd, time, xs, 77, N, 1e9, c); // this cascade's band alone, at its texel centres
+    xs.forEach((_, s) => {
+      const ix = pts[s * 2], iz = pts[s * 2 + 1], o = (iz * N + ix) * 4;
+      const g = [disp[c][o], disp[c][o + 1], disp[c][o + 2], slope[c][o], slope[c][o + 1]], r = one[s];
+      maxH = Math.max(maxH, Math.abs(g[1] - r[1]), Math.abs(g[0] - r[0]), Math.abs(g[2] - r[2])); refH = Math.max(refH, Math.abs(r[1]));
+      maxS = Math.max(maxS, Math.abs(g[3] - r[3]), Math.abs(g[4] - r[4])); refS = Math.max(refS, Math.abs(r[3]), Math.abs(r[4]));
+    });
+  }
+  // variance of the whole field over every texel, summed over cascades (cascades are independent)
+  let v = 0; for (let c = 0; c < C; c++) { let m = 0, m2 = 0; for (let i = 0; i < N * N; i++) { const h = disp[c][i * 4 + 1]; m += h; m2 += h * h; } m /= N * N; v += m2 / (N * N) - m * m; }
+  res[name] = { maxErrH: maxH, maxH: refH, maxErrS: maxS, maxS: refS, HsGPU: 4 * Math.sqrt(v), HsSpectrum: wf.stats.Hs };
+  wf.dispose();
+}
+window.__result = res;
+document.getElementById('out').textContent = JSON.stringify(res, null, 1);
+</script>

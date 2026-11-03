@@ -1,0 +1,42 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>World v2 GPU parity</title>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
+</head><body>
+<script type="module">
+// The wild source's GLSL twin against its JS: 4096 points from a centimetre to 12 km, all four channels.
+// Writes window.__result = { max: [h, moist, forest, trail], worst: {...}, n }.
+import * as THREE from 'three';
+import { wildSource } from '../sources/wild.js';
+import { hash01 } from '../noise.js';
+const N = 64;
+const renderer = new THREE.WebGLRenderer();
+const out = {};
+for (const seed of [7, 1234, 99]) {
+  const src = wildSource({ seed, blocky: 0.6 });
+  const pts = new Float32Array(N * N * 4);
+  for (let k = 0; k < N * N; k++) {
+    const r = Math.pow(10, -2 + 6.1 * hash01(k, 1, seed)), a = 6.2832 * hash01(k, 2, seed);
+    pts[k * 4] = Math.cos(a) * r; pts[k * 4 + 1] = Math.sin(a) * r;
+  }
+  const ptex = new THREE.DataTexture(pts, N, N, THREE.RGBAFormat, THREE.FloatType); ptex.needsUpdate = true;
+  const rt = new THREE.WebGLRenderTarget(N, N, { type: THREE.FloatType, depthBuffer: false });
+  const m = new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, uniforms: { ...src.uniforms, uP: { value: ptex } },
+    vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }',
+    fragmentShader: `precision highp float; precision highp int;\n${src.glsl}\nuniform highp sampler2D uP; out vec4 o; void main() { o = wildSample(texelFetch(uP, ivec2(gl_FragCoord.xy), 0).xy); }` });
+  const sc = new THREE.Scene(); const q = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), m); q.frustumCulled = false; sc.add(q);
+  renderer.setRenderTarget(rt); renderer.render(sc, new THREE.Camera());
+  const px = new Float32Array(N * N * 4); renderer.readRenderTargetPixels(rt, 0, 0, N, N, px); renderer.setRenderTarget(null);
+  const max = [0, 0, 0, 0], worst = {}, o4 = [0, 0, 0, 0];
+  let bad = 0;
+  for (let k = 0; k < N * N; k++) {
+    src.sample(pts[k * 4], pts[k * 4 + 1], o4);
+    for (let c = 0; c < 4; c++) {
+      const d = Math.abs(o4[c] - px[k * 4 + c]);
+      if (d > max[c]) { max[c] = d; worst[c] = { x: pts[k * 4], z: pts[k * 4 + 1], js: o4[c], gpu: px[k * 4 + c] }; }
+    }
+    if (Math.abs(o4[0] - px[k * 4]) > 0.02) bad++;
+  }
+  out[seed] = { max, worst, over2cm: bad, n: N * N };
+}
+window.__result = out;
+</script></body></html>

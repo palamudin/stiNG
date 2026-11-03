@@ -17,12 +17,17 @@ import { Sky, makeClouds } from './sky.js';
 import { Post } from './post.js';
 import { Forest } from './trees.js';
 import { Grass } from './grass.js';
+import { WaveField } from './wavegpu.js';
+import { Caustics } from './caustics.js';
+import { WATER } from './water.js';
+import { WAVES } from './waves.js';
 
+// waveN: the wave grid per cascade; caustics: [texture size, grid] for the sea's caustics, 0 for none
 export const QUALITY = {
-  low:    { levels: 10, scale: 0.7,  shadow: 1024, grass: 0.35, trees: 0.5,  post: true,  dof: false, rays: false, msaa: 0, clouds: 40 },
-  medium: { levels: 11, scale: 0.85, shadow: 2048, grass: 0.6,  trees: 0.75, post: true,  dof: true,  rays: true,  msaa: 0, clouds: 56 },
-  high:   { levels: 12, scale: 1.0,  shadow: 2048, grass: 1.0,  trees: 1.0,  post: true,  dof: true,  rays: true,  msaa: 4, clouds: 64 },
-  ultra:  { levels: 13, scale: 1.0,  shadow: 4096, grass: 1.4,  trees: 1.3,  post: true,  dof: true,  rays: true,  msaa: 4, clouds: 80 },
+  low:    { levels: 10, scale: 0.7,  shadow: 1024, grass: 0.35, trees: 0.5,  post: true,  dof: false, rays: false, msaa: 0, clouds: 40, waveN: 64,  caustics: 0 },
+  medium: { levels: 11, scale: 0.85, shadow: 2048, grass: 0.6,  trees: 0.75, post: true,  dof: true,  rays: true,  msaa: 0, clouds: 56, waveN: 128, caustics: [256, 192] },
+  high:   { levels: 12, scale: 1.0,  shadow: 2048, grass: 1.0,  trees: 1.0,  post: true,  dof: true,  rays: true,  msaa: 4, clouds: 64, waveN: 128, caustics: [512, 384] },
+  ultra:  { levels: 13, scale: 1.0,  shadow: 4096, grass: 1.4,  trees: 1.3,  post: true,  dof: true,  rays: true,  msaa: 4, clouds: 80, waveN: 256, caustics: [1024, 640] },
 };
 
 // the sun's direction from the hour (6 rises, 18 sets), on a fixed track across the sky
@@ -67,6 +72,7 @@ export class World {
     this.post.U.uSea.value = source.sea;
     if (opts.lens) { const L = opts.lens, U = this.post.U; if (L.fstop) U.uFstop.value = L.fstop; if (L.maxCoc) U.uMaxCoc.value = L.maxCoc; if (L.focal) U.uFocal.value = L.focal; if (L.sensor) U.uSensor.value = L.sensor; }
     if (source.sea < -1e5) this.post.U.uWaterOn.value = 0;
+    this._water();
     scene.add(this.group);
     this._mark();
     this.sunDir = sunAt(this.env.hour);
@@ -74,10 +80,44 @@ export class World {
     this.focusDist = 10;
   }
   heightAt(x, z) { return this.source.height(x, z); }
+  // the wave field and the sea's caustics for this source (source.water: fetch and cascades), or none
+  _water() {
+    const W = this.source.water, gl = this.renderer;
+    if (this.waves) { this.waves.dispose(); this.waves = null; }
+    if (this.caustics) { this.caustics.dispose(); this.caustics = null; }
+    if (W) {
+      const float = gl.extensions.has('EXT_color_buffer_float');
+      this.waves = new WaveField(gl, { cascades: W.cascades, fetch: W.fetch, N: this.q.waveN, salt: this.source.cosmetic | 0, float });
+      if (this.source.sea > -1e5 && this.q.caustics) this.caustics = new Caustics(gl, this.waves, this.clip.glsl(), this.clip.uniforms, { res: this.q.caustics[0], grid: this.q.caustics[1], msaa: this.q.msaa ? 4 : 0 });
+    }
+    this.post.setWater(this.waves, this.caustics);
+    this.drawsWater = !!(this.waves && this.source.waters); // the caller can stop drawing its own water bodies
+    this._dtAvg = 1 / 60;
+  }
+  // the water bodies the source has round the eye (the game's birdbaths, fountains and puddles), nearest first, as
+  // discs on the plane of the ground under them
+  _bodies(eye) {
+    const U = this.post.U, src = this.source;
+    if (!src.waters) { U.uBodies.value = 0; return; }
+    const CS = src.chunkSize || 64, ci = Math.floor(eye.x / CS), cj = Math.floor(eye.z / CS), all = [];
+    for (let j = cj - 1; j <= cj + 1; j++) for (let i = ci - 1; i <= ci + 1; i++) for (const b of src.waters(i, j)) all.push(b);
+    for (const b of all) b.d = Math.hypot(b.x - eye.x, b.z - eye.z) - b.r;
+    all.sort((a, b) => a.d - b.d);
+    const n = Math.min(all.length, WATER.bodies);
+    for (let k = 0; k < n; k++) {
+      const b = all[k], e = Math.max(0.1, b.r * 0.5), h = (x, z) => src.height(x, z);
+      const gx = (h(b.x + e, b.z) - h(b.x - e, b.z)) / (2 * e), gz = (h(b.x, b.z + e) - h(b.x, b.z - e)) / (2 * e);
+      U.uBody.value[k].set(b.x, b.z, b.r, h(b.x, b.z) + b.top);
+      U.uBodyB.value[k].set(gx, gz, b.depth, b.kind);
+    }
+    U.uBodies.value = n;
+  }
   // A new world in the same session (the game's newWorld): the clipmap keeps its uniforms, the forest is rebuilt.
   setSource(source, x = 0, z = 0) {
     this.source = source;
     this.clip.setSource(source);
+    this.post.U.uSea.value = source.sea; this.post.U.uWaterOn.value = source.sea < -1e5 ? 0 : 1;
+    this._water();
     this.group.remove(this.forest.group);
     this.forest = new Forest(this, { range: this.q.trees });
     this.group.add(this.forest.group);
@@ -127,6 +167,20 @@ export class World {
     this.clouds.uniforms.uSun.value.copy(this.sunDir); this.clouds.uniforms.uSunColor.value.copy(this.sky.sunColor); this.clouds.uniforms.uSkyUp.value.copy(this.sky.skyUp);
     // post
     U.uTime.value = this.time; U.uWet.value = E.wet; U.uWind.value.set(E.wind[0], E.wind[1]);
+    // water: the wind at 10 m (the game's own, else the drawing wind scaled to a breeze), waves past the frame rate faded
+    if (this.waves) {
+      this._dtAvg += (Math.min(Math.max(dt, 1 / 240), 0.2) - this._dtAvg) * 0.05;
+      const w10 = E.wind10 || [E.wind[0] * 8, E.wind[1] * 8];
+      this.waves.update(this.time, w10, Math.PI / this._dtAvg);
+      const st = this.waves.state;
+      U.uWLost.value = this.waves.lostSlope; U.uWPeak.value = Math.min(2 * Math.PI / WAVES.km, 2 * Math.PI / st.kp); // the ripples at the gravity-capillary minimum, or the peak if shorter
+      if (this.caustics) {
+        const fx2 = eye.x + TMPV.x * focusDist, fz2 = eye.z + TMPV.z * focusDist, size = THREE.MathUtils.clamp(focusDist * 2.2, 6, 96);
+        this.caustics.update(fx2, fz2, size, this.source.sea, this.sunDir);
+        U.uCaus.value.set(this.caustics.U.uCenter.value.x, this.caustics.U.uCenter.value.y, size, this.caustics.on ? 1 : 0);
+      }
+      this._bodies(eye);
+    }
     U.uMist.value = 0.0012 * E.mist; U.uMistH.value = 40;
     U.uSkyUp.value.copy(this.sky.skyUp); U.uSkyHz.value.copy(this.sky.skyHorizon);
     U.uFocus.value = focusDist;

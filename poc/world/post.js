@@ -1,7 +1,8 @@
 // The frame after the scene: everything here reads the scene's colour and depth and is written by hand (no addons).
 //
 //   scene (HDR half float, MSAA, depth texture)
-//   -> composite: sky where nothing was drawn, the water surface where the view ray meets it first (water.js),
+//   -> composite: sky where nothing was drawn, the water surface where the view ray meets it first (water.js: the
+//      sea of the source and the water bodies the game has, from the wave field of wavegpu.js),
 //      aerial perspective and low mist on everything by its distance, from the same atmosphere as the sky (sky.js).
 //      Alpha carries the distance along the ray, for the depth of field.
 //   -> god rays: the sun's light through gaps, a radial blur of the sky near the sun (quarter resolution)
@@ -12,7 +13,7 @@
 //   -> final: exposure, AgX, a light grade, vignette, grain, sRGB out.
 import * as THREE from 'three';
 import { SKY_GLSL } from './sky.js';
-import { WATER_GLSL, WATER_SHADE_GLSL } from './water.js';
+import { waterGLSL, WATER_SHADE_GLSL, WATER } from './water.js';
 import { NOISE_GLSL } from './noise.js';
 
 const VS = 'out vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }';
@@ -41,59 +42,13 @@ export class Post {
       uFocus: { value: 10 }, uFocal: { value: 0.045 }, uFstop: { value: 2.8 }, uSensor: { value: 0.024 }, uMaxCoc: { value: 14 }, uBlurIn: { value: 0 },
       uExposure: { value: 1 }, uSat: { value: 1.3 }, uPower: { value: 1.25 }, uVignette: { value: 0.22 }, uGrain: { value: 0.025 }, uBloom: { value: 0.045 },
       uTexel: { value: new THREE.Vector2() }, uBloomMax: { value: 1e4 }, uWind: { value: new THREE.Vector2(0.8, 0.3) },
+      uWL: { value: new THREE.Vector4(1, 1, 1, 1) }, uWLost: { value: 0 }, uWPeak: { value: 0.05 }, uGlint: { value: WATER.glint },
+      uBody: { value: Array.from({ length: WATER.bodies }, () => new THREE.Vector4()) }, uBodyB: { value: Array.from({ length: WATER.bodies }, () => new THREE.Vector4()) }, uBodies: { value: 0 },
+      tCaus: { value: null }, uCaus: { value: new THREE.Vector4(0, 0, 1, 0) },
       ...sky.uniforms,
     };
-    // ---- composite
-    this.composite = pass(`${SKY_GLSL}\n${NOISE_GLSL}\n${WATER_GLSL}
-uniform sampler2D tColor, tDepth, uSkyView; uniform mat4 uInvProj, uCamWorld, uViewProj; uniform vec3 uCamPos, uSun, uSunColor, uSkyUp, uSkyHz;
-uniform float uLogF, uSea, uMist, uMistH, uTime, uWet, uWaterOn, uDebug; uniform vec2 uRes;
-#define WATER_DEBUG
-vec3 viewRay(vec2 uv) { vec4 p = uInvProj * vec4(uv * 2.0 - 1.0, 1.0, 1.0); p.xyz /= p.w; return normalize((uCamWorld * vec4(p.xyz, 0.0)).xyz); }
-vec3 viewRayZ(vec2 uv) { vec4 p = uInvProj * vec4(uv * 2.0 - 1.0, 1.0, 1.0); p.xyz /= p.w; return p.xyz / -p.z; }
-// the log depth buffer back to distance along the ray
-float rayDist(vec2 uv, float d) { float w = exp2(d * uLogF) - 1.0; return w * length(viewRayZ(uv)); }
-vec3 skyAt(vec3 v) { return texture(uSkyView, skyUV(v, uSun)).rgb; }
-vec3 sunDisc(vec3 v) {
-  float c = dot(v, uSun), r = ${(0.5 * 0.00935).toFixed(6)};
-  float a = acos(clamp(c, -1.0, 1.0)); if (a > r * 1.6) return vec3(0.0);
-  float mu = sqrt(max(0.0, 1.0 - (a / r) * (a / r))); float limb = 1.0 - 0.6 * (1.0 - pow(mu, 0.5)); // limb darkening
-  return uSunColor * limb * smoothstep(r * 1.05, r * 0.95, a) / (3.14159 * r * r) * 0.6;
-}
-// aerial perspective: analytic optical depth of exponential air (Rayleigh, Mie) and the mist along the segment
-vec3 airT(float d, vec3 v, out vec3 inscatter) {
-  float h0 = max(uCamPos.y, 0.0), vy = v.y; vec3 ray = A_RAY; float mie = A_MIEX * uHaze;
-  float k = abs(vy) < 1e-4 ? d : 0.0;
-  float odR = abs(vy) < 1e-4 ? exp(-h0 / A_RAYH) * d : A_RAYH / vy * (exp(-h0 / A_RAYH) - exp(-(h0 + d * vy) / A_RAYH));
-  float odM = abs(vy) < 1e-4 ? exp(-h0 / A_MIEH) * d : A_MIEH / vy * (exp(-h0 / A_MIEH) - exp(-(h0 + d * vy) / A_MIEH));
-  float hm0 = max(uCamPos.y - uSea, 0.0);
-  float odF = abs(vy) < 1e-4 ? exp(-hm0 / uMistH) * d : uMistH / vy * (exp(-hm0 / uMistH) - exp(-(hm0 + d * vy) / uMistH));
-  vec3 od = ray * odR + vec3(mie * odM) + vec3(uMist * odF);
-  vec3 T = exp(-od);
-  vec3 vh = normalize(vec3(v.x, max(v.y, 0.035), v.z));
-  float c = dot(v, uSun);
-  vec3 mistLight = uSkyHz * 0.9 + uSunColor * aPhaseM(c) * 1.6;
-  float fm = uMist * odF / max(od.g, 1e-6);
-  inscatter = (1.0 - T) * mix(skyAt(vh), mistLight, clamp(fm, 0.0, 1.0));
-  return T;
-}
-${WATER_SHADE_GLSL}
-void main() {
-  vec2 uv = vUv; vec3 v = viewRay(uv);
-  float d0 = texture(tDepth, uv).r;
-  vec3 col = texture(tColor, uv).rgb;
-  float dist = d0 >= 1.0 ? 1e9 : rayDist(uv, d0);
-  if (d0 >= 1.0) col = skyAt(v) + sunDisc(v);
-  float tw = (uWaterOn > 0.5 && v.y < 0.0 && uCamPos.y > uSea) ? (uSea - uCamPos.y) / v.y : 1e10;
-  float outDist = dist;
-  if (tw < dist) {
-    col = waterShade(uv, v, tw, dist, col);
-    outDist = tw;
-  }
-  if (d0 < 1.0 || tw < dist) { vec3 ins; vec3 T = airT(min(outDist, 2e5), v, ins); col = col * T + ins; }
-  if (uDebug > 0.5 && uDebug < 1.5) { vec3 Pg = uCamPos + v * dist; col = vec3(tw < dist ? 1.0 : 0.0, Pg.y < 0.0 ? 1.0 : 0.0, d0 >= 1.0 ? 1.0 : 0.0) * 2.0; }
-  // half floats end at 65504: the sun's disc is brighter than that, and an infinity here turns into NaN in the passes after
-  oColor = vec4(min(col, vec3(6.0e4)), min(outDist, 60000.0));
-}`, U);
+    // ---- composite (rebuilt when the wave field's cascades change: setWater)
+    this.C = 0; this.composite = this._composite(0);
     // ---- god rays (quarter): a mask of the sky near the sun, blurred toward the sun's place on screen
     this.raysMask = pass(`${SKY_GLSL}
 uniform sampler2D tDepth; uniform mat4 uInvProj, uCamWorld; uniform vec3 uSun, uSunColor;
@@ -174,6 +129,88 @@ void main() {
 }`, U);
     this.size = new THREE.Vector2();
     this._alloc(1, 1);
+  }
+  _composite(C) {
+    return pass(`${SKY_GLSL}\n${NOISE_GLSL}\n#define W_CASCADES ${C}\n${C ? waterGLSL(C) : ''}
+uniform sampler2D tColor, tDepth, uSkyView; uniform mat4 uInvProj, uCamWorld, uViewProj; uniform vec3 uCamPos, uSun, uSunColor, uSkyUp, uSkyHz;
+uniform float uLogF, uSea, uMist, uMistH, uTime, uWet, uWaterOn, uDebug; uniform vec2 uRes;
+#define WATER_DEBUG
+vec3 viewRay(vec2 uv) { vec4 p = uInvProj * vec4(uv * 2.0 - 1.0, 1.0, 1.0); p.xyz /= p.w; return normalize((uCamWorld * vec4(p.xyz, 0.0)).xyz); }
+vec3 viewRayZ(vec2 uv) { vec4 p = uInvProj * vec4(uv * 2.0 - 1.0, 1.0, 1.0); p.xyz /= p.w; return p.xyz / -p.z; }
+// the log depth buffer back to distance along the ray
+float rayDist(vec2 uv, float d) { float w = exp2(d * uLogF) - 1.0; return w * length(viewRayZ(uv)); }
+vec3 skyAt(vec3 v) { return texture(uSkyView, skyUV(v, uSun)).rgb; }
+vec3 sunDisc(vec3 v) {
+  float c = dot(v, uSun), r = ${(0.5 * 0.00935).toFixed(6)};
+  float a = acos(clamp(c, -1.0, 1.0)); if (a > r * 1.6) return vec3(0.0);
+  float mu = sqrt(max(0.0, 1.0 - (a / r) * (a / r))); float limb = 1.0 - 0.6 * (1.0 - pow(mu, 0.5)); // limb darkening
+  return uSunColor * limb * smoothstep(r * 1.05, r * 0.95, a) / (3.14159 * r * r) * 0.6;
+}
+// aerial perspective: analytic optical depth of exponential air (Rayleigh, Mie) and the mist along the segment
+vec3 airT(float d, vec3 v, out vec3 inscatter) {
+  float h0 = max(uCamPos.y, 0.0), vy = v.y; vec3 ray = A_RAY; float mie = A_MIEX * uHaze;
+  float k = abs(vy) < 1e-4 ? d : 0.0;
+  float odR = abs(vy) < 1e-4 ? exp(-h0 / A_RAYH) * d : A_RAYH / vy * (exp(-h0 / A_RAYH) - exp(-(h0 + d * vy) / A_RAYH));
+  float odM = abs(vy) < 1e-4 ? exp(-h0 / A_MIEH) * d : A_MIEH / vy * (exp(-h0 / A_MIEH) - exp(-(h0 + d * vy) / A_MIEH));
+  float hm0 = max(uCamPos.y - uSea, 0.0);
+  float odF = abs(vy) < 1e-4 ? exp(-hm0 / uMistH) * d : uMistH / vy * (exp(-hm0 / uMistH) - exp(-(hm0 + d * vy) / uMistH));
+  vec3 od = ray * odR + vec3(mie * odM) + vec3(uMist * odF);
+  vec3 T = exp(-od);
+  vec3 vh = normalize(vec3(v.x, max(v.y, 0.035), v.z));
+  float c = dot(v, uSun);
+  vec3 mistLight = uSkyHz * 0.9 + uSunColor * aPhaseM(c) * 1.6;
+  float fm = uMist * odF / max(od.g, 1e-6);
+  inscatter = (1.0 - T) * mix(skyAt(vh), mistLight, clamp(fm, 0.0, 1.0));
+  return T;
+}
+${C ? WATER_SHADE_GLSL : ''}
+void main() {
+  vec2 uv = vUv; vec3 v = viewRay(uv);
+  float d0 = texture(tDepth, uv).r;
+  vec3 col = texture(tColor, uv).rgb;
+  float dist = d0 >= 1.0 ? 1e9 : rayDist(uv, d0);
+  if (d0 >= 1.0) col = skyAt(v) + sunDisc(v);
+  float outDist = dist; bool wet = false;
+#if W_CASCADES > 0
+  // the nearest water: the sea (iterated onto its waves), then the bodies (discs on the ground's plane)
+  float tw = 1e10, kind = -1.0; vec2 x0 = vec2(0.0), gx = vec2(0.0), gy = vec2(0.0); vec4 bA = vec4(0.0), bB = vec4(0.0);
+  if (uWaterOn > 0.5 && v.y < 0.0 && uCamPos.y > uSea) { tw = wSeaHit(uv, v, uSea, x0, gx, gy); kind = 0.0; }
+  for (int i = 0; i < ${WATER.bodies}; i++) {
+    if (i >= uBodies) break;
+    vec4 b = uBody[i], c2 = uBodyB[i]; vec3 c = vec3(b.x, b.w, b.y); vec3 n = vec3(-c2.x, 1.0, -c2.y);
+    float den = dot(v, n); if (den >= 0.0 || dot(uCamPos - c, n) <= 0.0) continue; // only from above
+    float t = dot(c - uCamPos, n) / den; if (t <= 0.0 || t >= tw) continue;
+    vec3 q = uCamPos + v * t; if (length(q.xz - c.xz) > b.z) continue;
+    tw = t; kind = c2.w; bA = b; bB = c2;
+  }
+  if (kind >= 0.0 && tw < dist) {
+    vec3 P = uCamPos + v * tw;
+    if (kind == 0.0) col = waterShade(uv, v, P, x0, vec2(0.0), gx, gy, dist, col, 0.0, 0.0, vec3(0.0), 1.0);
+    else {
+      vec3 c = vec3(bA.x, bA.w, bA.y);
+      gx = wPlaneHit(uv + vec2(1.0 / uRes.x, 0.0), c, bB.xy).xz - P.xz; gy = wPlaneHit(uv + vec2(0.0, 1.0 / uRes.y), c, bB.xy).xz - P.xz;
+      col = waterShade(uv, v, P, P.xz, bB.xy, gx, gy, dist, col, kind, bB.z, c, bA.z);
+    }
+    outDist = tw; wet = true;
+  }
+#endif
+  if (d0 < 1.0 || wet) { vec3 ins; vec3 T = airT(min(outDist, 2e5), v, ins); col = col * T + ins; }
+  if (uDebug > 0.5 && uDebug < 1.5) { vec3 Pg = uCamPos + v * dist; col = vec3(wet ? 1.0 : 0.0, Pg.y < 0.0 ? 1.0 : 0.0, d0 >= 1.0 ? 1.0 : 0.0) * 2.0; }
+  // half floats end at 65504: the sun's disc is brighter than that, and an infinity here turns into NaN in the passes after
+  oColor = vec4(min(col, vec3(6.0e4)), min(outDist, 60000.0));
+}`, this.U);
+  }
+
+  // the wave field (wavegpu.js) and the sea's caustics (caustics.js); null for none
+  setWater(field, caustics) {
+    const C = field ? field.C : 0, U = this.U;
+    if (C !== this.C) { this.composite.dispose(); this.C = C; this.composite = this._composite(C); }
+    if (field) {
+      U.uWL.value = field.U.uL.value;
+      for (let c = 0; c < C; c++) { U['tWD' + c] = { value: field.disp[c].texture }; U['tWS' + c] = { value: field.slope[c].texture }; }
+      this.composite.uniforms = U;
+    }
+    U.tCaus.value = caustics ? caustics.rt.texture : null;
   }
   _alloc(w, h) {
     this.w = w; this.h = h;

@@ -1,60 +1,68 @@
-// Water at the sea level of the source (lakes, rivers, the sea), drawn in the composite pass where the view ray meets
-// the plane before anything else. No mesh: the surface is the plane y = sea, its relief lives only in the normal.
+// Water (W2): the surface the view ray meets first, drawn in the composite pass from the wave field (wavegpu.js).
+// Two kinds of water share the optics:
+//   - the sea of a source (lakes, rivers, the sea of the wild world): the plane y = sea, displaced by the waves near
+//     the camera (the ray is iterated onto the displaced surface), with caustics splatted onto the floor (caustics.js);
+//   - water bodies (the game's birdbaths, fountains and puddles): discs on the plane the ground has under them, as the
+//     sim puts them (its heights are above the ground), with a bowl for a floor where the game draws a solid basin,
+//     and caustics from the ripples' curvature (shallow basins are short of the ripples' focus, where that holds).
 //
-// The optics are physical where it is cheap enough to be:
-//   - waves: six directional trains with deep-water dispersion (speed sqrt(g lambda / 2 pi)), plus two layers of
-//     capillary ripple, plus rain rings when it rains; trains smaller than about two pixels are faded out and their
-//     slope variance moved into the roughness of the sun's glint (LEAN-style), so distance does not shimmer;
-//   - reflection: Fresnel (Schlick, n = 1.333), screen-space reflection of the scene, the sky table where that misses,
-//     and the sun as a GGX highlight;
-//   - refraction: the floor is looked up along the refracted ray (Snell), offset by the surface normal, only from
-//     pixels that are really under water;
-//   - absorption and scattering: Beer-Lambert over the refracted path length to the floor (red goes first), plus
-//     single-scattered sky and sun light from the water itself;
-//   - caustics: the sun refracted by the large waves, focused onto the floor: the brightness is the inverse of the
-//     area change of a small patch of light from the surface to the floor (the Jacobian of the refracted map),
-//     computed per pixel from the same wave field, fading with depth;
-//   - foam where the water is a few centimetres deep at the shore.
+// The optics, per pixel:
+//   - the slope field is filtered to the pixel's footprint (anisotropic, from the ray's own footprint on the plane)
+//     as first and second moments, so the waves too small to see become the roughness of the sun's highlight
+//     (LEAN mapping, Olano and Baker 2010) and nothing shimmers; waves faded for the frame rate add their variance;
+//   - reflection: exact Fresnel for unpolarised light (n = 1.333), the scene by screen-space reflection, the sky table
+//     where that misses; the sun through the Gaussian slope distribution of the pixel (mean and variance), widened by
+//     the sun's own disc, so a calm birdbath mirrors a sun of the right size;
+//   - glints: the sun's highlight is carried by a countable number of mirror facets; where few are expected in a cell
+//     of the footprint's size, the cell draws a Poisson-distributed count of them (n / expected times the smooth
+//     highlight, mean unchanged), so close water sparkles and far water is smooth. Facets are the size of the ripples
+//     at the gravity-capillary minimum (half of 1.7 cm), or the footprint if smaller (at least 2 mm): our estimate;
+//   - refraction: the floor along the refracted ray (Snell) from under-water pixels only; Beer-Lambert over the path;
+//     the floor's sunlight loses the surface's Fresnel reflection and the water on its way down, and is focused or
+//     spread by the caustics;
+//   - single scattering from the water itself, foam where the surface folds and at the very edge, rain rings.
+import { WAVES } from './waves.js';
+
 export const WATER = {
   absorb: [0.45, 0.075, 0.035], // per metre: a clear lake with a little dissolved matter
   scatter: [0.025, 0.04, 0.045],
   n: 1.333,
-  waves: [ // wavelength m, amplitude m, direction (radians from the wind), phase
-    [5.1, 0.045, 0.0, 0.0], [3.2, 0.028, 0.6, 1.3], [2.1, 0.018, -0.5, 2.9],
-    [1.25, 0.010, 0.9, 4.1], [0.74, 0.006, -1.1, 5.6], [0.43, 0.0035, 0.3, 0.7],
-  ],
+  bodies: 8,                    // water bodies drawn at once (the nearest)
+  // How far glints spread from the smooth highlight: 1 is the full Poisson spread of the facet count, 0 the smooth
+  // highlight. The facet size is our estimate, so the spread is softened by default; this is a choice for the look,
+  // and the mean brightness is the same at any setting.
+  glint: 0.75,
 };
 
 const f = (v) => (Number.isInteger(v) ? v.toFixed(1) : String(v));
 
-// wave functions only; waterShade (below) is placed after the composite's helpers
-export const WATER_GLSL = /* glsl */ `
-uniform vec2 uWind; // direction (unit) * strength 0..1
+// C: cascades; B: bodies
+export function waterGLSL(C, B = WATER.bodies) {
+  const cs = [...Array(C).keys()];
+  return /* glsl */ `
+uniform vec2 uWind; uniform float uWLost, uWPeak, uGlint;
+uniform vec4 uWL; // tile sizes of the cascades
+${cs.map((c) => `uniform sampler2D tWD${c}, tWS${c};`).join(' ')}
+uniform vec4 uBody[${B}];  // centre x, z, radius, water level at the centre
+uniform vec4 uBodyB[${B}]; // ground gradient x, z, floor depth (0: the floor is drawn), kind (0 none, 1 bowl, 2 flat)
+uniform int uBodies;
 const float W_N = ${f(WATER.n)};
 const vec3 W_ABS = vec3(${WATER.absorb.map(f).join(', ')});
 const vec3 W_SCA = vec3(${WATER.scatter.map(f).join(', ')});
-// slope (dh/dx, dh/dz) of the wave trains at p, time t; fp = pixel footprint in metres; returns faded-out variance in .z
-vec3 wSlope(vec2 p, float t, float fp, bool bigOnly) {
-  vec2 wd = length(uWind) > 0.001 ? normalize(uWind) : vec2(1.0, 0.0); float ws = 0.35 + 0.65 * length(uWind);
-  vec2 s = vec2(0.0); float lost = 0.0;
-  ${WATER.waves.map(([L, A, D, P], i) => `{
-    float ang = ${f(D)}; vec2 dir = vec2(wd.x * cos(ang) - wd.y * sin(ang), wd.x * sin(ang) + wd.y * cos(ang));
-    float k = 6.2831853 / ${f(L)}, w = sqrt(9.81 * k);
-    float vis = 1.0 - smoothstep(${f(L)} * 0.12, ${f(L)} * 0.35, fp);
-    float a = ${f(A)} * ws * k; // slope amplitude
-    ${i >= 4 ? 'if (!bigOnly) {' : '{'}
-      s += dir * a * cos(k * dot(dir, p) - w * t + ${f(P)}) * vis;
-      lost += a * a * 0.5 * (1.0 - vis);
-    }
-  }`).join('\n  ')}
-  if (!bigOnly) {
-    float vc = 1.0 - smoothstep(0.012, 0.04, fp);
-    vec3 n1 = w2noised(p / 0.11 + wd * t * 0.9, 91); vec3 n2 = w2noised(p / 0.045 - wd.yx * t * 1.4, 92);
-    vec2 cap = (n1.yz / 0.11 * 0.0035 + n2.yz / 0.045 * 0.0012) * ws;
-    s += cap * vc; lost += dot(cap, cap) * (1.0 - vc) * 0.5;
-  }
-  return vec3(s, lost);
+// the displacement (Dx, h, Dz) and fold (J) summed over cascades, filtered to the footprint (gx, gy: metres per pixel)
+vec4 wDisp(vec2 x, vec2 gx, vec2 gy) {
+  vec4 d = vec4(0.0, 0.0, 0.0, 1.0);
+  ${cs.map((c) => `{ vec4 s = textureGrad(tWD${c}, x / uWL[${c}], gx / uWL[${c}], gy / uWL[${c}]); d.xyz += s.xyz; d.w += s.w - 1.0; }`).join('\n  ')}
+  return d;
 }
+// mean slope and slope variance (x, z) of the footprint
+void wSlope(vec2 x, vec2 gx, vec2 gy, out vec2 m, out vec2 v) {
+  m = vec2(0.0); v = vec2(0.0);
+  ${cs.map((c) => `{ vec4 s = textureGrad(tWS${c}, x / uWL[${c}], gx / uWL[${c}], gy / uWL[${c}]); m += s.xy; v += max(s.zw - s.xy * s.xy, 0.0); }`).join('\n  ')}
+  v += vec2(uWLost * 0.5);
+}
+// slope at a point, finest detail (for curvature)
+vec2 wSlopeAt(vec2 x) { vec2 s = vec2(0.0); ${cs.map((c) => `s += textureLod(tWS${c}, x / uWL[${c}], 0.0).xy;`).join(' ')} return s; }
 // rain: expanding rings in 0.3 m cells, each with its own time and place, fading as they spread
 vec2 wRain(vec2 p, float t, float amt) {
   if (amt <= 0.0) return vec2(0.0);
@@ -70,87 +78,196 @@ vec2 wRain(vec2 p, float t, float amt) {
   }
   return s;
 }
-// floor brightness from the refracted sun focused by the big waves: 1 / |det J| of x -> x + D * offset(n(x))
-float wCaustic(vec2 p, float depth, float t, vec3 sun) {
-  if (depth <= 0.0) return 1.0;
-  float e = 0.06;
-  vec2 s0 = wSlope(p, t, 0.0, true).xy, sx = wSlope(p + vec2(e, 0.0), t, 0.0, true).xy, sz = wSlope(p + vec2(0.0, e), t, 0.0, true).xy;
-  vec3 L = -sun;
-  vec3 r0 = refract(L, normalize(vec3(-s0.x, 1.0, -s0.y)), 1.0 / W_N), rx = refract(L, normalize(vec3(-sx.x, 1.0, -sx.y)), 1.0 / W_N), rz = refract(L, normalize(vec3(-sz.x, 1.0, -sz.y)), 1.0 / W_N);
-  vec2 o0 = r0.xz / -r0.y * depth, ox = rx.xz / -rx.y * depth, oz = rz.xz / -rz.y * depth;
-  mat2 J = mat2(1.0 + (ox.x - o0.x) / e, (ox.y - o0.y) / e, (oz.x - o0.x) / e, 1.0 + (oz.y - o0.y) / e);
-  float a = abs(determinant(J));
-  return clamp(1.0 / max(a, 0.05), 0.0, 6.0);
+// Fresnel reflectance, unpolarised, from air into water
+float wFresnel(float ci) {
+  ci = clamp(ci, 0.0, 1.0); float st2 = (1.0 - ci * ci) / (W_N * W_N); if (st2 >= 1.0) return 1.0;
+  float ct = sqrt(1.0 - st2), rs = (ci - W_N * ct) / (ci + W_N * ct), rp = (W_N * ci - ct) / (W_N * ci + ct);
+  return 0.5 * (rs * rs + rp * rp);
+}
+// Smith's masking for a Gaussian (Beckmann) slope distribution of variance s2 along the direction (Walter et al. 2007)
+float wLambda(float cosT, float s2) {
+  float a = cosT / max(sqrt(max(1.0 - cosT * cosT, 1e-6)) * sqrt(2.0 * s2), 1e-6);
+  return a < 1.6 ? (1.0 - 1.259 * a + 0.396 * a * a) / (3.535 * a + 2.181 * a * a) : 0.0;
+}
+// a Poisson count with mean lam from a uniform number u
+float wPoisson(float lam, float u, float u2) {
+  if (lam > 12.0) { float g = sqrt(-2.0 * log(max(u, 1e-7))) * cos(6.2831853 * u2); return max(0.0, floor(lam + sqrt(lam) * g + 0.5)); }
+  float p = exp(-lam), c = p, n = 0.0;
+  for (int i = 0; i < 40; i++) { if (u <= c) break; n += 1.0; p *= lam / n; c += p; }
+  return n;
 }
 `;
+}
 
+// placed after the composite's helpers (viewRay, rayDist, skyAt, uViewProj, tColor, tDepth, uSun, ...)
 export const WATER_SHADE_GLSL = /* glsl */ `
-float wD_GGX(float nh, float a) { float a2 = a * a; float d = nh * nh * (a2 - 1.0) + 1.0; return a2 / (3.14159265 * d * d); }
+uniform sampler2D tCaus; uniform vec4 uCaus; // centre x, z, size, on
 // screen-space reflection: march the reflected ray, compare with the depth buffer; 0 alpha when it misses
-vec4 wSSR(vec3 P, vec3 R) {
-  float t = 0.4 + 0.02 * length(P - uCamPos); vec3 q;
-  for (int i = 0; i < 20; i++) {
+vec4 wSSR(vec3 P, vec3 R, float yb) {
+  float t = min(0.4 + 0.02 * length(P - uCamPos), 0.02 + 0.05 * length(P - uCamPos)), tp = 0.0; vec3 q; bool front = true;
+  for (int i = 0; i < 24; i++) {
     q = P + R * t;
     vec4 c = uViewProj * vec4(q, 1.0); if (c.w <= 0.0) break;
     vec2 uv = c.xy / c.w * 0.5 + 0.5; if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) break;
-    float d = texture(tDepth, uv).r; if (d >= 1.0) { t *= 1.35; continue; }
+    float d = texture(tDepth, uv).r; if (d >= 1.0) { front = true; tp = t; t *= 1.35; continue; }
     float sd = rayDist(uv, d), qd = length(q - uCamPos);
     vec3 S = uCamPos + viewRay(uv) * sd;
-    // a hit: the ray has just gone behind something that stands above the water, within a thickness that grows
-    // slowly with the step (a thin shell), never on the water's own floor or on ground far behind
-    if (qd > sd && qd - sd < 0.04 * t + 0.08 && S.y > uSea + 0.01) {
+    // a hit: the ray has gone from in front of the scene to behind it since the last step, by no more than that step
+    // (so it passed through the surface there, not behind a thin thing far in front), on something above the water
+    if (qd > sd && front && qd - sd < (t - tp) * 1.5 + 0.02 && S.y > yb + 0.002) {
       float edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
       return vec4(texture(tColor, uv).rgb, smoothstep(0.0, 0.08, edge));
     }
-    t *= 1.35;
+    front = qd <= sd; tp = t; t *= 1.35;
   }
   return vec4(0.0);
 }
-vec3 waterShade(vec2 uv, vec3 v, float tw, float dist, vec3 sceneCol) {
-  vec3 P = uCamPos + v * tw;
-  float fp = tw * 2.0 / (uRes.y * abs(v.y) + 1e-3) * 0.8; // footprint of a pixel on the plane, roughly
-  vec3 sl = wSlope(P.xz, uTime, fp, false);
-  vec2 rs = wRain(P.xz, uTime, uWet) * (1.0 - smoothstep(0.02, 0.08, fp));
-  vec3 n = normalize(vec3(-sl.x - rs.x, 1.0, -sl.y - rs.y));
-  float rough = clamp(sqrt(0.004 + sl.z * 2.0), 0.03, 0.6);
-  vec3 V = -v;
-  float nv = max(dot(n, V), 1e-3);
-  float F = 0.02 + 0.98 * pow(1.0 - nv, 5.0);
-  // refraction: the floor along the refracted ray, from under-water pixels only
-  vec3 T = refract(v, n, 1.0 / W_N);
-  vec2 ruv = clamp(uv + (n.xz) * 0.06 * clamp((dist - tw) * 0.25, 0.0, 1.0) * vec2(1.0, uRes.x / uRes.y) * 0.5, vec2(0.001), vec2(0.999));
-  float rd = texture(tDepth, ruv).r; float rdist = rd >= 1.0 ? 1e9 : rayDist(ruv, rd);
-  vec3 rv = viewRay(ruv);
-  vec3 Pb = uCamPos + rv * min(rdist, tw + 400.0);
-  if (Pb.y > uSea - 0.002) { ruv = uv; Pb = uCamPos + v * min(dist, tw + 400.0); }
-  vec3 floorCol = texture(tColor, ruv).rgb;
-  float D = max(uSea - Pb.y, 0.0);              // vertical depth of the floor below the surface
-  float pathL = D / max(-T.y, 0.05);            // the refracted path through the water
-  // caustics on the floor, lit by the sun through the surface
+// the point where a view ray through pixel uv meets the plane y = y0 + g.(x - c)
+vec3 wPlaneHit(vec2 uv, vec3 c, vec2 g) {
+  vec3 v = viewRay(uv); vec3 n = vec3(-g.x, 1.0, -g.y);
+  float t = dot(c - uCamPos, n) / dot(v, n); return uCamPos + v * t;
+}
+// light under the water: what the floor sends back through it, plus the water's own scattering; D = depth of the
+// floor below the surface where the refracted ray meets it, L = the path's length through the water
+vec3 wUnder(vec3 floorCol, float D, float L, float cz) {
   float sunUp = max(uSun.y, 0.0);
-  float cz = wCaustic(Pb.xz, D, uTime, uSun);
-  float cfade = exp(-D * 0.35) * smoothstep(0.0, 0.06, D) * (1.0 - smoothstep(30.0, 120.0, tw));
-  floorCol *= mix(1.0, cz, cfade * smoothstep(0.0, 0.15, sunUp));
-  // through the water: absorbed on the way up, plus light scattered by the water toward the eye
+  // the floor's light split into sun and sky by the light that reaches level ground
+  float es = dot(uSunColor, vec3(0.2126, 0.7152, 0.0722)) * sunUp, ek = dot(uSkyUp, vec3(0.2126, 0.7152, 0.0722));
+  float share = es / max(es + ek, 1e-6);
+  vec3 Ts = refract(-uSun, vec3(0.0, 1.0, 0.0), 1.0 / W_N);
   vec3 ext = W_ABS + W_SCA;
-  vec3 Tw = exp(-ext * pathL);
+  vec3 sunDown = exp(-ext * D / max(-Ts.y, 0.1)) * (1.0 - wFresnel(sunUp)) * cz;
+  vec3 skyDown = exp(-ext * D * 1.2) * 0.934;
+  vec3 lit = floorCol * (share * sunDown + (1.0 - share) * skyDown);
+  vec3 Tw = exp(-ext * L);
   vec3 amb = uSkyUp / 3.14159 * 0.8 + uSunColor * sunUp / 3.14159 * 0.6;
-  vec3 inW = W_SCA / ext * (1.0 - Tw) * amb;
-  vec3 under = floorCol * Tw + inW;
-  // reflection: the scene where SSR finds it, else the sky; the sun as a GGX highlight
+  return lit * Tw + W_SCA / ext * (1.0 - Tw) * amb;
+}
+// v: the view ray; P: the point on the surface; x0: the same point before the waves moved it sideways; g: the plane's
+// gradient; yb: the water level at P; gx, gy: the footprint; dist: the scene's distance along v
+// bodyK: 0 the sea (floor from the scene), 1 bowl, 2 flat basin, 3 a puddle (floor from the scene); bodyD: basin depth
+vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, float dist, vec3 sceneCol, float bodyK, float bodyD, vec3 bodyC, float bodyR) {
+  vec3 V = -v; float tw = length(P - uCamPos);
+  vec2 m, sv; wSlope(x0, gx, gy, m, sv);
+  float fp = sqrt(max(length(gx) * length(gy), 1e-12));
+  vec2 rs = wRain(P.xz, uTime, uWet) * (1.0 - smoothstep(0.02, 0.08, fp));
+  m += rs + g; // the plane's own tilt is part of the mean slope
+  vec3 n = normalize(vec3(-m.x, 1.0, -m.y));
+  float nv = max(dot(n, V), 1e-3);
+  float F = wFresnel(nv);
+  // ---- refraction: the floor
+  vec3 T = refract(v, n, 1.0 / W_N);
+  vec3 floorCol; float D, L; vec3 Pb;
+  if (bodyK == 1.0 || bodyK == 2.0) {
+    // a basin the game draws solid: its floor is a bowl (1) or flat with a rounded edge (2) under the water level
+    float t = bodyD / max(-T.y, 0.05);
+    for (int i = 0; i < 4; i++) {
+      vec3 q = P + T * t; float r = length(q.xz - bodyC.xz) / bodyR;
+      float d = bodyK == 1.0 ? bodyD * max(1.0 - r * r, 0.0) : bodyD * (1.0 - smoothstep(0.82, 1.0, r));
+      float yq = bodyC.y + dot(g, q.xz - bodyC.xz) - d; // the floor follows the ground's plane like the water
+      t += (q.y - yq) / max(-T.y, 0.05) * 0.9;
+    }
+    t = max(t, 0.0); Pb = P + T * t; D = max(P.y - Pb.y, 0.0); L = t;
+    // the floor's colour and light: the basin's drawn top under that point
+    vec4 c = uViewProj * vec4(Pb.x, P.y - 0.006, Pb.z, 1.0); vec2 fuv = clamp(c.xy / c.w * 0.5 + 0.5, vec2(0.001), vec2(0.999));
+    floorCol = texture(tColor, fuv).rgb;
+    float fd = texture(tDepth, fuv).r; if (fd >= 1.0 || abs(rayDist(fuv, fd) - length(vec3(Pb.x, P.y - 0.006, Pb.z) - uCamPos)) > 0.03 + 0.01 * tw) floorCol = sceneCol;
+  } else {
+    vec2 ruv = clamp(uv + n.xz * 0.06 * clamp((dist - tw) * 0.25, 0.0, 1.0) * vec2(1.0, uRes.x / uRes.y) * 0.5, vec2(0.001), vec2(0.999));
+    float rd = texture(tDepth, ruv).r; float rdist = rd >= 1.0 ? 1e9 : rayDist(ruv, rd);
+    Pb = uCamPos + viewRay(ruv) * min(rdist, tw + 400.0);
+    float yAt = P.y + dot(g, Pb.xz - P.xz);
+    if (Pb.y > yAt - 0.0005) { ruv = uv; Pb = uCamPos + v * min(dist, tw + 400.0); }
+    floorCol = texture(tColor, ruv).rgb;
+    D = max(P.y + dot(g, Pb.xz - P.xz) - Pb.y, 0.0); L = D / max(-T.y, 0.05);
+  }
+  // ---- caustics: splatted for the sea, from the ripples' curvature for bodies
+  float cz = 1.0;
+  if (bodyK == 0.0) {
+    vec2 cu = (Pb.xz - uCaus.xy) / uCaus.z + 0.5;
+    float edge = min(min(cu.x, 1.0 - cu.x), min(cu.y, 1.0 - cu.y));
+    if (uCaus.w > 0.5 && edge > 0.0) cz = mix(1.0, min(texture(tCaus, cu).r, 400.0), smoothstep(0.0, 0.08, edge)); // a focus can sum past half-float range
+  } else if (D > 0.0005) {
+    // the sun's refracted offset on the floor as a function of slope, linearised; with the slope's derivative (the
+    // curvature) this is the Jacobian of the map from the surface to the floor; brightness = 1 / |det J|
+    vec2 q = Pb.xz; float e = 0.004;
+    vec2 s0 = wSlopeAt(q), sxp = wSlopeAt(q + vec2(e, 0.0)), szp = wSlopeAt(q + vec2(0.0, e));
+    mat2 H = mat2((sxp - s0) / e, (szp - s0) / e);
+    vec3 L0 = -uSun; float de = 0.01;
+    vec3 r0 = refract(L0, normalize(vec3(-s0.x, 1.0, -s0.y)), 1.0 / W_N), rx = refract(L0, normalize(vec3(-s0.x - de, 1.0, -s0.y)), 1.0 / W_N), rz = refract(L0, normalize(vec3(-s0.x, 1.0, -s0.y - de)), 1.0 / W_N);
+    vec2 o0 = r0.xz / -r0.y, ox = rx.xz / -rx.y, oz = rz.xz / -rz.y;
+    mat2 M = mat2((ox - o0) / de, (oz - o0) / de);
+    mat2 J = mat2(1.0) + D * M * H;
+    cz = clamp(1.0 / max(abs(determinant(J)), 0.12), 0.0, 8.0);
+  }
+  vec3 under = wUnder(floorCol, D, L, cz);
+  // ---- reflection: the scene where SSR finds it, else the sky
   vec3 R = reflect(v, n); R.y = abs(R.y);
-  vec4 ss = wSSR(P, R);
+  vec4 ss = wSSR(P, R, P.y);
   vec3 refl = mix(skyAt(R), ss.rgb, ss.a);
-  vec3 H = normalize(V + uSun);
-  float nl = max(dot(n, uSun), 0.0), nh = max(dot(n, H), 0.0);
-  vec3 spec = uSunColor * wD_GGX(nh, rough) * F * nl / (4.0 * nv * max(nl, 1e-3)) * nl;
+  // ---- the sun: the slope distribution of the footprint (mean m, variance sv), widened by the sun's disc
+  vec3 Lsun = uSun; float sunOn = step(0.0, Lsun.y);
+  vec3 Hh = normalize(V + Lsun);
+  vec2 sh = vec2(-Hh.x, -Hh.z) / max(Hh.y, 1e-3) - m;
+  vec2 s2 = sv + vec2(${((0.00465 / 2) ** 2 / 4).toExponential(3)}) + vec2(1e-7); // the sun's disc, radius 0.00465 rad: half that in half-vector slope
+  float P22 = exp(-0.5 * (sh.x * sh.x / s2.x + sh.y * sh.y / s2.y)) / (6.2831853 * sqrt(s2.x * s2.y));
+  float ch = max(Hh.y, 1e-3), Dm = P22 / (ch * ch * ch * ch);
+  float sav = 0.5 * (s2.x + s2.y);
+  float G = 1.0 / (1.0 + wLambda(max(V.y, 1e-3), sav) + wLambda(max(Lsun.y, 1e-3), sav));
+  float Fh = wFresnel(dot(V, Hh));
+  vec3 spec = uSunColor * Fh * Dm * G / (4.0 * max(V.y, 1e-3)) * sunOn;
+  // glints: facets of size l (the short ripples that carry most of the curvature) in square cells anchored to the
+  // world, at the two power-of-two sizes round the footprint, blended by the fraction between them; each cell redraws
+  // its Poisson count about three times a second from its own start, fading between draws, so it twinkles; uGlint
+  // softens the spread toward the smooth highlight (1: the full spread; the mean is exact at any setting)
+  float l = clamp(fp, 0.002, 0.5 * uWPeak);
+  float pc = P22 * ${(Math.PI * (0.00465 / 2) ** 2).toExponential(4)} / (ch * ch * ch) / (l * l); // per square metre: facets times the share in the sun's cone
+  float lf = log2(max(fp, l)), l0 = floor(lf), gm = 0.0;
+  if (uGlint > 0.0 && pc * exp2(2.0 * l0) < 60.0) {
+    for (int j = 0; j < 2; j++) {
+      float sz = exp2(l0 + float(j)), lam = max(pc * sz * sz, 1e-6);
+      vec2 cell = floor(x0 / sz); int cx = int(cell.x), cz2 = int(cell.y), lv = int(l0) + j + 64;
+      float tt = uTime * 3.0 + w2hash01(cx, cz2, 403 + lv) * 64.0, it = floor(tt);
+      float n0 = wPoisson(lam, w2hash01(cx, cz2, 410 + lv * 977 + int(it)), w2hash01(cx, cz2, 411 + lv * 977 + int(it)));
+      float n1 = wPoisson(lam, w2hash01(cx, cz2, 410 + lv * 977 + int(it) + 1), w2hash01(cx, cz2, 411 + lv * 977 + int(it) + 1));
+      gm += (j == 0 ? 1.0 - (lf - l0) : lf - l0) * mix(n0, n1, smoothstep(0.0, 1.0, tt - it)) / lam;
+    }
+    spec *= mix(1.0, gm, uGlint);
+  }
   vec3 col = mix(under, refl, F) + spec;
-  // foam at the very edge
-  float fz = 1.0 - smoothstep(0.0, 0.05 + 0.04 * w2noise(P.xz / 0.4 + uTime * 0.1, 97), D);
-  float fm = fz * smoothstep(-0.2, 0.6, w2noise(P.xz / 0.12 - uTime * 0.05, 98));
+  // ---- foam: where the surface folds, and at the very edge of the sea
+  vec4 dsp = wDisp(x0, gx, gy);
+  float fold = 1.0 - smoothstep(0.15, 0.55, dsp.w);
+  float sunUp = max(uSun.y, 0.0);
+  vec3 amb = uSkyUp / 3.14159 * 0.8 + uSunColor * sunUp / 3.14159 * 0.6;
+  float fm = fold * smoothstep(-0.2, 0.6, w2noise(x0 / 0.3, 99));
+  if (bodyK == 0.0) {
+    float fz = 1.0 - smoothstep(0.0, 0.05 + 0.04 * w2noise(P.xz / 0.4 + uTime * 0.1, 97), D);
+    fm = max(fm, fz * smoothstep(-0.2, 0.6, w2noise(P.xz / 0.12 - uTime * 0.05, 98)));
+  }
   col = mix(col, amb * 0.9 + uSunColor * sunUp * 0.25, fm * 0.7);
   if (uDebug > 1.5) col = vec3(D / 3.0, F, ss.a) * 2.0;
-  if (uDebug > 2.5) col = vec3(clamp(pathL / 5.0, 0.0, 1.0), Tw.r, cz / 3.0) * 2.0;
+  if (uDebug > 2.5) col = vec3(clamp(L / 5.0, 0.0, 1.0), sqrt(sv.x + sv.y) * 4.0, cz / 3.0) * 2.0;
   return col;
+}
+// the sea: the plane hit, then iterated onto the displaced surface (near the camera, where the waves are larger than
+// a pixel); returns the distance along v, the undisplaced point in x0
+float wSeaHit(vec2 uv, vec3 v, float yb, out vec2 x0, out vec2 gx, out vec2 gy) {
+  vec3 P = wPlaneHit(uv, vec3(0.0, yb, 0.0), vec2(0.0));
+  float t = length(P - uCamPos);
+  gx = wPlaneHit(uv + vec2(1.0 / uRes.x, 0.0), vec3(0.0, yb, 0.0), vec2(0.0)).xz - P.xz;
+  gy = wPlaneHit(uv + vec2(0.0, 1.0 / uRes.y), vec3(0.0, yb, 0.0), vec2(0.0)).xz - P.xz;
+  gx = clamp(gx, vec2(-50.0), vec2(50.0)); gy = clamp(gy, vec2(-50.0), vec2(50.0));
+  x0 = P.xz;
+  float near = 1.0 - smoothstep(0.08, 0.6, sqrt(length(gx) * length(gy)) / max(uWL.x, 1e-3) * 8.0);
+  if (near > 0.0) {
+    for (int i = 0; i < 4; i++) {
+      vec3 q = uCamPos + v * t;
+      vec4 d = wDisp(x0, gx, gy); x0 = q.xz - d.xz * near; d = wDisp(x0, gx, gy);
+      float f = q.y - (yb + d.y * near);
+      t += clamp(f / max(-v.y, 0.02), -2.0, 2.0) * 0.85;
+    }
+  }
+  return t;
 }
 `;

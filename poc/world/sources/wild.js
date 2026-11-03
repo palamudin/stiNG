@@ -10,7 +10,7 @@
 //           only in the lowlands; a little roughness at wasp scale.
 //   forest  big warped patches, nudged by moisture, thinned with height, none at the shore.
 //   trail   a winding footpath network (zero lines of another noise), in meadows only.
-import { vnoised, smoothstep, clamp, NOISE_GLSL } from '../noise.js';
+import { vnoised, smoothstep, clamp, NOISE_GLSL, hash3 } from '../noise.js';
 
 export const WILD = {
   cell: 1800,      // metres per lattice cell of the broad shape
@@ -199,6 +199,9 @@ export function wildSource(opts = {}) {
     // trees come from the scatter system (forest density); the wild source has no fixed objects
     objects: null,
     grassHeight: [0.1, 0.42], // a wild meadow: ankle-high where dry, knee-high where wet
+    cosmetic: hash3(P.seed | 0, 0xc05, 77) & 0xfffff, // decoration's salt, from the world's seed
+    // lakes and the sea: wind over 600 m of open water; tiles of 48 m down to 14 cm, from metre chop to millimetre ripples
+    water: { fetch: 600, cascades: [48, 6.9, 1.0, 0.14] },
   };
 }
 const TMP = [0, 0, 0, 0];

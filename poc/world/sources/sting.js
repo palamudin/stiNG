@@ -11,7 +11,7 @@
 // Where people are comes from the chunk itself: picnic tables and their seats, the spots where people stand about,
 // door steps, flower beds (bare earth round each plant), the foot of every trunk, and hives. Each land use also has a
 // little wear of its own (a park is walked all over, a yard much less, a wood not at all).
-import { groundAt, landUse, pavingOf, chunkOf, chunkKey, generateChunk, T } from '../../sim/index.js';
+import { groundAt, landUse, pavingOf, chunkOf, chunkKey, generateChunk, T, hash, Domain } from '../../sim/index.js';
 
 const MOIST = { park: 0.62, yards: 0.72, forest: 0.8, mall: 0.3, town: 0.42 };
 const FOREST = { park: 0.12, yards: 0.08, forest: 1, mall: 0, town: 0 };
@@ -124,10 +124,29 @@ export function stingSource(sim) {
     if (!c) { if (objCache.size > 256) objCache.clear(); c = generateChunk(seed, cx, cz, settings); objCache.set(k, c); }
     return c;
   }
+  // The water the sim has (GDD 20.4: drawn where the sim has it): birdbaths and fountains, their water at the top the
+  // sim gives them; and the puddles a rainy day leaves, while the ground is wet (the sim's own list, read, not changed).
+  // top: the water's height above the ground; depth and kind: the basin under it (1 a bowl, 2 flat, 3 the ground)
+  function waters(cx, cz) {
+    const c = objects(cx, cz), out = [];
+    for (const b of c.baths || []) out.push(b.fountain ? { x: b.x, z: b.z, r: b.r, top: b.h + 0.002, depth: 0.35, kind: 2 } : { x: b.x, z: b.z, r: b.r, top: b.h + 0.002, depth: 0.04, kind: 1 });
+    const rec = sim.records && sim.records.get(chunkKey(cx, cz));
+    if (rec && typeof sim.puddleDay === 'function') {
+      const d = sim.puddleDay();
+      if (d >= 0) for (const p of sim.puddlesIn(rec, d)) out.push({ x: p.x, z: p.z, r: p.r, top: p.y + 0.001, depth: 0, kind: 3 });
+    }
+    return out;
+  }
+  // decoration's variation (GDD 20.4 point 3): salted with hash(seed, Domain.Cosmetic, 0), kept under 2^20 so the GLSL
+  // hashes can add it to their own salts without overflow
+  const cosmetic = Number(hash(seed, Domain.Cosmetic, 0n) & 0xfffffn);
   return {
     kind: 'sting',
     params: { seed: Number(seed & 0xffffn), settings },
-    sea: -1e6,                   // no open water in the sim's world; birdbaths and puddles stay the game's
+    cosmetic,
+    sea: -1e6,                   // no open water in the sim's world: its water is the bodies below
+    water: { fetch: 0.8, cascades: [0.6, 0.085] }, // birdbath and puddle ripples: centimetres, from a breeze over 0.8 m
+    waters,
     sample,
     height: (x, z) => groundAt(seed, x, z, settings),
     glsl: null,                  // CPU fill

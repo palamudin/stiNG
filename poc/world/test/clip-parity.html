@@ -1,0 +1,56 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>World v2 clipmap parity</title>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
+</head><body>
+<script type="module">
+// The ground as the clipmap draws it, read back from the GPU, against the source it was filled from, for both fills:
+// the wild world (GPU fill from the GLSL twin) and the game's world (CPU fill from the sim's groundAt).
+//   on grid points of the finest level covering a point, outside its morph band: drawn must equal the source
+//   (up to float32 and, for the GPU fill, the twin's float precision);
+//   anywhere: the error is interpolation, reported per level.
+// window.__result = { wild: {...}, sting: {...} }
+import * as THREE from 'three';
+import { Clipmap, CLIP } from '../clipmap.js';
+import { wildSource } from '../sources/wild.js';
+import { stingSource } from '../sources/sting.js';
+import { u64, DEFAULT_SETTINGS } from '../../sim/index.js';
+const renderer = new THREE.WebGLRenderer();
+function probe(clip, pts) {
+  const n = pts.length, W = Math.min(n, 1024), Hh = Math.ceil(n / W), data = new Float32Array(W * Hh * 4);
+  pts.forEach((p, i) => { data[i * 4] = p[0]; data[i * 4 + 1] = p[1]; });
+  const tex = new THREE.DataTexture(data, W, Hh, THREE.RGBAFormat, THREE.FloatType); tex.needsUpdate = true;
+  const rt = new THREE.WebGLRenderTarget(W, Hh, { type: THREE.FloatType, depthBuffer: false });
+  const m = new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, uniforms: { ...clip.uniforms, uP: { value: tex } },
+    vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }',
+    fragmentShader: 'precision highp float; precision highp int;\n' + clip.glsl() + '\nuniform highp sampler2D uP; out vec4 o; void main() { vec2 p = texelFetch(uP, ivec2(gl_FragCoord.xy), 0).xy; int l = clipFinest(p); o = vec4(clipAt(p).x, float(l), 0.0, 0.0); }' });
+  const sc = new THREE.Scene(), q = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), m); q.frustumCulled = false; sc.add(q);
+  renderer.setRenderTarget(rt); renderer.render(sc, new THREE.Camera()); const px = new Float32Array(W * Hh * 4); renderer.readRenderTargetPixels(rt, 0, 0, W, Hh, px); renderer.setRenderTarget(null);
+  return pts.map((p, i) => [px[i * 4], px[i * 4 + 1]]);
+}
+function check(src, cx, cz, label) {
+  const clip = new Clipmap(renderer, src, { levels: 11 });
+  const t0 = performance.now(); clip.build(cx, cz); const buildMs = performance.now() - t0;
+  const grid = [], any = [];
+  for (let l = 0; l < clip.cfg.levels; l++) {
+    const L = clip.lv[l], inner = l ? clip.lv[l - 1].H + 3 * L.s : 0, outer = L.H - (CLIP.band0 + 2) * L.s;
+    for (let k = 0; k < 60; k++) {
+      // levels are squares: walk a square ring (Chebyshev radius r) between the finer level and this one's morph band
+      const a = (k / 60) * 6.283, r = inner + (outer - inner) * ((k * 37 % 60) / 60);
+      const ux = Math.max(-1, Math.min(1, Math.cos(a) * 1.5)), uz = Math.max(-1, Math.min(1, Math.sin(a) * 1.5));
+      const gx = Math.round((L.ci * L.s + ux * r) / L.s) * L.s, gz = Math.round((L.cj * L.s + uz * r) / L.s) * L.s;
+      grid.push([gx, gz, l]);
+      any.push([gx + L.s * 0.37, gz + L.s * 0.61, l]);
+    }
+  }
+  const pg = probe(clip, grid), pa = probe(clip, any);
+  let gridMax = 0, wrongLevel = 0; const interp = new Array(clip.cfg.levels).fill(0);
+  grid.forEach((p, i) => { if (pg[i][1] !== p[2]) wrongLevel++; else gridMax = Math.max(gridMax, Math.abs(pg[i][0] - src.height(p[0], p[1]))); });
+  any.forEach((p, i) => { const l = pa[i][1]; interp[l] = Math.max(interp[l], Math.abs(pa[i][0] - src.height(p[0], p[1]))); });
+  return { label, gpuFill: clip.gpu, buildMs: Math.round(buildMs), points: grid.length, gridMaxErr: gridMax, offLevel: wrongLevel, interpErrByLevel: interp.map((v) => +v.toFixed(3)), cells: clip.lv.map((L) => L.s) };
+}
+const out = {};
+out.wild = check(wildSource({ seed: 7 }), 1734.5, 1468.8, 'wild seed 7 (GPU fill)');
+const settings = { ...DEFAULT_SETTINGS, terrain: 2, seed: 1234 };
+out.sting = check(stingSource({ seed: u64(1234), settings, records: new Map() }), 40.3, 71.9, 'STING seed 1234, hilly (CPU fill from groundAt)');
+window.__result = out;
+</script></body></html>
