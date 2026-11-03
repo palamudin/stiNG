@@ -162,7 +162,7 @@ export function stingSource(sim) {
     params: { seed: Number(seed & 0xffffn), settings },
     cosmetic,
     sea: -1e6,                   // no open water in the sim's world: its water is the bodies below
-    water: { fetch: 0.8, cascades: [0.6, 0.085] }, // birdbath and puddle ripples: centimetres, from a breeze over 0.8 m
+    water: { fetch: 6, cascades: [2.4, 0.3] }, // ripples on ponds (a breeze over a few metres of water); a birdbath barely stirs
     waters,
     sample,
     height: (x, z) => groundAt(seed, x, z, settings),
