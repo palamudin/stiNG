@@ -2413,12 +2413,13 @@ The world-building thread delivered World v2 (`poc/world/`, with a template page
 8. **Own code.** No libraries beyond three.js.
 
 **The lawn (believable, not photoreal).** Green ground is green because it is solid grass; where it is not grass it is earth, stone, concrete or tarmac.
-- **Density.** Five rings of blades round the camera, each about 1.7 times the last (3, 6, 11, 19 and 32 m), with thousands of blades a square metre near the camera. The ground under the blades is the lawn's own dark thatch, so a gap between blades reads as more grass. Past the blades, the ground's colour stands for the lawn.
-- **Detail fades gently with distance.**
-  - Each ring thins over the outer 60% of its radius while the next thickens over the same band, so the density never steps.
-  - Every clump has its own threshold. Just past it the clump is short, and it reaches full height a little further in. Moving the camera makes far clumps grow and shrink a little; they never pop.
-  - A blade's height belongs to its place, the same from 2 m as from 20 m. Only its width grows with distance, as a pixel covers more ground.
-  - The thatch under the blades follows the camera's height smoothly.
+- **Density.** Five rings of blades round the camera, reaching 5, 10, 20, 40 and 80 m, with thousands of blades a square metre near the camera. The ground under the blades is the lawn's own thatch, so a gap between blades reads as more grass. Past the blades, the ground's colour stands for the lawn.
+- **Detail falls off without anything moving.**
+  - The rings sit on nested grids: each coarser ring's clumps are a subset of the finer ring's, at the same place, with the same blades. A clump is named by its index on the finest grid, and its jitter, look and blades follow from that name alone.
+  - Past a ring's reach, the clumps and blades the next ring also has carry on unchanged, drawn by it. Only the rest dissolve away over the ring's outer band, each clump over its own short stretch.
+  - Nothing is scaled and nothing slides: a blade stays where it grew and as tall as it grew, whatever the camera does. Further out there are just fewer of them.
+  - Only a blade's width grows a little with distance, as a pixel covers more ground.
+  - The camera's height counts toward the distance, so from above the fine rings give way to the coarse ones smoothly. The thatch under the blades follows the height smoothly too.
 - **Wind.** Blades bend with a gust field that travels downwind, and trees rock and flutter, on World v2's own clock. The game hands it the day's wind; on a still day a light breeze still moves the lawn a little, as real air near the ground always does.
 - **Wear, from where people are.** The game's source puts wear into the clipmap's fourth channel (below 0.3; paving keeps 0.5 to 1). It comes from the chunk itself:
   - picnic tables and their seats;
