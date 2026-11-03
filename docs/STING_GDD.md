@@ -40,6 +40,7 @@
 17. Open questions
 18. Findings from the proof of concept
 19. Feature tiers and the current stack
+20. Plan: terrain, far detail and the map
 - Appendix A — Protocode
 - Appendix B — Glossary
 - Appendix C — Biology reference
@@ -2100,6 +2101,8 @@ Agreed 2026-10-27: Tier 2 is built on the current stack in the order that surviv
 | T2-11 | **Built (18.47).** The honeybee colony: a perennial colony, honey stores and the winter cluster, swarming, the barbed sting, balling as the player's defence | 6.8, 9.1, 9.2 | L | sim; reuses hives and balling |
 | T2-12 | **T0 built (18.48, 18.49): XP, stabs, the bars and the spring offer; multi-colony play and the player gauge.** Experience and the year's turn: experience and stabs from sim events, the bars, the spring offer; multi-colony play (several colonies held, the rest on AI, switching in the colony view) with the player gauge: the player's measured rates set how AI colonies earn and play, capped at the player's level | 6.8 | L | sim; lineage-colony AI does the managing |
 | T2-13 | **T0 built (18.48): unit and hive skills learned in the colony view.** The growth tree: branches, node effects as colony parameters, the colony-view screen (takes in T2-7) | 6.8, 7.8 | M | node effects sim; the screen after the Unity move |
+| T2-14 | **Planned (20).** Ground v2 and ground rings: a derivative-damped height with slope, nested rings round the camera, things standing level, flight that feels the slope | 4.8, 7.2 | L | sim and drawing; G1 to G4 |
+| T2-15 | **Planned (20).** Far detail and the map: impostors and a quality controller; map tiles drawn from the world with zoom, places of interest and facts to learn | 10, 12 | L | drawing, with the place list in the sim; G5 to G7 |
 
 ### 19.4 Not on the current stack
 
@@ -2116,6 +2119,109 @@ Agreed 2026-10-27: Tier 2 is built on the current stack in the order that surviv
 - **Q-02 default day length**, settled: 2-minute days by default, chosen at world creation.
 
 ---
+
+## 20. Plan: terrain, far detail and the map (T2-14, T2-15)
+
+Agreed 2026-11-03: raids first, then this plan, built in order, one goal post at a time. Each goal post is finished, tested in JS and both C# builds where the sim is touched, documented and published before the next starts.
+
+### 20.1 What we looked at
+
+**Landfall** (Greg, github.com/dogum, MIT).
+- **What it does.** One HTML file draws an island world in a fragment shader from a 32-bit seed. The same height function is copied line for line into JavaScript for collision, the map and the peak labels.
+- **The height.** Value noise with analytic derivatives. Each octave is divided by one plus the squared sum of the gradients before it, which reads like erosion. The octaves are rotated off the lattice (0.8/0.6), and the input is domain-warped. A broad continent term is added, and terraces are made from the first five octaves only, so the steps stay put as detail comes and goes.
+- **Drawing.** Each pixel's ray is marched against the height field in steps of 0.45 times the height above ground, bisecting at cliffs. The number of octaves comes from the pixel's footprint, so there are no meshes, no LOD and no cracks. The sky comes from a 128 by 64 sky-view table integrated each frame (single scattering), and the sun's colour from the same integral. The resolution drops on slow machines.
+
+**Nanite Forest** (Victor Zakharov, three.js WebGPU, MIT).
+- **Plants.** A million trees go through a Nanite-style cluster LOD. Clusters are 128 triangles in a simplification DAG, the cut is chosen per cluster so the image moves by at most τ pixels, and culling runs on the GPU in compute with a two-phase depth pyramid. A software rasterizer handles tiny triangles.
+- **Far trees.** Impostors baked at start-up from four elevations as albedo plus normals, cross-faded with a dither.
+- **Quality.** An automatic controller steers τ and the render resolution to hold a GPU budget: 5.5 ms on desktop, 14 ms on phones.
+- **The ground is simple.** One fbm height function in plain TypeScript, shared by the mesh and the planting workers. A 1024-cell grid built in a worker, a coarse skirt out to the horizon, and coarser grids from high up. These keep the fine grid's normals as a texture so they shade the same.
+
+**tinyrj** (Rio de Janeiro as an isometric pixel-art map).
+- **What we could see.** The city is redrawn from a 3D model as map tiles generated in batches; the site loads its pictures with scripts, which this workspace could not run.
+- **What we take from it,** with the zoom, places and teaching asked for: a map drawn from the world itself, zoomed smoothly, with places of interest and something to learn at each.
+
+### 20.2 What we take, and what we do not
+
+**Taken.**
+- **Landfall's kind of height function,** rebuilt as our own code: integer lattice, our hash, our smoothstep, on `Num` in C#. This keeps it deterministic and in the parity digests.
+- **The idea that drawing, the sim and the map read one height function.**
+- **Impostors for far trees and houses.**
+- **A quality controller with a frame-time budget.**
+- **Detail normals baked for coarse ground.**
+- **A sky-view table for dusk and night.**
+
+**Not taken.**
+- **Ray-marching the ground per pixel.** It costs the most on exactly the phones we must run on, and it does not mix with our ordinary meshes (people, houses, centimetre wasps) without a depth composite. In Unity it would be a custom full-screen pass, and the sim needs the CPU copy anyway.
+- **The GPU cluster DAG and the software rasterizer.** They need WebGPU compute, which a third of phones lack. Unity 6 has its own GPU-resident drawing and occlusion culling, so a port would be thrown away. Our scenes are gardens, not a million trees.
+
+Every piece below is our own code, apart from three.js, which the PoC already draws with. The sim-facing parts (height, slope, places of interest, facts) live in the sim with C# twins. The drawing parts are plain meshes and short shaders that move to Unity as data plus HLSL.
+
+### 20.3 Goal posts, in order
+
+**G1. Ground v2 (sim; JS and C#).**
+- **What.** The height becomes a derivative-damped, rotated, domain-warped value-noise fbm at garden scale, from our integer lattice. It returns height and slope together, from the analytic derivatives. The existing flat home ring and the land-use damping stay. A ridge term and low-octave terraces become modifier options, for embankments and terraced gardens.
+- **Done when:**
+  - a flat world is unchanged, bit for bit;
+  - heights and slopes over a 512 m grid match in JS and both C# builds (a new `terrain` digest);
+  - one height costs under 1 µs in JS;
+  - the sight-line, puddle and wind tests of 18.44 still hold, with new figures.
+
+**G2. Ground rings (drawing).**
+- **What.** The 128 by 128 lifted height map (4 m texels) is replaced by nested square rings round the camera: about six levels of 64 by 64 cells, from 0.5 m cells at the wasp to 16 m at the edge (about 1 km). Each ring snaps to its own cell size, so nothing swims. Vertices morph into the next ring over the outer quarter (CDLOD), so there are no cracks or pops. Normals come from the G1 slope, and a baked normal texture covers the coarse rings.
+- **Done when:**
+  - screenshots taken while flying a fixed path show no cracks and no popping (a pixel-difference check between frames at ring edges);
+  - the ground is at most 100 k triangles;
+  - a ring update stays within 2 ms of a frame, spread over frames;
+  - the frame is no slower than now on the low setting.
+
+**G3. Things stand level (sim and drawing).**
+- **What.** Buildings, sheds, tables and fences stand level on a footing at the lowest corner, instead of leaning with the ground. In the sim, each solid keeps the ground height at its own base, so roofs and walls are where they are drawn.
+- **Done when:**
+  - a wasp landing on any roof or wall on a hilly world is within 1 cm of the drawn surface;
+  - the lean in 18.44's limits is gone;
+  - JS and C# agree.
+
+**G4. Flight feels the slope (#46).**
+- **What.** A wasp flying level holds its height above sea level rather than above the ground. A hill is climbed with effort and a valley opens up beneath it. Assisted flight and the AI plan with it.
+- **Done when:**
+  - climbing a 10% rise costs energy in proportion;
+  - level flight over a hill keeps a constant altitude;
+  - parity holds.
+
+**G5. Far detail and quality.**
+- **What.**
+  - **Impostors.** Trees and houses beyond about 60 m become impostors. Each kind is baked at load from its own mesh into an atlas from eight sides and two heights, lit by normals, and cross-faded with a dither.
+  - **Quality.** A controller steers the render scale (and the impostor distance) to hold a budget: 12 ms on desktop, 25 ms on phones.
+- **Done when:**
+  - draw calls and triangles past 60 m drop by at least two thirds;
+  - a hilly park holds 30 fps on a mid phone profile in the headless check at phone size;
+  - near views look as before.
+
+**G6. The map, drawn from the world (tinyrj-inspired).**
+- **The tiles.** Map tiles are drawn from the world itself: an orthographic render of each chunk from above (slightly isometric as an option), with hillshade from the G1 slope, in a flat pixel style. They are drawn a few per frame, kept for the session, and at three zoom levels.
+- **The zoom.** Zoom (wheel, pinch, controller triggers) runs smoothly from the whole region to a single garden.
+- **Places of interest.** These are a sim-side list with a C# twin: the nest, sister colonies, rival nests, hives, swarms, water, the beer garden and town centres, porch lights, the exterminator's van, and a nest site found. They are pinned with clustering when zoomed out, and each opens its area card.
+- **Things to learn.** Each card carries a short fact from Appendix C, tied to the place's kind. For example: yellowjackets raid weaker colonies for brood late in summer, and hornets hunt them. Facts unlock into a field guide the first time the place is visited.
+- **Done when:**
+  - zoom from 1 to 64 m a pixel stays above 50 fps;
+  - a chunk's tile is drawn in under 20 ms, spread over frames;
+  - every kind of place has a pin, a card and a fact with its Appendix C reference;
+  - the minimap, atlas and phone HUD of 18.60 still work.
+
+**G7. Sky and light (optional).**
+- **What.** A small sky-view table (128 by 64), rebuilt each in-game minute, gives the sky, the haze on far hills and the sun's colour. This fixes the slow, flat dusk.
+- **Done when:**
+  - dusk renders at full speed on the low setting;
+  - sunset reddens by itself;
+  - nothing in the sim changes.
+
+**What each goal post moves to Unity.**
+- **G1, G3, G4 and G6's place list and facts** are sim code, already in C#.
+- **G2** is a ring-mesh builder and a vertex shader.
+- **G5** is an impostor baker and a controller.
+- **G6's tiles** are an orthographic camera pass.
+- **G7** is one compute or pixel pass.
 
 ## Appendix A — Protocode
 
