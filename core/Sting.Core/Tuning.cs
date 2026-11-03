@@ -272,7 +272,8 @@ namespace Sting.Core
         {
             public static Num pollenSecs = 4, pollenLoad = 1, waxSugar = 1.5, waxFrom = 0.3, winterNeed = 0.05, winterLoss = 0.3, minCluster = 15,
                 swarmFrom = 0.15, swarmTo = 0.5, swarmAdults = 120, reproShare = 0.08, swarmShare = 0.6, swarmHoney = 0.3,
-                ballHeat = 0.5, ballR = 0.05, aiEscape = 0.0008, robHoney = 1, robStrength = 5, robChance = 0.3, robRange = 120;
+                ballHeat = 0.5, ballR = 0.05, aiEscape = 0.0008, robHoney = 1, robStrength = 5, robChance = 0.3, robRange = 120,
+                pourMin = 30, bivMin = 120, bivMax = 600, bivRange = 25, flySpeed = 1.5, flyMin = 20, mateFrac = 0.03, mateHour = 840, mateMin = 30, dcaDist = 150, dcaUp = 18, droneFrom = 780, droneTo = 960;
         }
         public static class bees
         {

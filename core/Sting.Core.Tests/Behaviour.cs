@@ -1203,6 +1203,23 @@ namespace Sting.Core.Tests
                     Ok(Count(ev, "swarm") >= 1 && Count(ev, "winter") >= 1 && Count(ev, "spring") >= 1 && !s.extinct && s.season.n >= 2 && s.nest.entrance.x == n0.x && s.nest.entrance.z == n0.z && s.colony.queenAlive,
                         $"a bee colony swarms in early summer ({Count(ev, "swarm")}), winters as a cluster on its honey and goes on in the same hive (season {s.season.n}, {D(s.colony.adults):0} bees)");
                 }
+                // a swarm seen (T2-11): out, hanging on a branch, flying home, a colony once it arrives; the daughter queen's mating flight
+                {
+                    var s = Mk("bee"); var c = s.colony; c.adults = 400; c.gynes = 2; c.sugar = 300; s.season.startMinute = s.minute - (long)(0.2 * s.settings.seasonDays * 1440);
+                    var ev = RunS(s, 61); var sw0 = s.swarms.Count > 0 ? s.swarms[0] : null; var e = s.nest.entrance;
+                    var hang = sw0 != null ? Sim.SwarmAt(sw0, (Num)(sw0.@out + sw0.leave) / 2) : default; double d = sw0 != null ? Hypot(hang.p.x - e.x, hang.p.z - e.z) : 0;
+                    int inLine0 = s.line.Count; bool virgin = c.virgin != null && c.virgin.at > s.minute; Num laid0 = c.stats.laid;
+                    var snap = Persist.Restore(Persist.Snapshot(s));
+                    Ok(Count(ev, "swarm") == 1 && sw0 != null && hang.hang && d > 1 && d < D(T.hive.bivRange) + 2 && inLine0 == 0 && virgin && snap.swarms.Count == 1,
+                        $"a crowded hive swarms: {(sw0 != null ? D(sw0.n) : 0):0} bees hang in a clump {d:0.0} m off for {(sw0 != null ? sw0.leave - sw0.@out : 0)} min, not yet a colony; the save keeps it");
+                    SimEvent settled = null; while (s.minute <= sw0.arrive + 1 && settled == null) { var e2 = RunS(s, 60); settled = e2.Find(x => x.type == "swarmSettled"); }
+                    var sc = s.line.Count > 0 ? s.line[0] : null;
+                    Ok(settled != null && sc != null && Math.Abs(D(sc.colony.adults - sw0.n)) < 1 && sc.nest.entrance.x == sw0.to.x && c.stats.laid == laid0,
+                        $"then it flies to a tree {(sc != null ? Hypot(sc.nest.x - e.x, sc.nest.z - e.z) : 0):0} m off and moves in as a colony of the line; meanwhile the hive laid nothing");
+                    SimEvent mated = null; while (mated == null && s.minute < c.virgin.at + (long)T.hive.mateMin + 120) { var e3 = RunS(s, 120); mated = e3.Find(x => x.type == "queenMated"); }
+                    Num laid1 = c.stats.laid; RunS(s, 600);
+                    Ok(mated != null && (bool)mated["own"] && c.virgin == null && c.stats.laid > laid1, $"the young queen flies to mate {System.Math.Max(1, R.RndI(T.hive.mateFrac * s.settings.seasonDays))} day(s) on and comes back; the hive lays again");
+                }
                 { var s = Mk("hornet"); RunS(s, 100); var r = Persist.Restore(Persist.Snapshot(s)); Ok(r.species == "hornet" && r.colony.species == "hornet" && r.wasp.sp == "hornet", "a save keeps the line's species"); }
             }
             // 50. progression (GDD 6.8): XP, skills learned with it, and the year's turn

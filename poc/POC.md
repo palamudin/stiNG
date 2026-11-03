@@ -142,6 +142,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 114 | The year's turn for every line: hornets are one way; a honeybee line that earns 300 XP in a year is offered a young queen to found a wasp colony, its hive going on under the AI | 6.8 | 25 |
 | 115 | Moths at the porch lights can be locked on to and caught with assisted flight | 7.9 | 25 |
 | 116 | Fireflies on summer evenings: dozens drifting over the lawns at dusk, each flashing on its own beat; catch one and the wasp spits it out, as real hunters do (they taste foul) | 5.3, 7.9 | 25 |
+| 117 | Swarms seen: a honeybee swarm pours out, hangs as a beard on a nearby branch for hours, then flies to its new tree and only then is a colony; the daughter queen flies to a drone congregation area to mate, and the hive lays nothing till she is back | 6.7, T2-11 | 25 |
 
 ## Verified
 
@@ -168,7 +169,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 - With terrain on, flight does not feel the slope (the sim works in height above the ground), hills block sight lines between people only, and buildings lean slightly with the ground they stand on.
 - Assisted flight steers round what is within a metre ahead (a trunk, a fence) but plans no route: a hedge or a house wall longer than it can see past still needs the player, and it does not dodge swats or birds.
 - Progression is at T0 (GDD 18.48, 18.49, 18.57): each line's XP and tree, the wasp in hand's job skills, five roles levelled by masters, multi-colony play and the gauge. a trained wasp that goes home retires inside rather than flying again; the XP, mastery and gauge figures are first guesses to tune with play. The PoC runs progression `open`, so any species can also be picked on the start screen.
-- A swarm is told, not shown: the new colony appears on its tree, but no cloud of bees flies there. A bee colony's queens and drones stay abstract (no mating flights).
+- A bee colony's drones are drawn only at their congregation area, and its young queen's flight carries no risk of being lost.
 - A raid on another player's nest takes one larva at a time, by the player's own wasp; AI workers do not raid other players' nests, as they do not raid rival nests.
 
 ## Controls

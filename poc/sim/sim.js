@@ -70,6 +70,7 @@ export class Sim {
     this.dragonState = new Map();
     this.species = opts.species || this.settings.species || 'wasp'; // the player's line (GDD 6.8)
     this.colony = newColony(false, this.species);
+    this.swarms = []; // swarms on their way to a new home (T2-11)
     this.progs = {}; // each line's XP, stabs and skills, by species (GDD 6.8); this.prog is the line in hand
     this.player = this._newPlayer(); // the player gauge: what the player earns in hand, whichever line
     this.nest = makeNest(NEST.treeX, NEST.treeZ, NEST.x, NEST.y, NEST.z);
@@ -2286,6 +2287,7 @@ export class Sim {
   // Autumn's end (GDD 6.7, T1-15). The mated gynes spread over a few hibernation sites near the nest, most of them to
   // the one a worker scouted; each site's quality sets how many wake. The colony sleeps until the player picks a queen.
   _endSeason(why) {
+    this._swarmTick(true); // any swarm still out moves in
     if (spOf(this.colony).perennial) { this._beeWinter(why); return; } // a bee colony winters as a cluster (T2-11)
     const S = T.season, H = T.hiber, col = this.colony, n = this.season.n;
     const cands = this.hiberSites();
@@ -2339,7 +2341,7 @@ export class Sim {
     c.sugar = Math.max(0, c.sugar - need);
     c.adults *= (1 - loss) * fed;
     c.eggs = c.larvae = c.pupae = c.rEggs = c.rLarvae = c.rPupae = 0; c.young = 0; c.gynes = 0; c.males = 0; c.mated = 0;
-    c.deficit = 0; c.sugarlessDays = 0; c.water = 0; c.cool = 1; c.thirst = 0;
+    c.deficit = 0; c.sugarlessDays = 0; c.water = 0; c.cool = 1; c.thirst = 0; c.virgin = null;
     if (c.adults < (bee ? H.minCluster : Wm.minAdults)) { c.adults = 0; c.queenAlive = false; return false; }
     return true;
   }
@@ -2405,15 +2407,63 @@ export class Sim {
     if (frac < H.swarmFrom || frac >= H.swarmTo || !isDaylight(this.minute) || this.raining) return;
     const moved = c.adults * H.swarmShare, honey = c.sugar * H.swarmHoney;
     c.adults -= moved; c.young = Math.min(c.young, c.adults); c.sugar -= honey; c.gynes = 0; c.swarmed = this.season.n;
-    const used = [{ x: this.nest.treeX, z: this.nest.treeZ }, ...this.line.map((x) => ({ x: x.nest.treeX, z: x.nest.treeZ }))];
-    const t = this.line.length < T.line.max ? this._lineTree({ x: nest.x, z: nest.z }, used) : null;
-    if (!t) { this.lineage++; this.emit('swarm', { x: nest.x, z: nest.z, adults: moved, gone: true }); return; }
-    let dx = nest.x - t.x, dz = nest.z - t.z; const d = Math.sqrt(dx * dx + dz * dz) || 1; dx /= d; dz /= d;
-    const nn = makeNest(t.x, t.z, t.x + dx * (t.r + 0.2), clamp(1.6, 1.2, Math.max(1.2, t.h - 0.6)), t.z + dz * (t.r + 0.2), NEST.r, 'trunk');
-    const colony = newColony(true, 'bee'); colony.sited = true; colony.maxCells = this._maxCells('trunk', 'bee'); colony.alloc = 0;
-    colony.adults = moved; colony.sugar = honey; colony.swarmed = this.season.n;
-    this.line.push({ id: ++this.lineSeq, nest: nn, colony, season: this.season.n });
-    this.emit('swarm', { x: nn.x, z: nn.z, adults: moved, id: this.lineSeq, from: nest === this.nest ? 'own' : 'line' });
+    // the daughter queen left in the hive flies to mate some days on; till she is back the hive lays nothing
+    c.virgin = { at: (dayOf(this.minute) + Math.max(1, Math.round(H.mateFrac * this.settings.seasonDays))) * 1440 + H.mateHour };
+    const used = [{ x: this.nest.treeX, z: this.nest.treeZ }, ...this.line.map((x) => ({ x: x.nest.treeX, z: x.nest.treeZ })), ...this.swarms.filter((x) => x.nest).map((x) => ({ x: x.nest.treeX, z: x.nest.treeZ }))];
+    const t = this.line.length + this.swarms.length < T.line.max ? this._lineTree({ x: nest.x, z: nest.z }, used) : null;
+    // the swarm hangs on a branch of the nearest other tree while its scouts look for a home
+    const e = nest.entrance, k = this.swarms.length + this.lineSeq;
+    let bv = null, bd = H.bivRange * H.bivRange;
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) for (const tr of this._content(chunkOf(e.x) + dx, chunkOf(e.z) + dz).trees) {
+      const q = sq(tr.x - e.x) + sq(tr.z - e.z);
+      if (q < bd && sq(tr.x - nest.treeX) + sq(tr.z - nest.treeZ) > 0.25) { bd = q; bv = tr; }
+    }
+    let biv;
+    if (bv) { const l = Math.sqrt(bd) || 1, ux = (e.x - bv.x) / l, uz = (e.z - bv.z) / l; biv = { x: bv.x + ux * (bv.r + 0.6), y: clamp(bv.h - 0.7, 1.6, 3.2), z: bv.z + uz * (bv.r + 0.6) }; }
+    else { const a = h32(this.season.n, k, 962) * TAU; biv = { x: e.x + 5 * dsin(a), y: 2.5, z: e.z + 5 * dcos(a) }; }
+    const out = this.minute + H.pourMin, leave = out + Math.round(H.bivMin + h32(this.season.n, k, 961) * (H.bivMax - H.bivMin));
+    let to, nn = null, colony = null;
+    if (t) {
+      let ux = nest.x - t.x, uz = nest.z - t.z; const d = Math.sqrt(ux * ux + uz * uz) || 1; ux /= d; uz /= d;
+      nn = makeNest(t.x, t.z, t.x + ux * (t.r + 0.2), clamp(1.6, 1.2, Math.max(1.2, t.h - 0.6)), t.z + uz * (t.r + 0.2), NEST.r, 'trunk');
+      colony = newColony(true, 'bee'); colony.sited = true; colony.maxCells = this._maxCells('trunk', 'bee'); colony.alloc = 0;
+      colony.adults = moved; colony.sugar = honey; colony.swarmed = this.season.n;
+      to = { x: nn.entrance.x, y: nn.entrance.y, z: nn.entrance.z };
+    } else { const a = h32(this.season.n, k, 963) * TAU; to = { x: biv.x + 90 * dsin(a), y: 8, z: biv.z + 90 * dcos(a) }; } // no room in the line: it leaves the area
+    const arrive = leave + Math.max(H.flyMin, Math.ceil(Math.hypot(to.x - biv.x, to.z - biv.z) / (H.flySpeed * 60)));
+    const own = nest === this.nest;
+    this.swarms.push({ n: moved, from: { x: e.x, y: e.y, z: e.z }, biv, to, t0: this.minute, out, leave, arrive, nest: nn, colony, own });
+    this.emit('swarm', { x: biv.x, z: biv.z, adults: moved, gone: !t, from: own ? 'own' : 'line', leave, arrive });
+  }
+  // Swarms on their way: a swarm that has arrived moves in and is a colony of the line from then on (all: at the
+  // season's end, every one still out settles at once)
+  _swarmTick(all = false) {
+    if (!this.swarms.length) return;
+    const keep = [];
+    for (const sw of this.swarms) {
+      if (!all && this.minute < sw.arrive) { keep.push(sw); continue; }
+      if (sw.colony) { this.line.push({ id: ++this.lineSeq, nest: sw.nest, colony: sw.colony, season: this.season.n }); this.emit('swarmSettled', { id: this.lineSeq, x: sw.nest.x, z: sw.nest.z, adults: sw.colony.adults }); }
+      else { this.lineage++; this.emit('swarmGone', { adults: sw.n }); }
+    }
+    this.swarms = keep;
+  }
+  // Where a swarm's cloud is at minute m (fractional), how loose it is, and whether it hangs as a clump
+  swarmAt(sw, m) {
+    const sm = (a) => a * a * (3 - 2 * a), lerp = (p, q, a) => ({ x: p.x + (q.x - p.x) * a, y: p.y + (q.y - p.y) * a, z: p.z + (q.z - p.z) * a });
+    if (m < sw.out) { const a = sm(clamp01((m - sw.t0) / (sw.out - sw.t0))); return { ...lerp(sw.from, sw.biv, a), r: 1 + 0.8 * a, hang: false }; }
+    if (m < sw.leave) return { ...sw.biv, r: 0.22, hang: true };
+    const a = sm(clamp01((m - sw.leave) / Math.max(1, sw.arrive - sw.leave)));
+    return { ...lerp(sw.biv, sw.to, a), r: a > 0.92 ? 2.5 * (1 - a) / 0.08 + 0.2 : 2.5, hang: false };
+  }
+  // A daughter queen's mating flight: is she out now, and where her colony's drones gather (a drone congregation area)
+  dca(nest) { const H = T.hive, a = h32(Number(this.seed & 0xffffffffn), Math.round(nest.x * 10), Math.round(nest.z * 10)) * TAU; return { x: nest.x + H.dcaDist * dsin(a), y: H.dcaUp, z: nest.z + H.dcaDist * dcos(a) }; }
+  _mateTick(c, own) {
+    const v = c.virgin;
+    if (!v || this.minute < v.at) return;
+    if (this.raining && this.minute < v.at + T.hive.mateMin) { v.at += 1440; return; } // no flight in rain: tomorrow
+    if (this.minute < v.at + T.hive.mateMin) return;
+    c.virgin = null;
+    this.emit('queenMated', { own });
   }
 
   // A pick of 1..n wakes that queen; 1001..1000+n wakes her as the species the year's turn offers (GDD 6.8)
@@ -4367,7 +4417,9 @@ export class Sim {
       this.colony.maxCells = this._maxCells(this.nest.site);
       this.emit('nestFounded', { x: this.nest.x, y: this.nest.y, z: this.nest.z, key: this.nest.key, auto: true });
     }
-    colonyStep(col, 60 / this.dayTicks, this._own().filter((w) => w.caste === 'worker').length, daylight, frac, this.bio, this.broodSpeed(), this.ecoAvail(), this.nestHeat(), this.boost());
+    this._swarmTick(); this._mateTick(col, true);
+    const ob = this.boost(); // a hive whose young queen has not mated yet lays nothing
+    colonyStep(col, 60 / this.dayTicks, this._own().filter((w) => w.caste === 'worker').length, daylight, frac, this.bio, this.broodSpeed(), this.ecoAvail(), this.nestHeat(), col.virgin ? { ...ob, lay: 0 } : ob);
     this._hiveXp(col);
     this._gaugeTick(60 / this.dayTicks);
     if (this.raining && col.nestAlive && col.sited) {
@@ -4458,7 +4510,9 @@ export class Sim {
         const q = L.queenForage; c.sugar += q.sugar * dt * av.sugar; c.protein += q.protein * dt * av.protein; c.pulp += q.pulp * dt;
       }
       const h = this.nestHeat(this.minute, sc.nest.site);
-      colonyStep(c, dt, out, daylight, frac, this.bio, this.broodSpeed(this.minute, sc.nest.site, c.cool), av, h, this.lineBoost(c.species || 'wasp'));
+      this._mateTick(c, false);
+      const lb = this.lineBoost(c.species || 'wasp');
+      colonyStep(c, dt, out, daylight, frac, this.bio, this.broodSpeed(this.minute, sc.nest.site, c.cool), av, h, c.virgin ? { ...lb, lay: 0 } : lb);
       this._hiveXp(c, g, false); // a colony on the AI earns at the player's gauge (GDD 6.8)
       if (spOf(c).perennial) this._swarm(c, sc.nest);
       // the exterminator (abstract; he is drawn only for the player's own nest): called to a sister nest's neighbourhood,

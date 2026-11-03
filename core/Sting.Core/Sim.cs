@@ -250,6 +250,8 @@ namespace Sting.Core
         internal Prog LPW(string sp) { if (!progs.TryGetValue(sp, out var p)) { p = new Prog(); progs[sp] = p; } return p; }
         /// the player gauge: what the player earns in hand, whichever line
         public Player player = new Player();
+        /// swarms on their way to a new home (T2-11)
+        public List<SwarmOut> swarms = new List<SwarmOut>();
         /// a wasp's species row: its line's, or a rival's (the neighbourhood's yellowjackets)
         internal static SpeciesRow Spw(Wasp w) => T.species.Of(w.sp);
         /// a site's room for comb, for the line's species: a bee colony builds a bigger nest (T2-11)

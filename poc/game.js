@@ -644,6 +644,24 @@ const mothMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.006, 6, 5), 
 const lampMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.06, 10, 8), new THREE.MeshBasicMaterial({ color: '#ffdf9a' }), 256);
 const glowMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.4, 12, 10), new THREE.MeshBasicMaterial({ color: '#ffc870', transparent: true, opacity: 0.1, depthWrite: false }), 256);
 for (const m of [flyMesh, catMesh, beeMesh, mothMesh, lampMesh, glowMesh]) { m.count = 0; m.frustumCulled = false; scene.add(m); }
+// swarms (T2-11): a cloud of bees that pours out, hangs as a clump on a branch, then flies to its new home; a young
+// queen's mating flight, and the drones gathered where she goes
+const SWARM_MAX = 1600, swarmMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.0045, 5, 4), mat('#8a5a1c'), SWARM_MAX);
+swarmMesh.count = 0; swarmMesh.frustumCulled = false; scene.add(swarmMesh);
+const queenMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.008, 8, 6), mat('#a5631a'), 16); queenMesh.count = 0; queenMesh.frustumCulled = false; scene.add(queenMesh);
+const TAU = Math.PI * 2, fr = (k, j) => { const x = Math.sin(k * 127.1 + j * 311.7) * 43758.5453; return x - Math.floor(x); }; // a stable scatter for the drawing only
+function drawCloud(c, n, t, from) { // n bees round c (x, y, z, r, hang), swirling with time t (s)
+  let i = from;
+  for (let k = 0; k < n && i < SWARM_MAX; k++, i++) {
+    // in flight a loose swirling cloud; hanging, a dense beard of bees, barely moving, packed toward the middle
+    const u = fr(k, 1), v = fr(k, 2), w = fr(k, 3), a = u * TAU + t * (c.hang ? 0.04 : 0.6 + 0.9 * w) * (k % 2 ? 1 : -1), e = Math.acos(2 * v - 1);
+    const rr = c.hang ? c.r * Math.pow(fr(k, 4), 0.7) : c.r * Math.cbrt(fr(k, 4));
+    let x = rr * Math.sin(e) * Math.cos(a), y = rr * Math.cos(e), z = rr * Math.sin(e) * Math.sin(a);
+    if (c.hang) { x *= 0.75; z *= 0.75; y = -Math.abs(y) * 2.2 - 0.04; } // hanging from the branch, longer than wide
+    swarmMesh.setMatrixAt(i, _m4.makeTranslation(c.x + x, c.y + y, c.z + z));
+  }
+  return i;
+}
 // fireflies: a dark body each, and a point of light that holds its size on screen when one flashes
 const fireflyMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.004, 6, 5), mat('#2b2618'), MAXI); fireflyMesh.count = 0; fireflyMesh.frustumCulled = false; scene.add(fireflyMesh);
 const FF_MAX = 512, ffGeo = new THREE.BufferGeometry(), ffPos = new Float32Array(FF_MAX * 3);
@@ -771,6 +789,24 @@ function renderCritters(t) {
   { let best = null, bd = 30 * 30; if (nl) for (const rec of sim.activeChunks) for (const l of sim.lightsIn(rec)) { const d = (l.x - camera.position.x) ** 2 + (l.z - camera.position.z) ** 2; if (d < bd) { bd = d; best = l; } }
     porchLight.intensity = best ? 2.2 : 0; if (best) porchLight.position.set(best.x + best.nx * 0.3, best.y + (sim.settings.terrain ? sim.ground(best.x, best.z) : 0), best.z + best.nz * 0.3); }
   for (const m of [lampMesh, glowMesh, mothMesh]) m.instanceMatrix.needsUpdate = true;
+  { // swarms, mating flights and drones (T2-11)
+    const mf = T.time.startMinute + (t + sim.clockOffset) / sim.tpm, secs = performance.now() / 1000, H = T.hive;
+    let ns = 0, nq = 0;
+    for (const sw of sim.swarms) ns = drawCloud(sim.swarmAt(sw, mf), Math.min(500, Math.round(sw.n * 1.5)), secs, ns);
+    const hives = [{ c: sim.colony, nest: sim.nest }, ...sim.line.map((x) => ({ c: x.colony, nest: x.nest }))].filter((h) => h.c.species === 'bee' && h.c.nestAlive);
+    const md = minuteOfDay(mf), drones = md >= H.droneFrom && md < H.droneTo && sim.seasonFrac >= H.swarmFrom && sim.seasonFrac < 0.7 && !sim.raining;
+    for (const h of hives) {
+      const dca = sim.dca(h.nest), v = h.c.virgin;
+      if (drones) ns = drawCloud({ ...dca, r: 5, hang: false }, 90, secs * 0.6, ns);
+      if (v && mf >= v.at && mf < v.at + H.mateMin && nq < 16) { // out and back, a while among the drones
+        const a = (mf - v.at) / H.mateMin, e = h.nest.entrance, lerp = (p, q, f) => ({ x: p.x + (q.x - p.x) * f, y: p.y + (q.y - p.y) * f, z: p.z + (q.z - p.z) * f });
+        const q = a < 0.4 ? lerp(e, dca, a / 0.4) : a < 0.6 ? { x: dca.x + 2 * Math.sin(secs * 2), y: dca.y, z: dca.z + 2 * Math.cos(secs * 2) } : lerp(dca, e, (a - 0.6) / 0.4);
+        queenMesh.setMatrixAt(nq++, _m4.makeTranslation(q.x, q.y, q.z));
+      }
+    }
+    swarmMesh.count = ns; swarmMesh.instanceMatrix.needsUpdate = true;
+    queenMesh.count = nq; queenMesh.instanceMatrix.needsUpdate = true;
+  }
   // fireflies on summer evenings: each flashes on its own beat
   let nff = 0, nfg = 0;
   if (sim.fireflyTime()) for (const rec of sim.activeChunks) for (const f of sim.fireflySpots(rec)) {
@@ -2426,6 +2462,9 @@ function drawMapTo(ctx, W, H, ox, oz, cell, o = {}) {
       ctx.fillText(String(n), ex - Math.cos(ang) * 20, ey - Math.sin(ang) * 20);
     }
   }
+  // swarms out (T2-11): an amber blob where the cloud is
+  ctx.fillStyle = 'rgba(214,150,40,.9)';
+  for (const sw of sim.swarms) { const p = sim.swarmAt(sw, sim.minute), [px, py] = toS(p.x, p.z); ctx.beginPath(); ctx.arc(px, py, 4 * k, 0, Math.PI * 2); ctx.fill(); }
   // the line's other colonies, then yours
   ctx.lineWidth = 2;
   for (const x of sim.line) { const [px, py] = toS(x.nest.x, x.nest.z); ctx.strokeStyle = x.colony.nestAlive ? 'rgba(246,199,0,.6)' : red; ctx.beginPath(); ctx.arc(px, py, 4 * k, 0, Math.PI * 2); ctx.stroke(); }
@@ -2513,6 +2552,7 @@ function atlasCard(key, px, py, card = $('atlasCard'), box = $('atlas').getBound
     if (c.rival) here.push('a rival nest');
     for (const [, n] of sim.peerNests) if (n.alive && n.key === key) here.push("another player's nest");
     if (sim.ext && sim.ext.hm && sim.ext.hm.chunk === key) here.push('the exterminator');
+    for (const sw of sim.swarms) { const p = sim.swarmAt(sw, sim.minute); if (chunkKey(chunkOf(p.x), chunkOf(p.z)) === key) here.push(p.hang ? 'a swarm hanging in a tree' : 'a swarm on the move'); }
     const bits = (arr) => arr.filter(Boolean).join(', ');
     html = `<b>${USE_NAME[c.use || 'park'] || 'Park'}</b>${d} m from the nest${lv ? ` · <span style="color:var(--red)">alert ${lv}/5</span>` : ' · calm'}<br>`
       + `People ${lvl(ppl.length, 4, 9)} ${ppl.length ? `${ppl.length}${stung ? `, ${stung} stung` : ''}` : ''}<br>`
@@ -2695,7 +2735,10 @@ function handleEvents(events) {
       case 'exhausted': if (e.id === sim.drivenId) toast('Crop empty · feed on flowers or soda', 'var(--red)', 2.6); break;
       case 'caught': if (e.id === sim.drivenId) { toast(e.kind === 'wasp' ? 'Took a wasp · carry it home for the brood' : `Caught a ${e.kind}`, 'var(--yellow)', 1.4); blip(900, 600, 0.08, 0.05, 'square'); } break;
       case 'pollen': if (e.driven) { toast('Pollen packed · bring it home', 'var(--yellow)', 1.4); blip(700, 900, 0.08, 0.05, 'triangle'); } break; // T2-11
-      case 'swarm': toast(e.gone ? 'The old queen swarmed off with most of the workers; the swarm left the area. A daughter keeps the hive.' : `The old queen swarmed with ${fmt(e.adults)} workers to a tree ${Math.round(Math.hypot(e.x - sim.nest.x, e.z - sim.nest.z))} m away: a new colony of the line. A daughter keeps the hive.`, 'var(--yellow)', 4); logEvent('swarm'); syncNests(); break;
+      case 'swarm': toast(`The old queen swarmed with ${fmt(e.adults)} workers. They hang in a clump on a branch ${Math.round(Math.hypot(e.x - sim.nest.x, e.z - sim.nest.z))} m off while their scouts look for a home. A daughter queen keeps the hive; it lays nothing until she has mated.`, 'var(--yellow)', 5); logEvent('swarm'); break;
+      case 'swarmSettled': toast(`The swarm moved into a tree ${Math.round(Math.hypot(e.x - sim.nest.x, e.z - sim.nest.z))} m away: a new colony of the line.`, 'var(--yellow)', 4); logEvent('swarm settled'); syncNests(); lineSig = ''; break;
+      case 'swarmGone': toast('The swarm flew off out of the area.', 'var(--muted)', 3); break;
+      case 'queenMated': if (e.own) toast('The young queen is back from her mating flight. The hive lays again.', 'var(--yellow)', 3.5); logEvent('queen mated'); break;
       case 'hiveRobbed': toast('A wasp is robbing the hive · get it before it gets away', 'var(--red)', 2.4); logEvent('a rival robbed the hive'); break;
       case 'chewed': if (e.id === sim.drivenId) toast('Pulp ready · bring it home', 'var(--yellow)', 1.4); break;
       case 'watered': if (e.id === sim.drivenId) toast('Water taken · bring it home to cool the comb', 'var(--yellow)', 1.4); break;

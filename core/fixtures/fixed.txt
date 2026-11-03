@@ -15,10 +15,10 @@ sim.idle7 aad3bc72
 sim.season d05e9ef0
 sim.hot 2dae5e8f
 sim.hornet 92ac72e5
-sim.bee 4a91c569
+sim.bee 6a972bd8
 sim.beesting e110b53b
 sim.skills 3f0bf5d6
-sim.multi 27e9aee9
+sim.multi 89704605
 sim.warm f46cf25e
 sim.restored 2e82a034
 net.good c63c88c8

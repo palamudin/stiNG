@@ -31,6 +31,8 @@ namespace Sting.Core
         public bool warm, house, found;
         /// insects with experience of their own living on inside, who pass on their mastery when they die (GDD 6.8)
         public System.Collections.Generic.List<Vet> vets = new System.Collections.Generic.List<Vet>();
+        /// a daughter queen not yet mated, and when she flies (T2-11): the hive lays nothing till she is back
+        public Virgin virgin;
         public ColonyStats stats = new ColonyStats();
         public ColonyState Clone() { var c = (ColonyState)MemberwiseClone(); c.stats = stats.Clone(); return c; }
         public Num this[string k]

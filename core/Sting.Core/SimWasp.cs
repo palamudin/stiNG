@@ -1628,6 +1628,7 @@ namespace Sting.Core
         internal void EndSeasonForTest(string why) => EndSeason(why);
         void EndSeason(string why)
         {
+            SwarmTick(true); // any swarm still out moves in
             if (Colony.Sp(colony).perennial != 0) { BeeWinter(why); return; } // a bee colony winters as a cluster (T2-11)
             var col = colony; int sn = season.n;
             var cands = HiberSites();
@@ -1687,7 +1688,7 @@ namespace Sting.Core
             c.sugar = Max(0, c.sugar - need);
             c.adults *= (1 - loss) * fed;
             c.eggs = c.larvae = c.pupae = c.rEggs = c.rLarvae = c.rPupae = 0; c.young = 0; c.gynes = 0; c.males = 0; c.mated = 0;
-            c.deficit = 0; c.sugarlessDays = 0; c.water = 0; c.cool = 1; c.thirst = 0;
+            c.deficit = 0; c.sugarlessDays = 0; c.water = 0; c.cool = 1; c.thirst = 0; c.virgin = null;
             if (c.adults < (bee ? T.hive.minCluster : T.warm.minAdults)) { c.adults = 0; c.queenAlive = false; return false; }
             return true;
         }
@@ -1760,16 +1761,71 @@ namespace Sting.Core
             if (frac < T.hive.swarmFrom || frac >= T.hive.swarmTo || !IsDaylight(minute) || Raining) return;
             Num moved = c.adults * T.hive.swarmShare, honey = c.sugar * T.hive.swarmHoney;
             c.adults -= moved; c.young = Min(c.young, c.adults); c.sugar -= honey; c.gynes = 0; c.swarmed = season.n;
+            // the daughter queen left in the hive flies to mate some days on; till she is back the hive lays nothing
+            c.virgin = new Virgin { at = (DayOf(minute) + System.Math.Max(1, RndI(T.hive.mateFrac * settings.seasonDays))) * 1440 + (long)T.hive.mateHour };
             var used = new List<(Num x, Num z)> { (nest.treeX, nest.treeZ) };
             foreach (var x in line) used.Add((x.nest.treeX, x.nest.treeZ));
-            var t = line.Count < T.line.max ? LineTree(new HiberSite { x = from.x, z = from.z }, used) : null;
-            if (t == null) { lineage++; Emit("swarm", ("x", from.x), ("z", from.z), ("adults", moved), ("gone", true)); return; }
-            Num dx = from.x - t.x, dz = from.z - t.z, d = Sqrt(dx * dx + dz * dz); if (d == 0) d = 1; dx /= d; dz /= d;
-            var nn = World.MakeNest(t.x, t.z, t.x + dx * (t.r + 0.2), Clamp(1.6, 1.2, Max(1.2, t.h - 0.6)), t.z + dz * (t.r + 0.2), World.NEST.r, "trunk");
-            var col = Colony.New(true, "bee"); col.sited = true; col.maxCells = MaxCells("trunk", "bee"); col.alloc = 0;
-            col.adults = moved; col.sugar = honey; col.swarmed = season.n;
-            line.Add(new LineColony { id = ++lineSeq, nest = nn, colony = col, season = season.n });
-            Emit("swarm", ("x", nn.x), ("z", nn.z), ("adults", moved), ("id", lineSeq), ("from", from == nest ? "own" : "line"));
+            foreach (var x in swarms) if (x.nest != null) used.Add((x.nest.treeX, x.nest.treeZ));
+            var t = line.Count + swarms.Count < T.line.max ? LineTree(new HiberSite { x = from.x, z = from.z }, used) : null;
+            // the swarm hangs on a branch of the nearest other tree while its scouts look for a home
+            var e = from.entrance; int k = swarms.Count + lineSeq;
+            Tree bv = null; Num bd = T.hive.bivRange * T.hive.bivRange;
+            for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++) foreach (var tr in Content(ChunkOf(e.x) + dx, ChunkOf(e.z) + dz).trees)
+            {
+                Num q = Sq(tr.x - e.x) + Sq(tr.z - e.z);
+                if (q < bd && Sq(tr.x - from.treeX) + Sq(tr.z - from.treeZ) > 0.25) { bd = q; bv = tr; }
+            }
+            V3 biv;
+            if (bv != null) { Num l = Sqrt(bd); if (l == 0) l = 1; Num ux = (e.x - bv.x) / l, uz = (e.z - bv.z) / l; biv = new V3(bv.x + ux * (bv.r + 0.6), Clamp(bv.h - 0.7, 1.6, 3.2), bv.z + uz * (bv.r + 0.6)); }
+            else { Num a = H32(season.n, k, 962) * TAU; biv = new V3(e.x + 5 * DSin(a), 2.5, e.z + 5 * DCos(a)); }
+            long @out = minute + (long)T.hive.pourMin, leave = @out + RndI(T.hive.bivMin + H32(season.n, k, 961) * (T.hive.bivMax - T.hive.bivMin));
+            V3 to; Nest nn = null; ColonyState col = null;
+            if (t != null)
+            {
+                Num ux = from.x - t.x, uz = from.z - t.z, d = Sqrt(ux * ux + uz * uz); if (d == 0) d = 1; ux /= d; uz /= d;
+                nn = World.MakeNest(t.x, t.z, t.x + ux * (t.r + 0.2), Clamp(1.6, 1.2, Max(1.2, t.h - 0.6)), t.z + uz * (t.r + 0.2), World.NEST.r, "trunk");
+                col = Colony.New(true, "bee"); col.sited = true; col.maxCells = MaxCells("trunk", "bee"); col.alloc = 0;
+                col.adults = moved; col.sugar = honey; col.swarmed = season.n;
+                to = nn.entrance;
+            }
+            else { Num a = H32(season.n, k, 963) * TAU; to = new V3(biv.x + 90 * DSin(a), 8, biv.z + 90 * DCos(a)); } // no room in the line: it leaves the area
+            long arrive = leave + System.Math.Max((long)T.hive.flyMin, (long)Ceil(Sqrt(Sq(to.x - biv.x) + Sq(to.z - biv.z)) / (T.hive.flySpeed * 60)));
+            bool own = from == nest;
+            swarms.Add(new SwarmOut { n = moved, from = e, biv = biv, to = to, t0 = minute, @out = @out, leave = leave, arrive = arrive, nest = nn, colony = col, own = own });
+            Emit("swarm", ("x", biv.x), ("z", biv.z), ("adults", moved), ("gone", t == null), ("from", own ? "own" : "line"), ("leave", leave), ("arrive", arrive));
+        }
+        /// swarms on their way: one that has arrived moves in and is a colony of the line (all: at the season's end)
+        internal void SwarmTick(bool all = false)
+        {
+            if (swarms.Count == 0) return;
+            var keep = new List<SwarmOut>();
+            foreach (var sw in swarms)
+            {
+                if (!all && minute < sw.arrive) { keep.Add(sw); continue; }
+                if (sw.colony != null) { line.Add(new LineColony { id = ++lineSeq, nest = sw.nest, colony = sw.colony, season = season.n }); Emit("swarmSettled", ("id", lineSeq), ("x", sw.nest.x), ("z", sw.nest.z), ("adults", sw.colony.adults)); }
+                else { lineage++; Emit("swarmGone", ("adults", sw.n)); }
+            }
+            swarms = keep;
+        }
+        /// where a swarm's cloud is at minute m, how loose it is, and whether it hangs as a clump
+        public static (V3 p, Num r, bool hang) SwarmAt(SwarmOut sw, Num m)
+        {
+            Num Sm(Num a) => a * a * (3 - 2 * a);
+            V3 Lerp(V3 p, V3 q, Num a) => new V3(p.x + (q.x - p.x) * a, p.y + (q.y - p.y) * a, p.z + (q.z - p.z) * a);
+            if (m < sw.@out) { Num a = Sm(Clamp01((m - sw.t0) / (Num)(sw.@out - sw.t0))); return (Lerp(sw.from, sw.biv, a), 1 + 0.8 * a, false); }
+            if (m < sw.leave) return (sw.biv, 0.22, true);
+            Num b = Sm(Clamp01((m - sw.leave) / (Num)System.Math.Max(1, sw.arrive - sw.leave)));
+            return (Lerp(sw.biv, sw.to, b), b > 0.92 ? 2.5 * (1 - b) / 0.08 + 0.2 : 2.5, false);
+        }
+        public V3 Dca(Nest n) { Num a = H32((long)(seed & 0xffffffffUL), RndI(n.x * 10), RndI(n.z * 10)) * TAU; return new V3(n.x + T.hive.dcaDist * DSin(a), T.hive.dcaUp, n.z + T.hive.dcaDist * DCos(a)); }
+        internal void MateTick(ColonyState c, bool own)
+        {
+            var v = c.virgin;
+            if (v == null || minute < v.at) return;
+            if (Raining && minute < v.at + (long)T.hive.mateMin) { v.at += 1440; return; } // no flight in rain: tomorrow
+            if (minute < v.at + (long)T.hive.mateMin) return;
+            c.virgin = null;
+            Emit("queenMated", ("own", own));
         }
 
         /// a pick of 1..n wakes that queen; 1001..1000+n wakes her as the species the year's turn offers (GDD 6.8)

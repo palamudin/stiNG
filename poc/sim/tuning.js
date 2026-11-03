@@ -288,7 +288,16 @@ export const T = {
   // sugar foragers within robRange m go for it by memory each day: wasps know where the hives are.
   hive: { pollenSecs: 4, pollenLoad: 1, waxSugar: 1.5, waxFrom: 0.3, winterNeed: 0.05, winterLoss: 0.3, minCluster: 15,
     swarmFrom: 0.15, swarmTo: 0.5, swarmAdults: 120, reproShare: 0.08, swarmShare: 0.6, swarmHoney: 0.3,
-    ballHeat: 0.5, ballR: 0.05, aiEscape: 0.0008, robHoney: 1, robStrength: 5, robChance: 0.3, robRange: 120 },
+    ballHeat: 0.5, ballR: 0.05, aiEscape: 0.0008, robHoney: 1, robStrength: 5, robChance: 0.3, robRange: 120,
+    // a swarm seen (bio): it pours out over pourMin minutes, hangs as a clump on a branch near the hive (a bivouac) for
+    // bivMin..bivMax minutes while scouts choose a home, then flies there at flySpeed m/s (at least flyMin minutes, so
+    // it can be seen at the PoC's quick days); the colony exists once it
+    // arrives. The daughter queen left in the hive flies to mate mateFrac of the season on (a day at least; about six
+    // in a real season), at mateHour, for mateMin minutes,
+    // at a drone congregation area dcaDist m off and dcaUp m up, where drones gather from droneFrom to droneTo; the
+    // hive lays nothing until she is back (the brood break after a swarm). A rainy day puts her flight off a day.
+    pourMin: 30, bivMin: 120, bivMax: 600, bivRange: 25, flySpeed: 1.5, flyMin: 20, mateFrac: 0.03, mateHour: 840, mateMin: 30,
+    dcaDist: 150, dcaUp: 18, droneFrom: 780, droneTo: 960 },
 
   bees: {
     guards: 6, foragers: 14, pursueSpeed: 4.2, accel: 30, contact: 0.016, ballMin: 3,

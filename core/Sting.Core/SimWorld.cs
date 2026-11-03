@@ -1579,7 +1579,9 @@ namespace Sting.Core
                 Emit("nestFounded", ("x", nest.x), ("y", nest.y), ("z", nest.z), ("key", nest.key), ("auto", true));
             }
             var nheat = NestHeat();
-            Colony.Step(col, (Num)60 / dayTicks, OwnWorkers(), daylight, frac, bio, BroodSpeed(), EcoAvail(), (nheat.heat, nheat.cook), BoostNow());
+            SwarmTick(); MateTick(col, true);
+            var ob = BoostNow(); if (col.virgin != null) ob = new Boost { forage = ob.forage, brood = ob.brood, lay = 0, build = ob.build }; // a hive whose young queen has not mated lays nothing
+            Colony.Step(col, (Num)60 / dayTicks, OwnWorkers(), daylight, frac, bio, BroodSpeed(), EcoAvail(), (nheat.heat, nheat.cook), ob);
             HiveXp(col);
             GaugeTick((Num)60 / dayTicks);
             if (Raining && col.nestAlive && col.sited)

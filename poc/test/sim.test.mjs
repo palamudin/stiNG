@@ -1892,6 +1892,22 @@ function seated(sim, pred) {
     const ev = run(s, 30000, () => idle());
     ok(count(ev, 'swarm') >= 1 && count(ev, 'winter') >= 1 && count(ev, 'spring') >= 1 && !s.extinct && s.season.n >= 2 && s.nest.entrance.x === n0.x && s.nest.entrance.z === n0.z && s.colony.queenAlive,
       `a bee colony swarms in early summer (${count(ev, 'swarm')}), winters as a cluster on its honey and goes on in the same hive (season ${s.season.n}, ${s.colony.adults.toFixed(0)} bees)`); }
+  // a swarm seen (T2-11): it pours out, hangs in a clump on a branch near the hive, flies to its new home and only then
+  // is a colony; the daughter queen left in the hive lays nothing until her mating flight, days later
+  { const s = mk('bee'), c = s.colony, H = T.hive; c.adults = 400; c.gynes = 2; c.sugar = 300; s.season.startMinute = s.minute - 0.2 * s.settings.seasonDays * 1440;
+    let ev = run(s, 61); const sw = s.swarms[0], e = s.nest.entrance;
+    const hang = sw && s.swarmAt(sw, (sw.out + sw.leave) / 2), d = sw ? Math.hypot(hang.x - e.x, hang.z - e.z) : 0;
+    const inLine0 = s.line.length, virgin = c.virgin && c.virgin.at > s.minute, laid0 = c.stats.laid;
+    const snap = restore(snapshot(s));
+    ok(count(ev, 'swarm') === 1 && sw && hang.hang && d > 1 && d < H.bivRange + 2 && inLine0 === 0 && virgin && snap.swarms.length === 1,
+      `a crowded hive swarms: ${sw ? sw.n.toFixed(0) : 0} bees hang in a clump ${d.toFixed(1)} m off for ${sw ? sw.leave - sw.out : 0} min, not yet a colony; the save keeps it`);
+    let settled = null; ev = []; while (s.minute <= sw.arrive + 1 && !settled) { const e2 = run(s, 60); ev.push(...e2); settled = e2.find((x) => x.type === 'swarmSettled'); }
+    const sc = s.line[0];
+    ok(settled && sc && Math.abs(sc.colony.adults - sw.n) < 1 && sc.nest.entrance.x === sw.to.x && c.stats.laid === laid0,
+      `then it flies to a tree ${sc ? Math.hypot(sc.nest.x - e.x, sc.nest.z - e.z).toFixed(0) : '?'} m off and moves in as a colony of the line; meanwhile the hive laid nothing`);
+    let mated = null; while (!mated && s.minute < c.virgin.at + H.mateMin + 120) { const e3 = run(s, 120); mated = e3.find((x) => x.type === 'queenMated'); }
+    const laid1 = c.stats.laid; run(s, 600);
+    ok(mated && mated.own && !c.virgin && c.stats.laid > laid1, `the young queen flies to mate ${Math.max(1, Math.round(H.mateFrac * s.settings.seasonDays))} day(s) on and comes back; the hive lays again`); }
   { const s = mk('hornet'); run(s, 100); const r = restore(snapshot(s)); ok(r.species === 'hornet' && r.colony.species === 'hornet' && r.wasp.sp === 'hornet', 'a save keeps the line\'s species'); }
 }
 
