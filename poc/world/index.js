@@ -13,7 +13,8 @@
 import * as THREE from 'three';
 import { Clipmap } from './clipmap.js';
 import { makeTerrain } from './terrain.js';
-import { Sky, makeClouds } from './sky.js';
+import { Sky } from './sky.js';
+import { Clouds, CLOUDS, CLOUD_SHADOW_GLSL } from './clouds.js';
 import { Post } from './post.js';
 import { Forest } from './trees.js';
 import { Grass } from './grass.js';
@@ -21,19 +22,33 @@ import { WaveField } from './wavegpu.js';
 import { Caustics } from './caustics.js';
 import { WATER } from './water.js';
 import { WAVES } from './waves.js';
+import { weatherAt, seasonAt } from './seasons.js';
+import { Rain } from './rain.js';
+import { GpuTimer } from './gputimer.js';
+import { hash01 } from './noise.js';
 
-// waveN: the wave grid per cascade; caustics: [texture size, grid] for the sea's caustics, 0 for none
+// waveN: the wave grid per cascade; caustics: [texture size, grid] for the sea's caustics, 0 for none; clouds: the
+// volumetric clouds (0 off); far: the impostor forest's reach [from, to] in metres, false for none
 export const QUALITY = {
-  low:    { levels: 10, scale: 0.7,  shadow: 1024, grass: 0.35, trees: 0.5,  post: true,  dof: false, rays: false, msaa: 0, clouds: 40, waveN: 64,  caustics: 0 },
-  medium: { levels: 11, scale: 0.85, shadow: 2048, grass: 0.6,  trees: 0.75, post: true,  dof: true,  rays: true,  msaa: 0, clouds: 56, waveN: 128, caustics: [256, 192] },
-  high:   { levels: 12, scale: 1.0,  shadow: 2048, grass: 1.0,  trees: 1.0,  post: true,  dof: true,  rays: true,  msaa: 4, clouds: 64, waveN: 128, caustics: [512, 384] },
-  ultra:  { levels: 13, scale: 1.0,  shadow: 4096, grass: 1.4,  trees: 1.3,  post: true,  dof: true,  rays: true,  msaa: 4, clouds: 80, waveN: 256, caustics: [1024, 640] },
+  low:    { levels: 10, scale: 0.7,  shadow: 1024, grass: 0.35, trees: 0.5,  post: true,  dof: false, rays: false, msaa: 0, clouds: 0,  waveN: 64,  caustics: 0, far: false },
+  medium: { levels: 11, scale: 0.85, shadow: 2048, grass: 0.6,  trees: 0.75, post: true,  dof: true,  rays: true,  msaa: 0, clouds: 56, waveN: 128, caustics: [256, 192], far: [1200, 3500] },
+  high:   { levels: 12, scale: 1.0,  shadow: 2048, grass: 1.0,  trees: 1.0,  post: true,  dof: true,  rays: true,  msaa: 4, clouds: 64, waveN: 128, caustics: [512, 384], far: [1200, 6000] },
+  ultra:  { levels: 13, scale: 1.0,  shadow: 4096, grass: 1.4,  trees: 1.3,  post: true,  dof: true,  rays: true,  msaa: 4, clouds: 80, waveN: 256, caustics: [1024, 640], far: [1500, 9000] },
 };
 
 // the sun's direction from the hour (6 rises, 18 sets), on a fixed track across the sky
 export function sunAt(hour, out = new THREE.Vector3()) {
   const a = (hour - 6) / 12 * Math.PI, el = Math.sin(a) * 1.05, az = 2.2 + a * 0.9;
   return out.set(Math.cos(az) * Math.cos(el), Math.sin(el), Math.sin(az) * Math.cos(el)).normalize();
+}
+// the sun by the clock and the season (W3): the real track at latitude 50 for a declination dec (seasons.js), so the
+// days are long in summer and short in winter; the game keeps the fixed track above (its day is mapped onto it)
+export function sunAtSeason(hour, dec, out = new THREE.Vector3()) {
+  const lat = 50 * Math.PI / 180, H = (hour - 12) / 24 * Math.PI * 2;
+  const sinEl = Math.sin(lat) * Math.sin(dec) + Math.cos(lat) * Math.cos(dec) * Math.cos(H), el = Math.asin(THREE.MathUtils.clamp(sinEl, -1, 1));
+  const cosAz = (Math.sin(dec) - Math.sin(lat) * sinEl) / (Math.cos(lat) * Math.cos(el) + 1e-6);
+  let az = Math.acos(THREE.MathUtils.clamp(cosAz, -1, 1)); if (H > 0) az = Math.PI * 2 - az; // from north, clockwise
+  return out.set(Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el)).normalize();
 }
 
 export class World {
@@ -44,7 +59,9 @@ export class World {
     if (opts.dof === false) this.q.dof = false; // a game camera that has to read the scene, not a macro lens
     this.shadowMin = opts.shadowBox ?? 3; // the shadow box's least half-width (the game wants the people round the wasp)
     this.time = 0;
-    this.env = { hour: 16.5, haze: 1, mist: 1, wet: 0, wind: [0.8, 0.3] };
+    // day: the day of the year (0 is the first of spring); auto: the weather and season follow the clock (seasons.js)
+    this.env = { hour: 16.5, day: 100, auto: false, haze: 1, mist: 1, wet: 0, wind: [0.8, 0.3], cloud: 0.35, cloudDens: 1, rain: 0, snow: 0, flash: 0 }; // auto is the template's; the game keeps its own weather
+    this.season = seasonAt(100); this.weather = null;
     this.clip = new Clipmap(renderer, source, { levels: this.q.levels, ...(opts.clip || {}) });
     const wet = source.sea > -1e5; // a source without water: no beaches, no mud, no snow line; heights count from 0
     this.terrain = makeTerrain(this.clip, { sea: wet ? source.sea : 0, paving: source.kind === 'sting', shore: wet ? 1 : 0, snowLine: wet ? 215 : 1e9 });
@@ -61,14 +78,15 @@ export class World {
     if (!opts.sun) this.group.add(this.sun, this.sun.target);
     if (!opts.hemi) this.group.add(this.hemi);
     this.sky = new Sky(renderer);
-    this.clouds = makeClouds({ radius: this.q.clouds });
-    this.group.add(this.clouds.mesh);
-    this.forest = new Forest(this, { range: this.q.trees });
+    this.clouds = new Clouds(renderer, this.sky);
+    this.uniforms.tCloudShadow.value = this.clouds.rtShadow.texture; this.uniforms.uCloudRect = this.clouds.U.uShadowRect;
+    this.forest = new Forest(this, { range: this.q.trees, far: this.q.far });
     this.group.add(this.forest.group);
-    this.uniforms.uTreeFar.value = this.forest.bands[3];
+    this.uniforms.uTreeFar.value = this.forest.farOn ? this.forest.cfg.far[1] : this.forest.bands[3];
     // decorative flowers only in the wild world: in the game's world flowers are nectar, and the sim places them
     this.grass = new Grass(this, { density: this.q.grass, flowers: source.kind !== 'sting' });
     this.group.add(this.grass.group);
+    this.rain = new Rain(this); this.group.add(this.rain.mesh);
     this.post = new Post(renderer, this.sky, { msaa: this.q.msaa, scale: this.q.scale });
     this.post.U.uSea.value = source.sea;
     if (opts.lens) { const L = opts.lens, U = this.post.U; if (L.fstop) U.uFstop.value = L.fstop; if (L.maxCoc) U.uMaxCoc.value = L.maxCoc; if (L.focal) U.uFocal.value = L.focal; if (L.sensor) U.uSensor.value = L.sensor; }
@@ -76,11 +94,14 @@ export class World {
     this._water();
     scene.add(this.group);
     this._mark();
+    this.timer = new GpuTimer(renderer); // per-pass GPU milliseconds, where the browser gives timer queries
     this.sunDir = sunAt(this.env.hour);
     this.eye = new THREE.Vector3();
     this.focusDist = 10;
   }
   heightAt(x, z) { return this.source.height(x, z); }
+  waterAt(x, z) { return this.source.waterAt ? this.source.waterAt(x, z) : this.source.sea; } // the water level there (W3)
+  surfaceAt(x, z) { return Math.max(this.heightAt(x, z), this.waterAt(x, z)); }
   // the wave field and the sea's caustics for this source (source.water: fetch and cascades), or none
   _water() {
     const W = this.source.water, gl = this.renderer;
@@ -91,7 +112,7 @@ export class World {
       this.waves = new WaveField(gl, { cascades: W.cascades, fetch: W.fetch, N: this.q.waveN, salt: this.source.cosmetic | 0, float });
       if (this.source.sea > -1e5 && this.q.caustics) this.caustics = new Caustics(gl, this.waves, this.clip.glsl(), this.clip.uniforms, { res: this.q.caustics[0], grid: this.q.caustics[1], msaa: this.q.msaa ? 4 : 0 });
     }
-    this.post.setWater(this.waves, this.caustics);
+    this.post.setWater(this.waves, this.caustics, this.source.sea > -1e5 ? this.clip : null);
     // the shore reads the first two cascades for its swash (terrain.js)
     const TU = this.terrain.uniforms;
     if (this.waves && this.source.sea > -1e5) {
@@ -138,7 +159,7 @@ export class World {
     this.post.U.uSea.value = source.sea; this.post.U.uWaterOn.value = source.sea < -1e5 ? 0 : 1;
     this._water();
     this.group.remove(this.forest.group);
-    this.forest = new Forest(this, { range: this.q.trees });
+    this.forest = new Forest(this, { range: this.q.trees, far: this.q.far });
     this.group.add(this.forest.group);
     this._mark();
     this.build(x, z);
@@ -153,22 +174,42 @@ export class World {
     this.time += dt;
     this.eye.copy(eye); this.focusDist = focusDist;
     this.clip.update(eye.x, eye.z, dt, this.source.glsl ? 0 : 3);
+    // the weather and the season from the clock (the template); the game sets these fields itself (auto: false)
+    const S = this.season = seasonAt(E.day ?? 100);
+    if (E.auto) {
+      const w = this.weather = weatherAt(this.source.params.seed | 0, Math.floor(E.day ?? 100), E.hour);
+      E.haze = w.haze; E.mist = w.mist; E.wet = w.wet; E.cloud = w.cover; E.cloudDens = w.cloudDens; E.wind10 = w.wind; E.wind = [w.wind[0] * 0.35, w.wind[1] * 0.35];
+      E.rain = w.rain; E.snow = w.snow > 0 ? 1 : 0; E.storm = w.storm;
+      // lightning: in a storm, a flash now and then (a hash of the half second), gone in a few frames
+      const sec = Math.floor(this.time * 2), hit = w.storm > 0.3 && hash01(sec, 7, this.source.params.seed | 0) < 0.08 * w.storm;
+      E.flash = hit ? 1 : Math.max(0, (E.flash || 0) - dt * 6);
+    }
+    // the season's look: the leaves, the snow line, the grass, the flowers, the ice
+    const FU = this.forest.uniforms; FU.uLeafTint.value.set(...S.leafTint); FU.uAutumn.value = S.autumn; FU.uLeafGone.value = S.leafGone; FU.uSnowOn.value = S.snow;
+    if (this.source.sea > -1e5) this.uniforms.uSnowLine.value = S.snowLine + this.source.sea;
+    this.uniforms.uGrassTint.value.set(...S.grassTint); this.uniforms.uSnowOn.value = S.snow;
+    this.grass.season(S.bloom, S.grassTint, S.snow);
+    U.uIce.value = this.source.sea > -1e5 ? S.freeze : 0;
+    U.uMap.value = E.map || 0; U.uSnowLine.value = this.uniforms.uSnowLine.value - (this.source.sea > -1e5 ? this.source.sea : 0);
     // sun, sky and the light they give
-    sunAt(E.hour, this.sunDir);
+    if (E.auto) sunAtSeason(E.hour, S.dec, this.sunDir); else sunAt(E.hour, this.sunDir);
     // the camera's height above sea level for the air: a source without water counts from 0 (its sea is a sentinel)
     const camH = Math.max(1, eye.y - (this.source.sea > -1e5 ? this.source.sea : 0));
     this.sky.update(this.sunDir, camH, E.haze);
     this.uniforms.uSunDir.value.copy(this.sunDir);
-    this.sun.color.copy(this.sky.sunColor); this.sun.intensity = 1;
-    this.hemi.color.copy(this.sky.skyUp); this.hemi.intensity = 1;
+    // the clouds overhead take the sun's light (their shadow on the ground is the map; this is the average under cover)
+    const cover = E.cloud ?? 0, through = 1 - 0.85 * THREE.MathUtils.smoothstep(cover, 0.3, 0.95);
+    this.sky.sunColor.multiplyScalar(through); this.sky.skyUp.multiplyScalar(1 - 0.3 * cover); this.sky.skyHorizon.multiplyScalar(1 - 0.3 * cover); this.sky.uniforms.uSunColor.value.copy(this.sky.sunColor);
+    this.sun.color.copy(this.sky.sunColor); this.sun.intensity = 1 + 6 * (E.flash || 0);
+    this.hemi.color.copy(this.sky.skyUp); this.hemi.intensity = 1 + 4 * (E.flash || 0);
     // what the ground sends back up: the sun and sky on an average ground (albedo 0.18)
     const g = Math.max(0, this.sunDir.y);
     this.hemi.groundColor.setRGB(0.18 * (this.sky.sunColor.r * g + this.sky.skyUp.r), 0.18 * (this.sky.sunColor.g * g + this.sky.skyUp.g), 0.15 * (this.sky.sunColor.b * g + this.sky.skyUp.b));
     // the shadow box follows the view: centimetres for a wasp, hills for the map
     const box = THREE.MathUtils.clamp(focusDist * 1.8 + 2, this.shadowMin, 2500);
-    const S = this.sun.shadow.camera;
-    Object.assign(S, { left: -box, right: box, top: box, bottom: -box, near: 0.05, far: box * 8 });
-    S.updateProjectionMatrix();
+    const SC = this.sun.shadow.camera;
+    Object.assign(SC, { left: -box, right: box, top: box, bottom: -box, near: 0.05, far: box * 8 });
+    SC.updateProjectionMatrix();
     const fx = eye.x + (this.camera.getWorldDirection(TMPV).x) * focusDist, fz = eye.z + TMPV.z * focusDist;
     const fy = this.heightAt(fx, fz);
     // snap the shadow box to its texels so shadows do not crawl as the camera moves
@@ -179,15 +220,15 @@ export class World {
     this.uniforms.uWet.value = E.wet;
     this.uniforms.uTime.value = this.time; // the grass and the trees sway on this clock (the post chain has its own)
     this.forest.update(eye, dt);
-    this.grass.update(eye, Math.max(this.heightAt(eye.x, eye.z), this.source.sea));
+    this.grass.update(eye, Math.max(this.heightAt(eye.x, eye.z), this.waterAt(eye.x, eye.z)));
+    this.rain.update(this.time, eye, this.camera, E.wind10 || [E.wind[0] * 8, E.wind[1] * 8], E.rain || 0, E.snow, this.sky.skyUp);
     this.uniforms.uGrassR.value = this.grass.reach;
-    // clouds
-    this.clouds.update(eye.x, eye.z, this.time, [6, 2.4], this.source.params.seed || 1);
-    Object.assign(this.clouds.uniforms, {});
-    this.clouds.uniforms.uSun.value.copy(this.sunDir); this.clouds.uniforms.uSunColor.value.copy(this.sky.sunColor); this.clouds.uniforms.uSkyUp.value.copy(this.sky.skyUp);
+    // clouds: the weather's cover, drifting with the wind
+    this.clouds.set(E.cloud ?? 0.35, E.cloudDens ?? 1, this.time, E.wind);
     // post
-    U.uTime.value = this.time; U.uWet.value = E.wet; U.uWind.value.set(E.wind[0], E.wind[1]);
+    U.uTime.value = this.time; U.uWet.value = E.wet; U.uWind.value.set(E.wind[0], E.wind[1]); U.uFlash.value = E.flash || 0;
     // water: the wind at 10 m (the game's own, else the drawing wind scaled to a breeze), waves past the frame rate faded
+    this.timer.begin('waves');
     if (this.waves) {
       this._dtAvg += (Math.min(Math.max(dt, 1 / 240), 0.2) - this._dtAvg) * 0.05;
       const w10 = E.wind10 || [E.wind[0] * 8, E.wind[1] * 8];
@@ -203,6 +244,7 @@ export class World {
       }
       this._bodies(eye);
     }
+    this.timer.end();
     U.uMist.value = 0.0012 * E.mist; U.uMistH.value = 40;
     U.uSkyUp.value.copy(this.sky.skyUp); U.uSkyHz.value.copy(this.sky.skyHorizon);
     U.uFocus.value = focusDist;
@@ -215,8 +257,9 @@ export class World {
   render() {
     // count the whole frame (shadows, scene, post), not just its last pass
     const info = this.renderer.info; info.autoReset = false; info.reset();
-    if (this.q.post) this.post.render(this.scene, this.camera, { dof: this.q.dof, rays: this.q.rays });
+    if (this.q.post) this.post.render(this.scene, this.camera, { dof: this.q.dof, rays: this.q.rays, clouds: this.q.clouds ? this.clouds : null, skyUp: this.sky.skyUp, timer: this.timer });
     else this.renderer.render(this.scene, this.camera);
+    this.timer.frame();
     this.frameInfo = { calls: info.render.calls, tris: info.render.triangles };
   }
 }

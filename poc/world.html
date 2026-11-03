@@ -19,6 +19,13 @@
   #title .big { font: 900 34px/0.9 var(--display); letter-spacing: .01em; }
   #title .big b { color: var(--yellow); font-weight: 900; }
   #title .sub { color: rgba(243,238,226,.8); letter-spacing: .14em; text-transform: uppercase; font-size: 10.5px; margin-top: 4px; }
+  #pins { position: fixed; inset: 0; z-index: 2; pointer-events: none; overflow: hidden; }
+  .pin { position: absolute; transform: translate(-50%, -100%); pointer-events: auto; cursor: pointer; font: 600 10px/1 var(--mono); letter-spacing: .06em; color: #15130f; padding: 4px 7px 4px 18px; border-radius: 3px; background: var(--yellow); white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,.4); opacity: 0; transition: opacity .25s; }
+  .pin::before { content: ""; position: absolute; left: 6px; top: 50%; width: 8px; height: 8px; margin-top: -4px; border-radius: 50%; background: #15130f; }
+  .pin.water { background: #7ec8e8; } .pin.food { background: #f2b6c6; } .pin.nest { background: #d9c89a; } .pin.you { background: var(--red); color: #fff; padding-left: 7px; } .pin.you::before { display: none; }
+  .pin.on { opacity: 1; } .pin .n { margin-left: 5px; opacity: .7; }
+  #card { position: fixed; z-index: 4; left: calc(16px + env(safe-area-inset-left, 0px)); bottom: calc(52px + env(safe-area-inset-bottom, 0px)); width: min(320px, calc(100vw - 32px)); background: var(--panel); border: 1px solid var(--line); backdrop-filter: blur(6px); padding: 10px 12px; }
+  #card .t { font: 800 20px/1.1 var(--display); text-transform: uppercase; letter-spacing: .04em; } #card .k { color: var(--yellow); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; margin: 2px 0 6px; } #card .b { color: rgba(243,238,226,.88); margin-bottom: 8px; }
   #stats { bottom: calc(10px + env(safe-area-inset-bottom, 0px)); left: calc(16px + env(safe-area-inset-left, 0px)); color: rgba(243,238,226,.85); font-size: 11px; white-space: pre; }
   #panel { position: fixed; z-index: 3; top: calc(12px + env(safe-area-inset-top, 0px)); right: calc(12px + env(safe-area-inset-right, 0px)); width: min(300px, calc(100vw - 24px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px))); background: var(--panel);
     border: 1px solid var(--line); backdrop-filter: blur(6px); padding: 10px 12px 12px; display: grid; gap: 8px; max-height: calc(100vh - 24px); overflow: auto; }
@@ -49,28 +56,34 @@
 <div id="boot"><div><div class="t">STI<b>NG</b> WORLD</div><div class="s" id="bootMsg">building the world</div></div></div>
 <div class="hud" id="title"><div class="big">STI<b>NG</b> WORLD v2</div><div class="sub">world template · terrain · forests · water · sky</div></div>
 <div class="hud" id="stats"></div>
+<div id="pins"></div>
+<div id="card" hidden><div class="t"></div><div class="k"></div><div class="b"></div><button id="bCardGo">Dive there</button> <button id="bCardX">Close</button></div>
 <div id="panel">
   <h2>World <span><button id="bNotes" aria-label="Show or hide notes">notes</button> <button id="bPanel" aria-label="Collapse panel">hide</button></span></h2>
-  <div class="seg" id="segSource"><button data-v="wild" class="on">Wild world</button><button data-v="sting">STING world</button></div>
+  <div class="seg" id="segSource"><button data-v="wild" class="on">Wild world</button><button data-v="town">Town in the wild</button><button data-v="village">Village in the wild</button><button data-v="sting">STING world alone</button></div>
+  <p class="note">The start's kind: a town (the sim's settled area 420 m across the middle) or a village (150 m) set down on a site of the wild land, blending into forests, lakes and the coast beyond; or the game's world on its own, as the game draws it today.</p>
   <div class="row"><label for="seed">Seed</label><input id="seed" type="range" min="1" max="99" step="1" value="7"><output id="oSeed">7</output></div>
   <p class="note">The whole world from one number: ground, water, forests, trails, rocks. Same seed, same world, on every machine. In the STING world it is the sim's seed.</p>
   <div class="row"><label for="tod">Time of day</label><input id="tod" type="range" min="4.5" max="21" step="0.05" value="16.6"><output id="oTod"></output></div>
-  <p class="note">Moves the sun. Its colour, the sky, the ambient light and the haze all come from one atmosphere model (single and multiple scattering), so a low sun reddens because the air took the blue. Exposure follows the light.</p>
+  <p class="note">Moves the sun on its track for the day of the year (long days in summer, short in winter). Its colour, the sky, the ambient light and the haze all come from one atmosphere model (single and multiple scattering), so a low sun reddens because the air took the blue. Exposure follows the light.</p>
+  <div class="row"><label for="day">Day of year</label><input id="day" type="range" min="0" max="359" step="1" value="100"><output id="oDay"></output></div>
+  <p class="note">The season: fresh leaves and flowers in spring, deep green in summer, yellow to red leaves in autumn and bare trees, snow down to the sea and frozen lakes in deep winter. The day's weather is drawn from the season's odds.</p>
+  <div class="seg" id="segWeather"><button data-v="auto" class="on">Weather: the day's</button><button data-v="clear">Clear</button><button data-v="overcast">Overcast</button><button data-v="rain">Rain</button><button data-v="storm">Storm</button><button data-v="fog">Fog</button><button data-v="snow">Snow</button></div>
+  <p class="note">The day's weather comes from a hash of the day with the season's odds, blended into the next day's over the night; a storm builds in the afternoon. The buttons force one. Clouds are volumetric blocks that shadow the ground; rain falls and wets the ground; a storm flashes.</p>
   <div class="row"><label for="zoom">Zoom</label><input id="zoom" type="range" min="0" max="1" step="0.001" value="0.42"><output id="oZoom"></output></div>
   <p class="note">Distance to the point you look at, 6 cm to 9 km. Ground detail is refined round the camera; new detail blurs in as it arrives. The lens is a real thin lens, so close views get a macro depth of field.</p>
   <div class="row"><label for="blocky">Blocky stone</label><input id="blocky" type="range" min="0" max="1" step="0.01" value="0.6"><output id="oBlocky"></output></div>
   <p class="note">Cuts mountains into ledges of 5 m: 0 is smooth slopes, 1 is sheer steps. Rebuilds the world. Hills and meadows are not stepped.</p>
   <div class="row"><label for="fog">Haze</label><input id="fog" type="range" min="0" max="2" step="0.01" value="1"><output id="oFog"></output></div>
-  <p class="note">Aerosol in the air (Mie density) and a low mist that thins with height above the water. Changes how far you see and how the sun glows; does not change the clouds.</p>
-  <div class="row"><label for="wind">Wind</label><input id="wind" type="range" min="0" max="1.5" step="0.01" value="0.85"><output id="oWind"></output></div>
-  <p class="note">One wind for everything drawn: trees lean and rock, leaves flutter, grass bends in travelling gusts, waves grow. Presentation only; in the game the sim has its own wind.</p>
+  <p class="note">With a forced weather: aerosol in the air (Mie density) and a low mist that thins with height above the water. The day's weather sets its own.</p>
+  <div class="row"><label for="wind">Wind</label><input id="wind" type="range" min="0" max="15" step="0.1" value="5"><output id="oWind"></output></div>
+  <p class="note">With a forced weather: the wind at 10 m in m/s. One wind for everything drawn: trees lean and rock, leaves flutter, grass bends in gusts, waves grow from a measured spectrum, rain slants. In the game the sim has its own wind.</p>
   <div class="row"><label for="fstop">Aperture</label><input id="fstop" type="range" min="1.4" max="16" step="0.1" value="2.8"><output id="oFstop"></output></div>
   <p class="note">The f-number of a 45 mm lens. Lower blurs more in front of and behind the focus. At landscape distances the blur is physically tiny at any setting.</p>
-  <div class="row"><label for="wet">Rain</label><input id="wet" type="range" min="0" max="1" step="0.01" value="0"><output id="oWet"></output></div>
-  <p class="note">Wets the ground (darker, glossier) and rings the water with drops. Falling rain and puddles are not drawn yet.</p>
+
   <div class="seg" id="segQ"><button data-v="low">Low</button><button data-v="medium">Medium</button><button data-v="high" class="on">High</button><button data-v="ultra">Ultra</button></div>
   <div class="seg"><button id="bTour">Zoom tour</button><button id="bDive">Dive to the ground</button><button id="bShot">Hide UI</button></div>
-  <div class="hint">Drag to look round. Wheel or pinch to zoom from kilometres down to a wasp's view. WASD or arrows move, Shift is fast. Double-click to dive to a spot.</div>
+  <div class="hint">Drag to look round. Wheel or pinch to zoom from kilometres down to a wasp's view; past a few hundred metres the view turns into a map with the places round you. WASD or arrows move, Shift is fast. Double-click to dive to a spot.</div>
 </div>
 <script type="module" src="world/demo.js"></script>
 

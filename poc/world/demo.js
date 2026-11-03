@@ -4,6 +4,10 @@
 import * as THREE from 'three';
 import { World } from './index.js';
 import { wildSource } from './sources/wild.js';
+import { compositeSource } from './sources/composite.js';
+import { MAP, Places, placeCard } from './map.js';
+import { seasonName, seasonAt } from './seasons.js';
+import { hash01 } from './noise.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('view');
@@ -23,13 +27,15 @@ renderer.toneMapping = THREE.NoToneMapping; // the post chain tone-maps
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(55, 1, 0.005, 60000);
 
-const state = { source: 'wild', seed: 7, tod: 16.6, zoom: 0.42, blocky: 0.6, fog: 1, wet: 0, wind: 0.85, fstop: 2.8, quality: 'high', ui: true };
+const state = { source: 'wild', seed: 7, tod: 16.6, day: 100, weather: 'auto', zoom: 0.42, blocky: 0.6, fog: 1, wet: 0, wind: 5, fstop: 2.8, quality: 'high', ui: true };
 let world = null, src = null;
 
 // ------------------------------------------------------------ camera: orbit a focus point on the ground
 // zoom 0..1 maps the distance from the focus logarithmically from 6 cm to 9 km. Pitch flattens as you come down, so
 // the far view is a map and the near view looks along the grass.
-const cam = { fx: 0, fz: 0, yaw: 0.8, pitch: 0.5, dist: 120, target: null, tour: null };
+const cam = { fx: 0, fz: 0, yaw: 0.8, pitch: 0.5, dist: 120, target: null, tour: null, map: 0, yawMap: 0 };
+// the map comes in with the distance (map.js): 0 below MAP.from, 1 past MAP.to
+const mapFor = (d) => THREE.MathUtils.smoothstep(Math.log(d), Math.log(MAP.from), Math.log(MAP.to));
 const zoomToDist = (z) => 0.06 * Math.pow(9000 / 0.06, z);
 const distToZoom = (d) => Math.log(d / 0.06) / Math.log(9000 / 0.06);
 function pitchFor(d) { return 0.12 + 0.95 * THREE.MathUtils.smoothstep(Math.log10(d), -1.2, 3.7); }
@@ -38,12 +44,14 @@ let stingMod = null, simMod = null;
 async function makeWorld() {
   if (world) { scene.remove(world.group); world = null; }
   if (state.source === 'wild') src = wildSource({ seed: state.seed, blocky: state.blocky });
-  else {
+  else { // 'sting': the game's world alone; 'town', 'village': the game's world in the wild, with a settled radius
     // the game's own world: the sim's generator with hilly ground, its land use, paving and trees
     simMod = simMod || await import('../sim/index.js');
     stingMod = stingMod || await import('./sources/sting.js');
     const settings = { ...simMod.DEFAULT_SETTINGS, terrain: 2, seed: state.seed };
     src = stingMod.stingSource({ seed: simMod.u64(state.seed), settings, records: new Map() }); // the sim's seed is a u64 (BigInt)
+    // the game's world set down in the wild one (sources/composite.js): the settled area's radius is the start's kind
+    if (state.source !== 'sting') src = compositeSource(src, wildSource({ seed: state.seed, blocky: state.blocky }), { radius: state.source === 'town' ? 420 : 150 });
   }
   world = new World(renderer, scene, camera, src, { quality: state.quality });
   world.build(cam.fx, cam.fz);
@@ -54,13 +62,19 @@ async function makeWorld() {
 let stands = null;
 function standIns() {
   if (stands) { scene.remove(stands); stands.traverse((o) => o.geometry && o.geometry.dispose()); stands = null; }
-  if (state.source !== 'sting') return;
+  if (state.source === 'wild') return;
   stands = new THREE.Group(); stands.userData.ring = true;
+  const bark = new THREE.MeshStandardMaterial({ color: new THREE.Color('#5b4330'), roughness: 0.95 });
   const stone = new THREE.MeshStandardMaterial({ color: new THREE.Color('#bdb8ad'), roughness: 0.9 }), dark = new THREE.MeshStandardMaterial({ color: new THREE.Color('#a9a49a'), roughness: 0.9 });
   for (let j = -3; j <= 3; j++) for (let i = -3; i <= 3; i++) for (const b of src.objects(i, j).baths || []) {
     const y = src.height(b.x, b.z), add = (geo, m, yy) => { const o = new THREE.Mesh(geo, m); o.position.set(b.x, y + yy, b.z); o.castShadow = o.receiveShadow = true; stands.add(o); };
     if (b.fountain) add(new THREE.CylinderGeometry(b.r + 0.15, b.r + 0.2, b.h - 0.02, 28), stone, (b.h - 0.02) / 2);
     else { add(new THREE.CylinderGeometry(0.07, 0.11, b.h - 0.08, 10), dark, (b.h - 0.08) / 2); add(new THREE.CylinderGeometry(b.r + 0.03, b.r * 0.55, 0.1, 18), stone, b.h - 0.055); }
+  }
+  // the sim's trunks, as the game draws them: solid cylinders of the sim's radius and height (GDD 20.4 point 2)
+  for (let j = -3; j <= 3; j++) for (let i = -3; i <= 3; i++) for (const t of src.objects(i, j).trees || []) {
+    if (src.wildFrom && Math.hypot(t.x, t.z) > src.wildFrom) continue;
+    const o = new THREE.Mesh(new THREE.CylinderGeometry(t.r * 0.8, t.r, t.h, 9), bark); o.position.set(t.x, src.height(t.x, t.z) + t.h / 2, t.z); o.castShadow = o.receiveShadow = true; stands.add(o);
   }
   scene.add(stands);
 }
@@ -85,20 +99,33 @@ function step(dt) {
   cam.fz += (-Math.cos(cam.yaw) * fwd - Math.sin(cam.yaw) * side) * sp * dt;
   if (cam.tour) cam.tour(dt);
   cam.dist += (zoomToDist(state.zoom) - cam.dist) * Math.min(1, dt * 6);
-  const gy = cam.fy ?? Math.max(world.heightAt(cam.fx, cam.fz), src.sea); // cam.fy: a focus height of its own (tests)
+  const gy = cam.fy ?? world.surfaceAt(cam.fx, cam.fz); // cam.fy: a focus height of its own (tests)
   focus.set(cam.fx, gy, cam.fz);
-  const pitch = cam.pitchOverride ?? pitchFor(cam.dist);
-  const cx = cam.fx + Math.sin(cam.yaw) * Math.cos(pitch) * cam.dist, cz = cam.fz + Math.cos(cam.yaw) * Math.cos(pitch) * cam.dist;
-  let cy = gy + Math.sin(pitch) * cam.dist;
-  cy = Math.max(cy, Math.max(world.heightAt(cx, cz), src.sea) + Math.min(0.02 + cam.dist * 0.15, 2));
+  // into the map: the view tips toward straight down, narrows (backing off to keep the framing) and turns north-up
+  const m = cam.map = mapFor(cam.dist);
+  const pitch = cam.pitchOverride ?? THREE.MathUtils.lerp(pitchFor(cam.dist), MAP.pitch, m);
+  const fov = THREE.MathUtils.lerp(55, MAP.fov, m), back = Math.tan(55 / 2 * Math.PI / 180) / Math.tan(fov / 2 * Math.PI / 180);
+  if (m > 0.5 && !drag) cam.yaw += (0 - cam.yaw) * Math.min(1, dt * 1.5 * (m - 0.5) * 2); // north-up
+  camera.fov = fov;
+  const D = cam.dist * THREE.MathUtils.lerp(1, back, m);
+  const cx = cam.fx + Math.sin(cam.yaw) * Math.cos(pitch) * D, cz = cam.fz + Math.cos(cam.yaw) * Math.cos(pitch) * D;
+  let cy = gy + Math.sin(pitch) * D;
+  cy = Math.max(cy, world.surfaceAt(cx, cz) + Math.min(0.02 + cam.dist * 0.15, 2));
   camera.position.set(cx, cy, cz);
   camera.lookAt(focus);
   camera.near = THREE.MathUtils.clamp(cam.dist * 0.02, 0.003, 20);
   camera.far = 60000;
   camera.updateProjectionMatrix();
-  world.set({ hour: state.tod, haze: state.fog, mist: state.fog, wet: state.wet, wind: [state.wind * 0.94, state.wind * 0.35] });
+  // the weather: the day's own, or a forced one from the buttons (then the haze and wind sliders apply)
+  const forced = state.weather !== 'auto';
+  const F = { clear: { cloud: 0.05, rain: 0, snow: 0, storm: 0 }, overcast: { cloud: 0.92, rain: 0, snow: 0, storm: 0 }, rain: { cloud: 0.95, rain: 0.8, snow: 0, storm: 0 }, storm: { cloud: 0.98, rain: 1, snow: 0, storm: 1 }, fog: { cloud: 0.6, rain: 0, snow: 0, storm: 0 }, snow: { cloud: 0.9, rain: 0.7, snow: 1, storm: 0 } }[state.weather] || {};
+  const w10 = [state.wind * 0.94, state.wind * 0.35];
+  world.set(forced
+    ? { hour: state.tod, day: state.day, auto: false, haze: state.fog * (state.weather === 'fog' ? 3 : 1), mist: state.fog * (state.weather === 'fog' ? 6 : 1), wet: F.rain, cloud: F.cloud, cloudDens: 0.6 + 0.6 * F.cloud + F.storm * 0.8, wind10: w10, wind: [w10[0] * 0.35, w10[1] * 0.35], rain: F.rain, snow: F.snow, storm: F.storm, flash: F.storm && hash01(Math.floor(world.time * 2), 7, 99) < 0.08 ? 1 : Math.max(0, (world.env.flash || 0) - dt * 6), map: m }
+    : { hour: state.tod, day: state.day, auto: true, map: m });
   world.post.U.uFstop.value = state.fstop;
   world.update(dt, camera.position, cam.dist);
+  updatePins(dt);
 }
 let manual = false;
 function frame(now) {
@@ -113,7 +140,9 @@ function showStats() {
   if (!world) return;
   const i = world.frameInfo || { calls: 0, tris: 0 }; i.triangles = i.tris;
   const d = cam.dist, ds = d < 1 ? (d * 100).toFixed(0) + ' cm' : d < 1000 ? d.toFixed(d < 10 ? 1 : 0) + ' m' : (d / 1000).toFixed(2) + ' km';
-  $('stats').textContent = `${fps.toFixed(0)} fps · ${i.calls} draws · ${(i.triangles / 1000).toFixed(0)}k tris\nview ${ds} · sharp ${(world.clip.sharpness() * 100).toFixed(0)}% · ${world.forest.stats.trees} near trees`;
+  const g = world.timer.ms, gpu = world.timer.on ? (g.total ? `gpu ${g.total.toFixed(1)} ms: ` + ['scene', 'clouds', 'composite', 'rays', 'dof', 'bloom', 'final', 'waves'].filter((k) => g[k] !== undefined).map((k) => `${k} ${g[k].toFixed(1)}`).join(' · ') : 'gpu timing…') : 'gpu timing: not given by this browser';
+  const w = world.weather, wx = w ? `${w.kind}, ${w.temp.toFixed(0)} °C, wind ${Math.hypot(...w.wind).toFixed(0)} m/s` : state.weather;
+  $('stats').textContent = `${fps.toFixed(0)} fps · ${i.calls} draws · ${(i.triangles / 1000).toFixed(0)}k tris · ${(world.forest.stats.far / 1000).toFixed(0)}k far cells\n${gpu}\nview ${ds} · ${seasonName(state.day)} day ${state.day} · ${wx} · ${world.forest.stats.trees} near trees`;
 }
 
 // ------------------------------------------------------------ input
@@ -135,11 +164,11 @@ function bindRange(id, key, out, f = (v) => v.toFixed(2), on) {
 }
 bindRange('seed', 'seed', 'oSeed', (v) => String(v), () => makeWorld());
 bindRange('tod', 'tod', 'oTod', fmtTod);
+bindRange('day', 'day', 'oDay', (v) => `${seasonName(v)} · ${v}`);
 bindRange('zoom', 'zoom', 'oZoom', (v) => fmtDist(zoomToDist(v)));
 bindRange('blocky', 'blocky', 'oBlocky', undefined, () => makeWorld());
 bindRange('fog', 'fog', 'oFog');
-bindRange('wet', 'wet', 'oWet');
-bindRange('wind', 'wind', 'oWind');
+bindRange('wind', 'wind', 'oWind', (v) => v.toFixed(1) + ' m/s');
 bindRange('fstop', 'fstop', 'oFstop', (v) => 'f/' + v.toFixed(1));
 $('bNotes').addEventListener('click', () => $('panel').classList.toggle('compact'));
 if (innerWidth < 640) $('panel').classList.add('compact');
@@ -151,8 +180,9 @@ function segment(id, key, on) {
     state[key] = b.dataset.v; on && on();
   });
 }
-segment('segSource', 'source', () => { if (state.source === 'sting') { cam.fx = 0; cam.fz = 0; } else { const s = findStart(); cam.fx = s.x; cam.fz = s.z; } makeWorld(); });
+segment('segSource', 'source', () => { if (state.source !== 'wild') { cam.fx = 0; cam.fz = 0; } else { const s = findStart(); cam.fx = s.x; cam.fz = s.z; } makeWorld(); });
 segment('segQ', 'quality', () => makeWorld());
+segment('segWeather', 'weather');
 // ---- tours: a continuous zoom from the whole region down into the grass and back, turning slowly
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 function tween(from, to, secs, onDone) {
@@ -182,20 +212,60 @@ canvas.addEventListener('dblclick', (e) => {
   let t = 0, step = Math.max(0.05, cam.dist * 0.01), hit = null;
   for (let i = 0; i < 600 && t < 30000; i++) {
     const p = o.clone().addScaledVector(d, t);
-    if (p.y < Math.max(world.heightAt(p.x, p.z), src.sea)) { hit = p; break; }
+    if (p.y < world.surfaceAt(p.x, p.z)) { hit = p; break; }
     t += step; step *= 1.02;
   }
   if (hit) { cam.fx = hit.x; cam.fz = hit.z; tween(state.zoom, Math.max(0.2, state.zoom - 0.25), 3); }
 });
 $('bPanel').addEventListener('click', () => { $('panel').classList.toggle('closed'); $('bPanel').textContent = $('panel').classList.contains('closed') ? 'show' : 'hide'; });
 
+// ------------------------------------------------------------ the map's pins: places scanned from the source, projected each frame
+let places = null; const pinEls = []; let cardPlace = null;
+function updatePins(dt) {
+  const m = cam.map, layer = $('pins');
+  if (!places || places.src !== src) { places = new Places(src, { cell: 220, radius: 6000 }); }
+  if (m > 0.02) places.scan(cam.fx, cam.fz, 2);
+  const on = m > 0.15 && !uiHidden, W = innerWidth, H = innerHeight, V = new THREE.Vector3();
+  // project, then cluster: a pin within 34 px of an earlier one joins it (its count shows)
+  const shown = [];
+  if (on) {
+    const list = [{ kind: 'you', name: 'you', x: cam.fx, z: cam.fz }, ...places.list];
+    for (const p of list) {
+      V.set(p.x, world.surfaceAt(p.x, p.z), p.z).project(camera);
+      if (V.z > 1 || Math.abs(V.x) > 1.05 || Math.abs(V.y) > 1.05) continue;
+      const sx = (V.x * 0.5 + 0.5) * W, sy = (-V.y * 0.5 + 0.5) * H;
+      const near = shown.find((q) => q.kind === p.kind && Math.hypot(q.sx - sx, q.sy - sy) < 34);
+      if (near && p.kind !== 'you') { near.n++; continue; }
+      shown.push({ p, sx, sy, n: 1, kind: p.kind });
+      if (shown.length > 60) break;
+    }
+  }
+  while (pinEls.length < shown.length) { const e = document.createElement('div'); e.className = 'pin'; e.addEventListener('click', () => openCard(e._p)); layer.appendChild(e); pinEls.push(e); }
+  pinEls.forEach((e, i) => {
+    const s = shown[i];
+    if (!s) { e.classList.remove('on'); return; }
+    e._p = s.p; e.className = 'pin on ' + s.kind; e.style.left = s.sx + 'px'; e.style.top = s.sy + 'px';
+    e.innerHTML = s.p.name + (s.n > 1 ? `<span class="n">+${s.n - 1}</span>` : '');
+  });
+}
+function openCard(p) {
+  cardPlace = p;
+  const c = placeCard(p, { x: cam.fx, z: cam.fz }, seasonAt(state.day));
+  $('card').querySelector('.t').textContent = c.title; $('card').querySelector('.k').textContent = `${c.kind} · ${c.sub || ''} · ${c.dist} away`;
+  $('card').querySelector('.b').innerHTML = c.lines.map((l) => `<div>${l}</div>`).join('');
+  $('card').hidden = false;
+}
+$('bCardX').addEventListener('click', () => { $('card').hidden = true; });
+$('bCardGo').addEventListener('click', () => { if (cardPlace) { cam.fx = cardPlace.x; cam.fz = cardPlace.z; tween(state.zoom, 0.3, 4); } $('card').hidden = true; });
+
 // ------------------------------------------------------------ boot
 function findStart() { // a meadow near the water, looking along the shore
   const s = wildSource({ seed: state.seed });
   let best = null;
-  for (let r = 0; r < 4000 && !best; r += 40) for (let a = 0; a < 6.283; a += 0.35) {
+  // a meadow by the sea, with open water for a few hundred metres in front of it (the fjord view)
+  for (let r = 0; r < 12000 && !best; r += 60) for (let a = 0; a < 6.283; a += 0.3) {
     const x = Math.cos(a) * r, z = Math.sin(a) * r, o = s.sample(x, z);
-    if (o[0] > 2 && o[0] < 6 && o[2] < 0.3) { const w = s.sample(x + 30, z); if (w[0] < 0) { best = { x, z }; break; } }
+    if (o[0] > 2 && o[0] < 7 && o[2] < 0.3 && o[4] <= s.sea) { let ok = true; for (let k = 1; k <= 5 && ok; k++) { const w = s.sample(x + 60 * k * Math.cos(a), z + 60 * k * Math.sin(a)); ok = w[0] < s.sea - 1; } if (ok) { best = { x, z }; break; } }
   }
   return best || { x: 0, z: 0 };
 }

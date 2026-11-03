@@ -50,8 +50,9 @@ void main() {
   vec3 L = -uSun;
   vec3 nrm = normalize(vec3(-s.x, 1.0, -s.y));
   vec3 r = refract(L, nrm, 1.0 / ${n}), r0 = refract(L, vec3(0.0, 1.0, 0.0), 1.0 / ${n});
-  vNew = land(vec3(x0.x + d.x, uSea + d.y, x0.y + d.z), r);
-  vOld = land(vec3(x0.x + d.x, uSea, x0.y + d.z), r0); // the sunlight this patch of surface intercepts: its own (displaced) footprint
+  float sea = clipWater(x0); // the water level here: the sea, or the lake's
+  vNew = land(vec3(x0.x + d.x, sea + d.y, x0.y + d.z), r);
+  vOld = land(vec3(x0.x + d.x, sea, x0.y + d.z), r0); // the sunlight this patch of surface intercepts: its own (displaced) footprint
   vT = (1.0 - fres(max(dot(-L, nrm), 0.0))) / (1.0 - fres(max(uSun.y, 0.0)));
   gl_Position = vec4((vNew - uCenter) / uSize * 2.0, 0.0, 1.0);
 }`,

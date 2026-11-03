@@ -29,6 +29,7 @@
 // earth is where the blades are missing). In woods the grass grows long and thin.
 import * as THREE from 'three';
 import { NOISE_GLSL } from './noise.js';
+import { CLOUD_SHADOW_GLSL } from './clouds.js';
 
 export const GRASS = {
   // Nested grids: ring k's clumps sit on a grid of spacing s0 * 2^k, so every clump of a coarser ring is also a clump of
@@ -81,7 +82,7 @@ function clumpGeometry(blades, segs, seed = 45) {
 
 const GRASS_VERT_HEAD = /* glsl */ `
 attribute float aT, aSide, aBi; attribute vec4 aB; attribute vec2 aCell;
-uniform int uK; uniform float uS0, uRin, uRout, uNextBlades, uTime, uSea, uDensity, uFlower, uAlt, uShore, uSnowLine, uWoodH, uZ0; uniform vec2 uGrassH; uniform vec2 uWind; uniform vec3 uCamG;
+uniform int uK; uniform float uS0, uRin, uRout, uNextBlades, uTime, uSea, uDensity, uFlower, uAlt, uShore, uSnowLine, uWoodH, uZ0, uBloom, uSnowCover, uWildFrom; uniform vec3 uGrassTint; uniform vec2 uWildH; uniform vec2 uGrassH; uniform vec2 uWind; uniform vec3 uCamG;
 varying float vT, vCol, vRootK, vFade, vDith; varying vec3 vGW; varying vec3 vTint, vPetal; varying float vKill;
 vec3 gPos; vec3 gNor;
 `;
@@ -107,14 +108,15 @@ const GRASS_BUILD = /* glsl */ `
   gPos = vec3(0.0); gNor = vec3(0.0, 1.0, 0.0); vGW = gPos;
   if (de >= uRin && de < uRout) {
   vec4 gd = clipAt(base); vec3 gn = clipNormal(base);
-  float hgt = gd.x - uSea, slope = 1.0 - gn.y;
+  float hgt = gd.x - clipWater(base), slope = 1.0 - gn.y; // above the water line here (the sea, or a lake's level)
   // what grows here: meadow full, under trees thin, nothing on stone, sand, water, trails or paving (by place: fixed)
   float dens = (1.0 - smoothstep(0.32, 0.45, slope)) * mix(1.0, smoothstep(1.3, 2.2, hgt), uShore) * (1.0 - smoothstep(0.3, 0.45, gd.w)) * mix(1.0, 0.35, smoothstep(0.4, 0.8, gd.z));
-  dens *= uDensity * (1.0 - smoothstep(uSnowLine - 10.0, uSnowLine + 10.0, hgt));
+  dens *= uDensity * (1.0 - smoothstep(uSnowLine - 10.0, uSnowLine + 10.0, gd.x - uSea));
   dens *= 1.0 - smoothstep(0.97, 1.03, gd.y); // a pond's bed (moisture past 1, sources/sting.js)
   float wr = w2wear(gd.w);
   dens *= 1.0 - w2bare(base, wr); // trodden: bare in patches
-  if (uFlower > 0.5) dens *= smoothstep(0.1, 0.6, w2noise(base / 9.0, 211) + 0.35 * (gd.y - 0.5)) * (1.0 - smoothstep(0.3, 0.6, gd.z));
+  if (uFlower > 0.5) dens *= smoothstep(0.1, 0.6, w2noise(base / 9.0, 211) + 0.35 * (gd.y - 0.5)) * (1.0 - smoothstep(0.3, 0.6, gd.z)) * uBloom; // flowers only in their season
+  dens *= 1.0 - 0.92 * uSnowCover; // under snow
   vKill = w2hash01(ci.x, ci.y, 203) > dens ? 1.0 : 0.0;
   float fade = persist ? 1.0 : 1.0 - smoothstep(uRout * ${GRASS_BAND}, uRout, de);
   fade *= 1.0 - smoothstep(8.0, 30.0, uAlt);
@@ -123,7 +125,8 @@ const GRASS_BUILD = /* glsl */ `
   vDith = w2hash01(ci.x, ci.y, 214);
   if (vFade <= 0.0) vKill = 1.0;
   float rnd = w2hash01(ci.x, ci.y, 204);
-  float H = mix(uGrassH.x, uGrassH.y, gd.y) * (0.55 + 0.9 * aB.w) * (0.75 + 0.5 * rnd) * (uFlower > 0.5 ? 1.3 : 1.0);
+  vec2 GH = uWildFrom > 0.0 ? mix(uGrassH, uWildH, smoothstep(uWildFrom * 0.85, uWildFrom * 1.05, length(base))) : uGrassH; // a town's mown grass, the wild meadow beyond
+  float H = mix(GH.x, GH.y, gd.y) * (0.55 + 0.9 * aB.w) * (0.75 + 0.5 * rnd) * (uFlower > 0.5 ? 1.3 : 1.0);
   H *= mix(1.0, uWoodH, smoothstep(0.85, 1.0, gd.z)); // long in the woods, where nobody mows
   H *= mix(1.0, 0.45, wr); // short where it is walked on
   float pxd = de; // how much ground a pixel covers here, roughly
@@ -171,7 +174,7 @@ const GRASS_BUILD = /* glsl */ `
   // a dense lawn hides its roots: up close each blade darkens toward its root, from further off the roots are hidden
   // by the blades in front, so the darkening fades with distance and height
   vRootK = 1.0 - smoothstep(3.0, 16.0, max(dist, uAlt * 2.0));
-  vTint = mix(root, tip, mix(1.0, smoothstep(0.0, 0.8, t), vRootK)) * (0.8 + 0.4 * rnd);
+  vTint = mix(root, tip, mix(1.0, smoothstep(0.0, 0.8, t), vRootK)) * (0.8 + 0.4 * rnd) * uGrassTint; // the season's tint (yellow in autumn)
   vPetal = vec3(-1.0); // a flower's colour is only its head (the fragment shader takes it above 90% of the stem)
   if (uFlower > 0.5) {
     float k = floor(w2hash01(int(floor(base.x / 9.0)), int(floor(base.y / 9.0)), 212) * 5.0);
@@ -203,7 +206,7 @@ export class Grass {
       geo.setAttribute('aCell', new THREE.InstancedBufferAttribute(new Float32Array(cells), 2));
       geo.instanceCount = cells.length / 2;
       const U = {
-        ...world.clip.uniforms, uTime: world.uniforms.uTime, uSea: { value: world.source.sea }, uShore: world.uniforms.uShore, uSnowLine: world.uniforms.uSnowLine, uSunDir: world.uniforms.uSunDir, uSunColor: world.sky.uniforms.uSunColor,
+        ...world.clip.uniforms, tCloudShadow: world.uniforms.tCloudShadow, uCloudRect: world.uniforms.uCloudRect, uTime: world.uniforms.uTime, uBloom: { value: 1 }, uSnowCover: { value: 0 }, uGrassTint: { value: new THREE.Vector3(1, 1, 1) }, uWildFrom: { value: world.source.wildFrom || 0 }, uWildH: { value: new THREE.Vector2(...(world.source.wildGrass || world.source.grassHeight || [0.1, 0.42])) }, uSea: { value: world.source.sea }, uShore: world.uniforms.uShore, uSnowLine: world.uniforms.uSnowLine, uSunDir: world.uniforms.uSunDir, uSunColor: world.sky.uniforms.uSunColor,
         uK: { value: k }, uS0: { value: S0 }, uRin: { value: rin }, uRout: { value: rout }, uNextBlades: { value: nextBlades }, uDensity: { value: this.density }, uFlower: { value: flower ? 1 : 0 },
         uWoodH: { value: world.source.grassWood ?? 1 },
         uZ0: { value: 0.1 * ((world.source.grassHeight || [0.1, 0.42])[0] + (world.source.grassHeight || [0.1, 0.42])[1]) / 2 }, // roughness length
@@ -217,7 +220,7 @@ export class Grass {
           .replace('#include <beginnormal_vertex>', GRASS_BUILD + '\n  vec3 objectNormal = gNor;')
           .replace('#include <begin_vertex>', 'vec3 transformed = gPos;')
           .replace('#include <project_vertex>', '#include <project_vertex>\n  if (vKill > 0.5) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);');
-        sh.fragmentShader = `uniform vec3 uSunDir, uSunColor; varying float vT, vCol, vRootK, vFade, vDith; varying vec3 vGW, vTint, vPetal; varying float vKill;
+        sh.fragmentShader = `${CLOUD_SHADOW_GLSL}\nuniform vec3 uSunDir, uSunColor; varying float vT, vCol, vRootK, vFade, vDith; varying vec3 vGW, vTint, vPetal; varying float vKill;
 float w2ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); } // interleaved gradient noise\n` + sh.fragmentShader
           .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n  if (vFade < 1.0 && fract(w2ign(gl_FragCoord.xy) + vDith) > vFade) discard; // dissolving, never shrinking')
           .replace('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb = vPetal.x >= 0.0 && vT > 0.9 ? vPetal : vTint;')
@@ -228,6 +231,7 @@ float w2ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.
   { // the sun through the blade, toward the tip, strongest looking into the light; the root sits in its neighbours' shade
     vec3 V = normalize(vGW - cameraPosition);
     float back = pow(clamp(dot(V, uSunDir), 0.0, 1.0), 3.0);
+    { float cs = cloudShadow(vGW.xz); reflectedLight.directDiffuse *= cs; reflectedLight.directSpecular *= cs; }
     reflectedLight.directDiffuse += uSunColor * diffuseColor.rgb * back * 0.5 * vT;
     reflectedLight.indirectDiffuse *= mix(1.0, 0.55 + 0.45 * vT, vRootK);
     reflectedLight.directDiffuse *= mix(1.0, 0.7 + 0.3 * vT, vRootK);
@@ -249,6 +253,8 @@ float w2ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.
     if (opts.flowers !== false) mk(0, GRASS.flowers.spacing / d, 0, GRASS.flowers.radius, true, 3, 3, 0);
     this.reach = 0; // how far the blades go this frame (0 when hidden): the ground lays thatch under them
   }
+  // the season (seasons.js): the flowers' share in bloom, the blades' tint, the snow cover
+  season(bloom, tint, snow) { for (const m of this.meshes) { const U = m.userData.U; U.uBloom.value = bloom; U.uGrassTint.value.set(...tint); U.uSnowCover.value = snow; } }
   update(eye, ground) {
     const alt = Math.max(0.05, eye.y - ground), S = this.shared;
     S.uCamG.value.copy(eye); S.uAlt.value = alt; const E = this.world.env, w10 = E.wind10 || [E.wind[0] * 8, E.wind[1] * 8]; S.uWind.value.set(w10[0], w10[1]); // m/s at 10 m (as the waves)
