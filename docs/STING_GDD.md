@@ -1482,7 +1482,7 @@ Agreed 2026-10-27: the PoC's known limits are worked through before terrain is t
 
 ### 18.44 Terrain as built (T2-6)
 
-**The choice.** A fifth feature modifier, Ground: flat (the standard), rolling or hilly. The ground's height is a smooth value-noise field in two octaves (36 m and 11 m cells, the second at 0.3 of the first), 2.5 m per step of the modifier. The ground is level within 14 m of the home tree, rising to full height over the next 24 m. Land use damps it, blended smoothly between chunk centres: a town square at 0.1 and a mall at 0.12 are near level, yards at 0.45 are graded gently, parks and woods roll freely. Around a town block's middle the steepest slope is 0.04; in a hilly park it is 0.53. A flat world is height 0 everywhere and generates and plays exactly as before.
+**The choice.** A fifth feature modifier, Ground: flat (the standard), rolling or hilly. The ground's height is a smooth value-noise field in two octaves (36 m and 11 m cells, the second at 0.3 of the first), 2.5 m per step of the modifier (since 18.67, a derivative-damped fbm in five octaves). The ground is level within 14 m of the home tree, rising to full height over the next 24 m. Land use damps it, blended smoothly between chunk centres: a town square at 0.1 and a mall at 0.12 are near level, yards at 0.45 are graded gently, parks and woods roll freely. Around a town block's middle the steepest slope is 0.04; in a hilly park it is 0.53. A flat world is height 0 everywhere and generates and plays exactly as before.
 
 **How it is built.** The sim works in height above the ground. Collision, landing, walking, humans, reach and every placed object are unchanged, so the cost in the sim is nothing measurable (0.38–0.41 ms a tick with or without hills). The ground's height is drawn: every vertex of everything is lifted by the height where it stands, read in the vertex shader from a 128 by 128 height map (4 m texels, 512 m across) round the camera, and the camera and the sun go with it. The map takes about 30 ms to rebuild, once the wasp has flown 64 m from its middle. Large buildings lean slightly with the ground they stand on, which is why built-up land is damped. Flat worlds never patch a material.
 
@@ -2042,6 +2042,29 @@ The long-run bee test (a swarm, a winter and a second spring in the same hive) s
 
 Seven digests changed, the rest did not. 414 properties hold.
 
+### 18.67 Ground v2 (GDD 20, G1)
+
+**The height.** The ground is now a derivative-damped fractal value noise in the manner of Landfall (20.1), on our own lattice.
+- **The lattice.** 256 by 256 values from the world seed, filled as they are first read.
+- **The noise.** It has its derivatives, with a quintic fade, so it is smooth to the second derivative.
+- **The shape.** Each octave is divided by one plus the squared sum of the gradients before it, so valleys are soft and crests sharper, which reads like erosion. Each octave is rotated (0.8/0.6) and doubled. The input is domain-warped by half a cell. There are five octaves over 60 m cells, so the finest is 3.75 m.
+- **Size.** The shape spans about -1.5 to 1.4 with a standard deviation of 0.3. At 1.9 m per step of the modifier, a rolling world rolls 2.7 m over 300 m and a hilly one twice that, about what it did before.
+- **Unchanged.** The home ring, the land-use damping and everything the sim does above the ground are as they were.
+- **Options in tuning.** `terrain.ridge` adds crests from a half-frequency ridged noise. `terrain.terrace` cuts steps of `terraceStep` into the first two octaves only, so they stay put while the detail varies, and keeps the treads flat. Both are 0 by default.
+- **The slope.** `groundSlope` gives the rise per metre along x and z, from heights a quarter metre either side. This is cheaper to keep identical in both languages than carrying the derivatives through the warp, and it is what G4's flight will read.
+
+**Checks.**
+- **A flat world is unchanged.** Only the `motion` digest moved, which holds the hilly height field and now also the slope and both options. JS and both C# builds match.
+- **The slope** agrees with finer differences to within 0.01.
+- **Terraces** turn 252 of 400 spots on a walk across a park level, against 84 without.
+- **Cost.** A height costs about 1 µs in JS, with the noise itself 0.18 µs; the rest is the land-use blend.
+- **18.44's checks hold:**
+  - a town square is near level (0.025) where a park rolls (0.265);
+  - a rise hides people from each other (28 of 140 sight lines);
+  - puddles gather in hollows (-0.81 against -0.52 m);
+  - the wind is stronger on a rise.
+- **Totals.** 415 properties hold.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -2050,7 +2073,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (118 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony; the T0 of progression (18.48): XP, unit and hive skills, the year's turn; multi-colony play with the player gauge (18.49); wintering in somewhere warm (18.50); chasing moving prey with a lock, with a colony view you can click (18.51); obstacle avoidance in assisted flight (18.52); reaching what moves under a lock (18.53); the lock ending on arrival (18.54); Shift hurrying an assisted flight (18.55); landing at speed with hovering round a lock (18.56); lines, the wasp in hand and roles passed on by masters (18.57); playing with a controller only, Xbox included (18.58); touch controls for phones and tablets (18.59); the map: minimap sizes, the big map and a phone HUD (18.60); colony switching through the relay (18.61); auto grab (18.62); the year's turn for hornet and honeybee lines (18.63); lockable moths with fireflies on summer evenings (18.64); swarms seen with a young queen's mating flight (18.65); and AI raids on enemy nests (18.66). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (119 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony; the T0 of progression (18.48): XP, unit and hive skills, the year's turn; multi-colony play with the player gauge (18.49); wintering in somewhere warm (18.50); chasing moving prey with a lock, with a colony view you can click (18.51); obstacle avoidance in assisted flight (18.52); reaching what moves under a lock (18.53); the lock ending on arrival (18.54); Shift hurrying an assisted flight (18.55); landing at speed with hovering round a lock (18.56); lines, the wasp in hand and roles passed on by masters (18.57); playing with a controller only, Xbox included (18.58); touch controls for phones and tablets (18.59); the map: minimap sizes, the big map and a phone HUD (18.60); colony switching through the relay (18.61); auto grab (18.62); the year's turn for hornet and honeybee lines (18.63); lockable moths with fireflies on summer evenings (18.64); swarms seen with a young queen's mating flight (18.65); AI raids on enemy nests (18.66); and ground v2 (18.67). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -2159,7 +2182,7 @@ Every piece below is our own code, apart from three.js, which the PoC already dr
 
 ### 20.3 Goal posts, in order
 
-**G1. Ground v2 (sim; JS and C#).**
+**G1. Ground v2 (sim; JS and C#). Built (18.67).**
 - **What.** The height becomes a derivative-damped, rotated, domain-warped value-noise fbm at garden scale, from our integer lattice. It returns height and slope together, from the analytic derivatives. The existing flat home ring and the land-use damping stay. A ridge term and low-octave terraces become modifier options, for embankments and terraced gardens.
 - **Done when:**
   - a flat world is unchanged, bit for bit;

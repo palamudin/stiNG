@@ -152,6 +152,13 @@ namespace Sting.Core.Tests
                 // terrain (T2-6): the height field on hilly worlds; pitched roofs
                 foreach (var (sd, st) in new[] { (1234UL, new Settings { terrain = 1 }), (7UL, new Settings { terrain = 2, towns = 2 }) })
                     for (int j = -20; j <= 20; j++) for (int i = -20; i <= 20; i++) d.F(World.GroundAt(sd, i * (Num)7.3, j * (Num)6.1, st));
+                // ground v2 (GDD 20 G1): the slope, and the ridge and terrace options
+                for (int k = 0; k < 40; k++) { var g = World.GroundSlope(7, k * (Num)11.3 - 200, k * (Num)5.9 - 90, new Settings { terrain = 2 }); d.F(g.x); d.F(g.z); }
+                {
+                    Num kr = T.terrain.ridge, kt = T.terrain.terrace; T.terrain.ridge = 0.5; T.terrain.terrace = 1;
+                    for (int k = 0; k < 40; k++) d.F(World.GroundAt(1234, k * (Num)9.7 - 150, 120 - k * (Num)6.3, new Settings { terrain = 2 }));
+                    T.terrain.ridge = kr; T.terrain.terrace = kt;
+                }
                 foreach (var sh in World.GenerateChunk(1234, 0, 1).sheds) { var r = World.ShedRoof(sh); foreach (var v in new[] { r.wall, r.wallHalf, r.half, r.S, r.y0, r.rise, r.L }) d.F(v); d.F(r.alongX); }
                 Out("motion", d.Hex);
             }

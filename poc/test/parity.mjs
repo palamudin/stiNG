@@ -4,7 +4,7 @@ import { writeFileSync, readFileSync } from 'node:fs';
 import { T, SKILLS } from '../sim/tuning.js';
 import { applyTuning } from '../sim/tunefile.js';
 applyTuning(T, readFileSync(new URL('../../tuning/sting.tune', import.meta.url), 'utf8')); // T1-22: the shipped tuning
-import { generateChunk, dayWeather, windAt, humanWindow, flyPos, beePos, birdPos, dragonPos, makeNest, shedSites, shedRoof, groundAt } from '../sim/world.js';
+import { generateChunk, dayWeather, windAt, humanWindow, flyPos, beePos, birdPos, dragonPos, makeNest, shedSites, shedRoof, groundAt, groundSlope } from '../sim/world.js';
 import { hash, Domain, u64, datan2, dsin, h32 } from '../sim/rng.js';
 import { newColony, colonyStep, destroyNest, colonyFinished, seasonPhase, sugarCap, proteinCap, waterCap } from '../sim/colony.js';
 import { Sim } from '../sim/sim.js';
@@ -94,6 +94,9 @@ for (const seed of seeds) {
   for (const sh of [...generateChunk(1234n, 2, 0).sheds, ...generateChunk(1234n, -3, 1).sheds, ...generateChunk(7n, 1, 1).sheds]) { const ss = shedSites(sh); for (const p of [ss.wall, ss.attic]) for (const k of ['x', 'y', 'z', 'ix', 'iz', 'nx', 'nz']) d.f(p[k]); }
   // terrain (T2-6): the height field on hilly worlds; pitched roofs
   for (const [seed, st] of [[1234n, { terrain: 1 }], [7n, { terrain: 2, towns: 2 }]]) for (let j = -20; j <= 20; j++) for (let i = -20; i <= 20; i++) d.f(groundAt(seed, i * 7.3, j * 6.1, st));
+  // ground v2 (GDD 20 G1): the slope, and the ridge and terrace options
+  for (let k = 0; k < 40; k++) { const g = groundSlope(7n, k * 11.3 - 200, k * 5.9 - 90, { terrain: 2 }); d.f(g.x); d.f(g.z); }
+  { const keep = { ...T.terrain }; Object.assign(T.terrain, { ridge: 0.5, terrace: 1 }); for (let k = 0; k < 40; k++) d.f(groundAt(1234n, k * 9.7 - 150, 120 - k * 6.3, { terrain: 2 })); Object.assign(T.terrain, keep); }
   for (const sh of generateChunk(1234n, 0, 1).sheds) { const r = shedRoof(sh); for (const k of ['wall', 'wallHalf', 'half', 'S', 'y0', 'rise', 'L']) d.f(r[k]); d.f(r.alongX); }
   out('motion', d.hex());
 }

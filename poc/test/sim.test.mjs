@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, humanParts, malesAbout, chunkOf, toLocal, dirToWorld, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, pickTarget, assistPilot, swoopPilot, hoverPilot, HOVER, ROLES, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS,
+  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, groundSlope, pickTarget, assistPilot, swoopPilot, hoverPilot, HOVER, ROLES, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS,
 } from '../sim/index.js';
 import { applyTuning, parseTuning, tuningHash, tuningLeaves, TUNE } from '../sim/tunefile.js';
 
@@ -1793,6 +1793,13 @@ function seated(sim, pred) {
   const L = regionLayout(1234n, 1, 0).towns[0], tc = [(8 - 4 + L.tx + 0.5) * 64, (L.tz - 4 + 0.5) * 64]; // the middle of the 2x2 block
   let pk = null; for (let x = 4; x < 12 && !pk; x++) for (let z = -4; z < 4 && !pk; z++) if (landUse(1234n, x, z) === 'park' && landUse(1234n, x + 1, z) === 'park') pk = [x, z];
   ok(slope(tc[0], tc[1]) < slope(pk[0] * 64 + 32, pk[1] * 64) / 3, `a town square is near level (slope ${slope(tc[0], tc[1]).toFixed(3)}) where a park rolls (${slope(pk[0] * 64 + 32, pk[1] * 64).toFixed(3)})`);
+  // ground v2 (GDD 20 G1): the slope comes with the height; terraces cut flat treads; a height is cheap
+  { let worst = 0; for (let k = 0; k < 50; k++) { const x = k * 7.9 - 180, z = 140 - k * 5.3, g = groundSlope(1234n, x, z, { terrain: 2 }), e = 0.05;
+      worst = Math.max(worst, Math.abs(g.x - (g2(x + e, z) - g2(x - e, z)) / (2 * e)), Math.abs(g.z - (g2(x, z + e) - g2(x, z - e)) / (2 * e))); }
+    const treads = () => { let n = 0; for (let k = 0; k < 400; k++) { const g = groundSlope(1234n, pk[0] * 64 - 64 + k * 0.4, pk[1] * 64 + 20, { terrain: 2 }); if (Math.hypot(g.x, g.z) < 0.03) n++; } return n; };
+    const plain = treads(), keep = T.terrain.terrace; T.terrain.terrace = 1; const stepped = treads(); T.terrain.terrace = keep;
+    let t0 = performance.now(), acc = 0; for (let k = 0; k < 200000; k++) acc += g2(k * 0.37 - 900, k * 0.11 - 300); const us = (performance.now() - t0) / 200000 * 1000;
+    ok(worst < 0.02 && stepped > plain * 1.5 && us < 3 && acc === acc, `the slope comes with the height (within ${worst.toFixed(4)} of finer differences); terraces leave ${stepped} of 400 spots on a walk level against ${plain}; a height costs ${us.toFixed(2)} µs`); }
   // a rise between two people blocks the sight line that a flat world leaves open
   const sh = new Sim({ seed: 1234, birds: false, terrain: 2 }, { noAI: true }), sf = new Sim({ seed: 1234, birds: false }, { noAI: true });
   let blocked = 0, pairs = 0;

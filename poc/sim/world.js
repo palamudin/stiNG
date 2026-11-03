@@ -184,30 +184,56 @@ export function features(s) {
   return { woods: s?.woods ?? 1, towns: s?.towns ?? 1, water: s?.water ?? 1, hives: s?.hives ?? 1 };
 }
 
-// Terrain (GDD 4.8, T2-6): rolling ground as a height field of smooth value noise, two octaves; flat when the terrain
-// modifier is 0 and round the home tree. The sim works in height above the ground, so nothing collides with it: the
+// Terrain (GDD 4.8, T2-6, ground v2 in GDD 20 G1): the ground's height is a derivative-damped fractal value noise,
+// rotated off its lattice and domain-warped (each octave is divided by one plus the squared gradient of the octaves
+// before it, which reads like erosion: soft valleys, sharper crests). Flat when the terrain modifier is 0 and round the
+// home tree, damped under built-up land. The sim works in height above the ground, so nothing collides with it: the
 // ground's height is drawn, blocks sight lines, gathers puddles in hollows and catches the wind on rises.
-const groundCache = { seed: null, maps: [new Map(), new Map()] };
-const cellKey = (ix, iz) => (ix + 1048576) * 2097152 + (iz + 1048576); // exact in a double for |i| < 2^20
-function lattice(seed, ix, iz, oct) {
-  if (groundCache.seed !== seed) { groundCache.seed = seed; for (const m of groundCache.maps) m.clear(); }
-  const m = groundCache.maps[oct], k = cellKey(ix, iz);
-  let v = m.get(k);
-  if (v === undefined) {
-    if (m.size > 50000) m.clear();
-    v = unit(hash(seed, Domain.WorldGen, u64(ix), u64(iz), BigInt(0x7E44 + oct))) * 2 - 1;
-    m.set(k, v);
-  }
+// The lattice is 256 x 256 values from the world seed, filled as they are first read.
+const LAT = { seed: null, v: new Float64Array(65536) };
+function lattice(seed, ix, iz) {
+  if (LAT.seed !== seed) { LAT.seed = seed; LAT.v.fill(NaN); }
+  const i = ix & 255, j = iz & 255, k = (j << 8) | i;
+  let v = LAT.v[k];
+  if (v !== v) { v = unit(hash(seed, Domain.WorldGen, u64(i), u64(j), 0x7E50n)) * 2 - 1; LAT.v[k] = v; }
   return v;
 }
+// value noise with its derivatives (quintic fade): N = [value, d/dx, d/dy]
+const N = [0, 0, 0];
+function noised(seed, x, y) {
+  const px = Math.floor(x), py = Math.floor(y), fx = x - px, fy = y - py;
+  const ux = fx * fx * fx * (fx * (fx * 6 - 15) + 10), uy = fy * fy * fy * (fy * (fy * 6 - 15) + 10);
+  const dux = 30 * fx * fx * (fx * (fx - 2) + 1), duy = 30 * fy * fy * (fy * (fy - 2) + 1);
+  const a = lattice(seed, px, py), b = lattice(seed, px + 1, py), c = lattice(seed, px, py + 1), d = lattice(seed, px + 1, py + 1);
+  const k1 = b - a, k2 = c - a, k4 = a - b - c + d;
+  N[0] = a + k1 * ux + k2 * uy + k4 * ux * uy; N[1] = dux * (k1 + k4 * uy); N[2] = duy * (k2 + k4 * ux);
+}
 const smooth = (t) => t * t * (3 - 2 * t);
-function valueNoise(seed, x, z, cell, oct) {
-  const fx = x / cell, fz = z / cell, ix = Math.floor(fx), iz = Math.floor(fz), tx = smooth(fx - ix), tz = smooth(fz - iz);
-  const a = lattice(seed, ix, iz, oct), b = lattice(seed, ix + 1, iz, oct), c = lattice(seed, ix, iz + 1, oct), d = lattice(seed, ix + 1, iz + 1, oct);
-  return a + (b - a) * tx + (c - a) * tz + (a - b - c + d) * tx * tz;
+// The shape, before the modifier, the home ring and land use: about -1.5..1.4, sd 0.3
+function groundShape(seed, x, z) {
+  const G = T.terrain, bx = (0.6 * x - 0.8 * z) / G.cell, by = (0.8 * x + 0.6 * z) / G.cell;
+  noised(seed, bx * 0.43 + 3.1, by * 0.43 + 7.7); const wx = N[0];
+  noised(seed, bx * 0.43 - 5.3, by * 0.43 + 1.9); const wy = N[0];
+  let px = bx + G.warp * wx, py = by + G.warp * wy, a = 0, b = 1, dx = 0, dy = 0, lo = 0;
+  const L = Math.min(G.octaves, 2);
+  for (let i = 0; i < G.octaves; i++) {
+    noised(seed, px, py);
+    dx += N[1]; dy += N[2];
+    a += b * N[0] / (1 + dx * dx + dy * dy);
+    if (i === L - 1) lo = a;
+    b *= 0.5;
+    const qx = 0.8 * px - 0.6 * py, qy = 0.6 * px + 0.8 * py; px = qx * 2; py = qy * 2;
+  }
+  if (G.ridge) { noised(seed, bx * 0.5 + 11.7, by * 0.5 - 4.2); const r = 1 - Math.abs(N[0]); a += G.ridge * (r * r - 0.4); }
+  if (G.terrace) { // steps cut in the broad shape only, so they stay put; the treads kept flat
+    const q = lo / G.terraceStep, fl = Math.floor(q), f = q - fl, s5 = f * f * f * (f * (f * 6 - 15) + 10);
+    a += (fl + Math.min(1, Math.max(0, (s5 - 0.5) * 1.5 + 0.5))) * G.terraceStep * G.terrace - lo * G.terrace - (a - lo) * 0.6 * G.terrace;
+  }
+  return a;
 }
 // How much a chunk's land use lets the ground roll: a town square or a mall lot is near level, yards are graded
 // gently, parks and woods roll freely. Blended smoothly between chunk centres.
+const cellKey = (ix, iz) => (ix + 1048576) * 2097152 + (iz + 1048576); // exact in a double for |i| < 2^20
 const flatCache = { tag: null, map: new Map() };
 function chunkRoll(seed, cx, cz, settings) {
   const F = features(settings), tag = seed + ':' + F.woods + ',' + F.towns;
@@ -225,7 +251,13 @@ export function groundAt(seed, x, z, settings) {
   const u = x / CS, v = z / CS, i = Math.floor(u), j = Math.floor(v), tu = smooth(u - i), tv = smooth(v - j);
   const a = chunkRoll(seed, i, j, settings), b = chunkRoll(seed, i + 1, j, settings), c = chunkRoll(seed, i, j + 1, settings), d = chunkRoll(seed, i + 1, j + 1, settings);
   const roll = a + (b - a) * tu + (c - a) * tv + (a - b - c + d) * tu * tv;
-  return terrain * G.amp * f * roll * (valueNoise(seed, x, z, G.cell, 0) + G.detail * valueNoise(seed, x, z, G.cell2, 1));
+  return terrain * G.amp * f * roll * groundShape(seed, x, z);
+}
+// The ground's slope (rise per metre along x and z), from the heights a quarter metre either side
+export function groundSlope(seed, x, z, settings) {
+  if (!(settings && settings.terrain)) return { x: 0, z: 0 };
+  const e = 0.25;
+  return { x: (groundAt(seed, x + e, z, settings) - groundAt(seed, x - e, z, settings)) / (2 * e), z: (groundAt(seed, x, z + e, settings) - groundAt(seed, x, z - e, settings)) / (2 * e) };
 }
 const regionCache = new Map();
 export function regionLayout(seed, rx, rz, settings) {

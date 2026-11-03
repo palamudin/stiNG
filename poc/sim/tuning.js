@@ -373,11 +373,13 @@ export const T = {
   // only gross violations fail, so honest peers reach the same verdict.
   // T1-20: a pickup or a sip must be within pickupReach of the thing taken, and no wasp position may lie more than
   // solidDepth inside a house, shed, table, trunk or grill, or under the ground; a sip is at most sipMax
-  // Terrain (GDD 4.8, T2-6): ground height amp m per step of the modifier, from noise over cell m and detail times as
-  // much over cell2 m; flat within flatR m of the home tree, rising to full over rise m. Hills block sight lines
+  // Terrain (GDD 4.8, T2-6, ground v2 in GDD 20 G1): ground height amp m per step of the modifier, times a
+  // derivative-damped value noise over cell m in octaves (sd about 0.3), its input warped by warp cells. ridge adds
+  // crests; terrace cuts steps of terraceStep (in the noise's units) into the broad shape. Flat within flatR m of the
+  // home tree, rising to full over rise m. Hills block sight lines
   // (checked every sightStep m); puddles settle at the lowest of poolTries spots; the wind is stronger by exposure
   // per metre of rise. roll: how much each land use lets the ground roll (blended between chunk centres).
-  terrain: { amp: 2.5, cell: 36, cell2: 11, detail: 0.3, flatR: 14, rise: 24, sightStep: 4, poolTries: 3, exposure: 0.05,
+  terrain: { amp: 1.9, cell: 60, octaves: 5, warp: 0.5, ridge: 0, terrace: 0, terraceStep: 0.5, flatR: 14, rise: 24, sightStep: 4, poolTries: 3, exposure: 0.05,
     roll: { park: 1, forest: 1, yards: 0.45, mall: 0.12, town: 0.1 } },
   plaus: { futureTicks: 120, stingReach: 1.6, humanDrift: 3, maxSwatDelay: 240, maxSwats: 4, rateWindow: 120, rateMax: 6,
     maxSpeed: 12, strikes: 3, pickupReach: 0.3, solidDepth: 0.08, sipMax: 0.12, maxPain: 2 }, // maxPain: no species stings harder (GDD 6.8)

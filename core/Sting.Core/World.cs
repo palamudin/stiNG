@@ -312,29 +312,58 @@ namespace Sting.Core
             if (TownQuarter(seed, cx, cz, st) != null) return "town";
             return BaseUse(Region(seed, R.rx, R.rz, st), R.lx, R.lz);
         }
-        // ---------------------------------------------------------------- terrain (T2-6, see world.js groundAt)
-        static readonly Dictionary<long, Num>[] lattices = { new Dictionary<long, Num>(), new Dictionary<long, Num>() };
-        static ulong latticeSeed; static bool latticeSet;
+        // ---------------------------------------------------------------- terrain (T2-6, ground v2 GDD 20 G1; see world.js groundAt)
+        static readonly Num[] lat = new Num[65536]; static readonly bool[] latSet = new bool[65536];
+        static ulong latticeSeed; static bool latticeOn;
         static long CellKey(long ix, long iz) => (ix + 1048576) * 2097152 + (iz + 1048576);
-        static Num Lattice(ulong seed, long ix, long iz, int oct)
+        /// the 256 x 256 lattice from the world seed, filled as it is first read
+        static Num Lattice(ulong seed, long ix, long iz)
         {
-            lock (lattices)
+            int i = (int)(ix & 255), j = (int)(iz & 255), k = (j << 8) | i;
+            lock (lat)
             {
-                if (!latticeSet || latticeSeed != seed) { latticeSet = true; latticeSeed = seed; foreach (var m in lattices) m.Clear(); }
-                var map = lattices[oct]; long k = CellKey(ix, iz);
-                if (map.TryGetValue(k, out var v)) return v;
-                if (map.Count > 50000) map.Clear();
-                v = Unit(Hash(seed, Domain.WorldGen, U64(ix), U64(iz), U64(0x7E44 + oct))) * 2 - 1;
-                map[k] = v;
+                if (!latticeOn || latticeSeed != seed) { latticeOn = true; latticeSeed = seed; System.Array.Clear(latSet, 0, latSet.Length); }
+                if (latSet[k]) return lat[k];
+                Num v = Unit(Hash(seed, Domain.WorldGen, U64(i), U64(j), U64(0x7E50))) * 2 - 1;
+                lat[k] = v; latSet[k] = true;
                 return v;
             }
         }
-        static Num Smooth(Num t) => t * t * (3 - 2 * t);
-        static Num ValueNoise(ulong seed, Num x, Num z, Num cell, int oct)
+        /// value noise with its derivatives (quintic fade)
+        static (Num v, Num dx, Num dy) Noised(ulong seed, Num x, Num y)
         {
-            Num fx = x / cell, fz = z / cell; long ix = (long)Floor(fx), iz = (long)Floor(fz); Num tx = Smooth(fx - ix), tz = Smooth(fz - iz);
-            Num a = Lattice(seed, ix, iz, oct), b = Lattice(seed, ix + 1, iz, oct), c = Lattice(seed, ix, iz + 1, oct), d = Lattice(seed, ix + 1, iz + 1, oct);
-            return a + (b - a) * tx + (c - a) * tz + (a - b - c + d) * tx * tz;
+            Num fpx = Floor(x), fpy = Floor(y); long px = (long)fpx, py = (long)fpy; Num fx = x - fpx, fy = y - fpy;
+            Num ux = fx * fx * fx * (fx * (fx * 6 - 15) + 10), uy = fy * fy * fy * (fy * (fy * 6 - 15) + 10);
+            Num dux = 30 * fx * fx * (fx * (fx - 2) + 1), duy = 30 * fy * fy * (fy * (fy - 2) + 1);
+            Num a = Lattice(seed, px, py), b = Lattice(seed, px + 1, py), c = Lattice(seed, px, py + 1), d = Lattice(seed, px + 1, py + 1);
+            Num k1 = b - a, k2 = c - a, k4 = a - b - c + d;
+            return (a + k1 * ux + k2 * uy + k4 * ux * uy, dux * (k1 + k4 * uy), duy * (k2 + k4 * ux));
+        }
+        static Num Smooth(Num t) => t * t * (3 - 2 * t);
+        /// the shape, before the modifier, the home ring and land use: derivative-damped, rotated, domain-warped fbm
+        static Num GroundShape(ulong seed, Num x, Num z)
+        {
+            Num bx = (0.6 * x - 0.8 * z) / T.terrain.cell, by = (0.8 * x + 0.6 * z) / T.terrain.cell;
+            Num wx = Noised(seed, bx * 0.43 + 3.1, by * 0.43 + 7.7).v;
+            Num wy = Noised(seed, bx * 0.43 - 5.3, by * 0.43 + 1.9).v;
+            Num px = bx + T.terrain.warp * wx, py = by + T.terrain.warp * wy, a = 0, b = 1, dx = 0, dy = 0, lo = 0;
+            int L = System.Math.Min(T.terrain.octaves, 2);
+            for (int i = 0; i < T.terrain.octaves; i++)
+            {
+                var n = Noised(seed, px, py);
+                dx += n.dx; dy += n.dy;
+                a += b * n.v / (1 + dx * dx + dy * dy);
+                if (i == L - 1) lo = a;
+                b *= 0.5;
+                Num qx = 0.8 * px - 0.6 * py, qy = 0.6 * px + 0.8 * py; px = qx * 2; py = qy * 2;
+            }
+            if (T.terrain.ridge != 0) { Num r = 1 - Abs(Noised(seed, bx * 0.5 + 11.7, by * 0.5 - 4.2).v); a += T.terrain.ridge * (r * r - 0.4); }
+            if (T.terrain.terrace != 0) // steps cut in the broad shape only, so they stay put; the treads kept flat
+            {
+                Num q = lo / T.terrain.terraceStep, fl = Floor(q), f = q - fl, s5 = f * f * f * (f * (f * 6 - 15) + 10);
+                a += (fl + Min(1, Max(0, (s5 - 0.5) * 1.5 + 0.5))) * T.terrain.terraceStep * T.terrain.terrace - lo * T.terrain.terrace - (a - lo) * 0.6 * T.terrain.terrace;
+            }
+            return a;
         }
         static readonly Dictionary<long, Num> rolls = new Dictionary<long, Num>(); static string rollTag;
         /// how much a chunk's land use lets the ground roll
@@ -353,7 +382,7 @@ namespace Sting.Core
                 return v;
             }
         }
-        /// The ground's height: smooth value noise in two octaves, flat when the terrain modifier is 0 and round the home
+        /// The ground's height: the shape above times the modifier, flat when the terrain modifier is 0 and round the home
         /// tree, damped under built-up land. The sim works in height above it.
         public static Num GroundAt(ulong seed, Num x, Num z, Settings st)
         {
@@ -364,7 +393,14 @@ namespace Sting.Core
             Num u = x / CS, v = z / CS; int i = (int)Floor(u), j = (int)Floor(v); Num tu = Smooth(u - i), tv = Smooth(v - j);
             Num a = ChunkRoll(seed, i, j, st), b = ChunkRoll(seed, i + 1, j, st), c = ChunkRoll(seed, i, j + 1, st), d = ChunkRoll(seed, i + 1, j + 1, st);
             Num roll = a + (b - a) * tu + (c - a) * tv + (a - b - c + d) * tu * tv;
-            return terrain * T.terrain.amp * f * roll * (ValueNoise(seed, x, z, T.terrain.cell, 0) + T.terrain.detail * ValueNoise(seed, x, z, T.terrain.cell2, 1));
+            return terrain * T.terrain.amp * f * roll * GroundShape(seed, x, z);
+        }
+        /// the ground's slope (rise per metre along x and z), from the heights a quarter metre either side
+        public static (Num x, Num z) GroundSlope(ulong seed, Num x, Num z, Settings st)
+        {
+            if ((st?.terrain ?? 0) == 0) return (0, 0);
+            Num e = 0.25;
+            return ((GroundAt(seed, x + e, z, st) - GroundAt(seed, x - e, z, st)) / (2 * e), (GroundAt(seed, x, z + e, st) - GroundAt(seed, x, z - e, st)) / (2 * e));
         }
         public static int MallSide(ulong seed, int cx, int cz, Settings st = null) { var R = RegionOf(cx, cz); return Region(seed, R.rx, R.rz, st).mallSide; }
 

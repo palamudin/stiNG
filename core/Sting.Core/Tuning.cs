@@ -212,8 +212,8 @@ namespace Sting.Core
         /// Terrain (GDD 4.8, T2-6): see tuning.js
         public static class terrain
         {
-            public static Num amp = 2.5, cell = 36, cell2 = 11, detail = 0.3, flatR = 14, rise = 24, sightStep = 4, exposure = 0.05;
-            public static int poolTries = 3;
+            public static Num amp = 1.9, cell = 60, warp = 0.5, ridge = 0, terrace = 0, terraceStep = 0.5, flatR = 14, rise = 24, sightStep = 4, exposure = 0.05;
+            public static int octaves = 5, poolTries = 3;
             public static class roll { public static Num park = 1, forest = 1, yards = 0.45, mall = 0.12, town = 0.1; }
         }
         public static class fruit { public static Num treeShare = 0.3, startFrac = 0.55, rate = 0.8, spread = 1.6; public static int perTree = 6, rotDays = 6; }

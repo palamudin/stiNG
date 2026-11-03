@@ -925,10 +925,13 @@ farEvery = 60
 midTtl = 75
 
 [terrain]
-amp = 2.5
-cell = 36
-cell2 = 11
-detail = 0.3
+amp = 1.9
+cell = 60
+octaves = 5
+warp = 0.5
+ridge = 0
+terrace = 0
+terraceStep = 0.5
 flatR = 14
 rise = 24
 sightStep = 4

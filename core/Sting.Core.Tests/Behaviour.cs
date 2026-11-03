@@ -1083,6 +1083,18 @@ namespace Sting.Core.Tests
                 int pkx = 0, pkz = 0; bool fpk = false;
                 for (int x = 4; x < 12 && !fpk; x++) for (int z = -4; z < 4 && !fpk; z++) if (World.LandUse(1234, x, z) == "park" && World.LandUse(1234, x + 1, z) == "park") { pkx = x; pkz = z; fpk = true; }
                 Ok(Slope(tcx, tcz) < Slope(pkx * 64 + 32, pkz * 64) / 3, $"a town square is near level (slope {D(Slope(tcx, tcz)):0.000}) where a park rolls ({D(Slope(pkx * 64 + 32, pkz * 64)):0.000})");
+                // ground v2 (GDD 20 G1): the slope comes with the height; terraces cut flat treads
+                {
+                    double worst = 0;
+                    for (int k = 0; k < 50; k++)
+                    {
+                        Num x = k * (Num)7.9 - 180, z = 140 - k * (Num)5.3, e = 0.05; var g = World.GroundSlope(1234, x, z, S2);
+                        worst = Math.Max(worst, Math.Max(D(Abs(g.x - (G2(x + e, z) - G2(x - e, z)) / (2 * e))), D(Abs(g.z - (G2(x, z + e) - G2(x, z - e)) / (2 * e)))));
+                    }
+                    int Treads() { int n = 0; for (int k = 0; k < 400; k++) { var g = World.GroundSlope(1234, pkx * 64 - 64 + k * (Num)0.4, pkz * 64 + 20, S2); if (Sqrt(g.x * g.x + g.z * g.z) < 0.03) n++; } return n; }
+                    int plain = Treads(); Num keep = T.terrain.terrace; T.terrain.terrace = 1; int stepped = Treads(); T.terrain.terrace = keep;
+                    Ok(worst < 0.02 && stepped > plain * 1.5, $"the slope comes with the height (within {worst:0.0000} of finer differences); terraces leave {stepped} of 400 spots on a walk level against {plain}");
+                }
                 var sh = new Sim(new Settings { seed = 1234, birds = false, terrain = 2 }, new SimOpts { noAI = true }); var sf = new Sim(new Settings { seed = 1234, birds = false }, new SimOpts { noAI = true });
                 int blocked = 0, pairs = 0;
                 for (int j = 0; j < 12; j++) for (int i = 0; i < 12; i++)

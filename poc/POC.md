@@ -144,6 +144,7 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 116 | Fireflies on summer evenings: dozens drifting over the lawns at dusk, each flashing on its own beat; catch one and the wasp spits it out, as real hunters do (they taste foul) | 5.3, 7.9 | 25 |
 | 117 | Swarms seen: a honeybee swarm pours out, hangs as a beard on a nearby branch for hours, then flies to its new tree and only then is a colony; the daughter queen flies to a drone congregation area to mate, and the hive lays nothing till she is back | 6.7, T2-11 | 25 |
 | 118 | AI raids: AI protein foragers now and then raid a rival's or another player's nest within 120 m for a larva by day (hornets 15% of trips, wasps 4%, bees never), with the guards after them; rivals raid the player's wasp nest the same way | 9.3 | 25 |
+| 119 | Ground v2: hills from a derivative-damped, rotated, domain-warped value noise on the seed's own lattice (soft valleys, sharper crests), with the slope, and ridge and terrace options in tuning | 4.8, 20 | 25 |
 
 ## Verified
 
