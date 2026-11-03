@@ -4,6 +4,16 @@
 // water, trails, paving or under a dense canopy), and builds the clump: blades that taper, curve, lean and bend with
 // the wind (a gust field that travels across the ground). No CPU work per blade.
 //
+// Wind: uWind is the wind at 10 m in m/s (World.env.wind10; without it, the drawing wind scaled to a breeze). At a
+// blade's top it is the log-law wind over the grass, with a roughness length of a tenth of the grass's height (the
+// usual rule; 2.6 cm for the wild meadow, 7.8 mm for the game's lawns): about 0.4 of the 10 m wind at 30 cm in the
+// meadow, 0.3 at the top of a lawn. Never less than 0.25 m/s there: the breath of air that always moves a lawn a little.
+// - Drag bends a blade with roughly the square of that wind: 1.5 m/s at the tips lays it about a third over (our
+//   calibration).
+// - Gusts cross the grass as patches 3 m apart that travel downwind at 1.8 times the wind at the tops (canopy waves,
+//   "honami"; Finnigan 2000), with small eddies carried along in them.
+// - Each blade moves in one of eight ways (stiffness, flutter rate and phase), so neighbours rarely move alike.
+//
 // Five rings on nested grids (GRASS below): thousands of blades a square metre round the camera (a lawn is green
 // because it is solid grass), fewer further out. A blade stays where it grew and as tall as it grew whatever the camera
 // does: further out, the blades the coarser rings do not have dissolve away, each clump over its own short stretch, and
@@ -32,7 +42,7 @@ export const GRASS = {
   band: 0.5,         // the clumps a ring hands on to no one dissolve over the outer (1 - band) of its reach
   jitterLv: 4,       // a clump of level L strays up to half of s0 * 2^min(L, jitterLv) from its grid point
   altK: 1.5,         // the camera's height counts this much toward a clump's distance (a pixel covers more ground from above)
-  bladeW: { root: 0.0065, from: 1.5, power: 0.7 }, // a blade's width: root * max(1, distance / from) ^ power, so far blades still cover
+  bladeW: { root: 0.0065, from: 1.5, power: 0.9 }, // a blade's width: root * max(1, distance / from) ^ power, so far blades cover as near ones do
   flowers: { spacing: 0.55, radius: 18 },
 };
 // The ground's wear, read the same way by the grass and the ground under it
@@ -70,8 +80,8 @@ function clumpGeometry(blades, segs, seed = 45) {
 
 const GRASS_VERT_HEAD = /* glsl */ `
 attribute float aT, aSide, aBi; attribute vec4 aB; attribute vec2 aCell;
-uniform int uK; uniform float uS0, uRin, uRout, uNextBlades, uTime, uSea, uDensity, uFlower, uAlt, uShore, uSnowLine, uWoodH; uniform vec2 uGrassH; uniform vec2 uWind; uniform vec3 uCamG;
-varying float vT, vCol, vRootK, vFade, vDith; varying vec3 vGW; varying vec3 vTint; varying float vKill;
+uniform int uK; uniform float uS0, uRin, uRout, uNextBlades, uTime, uSea, uDensity, uFlower, uAlt, uShore, uSnowLine, uWoodH, uZ0; uniform vec2 uGrassH; uniform vec2 uWind; uniform vec3 uCamG;
+varying float vT, vCol, vRootK, vFade, vDith; varying vec3 vGW; varying vec3 vTint, vPetal; varying float vKill;
 vec3 gPos; vec3 gNor;
 `;
 // everything is computed in the normal stage (it comes first in three's vertex shader) and reused for the position
@@ -92,7 +102,7 @@ const GRASS_BUILD = /* glsl */ `
   // this ring draws from the last ring's reach to its own. A clump (and blade) the next ring also has carries on past
   // here unchanged, drawn by it; the rest dissolve over the outer band, each clump over a short stretch of its own
   bool persist = lvl > uK && aBi < uNextBlades;
-  vKill = 1.0; vFade = 0.0; vDith = 0.0; vT = 0.0; vCol = 0.0; vRootK = 0.0; vTint = vec3(0.0);
+  vKill = 1.0; vFade = 0.0; vDith = 0.0; vT = 0.0; vCol = 0.0; vRootK = 0.0; vTint = vec3(0.0); vPetal = vec3(-1.0);
   gPos = vec3(0.0); gNor = vec3(0.0, 1.0, 0.0); vGW = gPos;
   if (de >= uRin && de < uRout) {
   vec4 gd = clipAt(base); vec3 gn = clipNormal(base);
@@ -122,22 +132,26 @@ const GRASS_BUILD = /* glsl */ `
   vec2 off = aB.yz * uS0 * (uFlower > 0.5 ? 0.4 : 0.9); // a tuft the same size in every ring
   float t = aT;
   float lean = (0.25 + 0.35 * aB.w) * H;
-  // wind, at three scales, so no two blades move alike:
-  //   gusts: broad waves rolling downwind across the lawn (metres), the whole patch leaning together;
-  //   eddies: small turbulence carried along by the wind (tens of centimetres), patch against patch;
+  // wind (the head of the file): the 10 m wind brought down to the blade's top by the log law; drag lays a blade over
+  // with about the square of it. Three scales, so no two blades move alike:
+  //   gusts: patches 3 m apart running downwind at 1.8 times the wind at the tops (canopy waves, honami);
+  //   eddies: small turbulence carried along with them (tens of centimetres), patch against patch;
   //   the blade: one of eight ways of moving (stiffness, and flutter across the wind and along it at a rate set by its
   //   length, a short blade quivering fast, a long one swaying), picked by the blade and its clump. Eight is plenty:
   //   neighbours rarely share one, and the gusts and eddies differ from place to place anyway.
-  float ws = length(uWind); vec2 wd = ws > 0.001 ? uWind / ws : vec2(1.0, 0.0), wp = vec2(-wd.y, wd.x);
-  float gust = 0.5 + 0.5 * sin(dot(base, wd) * 0.35 - uTime * 1.6 + w2noise(base / 8.0, 205) * 3.0);
-  float eddy = w2noise((base - wd * uTime * (0.6 + 1.4 * ws)) / 0.7, 206); // -1..1, carried downwind
+  float U10 = length(uWind); vec2 wd = U10 > 0.01 ? uWind / U10 : vec2(0.83, 0.55), wp = vec2(-wd.y, wd.x);
+  float Uh = max(U10 * log(max(H, 1.5 * uZ0) / uZ0) / log(10.0 / uZ0), 0.25);
+  float gust = 0.6 + 0.4 * sin(2.094 * dot(base, wd) - 2.094 * 1.8 * Uh * uTime + 3.0 * w2noise(base / 6.0, 205));
+  float eddy = w2noise((base - wd * uTime * 1.8 * Uh) / 0.7, 206); // -1..1, carried downwind with the gusts
   float mv = floor(fract(aB.w * 7.31 + rnd * 3.7) * 8.0); // which of the eight
   float bph = mv * 2.39996, bk = (mv + 0.5) / 8.0; // phases a golden angle apart
   float stiff = 0.65 + 0.7 * bk; // how far this blade gives
   float rate = (3.2 + 3.5 * bk) * mix(1.4, 0.8, smoothstep(0.03, 0.2, H)); // flutters per second
-  float push = (0.3 * gust + 0.2 * (0.5 + 0.5 * eddy) + 0.06) * stiff;
-  vec2 flutter = wp * (0.13 * sin(uTime * rate + bph) * (0.5 + 0.5 * abs(eddy))) + wd * (0.07 * sin(uTime * rate * 0.63 + bph * 1.7));
-  vec2 bend = fdir * lean * t * t + (wd * push + flutter) * ws * H * t * t;
+  float ug = Uh * gust * (0.85 + 0.3 * eddy) * stiff / 1.5;
+  float lay = min(0.85, ug * ug * 0.35); // 1.5 m/s at the tips lays a blade about a third over
+  float flu = min(Uh, 1.5) / 1.5 * (0.5 + 0.5 * abs(eddy)); // flutter grows with the wind
+  vec2 flutter = (wp * 0.13 * sin(uTime * rate + bph) + wd * 0.07 * sin(uTime * rate * 0.63 + bph * 1.7)) * flu;
+  vec2 bend = fdir * lean * t * t + (wd * lay + flutter) * H * t * t;
   float drop = (dot(bend, bend) / max(H, 1e-3)) * 0.45; // a bent blade is shorter
   vec2 xz = base + off + side * aSide * W * (1.0 - t * 0.85) + bend;
   gPos = vec3(xz.x, gd.x + t * H - drop * t, xz.y);
@@ -153,9 +167,10 @@ const GRASS_BUILD = /* glsl */ `
   // by the blades in front, so the darkening fades with distance and height
   vRootK = 1.0 - smoothstep(3.0, 16.0, max(dist, uAlt * 2.0));
   vTint = mix(root, tip, mix(1.0, smoothstep(0.0, 0.8, t), vRootK)) * (0.8 + 0.4 * rnd);
-  if (uFlower > 0.5 && t > 0.85) {
+  vPetal = vec3(-1.0); // a flower's colour is only its head (the fragment shader takes it above 90% of the stem)
+  if (uFlower > 0.5) {
     float k = floor(w2hash01(int(floor(base.x / 9.0)), int(floor(base.y / 9.0)), 212) * 5.0);
-    vTint = k < 1.0 ? vec3(0.9, 0.7, 0.05) : k < 2.0 ? vec3(0.85, 0.85, 0.8) : k < 3.0 ? vec3(0.45, 0.15, 0.6) : k < 4.0 ? vec3(0.8, 0.12, 0.08) : vec3(0.18, 0.3, 0.8);
+    vPetal = k < 1.0 ? vec3(0.9, 0.7, 0.05) : k < 2.0 ? vec3(0.85, 0.85, 0.8) : k < 3.0 ? vec3(0.45, 0.15, 0.6) : k < 4.0 ? vec3(0.8, 0.12, 0.08) : vec3(0.18, 0.3, 0.8);
   }
   }
 `;
@@ -172,13 +187,21 @@ export class Grass {
       const geo = clumpGeometry(blades, segs);
       // the grid cells whose clumps can land between rin and rout (a clump strays from its grid point by its jitter)
       const sp = S0 * 2 ** k, slack = 0.5 * S0 * 2 ** GRASS.jitterLv + sp, n = Math.ceil((rout + slack) / sp), cells = [];
-      for (let j = -n; j <= n; j++) for (let i = -n; i <= n; i++) { const r = Math.hypot(i, j) * sp; if (r <= rout + slack && r >= rin - slack) cells.push(i, j); }
+      // the whole disc, outermost cells first: on the ground the cells inside the last ring's reach are not drawn (a
+      // shorter instance count), but from above a clump right under the camera can be as far as rin, so update() lets
+      // the inner cells in as the camera climbs
+      const list = [];
+      for (let j = -n; j <= n; j++) for (let i = -n; i <= n; i++) { const r = Math.hypot(i, j) * sp; if (r <= rout + slack) list.push([r, i, j]); }
+      list.sort((a, b) => b[0] - a[0]);
+      for (const [, i, j] of list) cells.push(i, j);
+      const radii = list.map((c) => c[0]);
       geo.setAttribute('aCell', new THREE.InstancedBufferAttribute(new Float32Array(cells), 2));
       geo.instanceCount = cells.length / 2;
       const U = {
         ...world.clip.uniforms, uTime: world.uniforms.uTime, uSea: { value: world.source.sea }, uShore: world.uniforms.uShore, uSnowLine: world.uniforms.uSnowLine, uSunDir: world.uniforms.uSunDir, uSunColor: world.sky.uniforms.uSunColor,
         uK: { value: k }, uS0: { value: S0 }, uRin: { value: rin }, uRout: { value: rout }, uNextBlades: { value: nextBlades }, uDensity: { value: this.density }, uFlower: { value: flower ? 1 : 0 },
         uWoodH: { value: world.source.grassWood ?? 1 },
+        uZ0: { value: 0.1 * ((world.source.grassHeight || [0.1, 0.42])[0] + (world.source.grassHeight || [0.1, 0.42])[1]) / 2 }, // roughness length
         uWind: shared.uWind, uCamG: shared.uCamG, uAlt: shared.uAlt,
         uGrassH: { value: new THREE.Vector2(...(world.source.grassHeight || [0.1, 0.42])) }, // metres, dry to wet ground
       };
@@ -189,10 +212,10 @@ export class Grass {
           .replace('#include <beginnormal_vertex>', GRASS_BUILD + '\n  vec3 objectNormal = gNor;')
           .replace('#include <begin_vertex>', 'vec3 transformed = gPos;')
           .replace('#include <project_vertex>', '#include <project_vertex>\n  if (vKill > 0.5) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);');
-        sh.fragmentShader = `uniform vec3 uSunDir, uSunColor; varying float vT, vCol, vRootK, vFade, vDith; varying vec3 vGW, vTint; varying float vKill;
+        sh.fragmentShader = `uniform vec3 uSunDir, uSunColor; varying float vT, vCol, vRootK, vFade, vDith; varying vec3 vGW, vTint, vPetal; varying float vKill;
 float w2ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); } // interleaved gradient noise\n` + sh.fragmentShader
           .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n  if (vFade < 1.0 && fract(w2ign(gl_FragCoord.xy) + vDith) > vFade) discard; // dissolving, never shrinking')
-          .replace('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb = vTint;')
+          .replace('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb = vPetal.x >= 0.0 && vT > 0.9 ? vPetal : vTint;')
           // both faces of a blade use its rounded normal: three.js flips it on back faces, which points a sky-leaning
           // normal into the ground and turns every blade seen from behind dark
           .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n  normal = normalize(vNormal);')
@@ -208,7 +231,7 @@ float w2ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.
       mat.customProgramCacheKey = () => 'w2grass' + (flower ? 'f' : '') + world.clip.cfg.levels; // the clipmap's level count is in the code
       const mesh = new THREE.Mesh(geo, mat);
       mesh.frustumCulled = false; mesh.receiveShadow = true; mesh.castShadow = false;
-      mesh.userData.U = U; mesh.userData.instances = cells.length / 2;
+      mesh.userData.U = U; mesh.userData.instances = cells.length / 2; mesh.userData.radii = radii; mesh.userData.rin = rin; mesh.userData.slack = slack;
       this.group.add(mesh); this.meshes.push(mesh);
     };
     const shared = { uWind: { value: new THREE.Vector2(0.8, 0.3) }, uCamG: { value: new THREE.Vector3() }, uAlt: { value: 0 } };
@@ -223,11 +246,19 @@ float w2ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.
   }
   update(eye, ground) {
     const alt = Math.max(0.05, eye.y - ground), S = this.shared;
-    S.uCamG.value.copy(eye); S.uAlt.value = alt; S.uWind.value.set(...this.world.env.wind);
+    S.uCamG.value.copy(eye); S.uAlt.value = alt; const E = this.world.env, w10 = E.wind10 || [E.wind[0] * 8, E.wind[1] * 8]; S.uWind.value.set(w10[0], w10[1]); // m/s at 10 m (as the waves)
     this.group.visible = alt < 30;
+    // each ring draws its cells down to where a clump can still be past the last ring's reach, seen from this height
+    const hk = GRASS.altK * alt;
+    for (const m of this.meshes) {
+      const u = m.userData, inner = Math.sqrt(Math.max(0, u.rin * u.rin - hk * hk)) - u.slack;
+      let lo = 0, hi = u.radii.length; // the first cell (they run outermost first) closer than inner
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (u.radii[mid] >= inner) lo = mid + 1; else hi = mid; }
+      m.geometry.instanceCount = lo;
+    }
     // how far the blades reach on the ground (0 when hidden): the ground lays thatch under them; smooth in the height
     const h = GRASS.altK * alt, far = this.far;
     this.reach = this.group.visible ? Math.sqrt(Math.max(0, far * far - h * h)) * (1 - Math.min(1, Math.max(0, (alt - 8) / 22))) : 0;
   }
-  get instances() { return this.meshes.reduce((a, m) => a + m.userData.instances, 0); }
+  get instances() { return this.meshes.reduce((a, m) => a + m.geometry.instanceCount, 0); }
 }

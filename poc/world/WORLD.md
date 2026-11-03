@@ -107,6 +107,16 @@ the caustic grid). Phones. The look of glints in motion.
 ground, and dissolve clump by clump into the next step over the last 30% of each step. A clump never slides: before
 this, a continuous scale moved every clump whenever the camera's height over the ground changed.
 
+**Grass in the wind** (`grass.js`).
+- **The wind it feels.** Blades take the wind at 10 m (`env.wind10`). The wind at their tops comes from the log law,
+  with roughness a tenth of the grass's height, and never drops below 0.25 m/s: the breath of air the game's minimum
+  breeze stands for.
+- **The motion.**
+  - The bend goes with that wind squared (our calibration).
+  - Gust patches 3 m apart travel downwind at 1.8 times the wind at the tops (canopy waves, "honami").
+  - Each blade flutters on its own.
+- **Flowers.** A flower's colour is only its head.
+
 **Known limits.**
 - The swash has no lag between uprush and backwash; its edge follows the incident waves directly.
 - At grazing angles the screen-space reflection steps in bands at low resolution.
