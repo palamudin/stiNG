@@ -274,8 +274,19 @@ function naturalGround(seed, x, z, settings, terrain, oct) {
 // that broad shape; a cul-de-sac is graded as the street it ends; a lot and every building's pad are level, at the broad
 // shape's height at their middle. Kinds: 0 street (along x, levelled across at hz), 1 level rect, 2 cul-de-sac (a disc
 // graded as its street), 3 broad-shaped rect, 4 pond (a level disc at the broad shape's height at its middle).
+// a pad's level is the ground's broad shape, so the pads are worked out again if the ground's tuning changes
+const shapeTune = { n: 0, v: [] };
+function shapeStamp() {
+  const G = T.terrain, v = shapeTune.v;
+  if (v[0] !== G.amp || v[1] !== G.cell || v[2] !== G.octaves || v[3] !== G.warp || v[4] !== G.ridge || v[5] !== G.terrace || v[6] !== G.terraceStep || v[7] !== G.grade.oct) {
+    shapeTune.v = [G.amp, G.cell, G.octaves, G.warp, G.ridge, G.terrace, G.terraceStep, G.grade.oct]; shapeTune.n++;
+  }
+  return shapeTune.n;
+}
 function padsOf(seed, cx, cz, settings) {
-  const pads = worldTables(seed, settings).pads, key = cellKey(cx, cz);
+  const t = worldTables(seed, settings), stamp = shapeStamp();
+  if (t.padStamp !== stamp) { t.padStamp = stamp; t.pads.clear(); }
+  const pads = t.pads, key = cellKey(cx, cz);
   let P = pads.get(key);
   if (P) return P;
   if (pads.size >= TABLE_CAP) pads.clear();
@@ -293,7 +304,7 @@ function padsOf(seed, cx, cz, settings) {
   pads.set(key, P);
   return P;
 }
-// A chunk's pond (GDD 6.2): some parks and woods have one, never the home park. It keeps clear of what the chunk puts in
+// A chunk's pond (GDD 6.2): some parks and woods have one, never the home park; the park west of it always does. It keeps clear of what the chunk puts in
 // fixed places (a park's picnic table and its walk round the park, a wood's path), tries a few spots and takes the
 // first that fits, so the same seed gives the same pond with or without the rest of the chunk generated. The ground
 // under it and a shoulder round it are graded level (padsOf); its water is at the ground. A pure function.
@@ -307,7 +318,8 @@ function makePonds(seed, cx, cz, settings) {
   if (use !== 'park' && use !== 'forest') return [];
   const H = (slot) => hash(seed, Domain.WorldGen, u64(cx), u64(cz), BigInt(slot)), F = features(settings), W = T.water, ox = cx * CS, oz = cz * CS;
   const park = use === 'park';
-  if (unit(H(9100)) >= (park ? W.pondPark : W.pondForest) * F.water) return [];
+  const home = cx === -1 && cz === 0 && park; // the park beside the home park always has one: water within reach of the nest
+  if (!home && unit(H(9100)) >= (park ? W.pondPark : W.pondForest) * F.water) return [];
   const r = park ? range(H(9101), W.pondMin, W.pondMax) : range(H(9101), W.pondForestMin, W.pondForestMax), m = 28 - r;
   const picnic = park && unit(H(1)) < 0.6 ? { x: ox + range(H(2), -20, 20), z: oz + range(H(3), -20, 20) } : null;
   const walk = park && unit(H(6000)) < 0.6 ? range(H(6001), 12, 22) : 0; // a square walk at this distance from the middle

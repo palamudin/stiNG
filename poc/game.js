@@ -5,7 +5,7 @@ import {
   Sim, Act, T, DT, ZONES, ZoneName, SwatKind, SwatKindName, StyleName, TopName, BottomName, Top, Bottom,
   toWorld, toLocal, dirToWorld, chunkKey, chunkOf, hash, Domain, rangeInt, resolveSting, zoneCover, segClosest, classify, predictedKind,
   NEST, NEST_ENTRANCE, flyPos, beePos, fmtClock, minuteOfDay, isLowerZone, broodTotal, sugarCap, proteinCap, waterCap, garmentGraph, dayWeather,
-  NetLab, LINKS, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetVel, CHASE, targetLabel, assistPilot, swoopPilot, hoverPilot, hoverSetting, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE, SKILLS, SKILL_UNLOCKS, SKILL_RANKED, SKILL_HIVE, skillCost, ROLES,
+  NetLab, LINKS, pondsOf, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetVel, CHASE, targetLabel, assistPilot, swoopPilot, hoverPilot, hoverSetting, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE, SKILLS, SKILL_UNLOCKS, SKILL_RANKED, SKILL_HIVE, skillCost, ROLES,
 } from './sim/index.js';
 import { Rings, RING, ringGrid, ringGLSL } from './view/rings.js';
 // World v2 (GDD 20.4): the ground, forests, grass, sky and post chain of world/, drawing the sim's own world. Chosen on
@@ -357,7 +357,7 @@ const geoBox = new THREE.BoxGeometry(1, 1, 1);
 // aTop (per geometry): the wall's height above the ground, so windows stop below the eaves. uNight: 0 by day, 1 at night.
 const SURF = { uNight: { value: 0 } };
 const SURF_GLSL = `
-uniform float uNight; varying vec3 vSP; varying vec3 vSN; varying float vTop; varying vec4 vBox;
+uniform float uNight; varying vec3 vSP; varying vec3 vSN; flat varying float vTop; flat varying vec4 vBox;
 float sHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float sNoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(sHash(i), sHash(i + vec2(1, 0)), f.x), mix(sHash(i + vec2(0, 1)), sHash(i + vec2(1, 1)), f.x), f.y); }
@@ -445,7 +445,7 @@ function surfMat(color, kind, opts = {}) {
   m.onBeforeCompile = (sh, r) => {
     Object.assign(sh.uniforms, SURF);
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float aTop; attribute vec4 aBox; varying vec3 vSP; varying vec3 vSN; varying float vTop; varying vec4 vBox;')
+      .replace('#include <common>', '#include <common>\nattribute float aTop; attribute vec4 aBox; varying vec3 vSP; varying vec3 vSN; flat varying float vTop; flat varying vec4 vBox;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vSP = (modelMatrix * vec4(position, 1.0)).xyz; vSN = mat3(modelMatrix) * normal; vTop = aTop; vBox = aBox;');
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', '#include <common>\n' + SURF_GLSL)
@@ -600,7 +600,7 @@ function buildChunk(rec) {
   }
   const wood = mat('#8a6440');
   c.boxes.forEach((b, bi) => {
-    if (b.hive || b.shed || b.mall) return; // drawn with their own shapes
+    if (b.hive || b.shed || b.mall || b.shop) return; // drawn with their own shapes (a shop's box drawn again over its walls fought them)
     // fences in cedar; each wooden box keeps its own material so it can pale as wasps strip its pulp (T1-12)
     const m = new THREE.Mesh(geoBox, b.wood ? mat(b.fence ? '#b98a55' : '#8a6440') : wood);
     m.scale.set(b.maxx - b.minx, b.maxy - b.miny, b.maxz - b.minz);
@@ -2703,7 +2703,12 @@ function drawMapTo(ctx, W, H, ox, oz, cell, o = {}) {
       ctx.fillStyle = '#ece8dc';
       for (const hv of sim.hivesIn(rec)) { const [x, y] = toS(hv.x, hv.z); ctx.fillRect(x - 3 * k, y - 3 * k, 6 * k, 6 * k); }
       if (rec.content.rival) { const [x, y] = toS(rec.content.rival.x, rec.content.rival.z); ctx.strokeStyle = orange; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 4 * k, 0, Math.PI * 2); ctx.stroke(); }
-    } else if (!o.detail || cell > 14) { ctx.strokeStyle = 'rgba(165,157,138,.2)'; ctx.strokeRect(sx + 1.5, sy + 1.5, cell - 3, cell - 3); }
+    } else {
+      if (!o.detail || cell > 14) { ctx.strokeStyle = 'rgba(165,157,138,.2)'; ctx.strokeRect(sx + 1.5, sy + 1.5, cell - 3, cell - 3); }
+      // ponds show before their chunk is found: water is a landmark (pondsOf is a pure function of the seed, kept in a table)
+      ctx.fillStyle = 'rgba(79,140,190,.55)';
+      for (const p of pondsOf(sim.seed, cx, cz, sim.settings)) { const [x, y] = toS(p.x, p.z); ctx.beginPath(); ctx.arc(x, y, Math.max(2, p.r / CSZ * cell), 0, Math.PI * 2); ctx.fill(); }
+    }
     if (Math.abs(cx - wc) <= T.chunk.activeRadius && Math.abs(cz - wz) <= T.chunk.activeRadius) { ctx.strokeStyle = 'rgba(246,199,0,.3)'; ctx.strokeRect(sx + 0.5, sy + 0.5, cell - 1, cell - 1); }
     if (o.sel && o.sel === key) { ctx.strokeStyle = yellow; ctx.lineWidth = 2; ctx.strokeRect(sx + 1, sy + 1, cell - 2, cell - 2); ctx.lineWidth = 1; }
   }

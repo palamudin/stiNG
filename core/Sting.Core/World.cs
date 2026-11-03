@@ -414,7 +414,8 @@ namespace Sting.Core
             if (use != "park" && use != "forest") return o;
             ulong H(long slot) => Hash(seed, Domain.WorldGen, U64(cx), U64(cz), U64(slot));
             var F = Features(st); Num ox = cx * CS, oz = cz * CS; bool park = use == "park";
-            if (Unit(H(9100)) >= (park ? T.water.pondPark : T.water.pondForest) * F.water) return o;
+            bool home = cx == -1 && cz == 0 && park; // the park beside the home park always has one
+            if (!home && Unit(H(9100)) >= (park ? T.water.pondPark : T.water.pondForest) * F.water) return o;
             Num r = park ? Range(H(9101), T.water.pondMin, T.water.pondMax) : Range(H(9101), T.water.pondForestMin, T.water.pondForestMax), m = 28 - r;
             bool picnic = park && Unit(H(1)) < 0.6; Num px = 0, pz = 0;
             if (picnic) { px = ox + Range(H(2), -20, 20); pz = oz + Range(H(3), -20, 20); }
