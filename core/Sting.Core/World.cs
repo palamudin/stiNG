@@ -518,6 +518,49 @@ namespace Sting.Core
         {
             int terrain = st?.terrain ?? 0;
             if (terrain == 0) return 0;
+            Num h = GroundBase(seed, x, z, st, terrain);
+            Num M = T.terrain.grade.reach;
+            int c0x = ChunkOf(x - M), c1x = ChunkOf(x + M), c0z = ChunkOf(z - M), c1z = ChunkOf(z + M);
+            for (int cz = c0z; cz <= c1z; cz++) for (int cx = c0x; cx <= c1x; cx++)
+                    foreach (var p in FootingsOf(seed, cx, cz, st))
+                    {
+                        Num d;
+                        if (p.k == 6) d = Max(0, Sqrt((x - p.x) * (x - p.x) + (z - p.z) * (z - p.z)) - p.r);
+                        else { Num dx = Max(Max(p.minx - x, 0), x - p.maxx), dz = Max(Max(p.minz - z, 0), z - p.maxz); d = Sqrt(dx * dx + dz * dz); }
+                        if (d >= p.m) continue;
+                        lock (p) { if (!p.hSet) { p.h = GroundBase(seed, p.hx, p.hz, st, 1); p.hSet = true; } }
+                        Num w = 1 - Smooth(d / p.m);
+                        h += (p.h * terrain - h) * w;
+                    }
+            return h;
+        }
+        /// Footings (GDD 18.75, G3): a level pad under each small thing that stands on the ground, apron m round its
+        /// footprint at the ground's height at its middle, blending back over shed m. Kinds: 5 rect, 6 disc.
+        static readonly Dictionary<long, List<Pad>> feet = new Dictionary<long, List<Pad>>(); static string feetTag;
+        public static int FootingCount(ulong seed, int cx, int cz, Settings st) => FootingsOf(seed, cx, cz, st).Count;
+        static List<Pad> FootingsOf(ulong seed, int cx, int cz, Settings st)
+        {
+            var F = Features(st); string tag = seed + ":" + F.woods + "," + F.towns + "," + N(F.water) + "," + N(F.hives);
+            lock (feet)
+            {
+                if (feetTag != tag) { feetTag = tag; feet.Clear(); }
+                long key = CellKey(cx, cz);
+                if (feet.TryGetValue(key, out var P)) return P;
+                if (feet.Count > 4096) feet.Clear();
+                var c = GenerateChunk(seed, cx, cz, st); P = new List<Pad>(); Num a = T.terrain.grade.apron, m = T.terrain.grade.shed;
+                void R(Num x, Num z, Num hw, Num hd) => P.Add(new Pad { k = 5, minx = x - hw - a, maxx = x + hw + a, minz = z - hd - a, maxz = z + hd + a, m = m, hx = x, hz = z });
+                foreach (var t in c.tables) { if (t.axisX) R(t.x, t.z, 0.95, 0.81); else R(t.x, t.z, 0.81, 0.95); }
+                foreach (var s in c.sheds) if (!s.house) R(s.x, s.z, s.hw, s.hd);
+                foreach (var hv in c.hives) R(hv.x, hv.z, 0.225, 0.225);
+                foreach (var b in c.boxes) if (b.bench && b.miny < 0.45) R((b.minx + b.maxx) / 2, (b.minz + b.maxz) / 2, (b.maxx - b.minx) / 2 + 0.25, (b.maxz - b.minz) / 2 + 0.25);
+                foreach (var b in c.baths) P.Add(new Pad { k = 6, x = b.x, z = b.z, r = b.r + a, m = m, hx = b.x, hz = b.z });
+                feet[key] = P;
+                return P;
+            }
+        }
+        /// the ground graded under paving, buildings and ponds, before the footings
+        static Num GroundBase(ulong seed, Num x, Num z, Settings st, int terrain)
+        {
             Num h = NaturalGround(seed, x, z, st, terrain, T.terrain.octaves);
             Num M = T.terrain.grade.reach; int GO = T.terrain.grade.oct;
             int c0x = ChunkOf(x - M), c1x = ChunkOf(x + M), c0z = ChunkOf(z - M), c1z = ChunkOf(z + M);

@@ -953,6 +953,7 @@ road = 3
 lot = 3
 house = 2.5
 shed = 1
+apron = 0.3
 pond = 3
 reach = 3
 

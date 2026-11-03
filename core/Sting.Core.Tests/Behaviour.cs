@@ -1757,7 +1757,7 @@ namespace Sting.Core.Tests
                 foreach (var (q, cx, cz, use) in ponds)
                 {
                     double lo = double.MaxValue, hi = double.MinValue;
-                    for (int k = 0; k < 12; k++) { double a = k * 0.5236; double g = D(World.GroundAt(1234, q.x + Math.Cos(a) * D(q.r) * 0.95, q.z + Math.Sin(a) * D(q.r) * 0.95, st)); lo = Math.Min(lo, g); hi = Math.Max(hi, g); }
+                    for (int k = 0; k < 12; k++) { double a = k * 0.5236, e = D(World.PondEdge(q, a)) * 0.95; double g = D(World.GroundAt(1234, q.x + Math.Cos(a) * e, q.z + Math.Sin(a) * e, st)); lo = Math.Min(lo, g); hi = Math.Max(hi, g); } // under the water
                     if (hi - lo < 1e-6) flat++;
                     var c = World.GenerateChunk(1234, cx, cz, st);
                     bool In(Num x, Num z, Num r) => (x - q.x) * (x - q.x) + (z - q.z) * (z - q.z) < (q.r + r) * (q.r + r);
@@ -1778,6 +1778,34 @@ namespace Sting.Core.Tests
                 for (; kk < 6000; kk++) { if (s.WalkToForTest(hm, pd.x + pd.r + 2, pd.z + 0.3, T.panic.walkSpeed)) break; if (World.InPond(pd, hm.x, hm.z, 0.3)) wet++; }
                 int benches = rec.content.boxes.Count(b => b.bench); bool walker = rec.content.humans.Any(h => h.slot == 9150);
                 Ok(kk < 6000 && wet == 0 && benches == 4 && pd.park, $"a person sent straight across the pond walks round it, never in the water, and arrives ({kk} steps); the park pond has two benches ({benches} boxes) and {(walker ? "someone walking round it" : "nobody walking round it today")}");
+            }
+            // 61. footings (GDD 18.75, G3, GEN_VERSION 11): every small thing on the ground stands on a level pad on a hilly world
+            {
+                var st = new Settings { terrain = 2 }; var kinds = new SortedDictionary<string, int>();
+                int n = 0, level = 0, lean = 0; double worst = 0;
+                double Spread(Num x, Num z, Num hw, Num hd)
+                {
+                    double lo = double.MaxValue, hi = double.MinValue;
+                    for (int i = -1; i <= 1; i++) for (int j = -1; j <= 1; j++) { double g = D(World.GroundAt(1234, x + i * hw, z + j * hd, st)); lo = Math.Min(lo, g); hi = Math.Max(hi, g); }
+                    return hi - lo;
+                }
+                for (int cz = -8; cz <= 8; cz++) for (int cx = -8; cx <= 8; cx++)
+                    {
+                        var c = World.GenerateChunk(1234, cx, cz, st); var things = new List<(string k, Num x, Num z, Num hw, Num hd)>();
+                        foreach (var t in c.tables) things.Add(("table", t.x, t.z, t.axisX ? 0.95 : 0.81, t.axisX ? 0.81 : 0.95));
+                        foreach (var sh in c.sheds) if (!sh.house) things.Add(("shed", sh.x, sh.z, sh.hw, sh.hd));
+                        foreach (var hv in c.hives) things.Add(("hive", hv.x, hv.z, 0.225, 0.225));
+                        foreach (var b in c.boxes) if (b.bench && b.miny < 0.45) things.Add(("bench", (b.minx + b.maxx) / 2, (b.minz + b.maxz) / 2, (b.maxx - b.minx) / 2, (b.maxz - b.minz) / 2));
+                        foreach (var b in c.baths) things.Add(("bath", b.x, b.z, b.r * 0.7, b.r * 0.7));
+                        foreach (var (k, x, z, hw, hd) in things)
+                        {
+                            n++; kinds[k] = kinds.TryGetValue(k, out var v) ? v + 1 : 1;
+                            double s0 = Spread(x, z, hw, hd);
+                            if (s0 < 1e-6) level++; else worst = Math.Max(worst, s0);
+                            if (Spread(x, z, hw + 1.6, hd + 1.6) > 0.05) lean++;
+                        }
+                    }
+                Ok(n > 100 && level == n && lean > 10, $"{n} small things in 289 chunks ({string.Join(", ", kinds.Select(kv => kv.Value + " " + kv.Key))}) all stand level (worst {worst:E1} m); {lean} of them on ground that falls away by over 5 cm round them");
             }
             // 46. feature modifiers (T2-6): woods, towns, water and hives set at world creation act on generation
             {

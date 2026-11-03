@@ -10,7 +10,7 @@ An open-world, multiplayer wasp colony simulator. You run a colony through its y
 
 | Path | What it is |
 |---|---|
-| [`docs/STING_GDD.md`](docs/STING_GDD.md) | The game design document: pillars, simulation architecture, world, colony (with the growth tree and the three playable species: wasps, hornets, honeybees), wasp, humans, bees, multiplayer, Unity contract, decisions, open questions, and findings from the PoC |
+| [`docs/STING_GDD.md`](docs/STING_GDD.md) | The game design document: pillars, simulation architecture, world, colony (with the growth tree and the three playable species: wasps, hornets, honeybees), wasp, humans, bees, multiplayer, Unity contract, decisions, open questions, findings from the PoC, and the plans for terrain (20) and settlements built to code: urban, semi-urban and rural templates, the feature builder, dense forests (21) |
 | [`docs/COLLAB.md`](docs/COLLAB.md) | How the Claude threads working on this repository share it: branches, pull requests, who owns what, and how a thread that cannot push hands its work over |
 | [`poc/`](poc/) | The three.js proof of concept. A deterministic simulation core (`poc/sim/`) that owns every outcome, and a presentation layer (`poc/game.js`) that only draws. `poc/world/` is World v2, the high-detail world drawing (clipmap ground, forests, grass, sky, post chain) the menu's Look switches to; `poc/world.html` shows it on its own (GDD 20.5). See [`poc/POC.md`](poc/POC.md) for the feature list and what has been verified |
 | [`tuning/`](tuning/) | `sting.tune`: every tuning value of the sim as plain text, read by the PoC and the C# core with their own parsers (GDD 13). Edit it to retune; its hash goes into saves and the rules peers compare |

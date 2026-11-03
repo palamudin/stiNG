@@ -158,6 +158,7 @@ Run the tests from this folder with `node test/sim.test.mjs`, `node test/net.tes
 | 128 | Look: World v2 on the menu. The game's world drawn by the world module (clipmap ground from the sim's graded heights and paving, the sim's trees as meshed crowns on the game's own trunks, grass, a scattering sky, clouds, god rays, depth of field, bloom); everything is lifted onto its ground | 20.5 | 25 |
 | 129 | Ponds in some parks and woods, one always beside the home park: lobed shapes, level ground, water to drink; park ponds have a gravel path, benches and a walker; people walk round them; drawn in both looks and on the map | 18.73 | 25 |
 | 130 | Walls, roofs and paving drawn by their shaders: siding, planks, plaster, panels, centred windows with lit rooms at night, shopfronts, shingles, asphalt, slabs, pavers; generator lookups, the sky's day and the map kept in tables | 18.74 | 25 |
+| 131 | Small things stand level on hills: picnic tables, sheds, bee boxes, benches and birdbaths each on a level footing cut into the slope, in the sim and both looks | 18.75 | 25 |
 
 ## Verified
 

@@ -41,6 +41,7 @@
 18. Findings from the proof of concept
 19. Feature tiers and the current stack
 20. Plan: terrain, far detail and the map, and the world view seam (20.4)
+21. Plan: settlements built to code (urban, semi-urban, rural), the feature builder, forests
 - Appendix A — Protocode
 - Appendix B — Glossary
 - Appendix C — Biology reference
@@ -1505,7 +1506,7 @@ Agreed 2026-10-27: the PoC's known limits are worked through before terrain is t
 
 **What hills do.** A rise between two people blocks their sight line (checked every 4 m along it between their eye heights): on a hilly world 53 of 140 open sight lines across a park are blocked. Rain settles in hollows: on open ground a puddle takes the lowest of three spots (0.30 m against 0.98 m). The wind is stronger on a rise, by 5% a metre (0.516 against 0.429 m/s at the foot). Terrain is in the rules hash, the world tag ("rolling", "hilly") and saves (C# format 23). The height field is part of the `motion` parity digest, and JS and C# agree on every check.
 
-**Limits.** Flight did not feel the slope until 18.69. Hills are not solid to sight lines between a wasp and a person, only between people. A building did not sit level on a slope until 18.68; small sheds still lean with the ground.
+**Limits.** Flight did not feel the slope until 18.69. Hills are not solid to sight lines between a wasp and a person, only between people. A building did not sit level on a slope until 18.68, nor a shed, table, bee box, bench or birdbath until 18.75.
 
 
 ### 18.45 Lock-on, assisted flight and feeding as built (7.9)
@@ -2102,7 +2103,7 @@ The rings' fragment shader reads them, fading from the fine canvas to the coarse
 - **Squares.** A town square takes that broad shape.
 - **Lots and buildings.** A parking lot and every house, mall and shop pad are level, at the broad shape's height at their middle.
 - **Shoulders.** The ground blends back to its own shape over 3 m round streets, lots and squares, and 2.5 m round buildings.
-- **Small things.** Sheds, tables and fences (and footpaths, when there are any) follow the ground.
+- **Small things.** Fences and footpaths follow the ground. Since 18.75, sheds, tables, bee boxes, benches and birdbaths stand on level footings.
 - **The paving list.** `pavingOf` lists a chunk's paving and buildings without generating the rest. A test holds it to `generateChunk` over 169 chunks with two towns a region.
 
 **Checks.** JS and both C# builds agree:
@@ -2208,6 +2209,23 @@ Until now the only water was birdbaths, fountains and puddles after rain. Now so
 - **Water bodies.** World v2 looks them up again only when the eye has moved a metre or half a second has passed. Each body's plane is worked out once.
 - **The map.** What a chunk shows that does not change (ground, streets, buildings, ponds, tables; zoomed in, trees and baths) is drawn once per chunk and zoom into a tile. The map copies the tiles and draws only what moves over them.
 
+### 18.75 Footings under small things (G3, GEN_VERSION 11)
+
+**What.** On a hilly world, every small thing that stands on the ground stands level, as it would in life on a slab, a gravel bed or a paved pad:
+- picnic tables with their benches, garden sheds, bee boxes, pond benches, birdbaths and fountains;
+- the footing is the thing's footprint plus an apron of 0.3 m, level at the ground's height at its middle: cut into the slope uphill and built up downhill;
+- the ground blends back to its own shape over a 1 m shoulder (`terrain.grade.apron` and `terrain.grade.shed`).
+
+Houses, shops, malls, lots, streets and ponds were already graded (18.68, 18.73). Fences still follow the ground, cut every metre (18.74), as a raked fence does.
+
+**How.** `footingsOf` reads a chunk's small things from the chunk as generated, kept in a table per world like the other generator tables. The ground is the graded ground (streets, lots, squares, buildings, ponds), then each footing levels its patch at that ground's height at its middle. A footing's height is kept per step of the terrain modifier. It is in the sim, so the sim, the drawing and the map agree. A wasp on a shed roof or a table top is where they are drawn.
+
+**Cost.** A footing list needs the chunk generated: 0.4 ms a chunk, once per world, as the ground is first sampled there.
+
+**Checks.** JS and both C# builds agree. The `motion` digest changed, and is matched.
+- Of 1097 small things in 289 chunks on a hilly world (554 tables, 274 sheds, 223 birdbaths, 26 bee boxes, 20 pond benches), every one stands level to 1e-9 m. For 1042 of them, the ground round them falls away by more than 5 cm.
+- The water of every pond is still level, now sampled inside its lobed edge.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -2216,7 +2234,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (130 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony; the T0 of progression (18.48): XP, unit and hive skills, the year's turn; multi-colony play with the player gauge (18.49); wintering in somewhere warm (18.50); chasing moving prey with a lock, with a colony view you can click (18.51); obstacle avoidance in assisted flight (18.52); reaching what moves under a lock (18.53); the lock ending on arrival (18.54); Shift hurrying an assisted flight (18.55); landing at speed with hovering round a lock (18.56); lines, the wasp in hand and roles passed on by masters (18.57); playing with a controller only, Xbox included (18.58); touch controls for phones and tablets (18.59); the map: minimap sizes, the big map and a phone HUD (18.60); colony switching through the relay (18.61); auto grab (18.62); the year's turn for hornet and honeybee lines (18.63); lockable moths with fireflies on summer evenings (18.64); swarms seen with a young queen's mating flight (18.65); AI raids on enemy nests (18.66); ground v2 (18.67); ground rings with graded ground (18.68); flight that feels the slope (18.69); the loading screen with warm-up and a menu over the live world (18.70); the quality controller (18.71); and the T3-1 leftovers: AI wasps kept out of walls, routes past long walls, the spot on a walker and the hover the player sets (18.72); and World v2, taken over from the world-building thread and offered as the menu's Look (20.5); ponds (18.73); and surfaces drawn on request with work kept in tables (18.74). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (131 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony; the T0 of progression (18.48): XP, unit and hive skills, the year's turn; multi-colony play with the player gauge (18.49); wintering in somewhere warm (18.50); chasing moving prey with a lock, with a colony view you can click (18.51); obstacle avoidance in assisted flight (18.52); reaching what moves under a lock (18.53); the lock ending on arrival (18.54); Shift hurrying an assisted flight (18.55); landing at speed with hovering round a lock (18.56); lines, the wasp in hand and roles passed on by masters (18.57); playing with a controller only, Xbox included (18.58); touch controls for phones and tablets (18.59); the map: minimap sizes, the big map and a phone HUD (18.60); colony switching through the relay (18.61); auto grab (18.62); the year's turn for hornet and honeybee lines (18.63); lockable moths with fireflies on summer evenings (18.64); swarms seen with a young queen's mating flight (18.65); AI raids on enemy nests (18.66); ground v2 (18.67); ground rings with graded ground (18.68); flight that feels the slope (18.69); the loading screen with warm-up and a menu over the live world (18.70); the quality controller (18.71); and the T3-1 leftovers: AI wasps kept out of walls, routes past long walls, the spot on a walker and the hover the player sets (18.72); and World v2, taken over from the world-building thread and offered as the menu's Look (20.5); ponds (18.73); surfaces drawn on request with work kept in tables (18.74); and footings under small things (18.75). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -2355,7 +2373,7 @@ Every piece below is our own code, apart from three.js, which the PoC already dr
   - a ring update stays within 2 ms of a frame, spread over frames;
   - the frame is no slower than now on the low setting.
 
-**G3. Things stand level (sim and drawing). Built (18.68) by grading the ground under streets, lots, squares and the larger buildings; small sheds, tables and fences follow the ground.**
+**G3. Things stand level (sim and drawing). Built (18.68, 18.75): the ground is graded under streets, lots, squares and buildings, and every small thing stands on a level footing. Fences follow the ground, cut every metre.**
 - **What.** Buildings, sheds, tables and fences stand level on a footing at the lowest corner, instead of leaning with the ground. In the sim, each solid keeps the ground height at its own base, so roofs and walls are where they are drawn.
 - **Done when:**
   - a wasp landing on any roof or wall on a hilly world is within 1 cm of the drawn surface;
@@ -2476,6 +2494,171 @@ The world-building thread delivered World v2 (`poc/world/`, with a template page
 - Night is dark sky only (no moon or street light in the air).
 - Lots and squares lose their painted markings.
 - Changing Graphics needs a reload to change World v2's tier.
+
+## 21. Plan: settlements built to code
+
+Asked for 2026-11-03: settlements as templates (urban, semi-urban and rural) laid out by a feature builder that follows real building and land-use codes as the map is built. Buildings and paving are meshes drawn from code, not models fitted into the scene. Forests are dense, with blocky foliage that lets light through to the floor.
+
+World v2 is parked: v3 is coming, and these parts plug into it through the seam (20.4) when it lands.
+
+### 21.1 What the codes say
+
+The numbers are US model codes and typical local ordinances. The game takes them as tuning, not law.
+
+**Foundations on slopes.**
+- **Stepped footings (IRC R403.1.5).** A footing that must change height to follow a slope is stepped, like stairs. Each step is at least 2 ft (0.6 m) long, and no taller than three quarters of its run. A building on a slope therefore sits on level platforms, never on a tilted base.
+- **Slope setbacks (IRC R403.1.7, IBC 1808.7).** These apply to slopes steeper than 1:3 (33%):
+  - a building stands back from the toe of a rising slope by half its height H, at most 15 ft (4.6 m);
+  - a footing stands back from the face of a falling slope by H/3, at most 40 ft (12 m).
+- **Drainage (IRC R401.3).** The ground falls away from a foundation by 6 in over the first 10 ft (5%). A pad is level, and its apron sheds water.
+- **Earthworks.** Graded cut and fill slopes are no steeper than 2:1 (50%), so a step between pads is a bank or a retaining wall.
+
+**Streets** (typical subdivision ordinances, ITE practice):
+
+| Street | Right of way | Pavement | Maximum grade | Other |
+|---|---|---|---|---|
+| Local | 60 ft (18 m) | 24 ft (7.3 m) | 10% | — |
+| Collector | 80 ft (24 m) | 30 ft (9 m) | 6% | — |
+| Cul-de-sac | — | — | 8% | length at most 500 ft (150 m); turnaround of 65 ft (20 m) outside radius |
+| Rural | — | 18–24 ft (5.5–7.3 m) | — | no kerbs; gravel or grass shoulders and ditches |
+
+Every class has a minimum grade of 0.5% for drainage. A sidewalk is 5 ft (1.5 m), with a cross slope of at most 2% and a running slope of at most 5% (1:20). Steeper walks are ramps, or stairs.
+
+**Hillside development** (for example Phoenix ZO 710). Above 10% slope the allowed density falls with the slope:
+- 1.8 homes an acre at 10–15%;
+- 1.1 at 15–20%;
+- 0.7 at 20–25%;
+- 0.5 at 25–30%;
+- 0.3 at 30–35%;
+- 0.2 above 35%.
+
+On hillside lots buildings cover at most 25% of the lot, and are at most two storeys and 30 ft (9 m) above natural grade at any section.
+
+**Lots and setbacks** (typical zoning):
+
+| | Urban | Semi-urban (suburban) | Rural |
+|---|---|---|---|
+| Lot frontage | 5–8 m (row houses), 15–30 m (apartments) | 15–25 m | 60 m and more |
+| Lot depth | 20–30 m | 30–40 m | 100 m and more |
+| Front setback | 0–3 m (to the sidewalk) | 6 m (20 ft) | 15 m and more |
+| Side setback | 0 (party walls, fire-rated) | 1.5 m (5 ft; nearer needs a fire-rated wall, IRC R302.1) | 10 m and more |
+| Rear setback | 3–6 m | 7.5 m (25 ft) | 15 m and more |
+| Height | 3–6 storeys, shops on the ground floor of main streets | 1–2 storeys, at most 10.7 m (35 ft) | 1–2 storeys, barns and sheds |
+| Density | 40–100 homes a hectare | 5–15 | under 1 |
+| Ground it builds on | up to about 15%, terraced into level pads | up to about 20%, a level pad per house, banks between | up to about 35%: the small footprint allows a stepped footing or a plinth |
+
+A storey is 3 m; a shop's ground floor is 4–4.5 m. A parking stall is 2.5 by 5.5 m, on a 7.3 m aisle.
+
+**Forests.** A closed temperate wood holds roughly 250 to 600 stems a hectare above 10 cm across, which is 100 to 250 trees in a 64 m chunk. Today's woods have 16 to 26, which is parkland. Under a closed canopy little grass grows: the floor is leaf litter, moss, ferns and patches of sun.
+
+### 21.2 Templates
+
+A template is data: the rules above per settlement kind, plus a list of what goes on its lots. The builder applies it to a patch of land. Three to start:
+
+- **Urban.** A block per chunk, bounded by 16 m streets on the chunk edges, so blocks join into a grid. Lots are 6–8 m wide and back to back. Row houses and mid-rises stand at the sidewalk with party walls; shops are on the ground floor along main streets, and there are courtyards behind. On a slope the block is terraced: each lot's pad is level, and pads step down the street (the "stairs" of 21.1), with a retaining wall or steps where the drop is over 0.3 m. Streets are clamped to 8–10%; steeper land is not given an urban template.
+- **Semi-urban.** Today's yards, rebuilt to the rules: a 16 m street with sidewalks and verges, lots of 16–20 by 30–35 m with the setbacks above, a house on a level pad, a garage and drive (at most 15%), fenced backyards with what they hold now. Banks of at most 2:1 sit between pads at different heights. A town centre (18.41) is the semi-urban core: shops round a level square.
+- **Rural.** Farmland in fields and hedgerows, crossed by a lane 5–6 m wide with ditches and no sidewalks. There is a farmstead every two to four chunks, with a house, a barn, sheds and a yard. Buildings follow the slope:
+  - footprints are small (8–12 m);
+  - each building sits on a stepped footing or a plinth level with the uphill corner;
+  - downhill, a foundation wall up to 1.5 m shows, or a walk-out storey beyond that;
+  - a barn may be built into a bank.
+
+  Nothing is built above 35%, or within the slope setbacks of 21.1.
+
+The region layout (18.34) chooses the template per chunk from the land's broad slope and its place in the region: an urban core, a semi-urban ring round it, rural land beyond, and woods on the steepest ground. The home park stays as it is.
+
+### 21.3 The feature builder
+
+The builder runs once per chunk at generation, as a pure function of the seed, in the sim (JS and C#), so collision, the map and the drawing agree. In order:
+
+1. **Read the land.** Take the broad shape's height at the chunk's corners and middle, its mean slope and its steepest direction.
+2. **Choose the template** the slope allows (21.2), falling back from urban to semi-urban, rural or wood.
+3. **Lay the streets.** Give each street a profile along its length within the template's grade limits: cut where the land rises faster, filled where it falls. Sidewalks are level across.
+4. **Cut the lots.** Split each block into lots from the template's frontage and depth.
+5. **Grade each lot.**
+   - Urban: a level pad stepped to the street.
+   - Semi-urban: a level pad with banks.
+   - Rural: no pad; a stepped footing or a plinth under the building only.
+
+   The heights go into the graded ground (18.68), so `groundAt` returns them.
+6. **Place the envelope.** The lot less its setbacks and slope setbacks gives the area a building may cover. Its height comes from the template.
+7. **Choose a building** that fits the envelope: footprint, storeys, roof (gable, hip or flat), door to the street, garage and drive, porch steps from the pad down to the sidewalk.
+8. **Write the build list.** Each building is listed as parts: walls with openings, roof, plinth, steps, retaining walls, fences, paths. Each part has its box for collision. The sim keeps the boxes; the drawing makes meshes from the parts (21.4).
+
+The build list replaces today's fixed yards, mall and town layouts one template at a time. Each switch is a generator version, and old saves regenerate as they do now.
+
+### 21.4 Drawing from code
+
+- **Meshes made from the build list,** not models. A wall is a quad strip with its openings cut, sills and frames extruded; a roof is built from the footprint and the pitch; steps and walls from their boxes. The surfaces come from the shaders of 18.74.
+- **Merged per chunk and material.** A chunk's buildings become one geometry per material: about five draw calls a chunk, instead of one a part.
+- **Instancing for repeats.** Fence posts, benches, tables, cars, bins, lamp posts and tree parts use one geometry drawn many times, with a per-instance transform and colour.
+- **Chunk groups culled by distance.** Each chunk's meshes sit in one group with its bounds. Beyond the draw distance a chunk shows only its far version: boxes with the wall shader, then nothing.
+- **Movement in the vertex shader.** Swaying crowns and foliage, flags and washing move in the vertex shader from time and a per-instance phase. JS does not touch them each frame.
+- **Fake ambient occlusion.** A smoothstep on height above the ground darkens wall bases, trunk feet and the ground in corners. It is cheap, and it reads as weight.
+
+### 21.5 Forests
+
+- **Density.** The forest template places 120 to 250 trees a chunk by a jittered grid with spacing from the trunk size (the self-thinning rule), in a few species mixes. It keeps paths and a clearing now and then.
+- **Blocky foliage.** A crown is a small set of jittered cubes, 6 to 12 near and fewer far, with gaps between them. Sun reaches the floor through the gaps as dappled light, from the shadow map.
+- **The floor.** Grass is sparse under a closed canopy: leaf litter, moss and ferns, with grass in the sun patches and clearings. The shade channel (20.4) carries this.
+- **The sim** keeps trunks as cylinders, looked up through a per-chunk grid so 200 trunks cost no more to collide with than 20 do now. Nest sites, webs and hollows scale with the count, by tuning.
+- **Drawing.** Trunks and crowns are instanced, one draw call each per chunk, swaying in the vertex shader.
+
+### 21.6 Goal posts, in order
+
+Each is built, tested in JS and both C# builds where the sim is touched, documented and published before the next.
+
+**S1. Things stand level. Built (18.75).** Footings under small things; buildings and paving were already graded.
+
+**S2. Meshes from code.**
+- **What.** 21.4, on what the world holds today. The drawing turns each chunk's houses, sheds, shops, fences and furniture into a list of parts. A builder makes the meshes from the parts:
+  - merged per chunk and material;
+  - instanced repeats;
+  - distance groups;
+  - sway in the vertex shader;
+  - fake AO.
+- **Done when:**
+  - draw calls fall by at least half in a yards chunk;
+  - the frame is no slower than now on the low setting;
+  - houses, sheds and shops look as they do now, or better.
+
+**S3. The build list.**
+- **What.** The builder of 21.3, in the sim (JS and C#), run on today's layouts unchanged. The yards, mall and town become build lists of parts with their boxes. The sim reads its boxes from them, and the drawing reads the parts instead of making its own.
+- **Done when:** a generated chunk's content hash is unchanged on a flat world, and the parity digests match.
+
+**S4. Semi-urban to code.**
+- **What.** Yards rebuilt with the template: lot sizes, setbacks, drives and garages, porch steps, banks between pads, streets within grade.
+- **Done when:**
+  - every lot passes the template's rules on hilly worlds;
+  - no street is steeper than its limit;
+  - no pad is steeper than 1:50 across.
+
+**S5. Rural.**
+- **What.** Farmland, lanes, farmsteads, and buildings on stepped footings or plinths on slopes up to 35%.
+- **Done when:**
+  - no building stands within a slope setback;
+  - every plinth's downhill wall is at most its limit;
+  - people walk lanes and yards.
+
+**S6. Urban.**
+- **What.** Row houses and mid-rises on terraced lots, shops on main streets, courtyards, steps and retaining walls.
+- **Done when:**
+  - every terrace step is a wall or stairs;
+  - streets are within grade;
+  - the frame holds on the low setting at the busiest block.
+
+**S7. Dense forests.**
+- **What.** 21.5.
+- **Done when:**
+  - a forest chunk holds over 120 trees;
+  - light reaches the floor in patches;
+  - the sim tick is no slower than now in a wood.
+
+**S8. The region of templates.**
+- **What.** The region layout chooses templates by slope and place: an urban core, a semi-urban ring, rural land, woods.
+- **Done when** a hilly world reads as a town in its land: built where it is flat enough, farmed where it is not, wooded where it is steepest.
+
+---
 
 ## Appendix A — Protocode
 

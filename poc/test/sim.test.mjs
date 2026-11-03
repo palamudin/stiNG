@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, humanParts, malesAbout, chunkOf, toLocal, dirToWorld, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, groundSlope, pavingOf, pondsOf, inPond, pickTarget, assistPilot, swoopPilot, hoverPilot, hoverSetting, HOVER, ROLES, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS,
+  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, groundSlope, pavingOf, pondsOf, inPond, pondEdge, pickTarget, assistPilot, swoopPilot, hoverPilot, hoverSetting, HOVER, ROLES, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS,
 } from '../sim/index.js';
 import { applyTuning, parseTuning, tuningHash, tuningLeaves, TUNE } from '../sim/tunefile.js';
 
@@ -2330,7 +2330,7 @@ function seated(sim, pred) {
   let flat = 0, clear = 0;
   for (const p of ponds) {
     let lo = Infinity, hi = -Infinity;
-    for (let k = 0; k < 12; k++) { const a = k * 0.5236, g = groundAt(1234n, p.x + Math.cos(a) * p.r * 0.95, p.z + Math.sin(a) * p.r * 0.95, st); lo = Math.min(lo, g); hi = Math.max(hi, g); }
+    for (let k = 0; k < 12; k++) { const a = k * 0.5236, e = pondEdge(p, a) * 0.95, g = groundAt(1234n, p.x + dcos(a) * e, p.z + dsin(a) * e, st); lo = Math.min(lo, g); hi = Math.max(hi, g); } // under the water
     if (hi - lo < 1e-9) flat++;
     const c = generateChunk(1234n, p.cx, p.cz, st), inside = (x, z, r) => (x - p.x) * (x - p.x) + (z - p.z) * (z - p.z) < (p.r + r) * (p.r + r);
     if (c.ponds.length === 1 && !c.trees.some((t) => inside(t.x, t.z, t.r)) && !c.tables.some((t) => inside(t.x, t.z, 1)) && !c.flowers.some((f) => inPond(p, f.x, f.z, 0.2))
@@ -2351,6 +2351,33 @@ function seated(sim, pred) {
   for (; k < 6000; k++) { if (s._walkTo(hm, p.x + p.r + 2, p.z + 0.3, T.panic.walkSpeed)) break; if (inPond(p, hm.x, hm.z, 0.3)) wet++; }
   const benches = rec.content.boxes.filter((b) => b.bench).length, walker = rec.content.humans.some((h) => h.slot === 9150);
   ok(k < 6000 && wet === 0 && benches === 4 && p.park, `a person sent straight across the pond walks round it, never in the water, and arrives (${k} steps); the park pond has two benches (${benches} boxes) and ${walker ? 'someone walking round it' : 'nobody walking round it today'}`);
+}
+
+// 61. Footings (GDD 18.75, G3, GEN_VERSION 11): every small thing that stands on the ground (a picnic table and its
+// benches, a garden shed, a bee box, a pond bench, a birdbath or fountain) stands on a level pad on a hilly world
+{
+  const st = { terrain: 2 }, S = 1234n, kinds = {};
+  let n = 0, level = 0, lean = 0, worst = 0;
+  const spread = (x, z, hw, hd) => {
+    let lo = Infinity, hi = -Infinity;
+    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) { const g = groundAt(S, x + i * hw, z + j * hd, st); lo = Math.min(lo, g); hi = Math.max(hi, g); }
+    return hi - lo;
+  };
+  for (let cz = -8; cz <= 8; cz++) for (let cx = -8; cx <= 8; cx++) {
+    const c = generateChunk(S, cx, cz, st), things = [];
+    for (const t of c.tables) things.push(['table', t.x, t.z, t.axisX ? 0.95 : 0.81, t.axisX ? 0.81 : 0.95]);
+    for (const s of c.sheds) if (!s.house) things.push(['shed', s.x, s.z, s.hw, s.hd]);
+    for (const h of c.hives) things.push(['hive', h.x, h.z, 0.225, 0.225]);
+    for (const b of c.boxes) if (b.bench && b.miny < 0.45) things.push(['bench', (b.minx + b.maxx) / 2, (b.minz + b.maxz) / 2, (b.maxx - b.minx) / 2, (b.maxz - b.minz) / 2]);
+    for (const b of c.baths) things.push(['bath', b.x, b.z, b.r * 0.7, b.r * 0.7]);
+    for (const [k, x, z, hw, hd] of things) {
+      n++; kinds[k] = (kinds[k] || 0) + 1;
+      const s0 = spread(x, z, hw, hd);
+      if (s0 < 1e-9) level++; else worst = Math.max(worst, s0);
+      if (spread(x, z, hw + 1.6, hd + 1.6) > 0.05) lean++; // the ground round it falls away by more than 5 cm
+    }
+  }
+  ok(n > 100 && level === n && lean > 10, `${n} small things in 289 chunks (${Object.entries(kinds).map(([k, v]) => v + ' ' + k).join(', ')}) all stand level (worst ${worst.toExponential(1)} m); ${lean} of them on ground that falls away by over 5 cm round them`);
 }
 
 // Tuning as data (GDD 13, T1-22): one plain-text file feeds both sims

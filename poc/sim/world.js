@@ -196,7 +196,7 @@ function worldTables(seed, s) {
   let t = tableSets.get(tag);
   if (!t) {
     if (tableSets.size >= 8) tableSets.clear();
-    t = { use: new Map(), region: new Map(), roll: new Map(), ponds: new Map(), paving: new Map(), pads: new Map() };
+    t = { use: new Map(), region: new Map(), roll: new Map(), ponds: new Map(), paving: new Map(), pads: new Map(), feet: new Map() };
     tableSets.set(tag, t);
   }
   lastTables = { seed, woods, towns, water, hives, t };
@@ -382,9 +382,46 @@ function makePaving(seed, cx, cz, settings) {
   }
   return out;
 }
+// Footings (GDD 18.75, G3): the small things that stand on the ground (picnic tables, garden sheds, bee boxes, benches,
+// birdbaths and fountains) each get a level pad, as a slab or a gravel bed is laid in life: their footprint and an apron
+// of `apron` m round it is level at the ground's height at their middle, cut into the slope uphill and built up downhill,
+// blending back over a shoulder of `shed` m. Read from the chunk as generated (a pure function of the seed); a table.
+export function footingsOf(seed, cx, cz, settings) {
+  const t = worldTables(seed, settings), stamp = shapeStamp();
+  if (t.feetStamp !== stamp) { t.feetStamp = stamp; t.feet.clear(); }
+  const k = cellKey(cx, cz), v = t.feet.get(k);
+  return v !== undefined ? v : keep(t.feet, k, makeFootings(seed, cx, cz, settings));
+}
+function makeFootings(seed, cx, cz, settings) {
+  const c = generateChunk(seed, cx, cz, settings), Gr = T.terrain.grade, a = Gr.apron, m = Gr.shed, F = [];
+  const rect = (x, z, hw, hd) => F.push({ k: 5, minx: x - hw - a, maxx: x + hw + a, minz: z - hd - a, maxz: z + hd + a, m, hx: x, hz: z, h: null });
+  for (const t of c.tables) if (t.axisX) rect(t.x, t.z, 0.95, 0.81); else rect(t.x, t.z, 0.81, 0.95); // the table and its benches
+  for (const s of c.sheds) if (!s.house) rect(s.x, s.z, s.hw, s.hd);
+  for (const h of c.hives) rect(h.x, h.z, 0.225, 0.225);
+  for (const b of c.boxes) if (b.bench && b.miny < 0.45) rect((b.minx + b.maxx) / 2, (b.minz + b.maxz) / 2, (b.maxx - b.minx) / 2 + 0.25, (b.maxz - b.minz) / 2 + 0.25); // a seat and its back
+  for (const b of c.baths) F.push({ k: 6, x: b.x, z: b.z, r: b.r + a, m, hx: b.x, hz: b.z, h: null });
+  return F;
+}
 export function groundAt(seed, x, z, settings) {
   const terrain = settings ? settings.terrain || 0 : 0;
   if (!terrain) return 0;
+  let h = groundBase(seed, x, z, settings, terrain);
+  const Gr = T.terrain.grade, M = Gr.reach, c0x = chunkOf(x - M), c1x = chunkOf(x + M), c0z = chunkOf(z - M), c1z = chunkOf(z + M);
+  for (let cz = c0z; cz <= c1z; cz++) for (let cx = c0x; cx <= c1x; cx++) {
+    for (const p of footingsOf(seed, cx, cz, settings)) {
+      let d;
+      if (p.k === 6) d = Math.max(0, Math.sqrt((x - p.x) * (x - p.x) + (z - p.z) * (z - p.z)) - p.r);
+      else { const dx = Math.max(p.minx - x, 0, x - p.maxx), dz = Math.max(p.minz - z, 0, z - p.maxz); d = Math.sqrt(dx * dx + dz * dz); }
+      if (d >= p.m) continue;
+      if (p.h === null) p.h = groundBase(seed, p.hx, p.hz, settings, 1); // the ground there without footings, kept per step of the modifier
+      const w = 1 - smooth(d / p.m);
+      h += (p.h * terrain - h) * w;
+    }
+  }
+  return h;
+}
+// the ground graded under paving, buildings and ponds, before the footings
+function groundBase(seed, x, z, settings, terrain) {
   let h = naturalGround(seed, x, z, settings, terrain, T.terrain.octaves);
   const Gr = T.terrain.grade, M = Gr.reach, c0x = chunkOf(x - M), c1x = chunkOf(x + M), c0z = chunkOf(z - M), c1z = chunkOf(z + M);
   for (let cz = c0z; cz <= c1z; cz++) for (let cx = c0x; cx <= c1x; cx++) {
