@@ -2212,6 +2212,20 @@ Agreed 2026-10-27: Tier 2 is built on the current stack in the order that surviv
 | T2-14 | **Planned (20).** Ground v2 and ground rings: a derivative-damped height with slope, nested rings round the camera, things standing level, flight that feels the slope | 4.8, 7.2 | L | sim and drawing; G1 to G4 |
 | T2-15 | **Planned (20).** Far detail and the map: impostors and a quality controller; map tiles drawn from the world with zoom, places of interest and facts to learn | 10, 12 | L | drawing, with the place list in the sim; G5 to G7 |
 
+### 19.6 Tier 3: the goals set 2026-11-03
+
+Set 2026-11-03, after T2-14: graphics now belong to the world-building thread (20.4). This list is the rest of the design that the current stack can carry: sim, rules and data, each ported to the C# core with tests. Items are built in order, each finished, documented and published before the next starts.
+
+| # | Goal | GDD | Size | Done when |
+|---|---|---|---|---|
+| T3-1 | **Leftovers from the flight and network work.** <br>• Other players' AI wasps reported inside walls are not drawn there (as players' wasps already are, 18.36). <br>• Assisted flight plans a way round long walls and hedges, not only single obstacles. <br>• A lock on a walking person lands on the exact spot locked. <br>• H's hover distance and orbit can be set. <br>• `CHASE.close` goes. | 11.8, 7.9 | M | each has a check in JS and C# where it touches the sim |
+| T3-2 | **Places of interest and field notes** (the sim half of 20.3 G6). <br>• A place list kept by the sim (C# twin): the nest, colonies of the line, rival nests, hives, swarms, water, town squares and beer gardens, porch lights, the exterminator, nest sites found. <br>• Every kind carries a true field note from Appendix C. <br>• Notes unlock into a field guide the first time the place is reached, kept in the save. <br>• The map and area cards show them. The drawn map tiles are the world thread's. | 10, App. C | M | the list matches in JS and C#; the guide unlocks, saves and restores |
+| T3-3 | **The growth tree's branches** (T2-13 in full, with T2-7). <br>• Nest (cell building, brood speed, insulation, guard strength), Flight (the Reflex cue, swoop recovery, lock-on range, assisted reach) and Line (gyne output, winter survival by site, how many lineage colonies found). <br>• Points come from experience, a few a season. <br>• Every node that changes an outcome is a colony parameter in ranges the plausibility checks know (11.8). | 6.8, 7.8 | L | nodes act in the sim, ranges are audited across peers, the colony view spends points |
+| T3-4 | **The player's own colonies meeting across species.** <br>• A player's hornets hunt the same player's yellowjackets and bees ball them, unless the player marks the colonies kin. <br>• Kin is colony state every peer reads. | 6.8 | S | a kin mark stops the hunting and balling; unmarked, they fight |
+| T3-5 | **How many colonies a player holds,** as a world setting, with colonies far from the player run at the abstract tier. | 6.8, 11.12 | M | the setting caps the held colonies; a far colony steps abstractly and comes back in step |
+
+**Waiting on decisions.** The genus progression beyond hornets and bees (6.9, T4: ants, termites, cockroaches) waits on Q-22 (what a removed tree means in a persistent world) and Q-23 (how alliances are formed and audited). Offshoot modes need their own design passes.
+
 ### 19.4 Not on the current stack
 
 **Needs Unity [Unity].** The presentation contract (12): hands brought to the impact point by IK and time-warped clips, skeletons fitted to the zone capsules, the Unity physics rule, wing animation; the Unity version and packages (15); art scope for thousands of humans (Q-11). The PoC keeps its stand-ins: capsule humans with two-bone arm IK that reaches the impact point at the impact tick.
