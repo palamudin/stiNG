@@ -7,6 +7,7 @@ import {
   NEST, NEST_ENTRANCE, flyPos, beePos, fmtClock, minuteOfDay, isLowerZone, broodTotal, sugarCap, proteinCap, waterCap, garmentGraph, dayWeather,
   NetLab, LINKS, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetVel, CHASE, targetLabel, assistPilot, swoopPilot, hoverPilot, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE, SKILLS, SKILL_UNLOCKS, SKILL_RANKED, SKILL_HIVE, skillCost, ROLES,
 } from './sim/index.js';
+import { Rings, RING, ringGrid, ringGLSL } from './view/rings.js';
 
 // Tuning as data (GDD 13, T1-22): read tuning/sting.tune, served next to the page, before anything uses T. Without it
 // the game runs the built-in values, and the pause screen and rules hash say so.
@@ -66,6 +67,7 @@ resize();
 // ------------------------------------------------------------------ materials
 
 const matCache = new Map();
+const ONGROUND = { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 }; // paving laid on the ground draws over it
 function mat(color, opts = {}) {
   const key = color + JSON.stringify(opts);
   if (!matCache.has(key)) matCache.set(key, new THREE.MeshLambertMaterial({ color, ...opts }));
@@ -96,17 +98,21 @@ ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
 
-// ------------------------------------------------------------------ terrain (T2-6)
-// The sim works in height above the ground. When the world has terrain, every vertex of everything drawn is lifted by
-// the ground's height where it stands, read from a height map round the camera (4 m texels, linear between them), and
-// the camera with it. Flat worlds never patch a material, so they draw exactly as before.
-const TERR = { N: 128, step: 4, on: false, ox: 1e9, oz: 1e9, data: new Float32Array(128 * 128), frame: 0 };
-const terrTex = new THREE.DataTexture(new Uint16Array(TERR.N * TERR.N), TERR.N, TERR.N, THREE.RedFormat, THREE.HalfFloatType);
-terrTex.magFilter = terrTex.minFilter = THREE.LinearFilter; terrTex.needsUpdate = true;
-const terrUniforms = { terrMap: { value: terrTex }, terrOrigin: { value: new THREE.Vector2() }, terrSize: { value: TERR.N * TERR.step } };
+// ------------------------------------------------------------------ terrain (T2-6; ground rings, GDD 20 G2)
+// The sim works in height above the ground. When the world has terrain, the ground is drawn as nested rings round the
+// wasp (view/rings.js): each level a 64-cell grid twice as coarse as the one inside it, its heights exact samples of
+// the ground kept in a 128 x 128 texture, morphing into the next level near its edge. Every vertex of everything else
+// is lifted by the ground as those rings draw it, and the camera and the sun with it. Flat worlds never patch a
+// material and draw the flat plane, exactly as before.
+const TERR = { on: false, frame: 0, filled: false };
+const rings = new Rings((x, z) => groundAt(sim.seed, x, z, sim.settings));
+const ringTex = rings.lv.map((L) => { const t = new THREE.DataTexture(L.data, RING.win, RING.win, THREE.RedFormat, THREE.FloatType); t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false; t.needsUpdate = true; return t; });
+const ringUniforms = { ringLv: { value: rings.lv.map(() => new THREE.Vector4()) } };
+ringTex.forEach((t, l) => { ringUniforms['ringMap' + l] = { value: t }; });
+const RING_GLSL = ringGLSL();
 THREE.ShaderChunk.common += `
 #ifdef TERRAIN
-uniform sampler2D terrMap; uniform vec2 terrOrigin; uniform float terrSize;
+${RING_GLSL}
 #endif
 `;
 THREE.ShaderChunk.begin_vertex += `
@@ -117,7 +123,7 @@ THREE.ShaderChunk.begin_vertex += `
   tm = modelMatrix * instanceMatrix;
 #endif
   vec4 tw = tm * vec4(transformed, 1.0);
-  float th = texture2D(terrMap, (tw.xz - terrOrigin) / terrSize).r;
+  float th = ringHeightAt(tw.xz);
   transformed += inverse(mat3(tm)) * vec3(0.0, th, 0.0);
 }
 #endif
@@ -127,47 +133,125 @@ function terrPatch(m) {
   m.userData.terr = true;
   m.defines = { ...(m.defines || {}), TERRAIN: '' };
   const prev = m.onBeforeCompile;
-  m.onBeforeCompile = (sh, r) => { Object.assign(sh.uniforms, terrUniforms); if (prev) prev.call(m, sh, r); };
+  m.onBeforeCompile = (sh, r) => { Object.assign(sh.uniforms, ringUniforms); if (prev) prev.call(m, sh, r); };
   m.needsUpdate = true;
 }
 const terrDepth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
 terrPatch(terrDepth);
 function terrApply(root) {
   root.traverse((o) => {
-    if (!o.material) return;
+    if (!o.material || o.userData.ring) return;
     for (const m of Array.isArray(o.material) ? o.material : [o.material]) terrPatch(m);
     if (o.castShadow && !o.customDepthMaterial) o.customDepthMaterial = terrDepth;
   });
 }
-// the height map round a point, rebuilt when the point has moved a quarter of the way to its edge
-function terrCenter(x, z) {
-  const h = TERR.N * TERR.step / 2;
-  if (Math.abs(x - TERR.ox - h) < h / 4 && Math.abs(z - TERR.oz - h) < h / 4) return;
-  TERR.ox = Math.round((x - h) / 16) * 16; TERR.oz = Math.round((z - h) / 16) * 16;
-  const d = TERR.data, out = terrTex.image.data;
-  for (let j = 0; j < TERR.N; j++) for (let i = 0; i < TERR.N; i++) {
-    const v = groundAt(sim.seed, TERR.ox + i * TERR.step, TERR.oz + j * TERR.step, sim.settings);
-    d[j * TERR.N + i] = v; out[j * TERR.N + i] = THREE.DataUtils.toHalfFloat(v);
+// Cover maps: the ground's land use and paving (lawns, forest floor, streets, sidewalks, cul-de-sacs, parking lots,
+// town squares) painted from the world onto two canvases round the wasp, a fine one (12.5 cm a texel, 64 m across)
+// and a coarse one (50 cm, 256 m), repainted when the wasp has gone an eighth of the way across. The ground rings
+// read them, so paving lies exactly on the ground however it rolls.
+const COVER = [{ px: 512, size: 64 }, { px: 512, size: 256 }].map((C) => {
+  const cv = document.createElement('canvas'); cv.width = cv.height = C.px;
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.generateMipmaps = false; tex.minFilter = THREE.LinearFilter; tex.premultiplyAlpha = true; // filtered without dark fringes
+  return { ...C, cv, ctx: cv.getContext('2d'), tex, ox: 1e9, oz: 1e9, sig: '' };
+});
+const coverUniforms = { cover0: { value: COVER[0].tex }, cover1: { value: COVER[1].tex }, coverBox: { value: [new THREE.Vector4(), new THREE.Vector4()] } };
+function paintCover(C, ox, oz) {
+  const g = C.ctx, k = C.px / C.size, X = (x) => (x - ox) * k, Z = (z) => (z - oz) * k;
+  g.clearRect(0, 0, C.px, C.px);
+  const rect = (minx, maxx, minz, maxz, col) => { g.fillStyle = col; g.fillRect(X(minx), Z(minz), Math.max(1, (maxx - minx) * k), Math.max(1, (maxz - minz) * k)); };
+  const c0x = chunkOf(ox), c0z = chunkOf(oz), c1x = chunkOf(ox + C.size), c1z = chunkOf(oz + C.size);
+  for (let cz = c0z; cz <= c1z; cz++) for (let cx = c0x; cx <= c1x; cx++) {
+    const rec = sim.records.get(chunkKey(cx, cz));
+    if (!rec) continue;
+    const c = rec.content;
+    if (c.use === 'yards' || c.use === 'forest' || c.use === 'mall') rect(cx * 64 - 32, cx * 64 + 32, cz * 64 - 32, cz * 64 + 32, c.use === 'yards' ? 'rgba(127,191,74,.28)' : c.use === 'forest' ? 'rgba(61,74,34,.45)' : 'rgba(143,154,106,.45)');
+    for (const r of c.roads || []) { rect(r.minx, r.maxx, r.minz - 1.6, r.minz, '#b9b4a8'); rect(r.minx, r.maxx, r.maxz, r.maxz + 1.6, '#b9b4a8'); rect(r.minx, r.maxx, r.minz, r.maxz, '#45464a'); }
+    g.fillStyle = '#45464a';
+    for (const l of c.loops || []) { g.beginPath(); g.arc(X(l.x), Z(l.z), l.r * k, 0, Math.PI * 2); g.fill(); }
+    for (const l of c.lots || []) {
+      rect(l.minx, l.maxx, l.minz, l.maxz, '#4b4c50');
+      const along = l.maxx - l.minx > l.maxz - l.minz;
+      for (let q = -12; q <= 12; q++) { const x = (l.minx + l.maxx) / 2 + (along ? q * 2.5 : 0), z = (l.minz + l.maxz) / 2 + (along ? 0 : q * 2.5); rect(x - (along ? 0.06 : 2.4), x + (along ? 0.06 : 2.4), z - (along ? 2.4 : 0.06), z + (along ? 2.4 : 0.06), '#d8d6cf'); }
+    }
+    for (const p of c.plazas || []) {
+      rect(p.minx, p.maxx, p.minz, p.maxz, '#bdb4a4');
+      for (let q = -3; q <= 3; q++) { rect(p.minx, p.maxx, (p.minz + p.maxz) / 2 + q * 9 - 0.04, (p.minz + p.maxz) / 2 + q * 9 + 0.04, '#a99f8e'); rect((p.minx + p.maxx) / 2 + q * 9 - 0.04, (p.minx + p.maxx) / 2 + q * 9 + 0.04, p.minz, p.maxz, '#a99f8e'); }
+    }
   }
-  terrTex.needsUpdate = true;
-  terrUniforms.terrOrigin.value.set(TERR.ox - TERR.step / 2, TERR.oz - TERR.step / 2);
+  C.tex.needsUpdate = true;
 }
-// the ground's height as drawn there (the same texels, bilinear), for the camera and the sun
-function terrAt(x, z) {
-  if (!TERR.on) return 0;
-  const N = TERR.N, fx = Math.min(N - 1.001, Math.max(0, (x - TERR.ox) / TERR.step)), fz = Math.min(N - 1.001, Math.max(0, (z - TERR.oz) / TERR.step));
-  const i = Math.floor(fx), j = Math.floor(fz), tx = fx - i, tz = fz - j, d = TERR.data;
-  const a = d[j * N + i], b = d[j * N + i + 1], c = d[(j + 1) * N + i], e = d[(j + 1) * N + i + 1];
-  return a + (b - a) * tx + (c - a) * tz + (a - b - c + e) * tx * tz;
+function coverFrame(fx, fz) {
+  COVER.forEach((C, i) => {
+    const step = C.size / 8, ox = Math.round((fx - C.size / 2) / step) * step, oz = Math.round((fz - C.size / 2) / step) * step;
+    const sig = ox + ',' + oz + ',' + sim.records.size; // repaint when moved, or when chunks have been generated
+    if (sig !== C.sig) { C.sig = sig; C.ox = ox; C.oz = oz; paintCover(C, ox, oz); }
+    coverUniforms.coverBox.value[i].set(C.ox, C.oz, C.size, 0);
+  });
 }
+const COVER_GLSL = `
+uniform sampler2D cover0, cover1; uniform vec4 coverBox[2];
+vec4 coverAt(vec2 p) {
+  vec2 u0 = (p - coverBox[0].xy) / coverBox[0].z, u1 = (p - coverBox[1].xy) / coverBox[1].z;
+  vec4 c1 = all(greaterThan(u1, vec2(0.0))) && all(lessThan(u1, vec2(1.0))) ? texture2D(cover1, u1) : vec4(0.0);
+  vec2 e = min(u0, 1.0 - u0);
+  float k = clamp(min(e.x, e.y) * 16.0, 0.0, 1.0); // fade to the coarse map near the fine one's edge
+  return k > 0.0 ? mix(c1, texture2D(cover0, u0), k) : c1;
+}
+`;
+// The ring meshes: one grid, each level placed and shaped in its vertex shader; a coarser level is drawn a little
+// further back, so where two levels are the same surface the finer one shows
+const ringGeo = (() => { const g = ringGrid(), geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(g.pos, 3)); geo.setIndex(new THREE.BufferAttribute(g.idx, 1)); return geo; })();
+const ringGrass = grassTex.clone(); ringGrass.repeat.set(1, 1); ringGrass.needsUpdate = true;
+const ringMeshes = rings.lv.map((L, l) => {
+  const m = new THREE.MeshLambertMaterial({ map: ringGrass, polygonOffset: l > 0, polygonOffsetFactor: l, polygonOffsetUnits: 4 * l });
+  m.defines = { RING_LEVEL: l };
+  m.userData.terr = true;
+  m.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, ringUniforms, coverUniforms);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec2 vRingP;\n' + COVER_GLSL)
+      .replace('#include <map_fragment>', '#include <map_fragment>\n  { vec4 cv = coverAt(vRingP); diffuseColor.rgb = mix(diffuseColor.rgb, cv.rgb / max(cv.a, 1e-4), cv.a); }');
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec2 vRingP;\n' + RING_GLSL)
+      .replace('#include <uv_vertex>', `#include <uv_vertex>
+  float rs = ringLv[RING_LEVEL].z;
+  vec2 rp = ringLv[RING_LEVEL].xy + position.xz * rs;
+  vRingP = rp;
+#ifdef USE_MAP
+  vMapUv = rp / ${GROUND_TILE.toFixed(1)};
+#endif`)
+      .replace('#include <beginnormal_vertex>', `float ry = ringSurfaceH(RING_LEVEL, rp);
+#if RING_LEVEL > 0
+  { vec2 rq = abs(rp - ringLv[RING_LEVEL - 1].xy); if (max(rq.x, rq.y) <= ringLv[RING_LEVEL - 1].w - 2.0 * rs) ry -= ${RING.push.toFixed(1)}; }
+#endif
+  vec3 objectNormal = normalize(vec3(ringSurfaceH(RING_LEVEL, rp - vec2(rs, 0.0)) - ringSurfaceH(RING_LEVEL, rp + vec2(rs, 0.0)), 2.0 * rs,
+    ringSurfaceH(RING_LEVEL, rp - vec2(0.0, rs)) - ringSurfaceH(RING_LEVEL, rp + vec2(0.0, rs))));
+#ifdef USE_TANGENT
+  vec3 objectTangent = vec3(1.0, 0.0, 0.0);
+#endif`)
+      .replace('#include <begin_vertex>', 'vec3 transformed = vec3(rp.x, ry, rp.y);');
+  };
+  const mesh = new THREE.Mesh(ringGeo, m);
+  mesh.frustumCulled = false; mesh.receiveShadow = true; mesh.visible = false; mesh.userData.ring = true;
+  scene.add(mesh);
+  return mesh;
+});
+// the ground's height as drawn there, for the camera and the sun
+function terrAt(x, z) { return TERR.on ? rings.heightAt(x, z) : 0; }
 function terrFrame(focus) {
   TERR.on = !!(sim && sim.settings.terrain);
-  if (!TERR.on) { // a flat world after a hilly one: materials already patched read a flat map
-    if (TERR.filled) { TERR.data.fill(0); terrTex.image.data.fill(0); terrTex.needsUpdate = true; TERR.filled = false; TERR.ox = 1e9; }
+  if (!TERR.on) { // a flat world after a hilly one: materials already patched read flat rings
+    if (TERR.filled) { for (const L of rings.lv) L.data.fill(0); for (const t of ringTex) t.needsUpdate = true; rings.reset(); TERR.filled = false; }
+    for (const m of ringMeshes) m.visible = false;
+    ground.visible = true;
     return;
   }
   TERR.filled = true;
-  terrCenter(focus.x, focus.z);
+  for (const l of rings.update(focus.x, focus.z)) ringTex[l].needsUpdate = true;
+  coverFrame(focus.x, focus.z);
+  rings.lv.forEach((L, l) => ringUniforms.ringLv.value[l].set(L.cx, L.cz, L.s, L.H));
+  for (const m of ringMeshes) m.visible = true;
+  ground.visible = false;
   if (TERR.frame++ % 30 === 0) terrApply(scene);
 }
 
@@ -264,23 +348,25 @@ function buildChunk(rec) {
   }
   // garden sheds: plank walls, a pitched roof, a crack in one wall and a gap under one eave (nest sites)
   // land use (T1-12): the ground of a yard is a mown lawn, a forest floor is dark; streets, cul-de-sacs, parking lots
-  if (c.use === 'yards' || c.use === 'forest' || c.use === 'mall') {
+  // on a hilly world the ground rings paint all of this into the ground itself (cover maps, GDD 20 G2)
+  const painted = !!(sim && sim.settings.terrain);
+  if (!painted && (c.use === 'yards' || c.use === 'forest' || c.use === 'mall')) {
     const tint = new THREE.Mesh(new THREE.PlaneGeometry(64, 64, 16, 16), new THREE.MeshLambertMaterial({ color: c.use === 'yards' ? '#7fbf4a' : c.use === 'forest' ? '#3d4a22' : '#8f9a6a', transparent: true, opacity: c.use === 'yards' ? 0.28 : 0.45, depthWrite: false }));
     tint.rotation.x = -Math.PI / 2; tint.position.set(rec.cx * 64, 0.002, rec.cz * 64); tint.receiveShadow = true; g.add(tint);
   }
-  const flat = (minx, maxx, minz, maxz, color, y) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(maxx - minx, maxz - minz, Math.max(1, Math.ceil((maxx - minx) / 4)), Math.max(1, Math.ceil((maxz - minz) / 4))), mat(color)); m.rotation.x = -Math.PI / 2; m.position.set((minx + maxx) / 2, y, (minz + maxz) / 2); m.receiveShadow = true; g.add(m); };
-  for (const r of c.roads || []) {
+  const flat = (minx, maxx, minz, maxz, color, y) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(maxx - minx, maxz - minz, Math.max(1, Math.ceil((maxx - minx) / 4)), Math.max(1, Math.ceil((maxz - minz) / 4))), mat(color, ONGROUND)); m.rotation.x = -Math.PI / 2; m.position.set((minx + maxx) / 2, y, (minz + maxz) / 2); m.receiveShadow = true; g.add(m); };
+  for (const r of painted ? [] : c.roads || []) {
     flat(r.minx, r.maxx, r.minz - 1.6, r.minz, '#b9b4a8', 0.004); flat(r.minx, r.maxx, r.maxz, r.maxz + 1.6, '#b9b4a8', 0.004); // sidewalks
     flat(r.minx, r.maxx, r.minz, r.maxz, '#45464a', 0.005);
   }
-  for (const l of c.loops || []) { const m = new THREE.Mesh(new THREE.RingGeometry(0, l.r, 40, 4), mat('#45464a')); m.rotation.x = -Math.PI / 2; m.position.set(l.x, 0.006, l.z); m.receiveShadow = true; g.add(m); }
-  for (const l of c.lots || []) {
+  for (const l of painted ? [] : c.loops || []) { const m = new THREE.Mesh(new THREE.RingGeometry(0, l.r, 40, 4), mat('#45464a', ONGROUND)); m.rotation.x = -Math.PI / 2; m.position.set(l.x, 0.006, l.z); m.receiveShadow = true; g.add(m); }
+  for (const l of painted ? [] : c.lots || []) {
     flat(l.minx, l.maxx, l.minz, l.maxz, '#4b4c50', 0.005);
     const along = l.maxx - l.minx > l.maxz - l.minz;
     for (let k = -12; k <= 12; k++) { const x = (l.minx + l.maxx) / 2 + (along ? k * 2.5 : 0), z = (l.minz + l.maxz) / 2 + (along ? 0 : k * 2.5); flat(x - (along ? 0.06 : 2.4), x + (along ? 0.06 : 2.4), z - (along ? 2.4 : 0.06), z + (along ? 2.4 : 0.06), '#d8d6cf', 0.006); }
   }
   // a town centre (T2-5): stone paving, shops with lit windows and awnings, a beer garden under string lights, a fountain
-  for (const p of c.plazas || []) {
+  for (const p of painted ? [] : c.plazas || []) {
     flat(p.minx, p.maxx, p.minz, p.maxz, '#bdb4a4', 0.005);
     for (let k = -3; k <= 3; k++) { flat(p.minx, p.maxx, (p.minz + p.maxz) / 2 + k * 9 - 0.04, (p.minz + p.maxz) / 2 + k * 9 + 0.04, '#a99f8e', 0.006); flat((p.minx + p.maxx) / 2 + k * 9 - 0.04, (p.minx + p.maxx) / 2 + k * 9 + 0.04, p.minz, p.maxz, '#a99f8e', 0.006); }
   }
@@ -1259,6 +1345,8 @@ function buildWasp(remote = false, rival = false, caste = 'worker', species = 'w
   g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
   Object.assign(g.userData, { abdomen, wl, wr, carry, legs, head, eyes, yaw: 0, step: 0 });
   scene.add(g);
+  // on hills the body is lifted in its vertex shader, past where its bounds say it is: never culled for that (GDD 20)
+  g.traverse((o) => { o.frustumCulled = false; });
   return g;
 }
 // Fur: a ball whose surface is pushed in and out at random, flat shaded, so it reads as tufts against the light
@@ -3106,7 +3194,7 @@ function newWorld(s, restored = null) {
   if (nestView) scene.remove(nestView);
   for (const o of oldNestViews) if (o) scene.remove(o);
   nestView = null; nestSig = ''; oldNestViews.length = 0;
-  TERR.ox = TERR.oz = 1e9; // a new world: build its height map afresh
+  rings.reset(); for (const C of COVER) C.sig = ''; // a new world: fill the rings and paint the cover afresh
   input.lock = input.pilot = input.swoopLock = null; input.turning = false;
   for (const v of lineViews.values()) scene.remove(v); lineViews.clear();
   if (restored) { sim = restored.sim; loadSnap = restored.json; lab = null; settings = sim.settings; }
@@ -3229,7 +3317,7 @@ newWorld({ seed: 1234n, dayMinutes: 2, humanDensity: 1, beeAggression: 1, season
 requestAnimationFrame(frame);
 
 // test hook for automated checks
-window.__sting = { get sim() { return sim; }, get lab() { return lab; }, input, padUI, touch, buildCmd, atlas, opts, start: () => $("bStart").click(), humanViews, toggleNest, toggleLab, saveWorld, camera };
+window.__sting = { get sim() { return sim; }, get lab() { return lab; }, input, padUI, touch, buildCmd, atlas, opts, start: () => $("bStart").click(), humanViews, waspViews, rings, toggleNest, toggleLab, saveWorld, camera, scene };
 window.__garment = (hm) => garmentGraph(hm.tr, hm.clothing, hm.posture, hm.parts[hm.posture]);
 window.__toWorld = toWorld;
 window.__weather = dayWeather;

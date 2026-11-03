@@ -313,20 +313,21 @@ namespace Sting.Core
             return BaseUse(Region(seed, R.rx, R.rz, st), R.lx, R.lz);
         }
         // ---------------------------------------------------------------- terrain (T2-6, ground v2 GDD 20 G1; see world.js groundAt)
-        static readonly Num[] lat = new Num[65536]; static readonly bool[] latSet = new bool[65536];
+        static readonly Num[] lat = new Num[65536];
         static ulong latticeSeed; static bool latticeOn;
         static long CellKey(long ix, long iz) => (ix + 1048576) * 2097152 + (iz + 1048576);
-        /// the 256 x 256 lattice from the world seed, filled as it is first read
+        /// the 256 x 256 lattice from the world seed (a fast 32-bit hash keyed by one full hash of the seed)
         static Num Lattice(ulong seed, long ix, long iz)
         {
-            int i = (int)(ix & 255), j = (int)(iz & 255), k = (j << 8) | i;
             lock (lat)
             {
-                if (!latticeOn || latticeSeed != seed) { latticeOn = true; latticeSeed = seed; System.Array.Clear(latSet, 0, latSet.Length); }
-                if (latSet[k]) return lat[k];
-                Num v = Unit(Hash(seed, Domain.WorldGen, U64(i), U64(j), U64(0x7E50))) * 2 - 1;
-                lat[k] = v; latSet[k] = true;
-                return v;
+                if (!latticeOn || latticeSeed != seed)
+                {
+                    latticeOn = true; latticeSeed = seed;
+                    int b = unchecked((int)(uint)(Hash(seed, Domain.WorldGen, U64(0x7E50)) >> 32));
+                    for (int j = 0; j < 256; j++) for (int i = 0; i < 256; i++) lat[(j << 8) | i] = H32(b, i, j, 0x7E50) * 2 - 1;
+                }
+                return lat[(int)(((iz & 255) << 8) | (ix & 255))];
             }
         }
         /// value noise with its derivatives (quintic fade)
@@ -341,14 +342,14 @@ namespace Sting.Core
         }
         static Num Smooth(Num t) => t * t * (3 - 2 * t);
         /// the shape, before the modifier, the home ring and land use: derivative-damped, rotated, domain-warped fbm
-        static Num GroundShape(ulong seed, Num x, Num z)
+        static Num GroundShape(ulong seed, Num x, Num z, int oct)
         {
             Num bx = (0.6 * x - 0.8 * z) / T.terrain.cell, by = (0.8 * x + 0.6 * z) / T.terrain.cell;
             Num wx = Noised(seed, bx * 0.43 + 3.1, by * 0.43 + 7.7).v;
             Num wy = Noised(seed, bx * 0.43 - 5.3, by * 0.43 + 1.9).v;
             Num px = bx + T.terrain.warp * wx, py = by + T.terrain.warp * wy, a = 0, b = 1, dx = 0, dy = 0, lo = 0;
-            int L = System.Math.Min(T.terrain.octaves, 2);
-            for (int i = 0; i < T.terrain.octaves; i++)
+            int L = System.Math.Min(oct, 2);
+            for (int i = 0; i < oct; i++)
             {
                 var n = Noised(seed, px, py);
                 dx += n.dx; dy += n.dy;
@@ -382,18 +383,109 @@ namespace Sting.Core
                 return v;
             }
         }
-        /// The ground's height: the shape above times the modifier, flat when the terrain modifier is 0 and round the home
-        /// tree, damped under built-up land. The sim works in height above it.
-        public static Num GroundAt(ulong seed, Num x, Num z, Settings st)
+        /// the ground before grading: oct octaves, times the modifier, the home ring and land use
+        static Num NaturalGround(ulong seed, Num x, Num z, Settings st, int terrain, int oct)
         {
-            int terrain = st?.terrain ?? 0;
-            if (terrain == 0) return 0;
             Num f = Smooth(Clamp01((Sqrt(x * x + z * z) - T.terrain.flatR) / T.terrain.rise));
             if (f == 0) return 0;
             Num u = x / CS, v = z / CS; int i = (int)Floor(u), j = (int)Floor(v); Num tu = Smooth(u - i), tv = Smooth(v - j);
             Num a = ChunkRoll(seed, i, j, st), b = ChunkRoll(seed, i + 1, j, st), c = ChunkRoll(seed, i, j + 1, st), d = ChunkRoll(seed, i + 1, j + 1, st);
             Num roll = a + (b - a) * tu + (c - a) * tv + (a - b - c + d) * tu * tv;
-            return terrain * T.terrain.amp * f * roll * GroundShape(seed, x, z);
+            return terrain * T.terrain.amp * f * roll * GroundShape(seed, x, z, oct);
+        }
+        /// a chunk's paving and buildings, as GenerateChunk places them, without generating the rest (world.js pavingOf)
+        public sealed class Paving
+        {
+            public List<Rect> roads = new List<Rect>(), lots = new List<Rect>(), plazas = new List<Rect>();
+            public List<Loop> loops = new List<Loop>(); public List<Mall> malls = new List<Mall>(); public List<Shop> shops = new List<Shop>(); public List<Shed> houses = new List<Shed>();
+        }
+        public static Paving PavingOf(ulong seed, int cx, int cz, Settings st = null)
+        {
+            ulong H(long slot) => Hash(seed, Domain.WorldGen, U64(cx), U64(cz), U64(slot));
+            Num ox = cx * CS, oz = cz * CS; var o = new Paving();
+            if (cx == 0 && cz == 0) return o;
+            string use = LandUse(seed, cx, cz, st);
+            if (use == "yards")
+            {
+                bool endW = LandUse(seed, cx - 1, cz, st) != "yards", endE = LandUse(seed, cx + 1, cz, st) != "yards";
+                o.roads.Add(new Rect { minx = ox + (endW ? -22 : -32), maxx = ox + (endE ? 22 : 32), minz = oz - 4, maxz = oz + 4 });
+                if (endW) o.loops.Add(new Loop { x = ox - 22, z = oz, r = 11 });
+                if (endE) o.loops.Add(new Loop { x = ox + 22, z = oz, r = 11 });
+                for (int li = 0; li < 4; li++)
+                {
+                    int s = li < 2 ? -1 : 1; Num lx = ox + (li % 2 != 0 ? 16 : -16); long b = 3000 + li * 2000;
+                    if (Unit(H(b)) < 0.9) o.houses.Add(new Shed { x = lx + Range(H(b + 1), -3, 3), z = oz + s * 15.5, hw = Range(H(b + 2), 5, 6.5), hd = Range(H(b + 3), 4, 5), house = true });
+                }
+            }
+            else if (use == "mall")
+            {
+                int side = MallSide(seed, cx, cz, st);
+                int o0 = side == 1 ? 1 : side == 3 ? -1 : 0, o1 = side == 0 ? -1 : side == 2 ? 1 : 0, a0 = o0 != 0 ? 0 : 1, a1 = o0 != 0 ? 1 : 0;
+                (Num x, Num z) At(Num u, Num v) => (ox + a0 * u + o0 * v, oz + a1 * u + o1 * v);
+                var bp = At(0, 21); Num hx = o0 != 0 ? 8 : 27, hz = o0 != 0 ? 27 : 8; var l0 = At(-28, 11); var l1 = At(28, -20);
+                o.malls.Add(new Mall { x = bp.x, z = bp.z, hw = hx, hd = hz });
+                o.lots.Add(new Rect { minx = Min(l0.x, l1.x), maxx = Max(l0.x, l1.x), minz = Min(l0.z, l1.z), maxz = Max(l0.z, l1.z) });
+            }
+            else if (use == "town")
+            {
+                var q = TownQuarter(seed, cx, cz, st); int ix = q.qx != 0 ? -1 : 1, iz = q.qz != 0 ? -1 : 1;
+                o.plazas.Add(new Rect { minx = ox - 32, maxx = ox + 32, minz = oz - 32, maxz = oz + 32 });
+                o.shops.Add(new Shop { x = ox - ix * 22, z = oz - iz * 22, hw = 9, hd = 9 });
+                o.shops.Add(new Shop { x = ox - ix * 25, z = oz + iz * 6, hw = 6, hd = 8 });
+                o.shops.Add(new Shop { x = ox + ix * 6, z = oz - iz * 25, hw = 8, hd = 6 });
+            }
+            return o;
+        }
+        /// graded ground (GDD 20): kinds 0 street (levelled across at hz), 1 level rect, 2 cul-de-sac, 3 broad-shaped rect
+        sealed class Pad { public int k; public Num minx, maxx, minz, maxz, x, z, r, m, hx, hz, h; public bool hSet; }
+        static readonly Dictionary<long, List<Pad>> pads = new Dictionary<long, List<Pad>>(); static string padTag;
+        static List<Pad> PadsOf(ulong seed, int cx, int cz, Settings st)
+        {
+            var F = Features(st); string tag = seed + ":" + F.woods + "," + F.towns + "," + N(F.water) + "," + N(F.hives);
+            lock (pads)
+            {
+                if (padTag != tag) { padTag = tag; pads.Clear(); }
+                long key = CellKey(cx, cz);
+                if (pads.TryGetValue(key, out var P)) return P;
+                if (pads.Count > 4096) pads.Clear();
+                var c = PavingOf(seed, cx, cz, st); P = new List<Pad>();
+                void R(int k, Num minx, Num maxx, Num minz, Num maxz, Num m, Num hx, Num hz) => P.Add(new Pad { k = k, minx = minx, maxx = maxx, minz = minz, maxz = maxz, m = m, hx = hx, hz = hz });
+                foreach (var r in c.roads) R(0, r.minx, r.maxx, r.minz - T.terrain.grade.walk, r.maxz + T.terrain.grade.walk, T.terrain.grade.road, 0, (r.minz + r.maxz) / 2);
+                foreach (var l in c.loops) P.Add(new Pad { k = 2, x = l.x, z = l.z, r = l.r, m = T.terrain.grade.road, hx = 0, hz = l.z });
+                foreach (var l in c.lots) R(1, l.minx, l.maxx, l.minz, l.maxz, T.terrain.grade.lot, (l.minx + l.maxx) / 2, (l.minz + l.maxz) / 2);
+                foreach (var q in c.plazas) R(3, q.minx, q.maxx, q.minz, q.maxz, T.terrain.grade.lot, 0, 0);
+                foreach (var b in c.malls) R(1, b.x - b.hw, b.x + b.hw, b.z - b.hd, b.z + b.hd, T.terrain.grade.house, b.x, b.z);
+                foreach (var b in c.shops) R(1, b.x - b.hw, b.x + b.hw, b.z - b.hd, b.z + b.hd, T.terrain.grade.house, b.x, b.z);
+                foreach (var b in c.houses) R(1, b.x - b.hw, b.x + b.hw, b.z - b.hd, b.z + b.hd, T.terrain.grade.house, b.x, b.z);
+                pads[key] = P;
+                return P;
+            }
+        }
+        static string N(Num v) => ((double)v).ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+        /// The ground's height: the shape times the modifier, flat when the terrain modifier is 0 and round the home
+        /// tree, damped under built-up land, graded under streets, lots, squares and buildings. The sim works in height above it.
+        public static Num GroundAt(ulong seed, Num x, Num z, Settings st)
+        {
+            int terrain = st?.terrain ?? 0;
+            if (terrain == 0) return 0;
+            Num h = NaturalGround(seed, x, z, st, terrain, T.terrain.octaves);
+            Num M = T.terrain.grade.reach; int GO = T.terrain.grade.oct;
+            int c0x = ChunkOf(x - M), c1x = ChunkOf(x + M), c0z = ChunkOf(z - M), c1z = ChunkOf(z + M);
+            for (int cz = c0z; cz <= c1z; cz++) for (int cx = c0x; cx <= c1x; cx++)
+                    foreach (var p in PadsOf(seed, cx, cz, st))
+                    {
+                        Num d;
+                        if (p.k == 2) d = Max(0, Sqrt((x - p.x) * (x - p.x) + (z - p.z) * (z - p.z)) - p.r);
+                        else { Num dx = Max(Max(p.minx - x, 0), x - p.maxx), dz = Max(Max(p.minz - z, 0), z - p.maxz); d = Sqrt(dx * dx + dz * dz); }
+                        if (d >= p.m) continue;
+                        Num hp;
+                        if (p.k == 0 || p.k == 2) hp = NaturalGround(seed, x, p.hz, st, terrain, GO);
+                        else if (p.k == 3) hp = NaturalGround(seed, x, z, st, terrain, GO);
+                        else { lock (p) { if (!p.hSet) { p.h = NaturalGround(seed, p.hx, p.hz, st, 1, GO); p.hSet = true; } } hp = p.h * terrain; }
+                        Num w = 1 - Smooth(d / p.m);
+                        h += (hp - h) * w;
+                    }
+            return h;
         }
         /// the ground's slope (rise per metre along x and z), from the heights a quarter metre either side
         public static (Num x, Num z) GroundSlope(ulong seed, Num x, Num z, Settings st)

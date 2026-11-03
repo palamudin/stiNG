@@ -1,5 +1,5 @@
 // World generation, clock, weather and schedules (GDD 4, 5, 8.2). All pure functions of seed and time.
-import { Domain, hash, unit, range, rangeInt, u64, dsin, dcos, TAU, rnd, datan2, clamp01 } from './rng.js';
+import { Domain, hash, unit, range, rangeInt, u64, dsin, dcos, TAU, rnd, datan2, clamp01, h32 } from './rng.js';
 import { T } from './tuning.js';
 
 const CS = T.chunk.size;
@@ -189,14 +189,15 @@ export function features(s) {
 // before it, which reads like erosion: soft valleys, sharper crests). Flat when the terrain modifier is 0 and round the
 // home tree, damped under built-up land. The sim works in height above the ground, so nothing collides with it: the
 // ground's height is drawn, blocks sight lines, gathers puddles in hollows and catches the wind on rises.
-// The lattice is 256 x 256 values from the world seed, filled as they are first read.
+// The lattice is 256 x 256 values from the world seed (a fast 32-bit hash keyed by one full hash of the seed).
 const LAT = { seed: null, v: new Float64Array(65536) };
 function lattice(seed, ix, iz) {
-  if (LAT.seed !== seed) { LAT.seed = seed; LAT.v.fill(NaN); }
-  const i = ix & 255, j = iz & 255, k = (j << 8) | i;
-  let v = LAT.v[k];
-  if (v !== v) { v = unit(hash(seed, Domain.WorldGen, u64(i), u64(j), 0x7E50n)) * 2 - 1; LAT.v[k] = v; }
-  return v;
+  if (LAT.seed !== seed) {
+    LAT.seed = seed;
+    const base = Number(hash(seed, Domain.WorldGen, 0x7E50n) >> 32n) | 0;
+    for (let j = 0; j < 256; j++) for (let i = 0; i < 256; i++) LAT.v[(j << 8) | i] = h32(base, i, j, 0x7E50) * 2 - 1;
+  }
+  return LAT.v[((iz & 255) << 8) | (ix & 255)];
 }
 // value noise with its derivatives (quintic fade): N = [value, d/dx, d/dy]
 const N = [0, 0, 0];
@@ -209,14 +210,14 @@ function noised(seed, x, y) {
   N[0] = a + k1 * ux + k2 * uy + k4 * ux * uy; N[1] = dux * (k1 + k4 * uy); N[2] = duy * (k2 + k4 * ux);
 }
 const smooth = (t) => t * t * (3 - 2 * t);
-// The shape, before the modifier, the home ring and land use: about -1.5..1.4, sd 0.3
-function groundShape(seed, x, z) {
+// The shape, before the modifier, the home ring and land use: about -1.5..1.4, sd 0.3; oct: how many octaves
+function groundShape(seed, x, z, oct = T.terrain.octaves) {
   const G = T.terrain, bx = (0.6 * x - 0.8 * z) / G.cell, by = (0.8 * x + 0.6 * z) / G.cell;
   noised(seed, bx * 0.43 + 3.1, by * 0.43 + 7.7); const wx = N[0];
   noised(seed, bx * 0.43 - 5.3, by * 0.43 + 1.9); const wy = N[0];
   let px = bx + G.warp * wx, py = by + G.warp * wy, a = 0, b = 1, dx = 0, dy = 0, lo = 0;
-  const L = Math.min(G.octaves, 2);
-  for (let i = 0; i < G.octaves; i++) {
+  const L = Math.min(oct, 2);
+  for (let i = 0; i < oct; i++) {
     noised(seed, px, py);
     dx += N[1]; dy += N[2];
     a += b * N[0] / (1 + dx * dx + dy * dy);
@@ -243,15 +244,91 @@ function chunkRoll(seed, cx, cz, settings) {
   if (v === undefined) { if (flatCache.map.size > 4096) flatCache.map.clear(); v = T.terrain.roll[landUse(seed, cx, cz, settings)] ?? 1; flatCache.map.set(k, v); }
   return v;
 }
-export function groundAt(seed, x, z, settings) {
-  const terrain = settings ? settings.terrain || 0 : 0;
-  if (!terrain) return 0;
+// The ground before grading: oct octaves, times the modifier, the home ring and land use
+function naturalGround(seed, x, z, settings, terrain, oct) {
   const G = T.terrain, f = smooth(clamp01((Math.sqrt(x * x + z * z) - G.flatR) / G.rise));
   if (f === 0) return 0;
   const u = x / CS, v = z / CS, i = Math.floor(u), j = Math.floor(v), tu = smooth(u - i), tv = smooth(v - j);
   const a = chunkRoll(seed, i, j, settings), b = chunkRoll(seed, i + 1, j, settings), c = chunkRoll(seed, i, j + 1, settings), d = chunkRoll(seed, i + 1, j + 1, settings);
   const roll = a + (b - a) * tu + (c - a) * tv + (a - b - c + d) * tu * tv;
-  return terrain * G.amp * f * roll * groundShape(seed, x, z);
+  return terrain * G.amp * f * roll * groundShape(seed, x, z, oct);
+}
+// Graded ground (GDD 20): roads, cul-de-sacs, parking lots, town squares and the pads of buildings are graded, the
+// ground blending back to its own shape over a shoulder of `m` metres round each. A street with its sidewalks is level
+// across and follows only the broad shape of the land (the first `oct` octaves) along its length; a town square is
+// that broad shape; a cul-de-sac is graded as the street it ends; a lot and every building's pad are level, at the broad
+// shape's height at their middle. Kinds: 0 street (along x, levelled across at hz), 1 level rect, 2 cul-de-sac (a disc
+// graded as its street), 3 broad-shaped rect.
+const padCache = { tag: null, map: new Map() };
+function padsOf(seed, cx, cz, settings) {
+  const F = features(settings), tag = seed + ':' + F.woods + ',' + F.towns + ',' + F.water + ',' + F.hives;
+  if (padCache.tag !== tag) { padCache.tag = tag; padCache.map.clear(); }
+  const key = cellKey(cx, cz);
+  let P = padCache.map.get(key);
+  if (P) return P;
+  if (padCache.map.size > 4096) padCache.map.clear();
+  const c = pavingOf(seed, cx, cz, settings), Gr = T.terrain.grade;
+  P = [];
+  const rect = (k, minx, maxx, minz, maxz, m, hx, hz) => P.push({ k, minx, maxx, minz, maxz, m, hx, hz, h: null });
+  for (const r of c.roads) rect(0, r.minx, r.maxx, r.minz - Gr.walk, r.maxz + Gr.walk, Gr.road, 0, (r.minz + r.maxz) / 2);
+  for (const l of c.loops) P.push({ k: 2, x: l.x, z: l.z, r: l.r, m: Gr.road, hx: 0, hz: l.z, h: null });
+  for (const l of c.lots) rect(1, l.minx, l.maxx, l.minz, l.maxz, Gr.lot, (l.minx + l.maxx) / 2, (l.minz + l.maxz) / 2);
+  for (const p of c.plazas) rect(3, p.minx, p.maxx, p.minz, p.maxz, Gr.lot, 0, 0);
+  for (const b of c.malls) rect(1, b.x - b.hw, b.x + b.hw, b.z - b.hd, b.z + b.hd, Gr.house, b.x, b.z);
+  for (const b of c.shops) rect(1, b.x - b.hw, b.x + b.hw, b.z - b.hd, b.z + b.hd, Gr.house, b.x, b.z);
+  for (const b of c.houses) rect(1, b.x - b.hw, b.x + b.hw, b.z - b.hd, b.z + b.hd, Gr.house, b.x, b.z);
+  padCache.map.set(key, P);
+  return P;
+}
+// A chunk's paving and buildings, as generateChunk places them, without generating the rest (the ground's grading
+// reads this for chunks far out that nothing has generated; a test holds the two to the same numbers)
+export function pavingOf(seed, cx, cz, settings) {
+  const H = (slot) => hash(seed, Domain.WorldGen, u64(cx), u64(cz), BigInt(slot)), ox = cx * CS, oz = cz * CS;
+  const out = { roads: [], loops: [], lots: [], plazas: [], malls: [], shops: [], houses: [] };
+  if (cx === 0 && cz === 0) return out;
+  const use = landUse(seed, cx, cz, settings);
+  if (use === 'yards') {
+    const endW = landUse(seed, cx - 1, cz, settings) !== 'yards', endE = landUse(seed, cx + 1, cz, settings) !== 'yards';
+    out.roads.push({ minx: ox + (endW ? -22 : -32), maxx: ox + (endE ? 22 : 32), minz: oz - 4, maxz: oz + 4 });
+    if (endW) out.loops.push({ x: ox - 22, z: oz, r: 11 });
+    if (endE) out.loops.push({ x: ox + 22, z: oz, r: 11 });
+    for (let li = 0; li < 4; li++) {
+      const s = li < 2 ? -1 : 1, lx = ox + (li % 2 ? 16 : -16), base = 3000 + li * 2000;
+      if (unit(H(base)) < 0.9) out.houses.push({ x: lx + range(H(base + 1), -3, 3), z: oz + s * 15.5, hw: range(H(base + 2), 5, 6.5), hd: range(H(base + 3), 4, 5) });
+    }
+  } else if (use === 'mall') {
+    const side = mallSide(seed, cx, cz, settings), o = [[0, -1], [1, 0], [0, 1], [-1, 0]][side], al = o[0] ? [0, 1] : [1, 0];
+    const at = (u, v) => ({ x: ox + al[0] * u + o[0] * v, z: oz + al[1] * u + o[1] * v });
+    const b = at(0, 21), hx = o[0] ? 8 : 27, hz = o[0] ? 27 : 8, l0 = at(-28, 11), l1 = at(28, -20);
+    out.malls.push({ x: b.x, z: b.z, hw: hx, hd: hz });
+    out.lots.push({ minx: Math.min(l0.x, l1.x), maxx: Math.max(l0.x, l1.x), minz: Math.min(l0.z, l1.z), maxz: Math.max(l0.z, l1.z) });
+  } else if (use === 'town') {
+    const q = townQuarter(seed, cx, cz, settings), ix = q.qx ? -1 : 1, iz = q.qz ? -1 : 1;
+    out.plazas.push({ minx: ox - 32, maxx: ox + 32, minz: oz - 32, maxz: oz + 32 });
+    out.shops.push({ x: ox - ix * 22, z: oz - iz * 22, hw: 9, hd: 9 }, { x: ox - ix * 25, z: oz + iz * 6, hw: 6, hd: 8 }, { x: ox + ix * 6, z: oz - iz * 25, hw: 8, hd: 6 });
+  }
+  return out;
+}
+export function groundAt(seed, x, z, settings) {
+  const terrain = settings ? settings.terrain || 0 : 0;
+  if (!terrain) return 0;
+  let h = naturalGround(seed, x, z, settings, terrain, T.terrain.octaves);
+  const Gr = T.terrain.grade, M = Gr.reach, c0x = chunkOf(x - M), c1x = chunkOf(x + M), c0z = chunkOf(z - M), c1z = chunkOf(z + M);
+  for (let cz = c0z; cz <= c1z; cz++) for (let cx = c0x; cx <= c1x; cx++) {
+    for (const p of padsOf(seed, cx, cz, settings)) {
+      let d;
+      if (p.k === 2) d = Math.max(0, Math.sqrt((x - p.x) * (x - p.x) + (z - p.z) * (z - p.z)) - p.r);
+      else { const dx = Math.max(p.minx - x, 0, x - p.maxx), dz = Math.max(p.minz - z, 0, z - p.maxz); d = Math.sqrt(dx * dx + dz * dz); }
+      if (d >= p.m) continue;
+      let hp;
+      if (p.k === 0 || p.k === 2) hp = naturalGround(seed, x, p.hz, settings, terrain, Gr.oct); // a street and its cul-de-sac
+      else if (p.k === 3) hp = naturalGround(seed, x, z, settings, terrain, Gr.oct);
+      else { if (p.h === null) p.h = naturalGround(seed, p.hx, p.hz, settings, 1, Gr.oct); hp = p.h * terrain; } // kept per step of the modifier
+      const w = 1 - smooth(d / p.m);
+      h += (hp - h) * w;
+    }
+  }
+  return h;
 }
 // The ground's slope (rise per metre along x and z), from the heights a quarter metre either side
 export function groundSlope(seed, x, z, settings) {

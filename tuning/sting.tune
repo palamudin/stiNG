@@ -938,6 +938,15 @@ sightStep = 4
 poolTries = 3
 exposure = 0.05
 
+[terrain.grade]
+oct = 2
+walk = 1.6
+road = 3
+lot = 3
+house = 2.5
+shed = 1
+reach = 3
+
 [terrain.roll]
 park = 1
 forest = 1

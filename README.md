@@ -36,6 +36,7 @@ three.js r160 is the one outside dependency, loaded by exact version from jsDeli
 cd poc
 node test/sim.test.mjs   # simulation: determinism, replay, colony, humans, swats, bees, seasons, saves
 node test/net.test.mjs   # two peers over simulated links: agreement on every human, late join, rival fights
+node test/view.test.mjs  # drawing helpers with no browser: the ground rings meet without cracks
 ```
 
 **C# core** (.NET 8 SDK):

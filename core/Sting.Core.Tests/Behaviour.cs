@@ -1095,6 +1095,35 @@ namespace Sting.Core.Tests
                     int plain = Treads(); Num keep = T.terrain.terrace; T.terrain.terrace = 1; int stepped = Treads(); T.terrain.terrace = keep;
                     Ok(worst < 0.02 && stepped > plain * 1.5, $"the slope comes with the height (within {worst:0.0000} of finer differences); terraces leave {stepped} of 400 spots on a walk level against {plain}");
                 }
+                // graded ground (GDD 20): streets level across with their sidewalks, buildings on level pads, paving read from a
+                // list that matches what GenerateChunk places
+                {
+                    bool same = true; int n = 0; var T2 = new Settings { towns = 2 };
+                    string Rs(IEnumerable<Rect> a) => string.Join(";", a.Select(r => D(r.minx) + "," + D(r.maxx) + "," + D(r.minz) + "," + D(r.maxz)));
+                    string Bs(IEnumerable<(Num x, Num z, Num hw, Num hd)> a) => string.Join(";", a.Select(r => D(r.x) + "," + D(r.z) + "," + D(r.hw) + "," + D(r.hd)));
+                    for (int cz = -6; cz <= 6; cz++) for (int cx = -6; cx <= 6; cx++)
+                    {
+                        var c = World.GenerateChunk(1234, cx, cz, T2); var p = World.PavingOf(1234, cx, cz, T2);
+                        if (Rs(c.roads) != Rs(p.roads) || Rs(c.lots) != Rs(p.lots) || Rs(c.plazas) != Rs(p.plazas) || string.Join(";", c.loops.Select(l => D(l.x) + "," + D(l.z) + "," + D(l.r))) != string.Join(";", p.loops.Select(l => D(l.x) + "," + D(l.z) + "," + D(l.r)))
+                            || Bs(c.malls.Select(b => (b.x, b.z, b.hw, b.hd))) != Bs(p.malls.Select(b => (b.x, b.z, b.hw, b.hd))) || Bs(c.shops.Select(b => (b.x, b.z, b.hw, b.hd))) != Bs(p.shops.Select(b => (b.x, b.z, b.hw, b.hd)))
+                            || Bs(c.sheds.Where(b => b.house).Select(b => (b.x, b.z, b.hw, b.hd))) != Bs(p.houses.Select(b => (b.x, b.z, b.hw, b.hd)))) same = false;
+                        n += p.roads.Count + p.houses.Count + p.lots.Count + p.plazas.Count;
+                    }
+                    double across = 0, pad = 0, bumpy = 0, rough = 0; int roads = 0, houses = 0;
+                    for (int cz = -4; cz <= 4; cz++) for (int cx = -4; cx <= 4; cx++)
+                    {
+                        var p = World.PavingOf(1234, cx, cz, new Settings());
+                        foreach (var r in p.roads)
+                        {
+                            roads++;
+                            for (int k = 0; k <= 20; k++) { Num x = r.minx + (r.maxx - r.minx) * k / 20; double lo2 = double.MaxValue, hi2 = double.MinValue; for (int j = 0; j <= 8; j++) { double v = D(G2(x, r.minz - 1.6 + (r.maxz - r.minz + 3.2) * j / 8)); lo2 = Math.Min(lo2, v); hi2 = Math.Max(hi2, v); } across = Math.Max(across, hi2 - lo2); }
+                            for (int k = 1; k < 60; k++) { Num x = r.minx + (r.maxx - r.minx) * k / 60, e = 0.5, zc = (r.minz + r.maxz) / 2; rough = Math.Max(rough, D(Abs(G2(x - e, zc) - 2 * G2(x, zc) + G2(x + e, zc)))); bumpy = Math.Max(bumpy, D(Abs(G2(x - e, zc + 12) - 2 * G2(x, zc + 12) + G2(x + e, zc + 12)))); }
+                        }
+                        foreach (var b in p.houses) { houses++; double lo2 = double.MaxValue, hi2 = double.MinValue; for (int j = 0; j <= 6; j++) for (int i = 0; i <= 6; i++) { double v = D(G2(b.x - b.hw + 2 * b.hw * i / 6, b.z - b.hd + 2 * b.hd * j / 6)); lo2 = Math.Min(lo2, v); hi2 = Math.Max(hi2, v); } pad = Math.Max(pad, hi2 - lo2); }
+                    }
+                    Ok(same && n > 50 && roads > 5 && houses > 10 && across < 1e-6 && pad < 1e-6 && rough < bumpy / 3,
+                        $"on a hilly world {roads} streets are level across their sidewalks and smooth along (bend {rough:0.0000} m against {bumpy:0.0000} on the lawns beside), {houses} houses stand on level pads; the paving list matches the generator over 169 chunks");
+                }
                 var sh = new Sim(new Settings { seed = 1234, birds = false, terrain = 2 }, new SimOpts { noAI = true }); var sf = new Sim(new Settings { seed = 1234, birds = false }, new SimOpts { noAI = true });
                 int blocked = 0, pairs = 0;
                 for (int j = 0; j < 12; j++) for (int i = 0; i < 12; i++)

@@ -14,13 +14,15 @@ The tier-0 slice of the GDD, built in the browser so it can move to Unity. Same 
 | `sim/net.js` | Simulated link, the two-peer lab and an N-peer mesh lab | `core/Sting.Core/Net.cs` (ported); real transport later |
 | `sim/persist.js` | Exact snapshot and restore, replay from a snapshot, joining a world in progress | `core/Sting.Core/Persist.cs` (ported, binary) |
 | `sim/bots.js` | Scripted pilots that produce ordinary input commands | `core/Sting.Core/Bots.cs` (ported) |
+| `view/rings.js` | Ground rings round the camera: level windows, morphing, the GLSL twin (GDD 20) | a ring mesh and HLSL vertex shader |
 | `game.js` | three.js rendering, animation, camera, input, HUD, sound | Unity scene, Animator, UI |
 | `index.html` | Page shell, HUD markup and styles | UI Toolkit |
 | `test/sim.test.mjs` | 214 headless sim checks | `Sting.Core.Tests` |
 | `test/net.test.mjs` | 43 network checks | `Sting.Net.Tests` |
+| `test/view.test.mjs` | ground-ring checks (GDD 20) | presentation, Unity side |
 | `test/parity.mjs` | Writes `core/fixtures/parity.txt`: 29 digests the C# core must reproduce bit for bit | `core/Sting.Core.Tests` |
 
-Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.test.mjs` (Node 18+, no packages). Play locally with `node serve.mjs`. Any change to `sim/` that changes behaviour must be made in `core/` too: rerun `node test/parity.mjs`, then `dotnet run -c Release` in `core/Sting.Core.Tests`. To retune, edit `../tuning/sting.tune`: the game, the tests, parity and the core all read it, and a different file gives a different tuning hash, so old saves and peers on the old file are refused.
+Run the tests from this folder with `node test/sim.test.mjs`, `node test/net.test.mjs` and `node test/view.test.mjs` (Node 18+, no packages). Play locally with `node serve.mjs`. Any change to `sim/` that changes behaviour must be made in `core/` too: rerun `node test/parity.mjs`, then `dotnet run -c Release` in `core/Sting.Core.Tests`. To retune, edit `../tuning/sting.tune`: the game, the tests, parity and the core all read it, and a different file gives a different tuning hash, so old saves and peers on the old file are refused.
 
 ## Feature list
 
@@ -145,6 +147,8 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 | 117 | Swarms seen: a honeybee swarm pours out, hangs as a beard on a nearby branch for hours, then flies to its new tree and only then is a colony; the daughter queen flies to a drone congregation area to mate, and the hive lays nothing till she is back | 6.7, T2-11 | 25 |
 | 118 | AI raids: AI protein foragers now and then raid a rival's or another player's nest within 120 m for a larva by day (hornets 15% of trips, wasps 4%, bees never), with the guards after them; rivals raid the player's wasp nest the same way | 9.3 | 25 |
 | 119 | Ground v2: hills from a derivative-damped, rotated, domain-warped value noise on the seed's own lattice (soft valleys, sharper crests), with the slope, and ridge and terrace options in tuning | 4.8, 20 | 25 |
+| 120 | Ground rings: on hilly worlds the ground is five nested grids round the wasp (0.5 to 8 m cells), exact samples of the sim's ground, morphing into each other with no cracks; lawns and paving painted into the ground from the world | 20 | 25 |
+| 121 | Graded ground: streets level across with their sidewalks and smooth along, cul-de-sacs graded as their street, town squares on the broad shape, lots and house, mall and shop pads level | 20 | 25 |
 
 ## Verified
 
@@ -168,7 +172,8 @@ Run the tests from this folder with `node test/sim.test.mjs` and `node test/net.
 - The colony economy is tuned against one simulated season with an idle player; it needs real play data.
 - After a late event the peers' humans differ until the chunk authority's correction commits (two seconds); what happened to those humans in between is lost on every peer alike.
 - AI wasps in state packets are not checked against solid geometry (their owner does not collide them far from its player).
-- With terrain on, flight does not feel the slope (the sim works in height above the ground), hills block sight lines between people only, and buildings lean slightly with the ground they stand on. The plan in GDD 20 (T2-14) closes these.
+- With terrain on, flight does not feel the slope (the sim works in height above the ground; G4 in GDD 20), hills block sight lines between people only, and small sheds, tables and fences follow the ground rather than standing on level pads.
+- On hilly worlds the paving is painted into the ground; flat worlds still draw it as meshes. The frame rate on phones with ground rings is not yet measured (G5).
 - Assisted flight steers round what is within a metre ahead (a trunk, a fence) but plans no route: a hedge or a house wall longer than it can see past still needs the player, and it does not dodge swats or birds.
 - Progression is at T0 (GDD 18.48, 18.49, 18.57): each line's XP and tree, the wasp in hand's job skills, five roles levelled by masters, multi-colony play and the gauge. a trained wasp that goes home retires inside rather than flying again; the XP, mastery and gauge figures are first guesses to tune with play. The PoC runs progression `open`, so any species can also be picked on the start screen.
 - A bee colony's drones are drawn only at their congregation area, and its young queen's flight carries no risk of being lost.

@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, humanParts, malesAbout, chunkOf, toLocal, dirToWorld, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, groundSlope, pickTarget, assistPilot, swoopPilot, hoverPilot, HOVER, ROLES, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS,
+  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, groundSlope, pavingOf, pickTarget, assistPilot, swoopPilot, hoverPilot, HOVER, ROLES, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS,
 } from '../sim/index.js';
 import { applyTuning, parseTuning, tuningHash, tuningLeaves, TUNE } from '../sim/tunefile.js';
 
@@ -1800,6 +1800,25 @@ function seated(sim, pred) {
     const plain = treads(), keep = T.terrain.terrace; T.terrain.terrace = 1; const stepped = treads(); T.terrain.terrace = keep;
     let t0 = performance.now(), acc = 0; for (let k = 0; k < 200000; k++) acc += g2(k * 0.37 - 900, k * 0.11 - 300); const us = (performance.now() - t0) / 200000 * 1000;
     ok(worst < 0.02 && stepped > plain * 1.5 && us < 3 && acc === acc, `the slope comes with the height (within ${worst.toFixed(4)} of finer differences); terraces leave ${stepped} of 400 spots on a walk level against ${plain}; a height costs ${us.toFixed(2)} µs`); }
+  // graded ground (GDD 20): streets level across with their sidewalks, buildings on level pads, paving read from a list
+  // that matches what generateChunk places
+  { let same = true, n = 0;
+    for (let cz = -6; cz <= 6; cz++) for (let cx = -6; cx <= 6; cx++) {
+      const c = generateChunk(1234n, cx, cz, { towns: 2 }), p = pavingOf(1234n, cx, cz, { towns: 2 }), pick = (a, ks) => JSON.stringify(a.map((o) => ks.map((k) => o[k])));
+      const R = ['minx', 'maxx', 'minz', 'maxz'], B = ['x', 'z', 'hw', 'hd'];
+      if (pick(c.roads, R) !== pick(p.roads, R) || pick(c.lots, R) !== pick(p.lots, R) || pick(c.plazas, R) !== pick(p.plazas, R) || pick(c.loops, ['x', 'z', 'r']) !== pick(p.loops, ['x', 'z', 'r'])
+        || pick(c.malls, B) !== pick(p.malls, B) || pick(c.shops, B) !== pick(p.shops, B) || pick(c.sheds.filter((q) => q.house), B) !== pick(p.houses, B)) same = false;
+      n += p.roads.length + p.houses.length + p.lots.length + p.plazas.length;
+    }
+    let across = 0, pad = 0, bumpy = 0, rough = 0, roads = 0, houses = 0;
+    for (let cz = -4; cz <= 4; cz++) for (let cx = -4; cx <= 4; cx++) {
+      const p = pavingOf(1234n, cx, cz, {});
+      for (const r of p.roads) { roads++; for (let k = 0; k <= 20; k++) { const x = r.minx + (r.maxx - r.minx) * k / 20; let lo = Infinity, hi = -Infinity; for (let j = 0; j <= 8; j++) { const v = g2(x, r.minz - 1.6 + (r.maxz - r.minz + 3.2) * j / 8); lo = Math.min(lo, v); hi = Math.max(hi, v); } across = Math.max(across, hi - lo); }
+        for (let k = 1; k < 60; k++) { const x = r.minx + (r.maxx - r.minx) * k / 60, e = 0.5, zc = (r.minz + r.maxz) / 2; rough = Math.max(rough, Math.abs(g2(x - e, zc) - 2 * g2(x, zc) + g2(x + e, zc))); bumpy = Math.max(bumpy, Math.abs(g2(x - e, zc + 12) - 2 * g2(x, zc + 12) + g2(x + e, zc + 12))); } }
+      for (const b of p.houses) { houses++; let lo = Infinity, hi = -Infinity; for (let j = 0; j <= 6; j++) for (let i = 0; i <= 6; i++) { const v = g2(b.x - b.hw + 2 * b.hw * i / 6, b.z - b.hd + 2 * b.hd * j / 6); lo = Math.min(lo, v); hi = Math.max(hi, v); } pad = Math.max(pad, hi - lo); }
+    }
+    ok(same && n > 50 && roads > 5 && houses > 10 && across < 1e-9 && pad < 1e-9 && rough < bumpy / 3,
+      `on a hilly world ${roads} streets are level across their sidewalks and smooth along (bend ${rough.toFixed(4)} m against ${bumpy.toFixed(4)} on the lawns beside), ${houses} houses stand on level pads; the paving list matches the generator over 169 chunks`); }
   // a rise between two people blocks the sight line that a flat world leaves open
   const sh = new Sim({ seed: 1234, birds: false, terrain: 2 }, { noAI: true }), sf = new Sim({ seed: 1234, birds: false }, { noAI: true });
   let blocked = 0, pairs = 0;

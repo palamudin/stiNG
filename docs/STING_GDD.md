@@ -2065,6 +2065,37 @@ Seven digests changed, the rest did not. 414 properties hold.
   - the wind is stronger on a rise.
 - **Totals.** 415 properties hold.
 
+### 18.68 Ground rings and graded ground (GDD 20, G2 and G3)
+
+**Ground rings (G2).** On a hilly world the ground is drawn as five nested square grids round the wasp. Each grid is 64 by 64 cells, twice as coarse as the one inside it: 0.5, 1, 2, 4 and 8 m cells, so 32 m to 512 m across. That is 41 k triangles, against 35 k for the old plane.
+- **Heights.** Each level's heights are exact samples of the sim's ground, kept in a 128 by 128 float texture addressed by world texel. As the wasp moves, only the rows it has gained are filled: at most 886 heights in a frame flying at 12 m/s, about 2 ms, one level a frame. A new world fills all five in 0.1 to 0.3 s.
+- **Where levels meet.** A level morphs into the next one's surface over its outer six cells, so where two levels meet they are the same surface, to 1e-17 m. A coarser level's vertices more than two of its cells inside a finer level are pushed far down. Each cell is split along the same diagonal in the mesh, the shaders and `view/rings.js`, the plain-JS twin the tests use.
+- **What sits on it.** Everything else is lifted by the same function in its vertex shader, and the camera and the sun by the JS twin. The drawn ground is within 2 cm of the sim's near the wasp; before, the 4 m height map was off by up to about 10 cm.
+- **Checks.** Looking straight down from 18 to 60 m against a magenta sky with no fog, not one pixel of sky shows through at four spots. A wasp's body is lifted past where its bounds say it is, so its meshes are never culled for that.
+- **Flat worlds** draw the old flat plane and paving meshes, as before.
+
+**Paving painted into the ground.** On a hilly world, lawns, forest floor, streets, sidewalks, cul-de-sacs, parking lots with their stripes, and town squares with their joints are no longer separate meshes, which the finer ground poked through. They are painted from the world onto two canvases round the wasp:
+- 12.5 cm a texel over 64 m;
+- 50 cm over 256 m.
+
+The rings' fragment shader reads them, fading from the fine canvas to the coarse one near its edge. A canvas is repainted when the wasp has gone an eighth of the way across, or when new chunks have been generated.
+
+**Graded ground (G3).** As roads are in life, the ground is graded under paving and the larger buildings. This is in the sim, so the sim and the drawing agree:
+- **Streets.** A street and its sidewalks are level across. Along their length they follow only the broad shape of the land (the first two octaves, 60 and 30 m). A cul-de-sac is graded as the street it ends.
+- **Squares.** A town square takes that broad shape.
+- **Lots and buildings.** A parking lot and every house, mall and shop pad are level, at the broad shape's height at their middle.
+- **Shoulders.** The ground blends back to its own shape over 3 m round streets, lots and squares, and 2.5 m round buildings.
+- **Small things.** Sheds, tables and fences (and footpaths, when there are any) follow the ground.
+- **The paving list.** `pavingOf` lists a chunk's paving and buildings without generating the rest. A test holds it to `generateChunk` over 169 chunks with two towns a region.
+
+**Checks.** JS and both C# builds agree:
+- on a hilly world, 52 streets are level across their sidewalks to within 1e-9 m;
+- the streets bend 0.018 m over a metre against 0.136 m on the lawns beside;
+- 179 houses stand on level pads;
+- a height costs about 1.1 µs.
+
+Only the `motion` digest moved. 416 properties hold.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -2073,7 +2104,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (119 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony; the T0 of progression (18.48): XP, unit and hive skills, the year's turn; multi-colony play with the player gauge (18.49); wintering in somewhere warm (18.50); chasing moving prey with a lock, with a colony view you can click (18.51); obstacle avoidance in assisted flight (18.52); reaching what moves under a lock (18.53); the lock ending on arrival (18.54); Shift hurrying an assisted flight (18.55); landing at speed with hovering round a lock (18.56); lines, the wasp in hand and roles passed on by masters (18.57); playing with a controller only, Xbox included (18.58); touch controls for phones and tablets (18.59); the map: minimap sizes, the big map and a phone HUD (18.60); colony switching through the relay (18.61); auto grab (18.62); the year's turn for hornet and honeybee lines (18.63); lockable moths with fireflies on summer evenings (18.64); swarms seen with a young queen's mating flight (18.65); AI raids on enemy nests (18.66); and ground v2 (18.67). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (121 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony; the T0 of progression (18.48): XP, unit and hive skills, the year's turn; multi-colony play with the player gauge (18.49); wintering in somewhere warm (18.50); chasing moving prey with a lock, with a colony view you can click (18.51); obstacle avoidance in assisted flight (18.52); reaching what moves under a lock (18.53); the lock ending on arrival (18.54); Shift hurrying an assisted flight (18.55); landing at speed with hovering round a lock (18.56); lines, the wasp in hand and roles passed on by masters (18.57); playing with a controller only, Xbox included (18.58); touch controls for phones and tablets (18.59); the map: minimap sizes, the big map and a phone HUD (18.60); colony switching through the relay (18.61); auto grab (18.62); the year's turn for hornet and honeybee lines (18.63); lockable moths with fireflies on summer evenings (18.64); swarms seen with a young queen's mating flight (18.65); AI raids on enemy nests (18.66); ground v2 (18.67); and ground rings with graded ground (18.68). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -2190,7 +2221,7 @@ Every piece below is our own code, apart from three.js, which the PoC already dr
   - one height costs under 1 µs in JS;
   - the sight-line, puddle and wind tests of 18.44 still hold, with new figures.
 
-**G2. Ground rings (drawing).**
+**G2. Ground rings (drawing). Built (18.68), with paving painted into the ground.**
 - **What.** The 128 by 128 lifted height map (4 m texels) is replaced by nested square rings round the camera: about six levels of 64 by 64 cells, from 0.5 m cells at the wasp to 16 m at the edge (about 1 km). Each ring snaps to its own cell size, so nothing swims. Vertices morph into the next ring over the outer quarter (CDLOD), so there are no cracks or pops. Normals come from the G1 slope, and a baked normal texture covers the coarse rings.
 - **Done when:**
   - screenshots taken while flying a fixed path show no cracks and no popping (a pixel-difference check between frames at ring edges);
@@ -2198,7 +2229,7 @@ Every piece below is our own code, apart from three.js, which the PoC already dr
   - a ring update stays within 2 ms of a frame, spread over frames;
   - the frame is no slower than now on the low setting.
 
-**G3. Things stand level (sim and drawing).**
+**G3. Things stand level (sim and drawing). Built (18.68) by grading the ground under streets, lots, squares and the larger buildings; small sheds, tables and fences follow the ground.**
 - **What.** Buildings, sheds, tables and fences stand level on a footing at the lowest corner, instead of leaning with the ground. In the sim, each solid keeps the ground height at its own base, so roofs and walls are where they are drawn.
 - **Done when:**
   - a wasp landing on any roof or wall on a hilly world is within 1 cm of the drawn surface;
