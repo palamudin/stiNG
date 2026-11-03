@@ -152,6 +152,9 @@ Run the tests from this folder with `node test/sim.test.mjs`, `node test/net.tes
 | 122 | Flight that feels the slope: over hills a wasp keeps its altitude, so it has to climb a rise; every metre climbed costs energy | 20 | 25 |
 | 123 | Loading screen at once with byte progress and field notes; the menu's world built and its shaders compiled behind it; the menu over the live world, and Fly instant; on hills the camera rig lifted as one with the wasp | 12.1 | 25 |
 | 124 | Auto resolution: the render scale is steered to hold 55 fps on a desktop and 30 on touch screens (pause menu option) | 20 | 25 |
+| 125 | Another player's AI wasps reported inside a wall are not drawn there, but kept where they were last seen outside | 11.8, 19.6 | 25 |
+| 126 | Assisted flight plans past long walls: over the wall or round a corner of the whole wall (a run of fence counts as one), so a flower behind a house is reached from the front yard | 7.9, 19.6 | 25 |
+| 127 | On a walker, assisted flight slides along the body to the spot locked, allowing for the wind; the hover's distance and orbit (either way round) are set with the mouse wheel | 7.9, 19.6 | 25 |
 
 ## Verified
 
@@ -174,15 +177,15 @@ Run the tests from this folder with `node test/sim.test.mjs`, `node test/net.tes
 
 - The colony economy is tuned against one simulated season with an idle player; it needs real play data.
 - After a late event the peers' humans differ until the chunk authority's correction commits (two seconds); what happened to those humans in between is lost on every peer alike.
-- AI wasps in state packets are not checked against solid geometry (their owner does not collide them far from its player).
+- Another player's AI wasps far from that player still pass through walls on the owner's side; this side only keeps them out of sight there.
 - With terrain on, hills block sight lines between people only, and small sheds, tables and fences follow the ground rather than standing on level pads.
 - On hilly worlds the paving is painted into the ground; flat worlds still draw it as meshes.
 - The download bar weighs files by sizes written into the page; a file that has grown fills only its share. Shaders are warmed for the menu's world only; a world with other settings warms behind the loader when Fly is pressed. The frame rate on phones with ground rings is not yet measured on real hardware. Trees, water and sky are still the plain PoC look; a world-building module with forests, water, volumetric light and clouds is in progress in a separate thread (GDD 20.4).
-- Assisted flight steers round what is within a metre ahead (a trunk, a fence) but plans no route: a hedge or a house wall longer than it can see past still needs the player, and it does not dodge swats or birds.
+- Assisted flight plans one waypoint at a time past the first wall in the way (over it or round a corner); it does not dodge swats or birds. On a walker, a locked spot under a swinging arm is not reached: it settles as near as it got.
 - Progression is at T0 (GDD 18.48, 18.49, 18.57): each line's XP and tree, the wasp in hand's job skills, five roles levelled by masters, multi-colony play and the gauge. a trained wasp that goes home retires inside rather than flying again; the XP, mastery and gauge figures are first guesses to tune with play. The PoC runs progression `open`, so any species can also be picked on the start screen.
 - A bee colony's drones are drawn only at their congregation area, and its young queen's flight carries no risk of being lost.
 - A raid on a nest takes one larva at a time, whoever makes it; an AI raider makes no choice of nest beyond the nearest in range.
 
 ## Controls
 
-Mouse look · hold RMB look from the wasp's eyes · G turn to where you look (hold 1 s: auto turn) · V or MMB lock on · E with a lock: fly there and land (Shift: faster) · H or d-pad down with a lock: hover round it · X or d-pad up swoop (with a lock: onto it; a skill) · Z focus (a skill, solo) · WASD fly · Space / C up and down · Shift burst, mash to break free · hold LMB or F to sting · E catch, chew, crawl under clothes · Q take over nearest worker · R rest at night · N colony view (frees the mouse; N or Esc closes it; T cycles its speed, solo, set in the pause menu) · Tab lab · M big map (WASD moves it, Q/E zoom, ✕ closes) · - and = map size · [ and ] map zoom · touch: stick flies, drag looks, buttons for the rest · Arrows look · WASD walk when landed · Esc pause (Save world is on the pause screen; Continue appears on the start screen once a save exists).
+Mouse look · hold RMB look from the wasp's eyes · G turn to where you look (hold 1 s: auto turn) · V or MMB lock on · E with a lock: fly there and land (Shift: faster) · H or d-pad down with a lock: hover round it (wheel: how far off · Shift+wheel: how fast and which way round) · X or d-pad up swoop (with a lock: onto it; a skill) · Z focus (a skill, solo) · WASD fly · Space / C up and down · Shift burst, mash to break free · hold LMB or F to sting · E catch, chew, crawl under clothes · Q take over nearest worker · R rest at night · N colony view (frees the mouse; N or Esc closes it; T cycles its speed, solo, set in the pause menu) · Tab lab · M big map (WASD moves it, Q/E zoom, ✕ closes) · - and = map size · [ and ] map zoom · touch: stick flies, drag looks, buttons for the rest · Arrows look · WASD walk when landed · Esc pause (Save world is on the pause screen; Continue appears on the start screen once a save exists).

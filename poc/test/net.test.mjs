@@ -394,6 +394,12 @@ for (const name of ['lan', 'good', 'bad', 'awful']) {
   const dropped = A.netStats.dropped;
   A.receive([{ mk: 'state', peer: 1, tick: A.tick + 1, driven: 4242, gone: [], wasps: [{ id: 4242, caste: 'worker', x: house.x, y: 2, z: house.z, vx: 0, vy: 0, vz: 0, state: 'fly', carry: null, under: null, rival: false }] }]);
   ok(!A.remote.has(4242) && A.netStats.dropped === dropped + 1, 'a player\'s wasp reported inside a house is not drawn there');
+  // its AI wasps (T3-1): one seen outside a house and then reported inside it stays where it was last seen outside
+  const ai = (t, p) => ({ mk: 'state', peer: 1, tick: t, driven: 4242, gone: [], wasps: [{ id: 5151, caste: 'worker', ...p, vx: 0, vy: 0, vz: 0, state: 'fly', carry: null, under: null, rival: false }] });
+  const outside = { x: house.x + house.hw + 0.5, y: 2, z: house.z }, walled = A.netStats.walled;
+  A.receive([ai(A.tick + 2, outside)]); A.receive([ai(A.tick + 62, { x: house.x + house.hw - 0.5, y: 2, z: house.z })]); // a second apart: not too fast
+  const seenX = A.remote.get(5151) ? A.remote.get(5151).x : -1; A.receive([ai(A.tick + 122, { x: house.x + house.hw + 0.6, y: 2, z: house.z })]);
+  ok(seenX === outside.x && A.netStats.walled === walled + 1 && A.remote.get(5151).x === house.x + house.hw + 0.6, 'another player\'s AI wasp reported inside a house is not drawn there; it is drawn again once out');
   // fences and table tops are thinner than the margin: a move straight through one between two packets is caught instead
   let fence = null, table = null;
   for (let x = -4; x < 4 && !(fence && table); x++) for (let z = -4; z < 4 && !(fence && table); z++) {

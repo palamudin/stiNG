@@ -38,7 +38,7 @@ export class Sim {
     this.pending = [];
     this.evSeq = 0;
     this.remote = new Map();
-    this.netStats = { sent: 0, recv: 0, late: 0, lateMax: 0, rejected: 0, dropped: 0, fixes: 0, fixed: 0 };
+    this.netStats = { sent: 0, recv: 0, late: 0, lateMax: 0, rejected: 0, dropped: 0, fixes: 0, fixed: 0, walled: 0 };
     this.plaus = { strikes: {}, quarantined: [], lastSeq: {}, stingTicks: {}, held: {}, sips: {} };
     this.claims = new Map(); // pickups waiting for the chunk authority (T1-19), by wasp id
     this.fixes = { due: [], last: {} }; // chunks this peer, as their authority, owes a correction (late events)
@@ -544,8 +544,10 @@ export class Sim {
         prev.bad = 0;
       }
       // display only, like speed: a player's own wasp is never inside a wall or the ground (T1-20). Its AI wasps can be,
-      // far from that player, where it does not collide them.
+      // far from that player, where it does not collide them: they are not drawn there either, but kept where they were
+      // last seen outside (GDD 19.6 T3-1); one inside its own nest in a trunk or a shed wall is out of sight anyway.
       if (r.id === m.driven && this._inSolid(r)) { this.netStats.dropped++; ids.add(r.id); if (prev) prev.seen = this.tick; continue; }
+      if (r.id !== m.driven && this._inSolid(r)) { this.netStats.walled++; ids.add(r.id); if (prev) prev.seen = this.tick; continue; }
       // nor does it go through a fence or a table top between two packets, which is too thin for that margin
       if (r.id === m.driven && prev && prev.peer === m.peer && m.tick > prev.stamp && this._throughThin({ x: prev.px, y: prev.py, z: prev.pz }, r, (m.tick - prev.stamp) / 60)) { this.netStats.dropped++; ids.add(r.id); prev.seen = this.tick; continue; }
       ids.add(r.id);
@@ -570,6 +572,7 @@ export class Sim {
         prev.bad = 0;
         if (dt > 1) vx = vy = vz = 0;
       } else if (prev && prev.peer === m.peer) continue; // older than what we have
+      if (this._inSolid(r)) { this.netStats.walled++; if (prev) prev.seen = this.tick; continue; } // not drawn in a wall (T3-1)
       const e = prev || {};
       Object.assign(e, { id: r.id, caste: r.caste, x: r.x, y: r.y, z: r.z, vx, vy, vz, state: r.state, carry: prev ? prev.carry : null, under: null, rival: r.rival,
         peer: m.peer, stamp: m.tick, px: r.x, py: r.y, pz: r.z, seen: this.tick, ttl: T.relevance.midTtl });

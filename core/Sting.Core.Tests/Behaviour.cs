@@ -1693,6 +1693,62 @@ namespace Sting.Core.Tests
                 Num up = Hold(1, bx - 3), down = Hold(-1, bx + 10);
                 Ok(up > down * 1.1 && D(Abs(w.y - 1)) < 0.3, $"holding a metre above the ground, up the rise costs {D(up) * 1000:0.0} and down it {D(down) * 1000:0.0} thousandths of a tank");
             }
+            // 58. routes past long walls (GDD 19.6 T3-1): from a front yard to a flower behind the house
+            {
+                var res = new List<(string done, double secs)>();
+                foreach (ulong seed in new ulong[] { 1234, 7, 99 })
+                {
+                    var s = new Sim(new Settings { seed = seed, birds = false }, new SimOpts { noAI = true }); RunS(s, 1);
+                    int cases = 0;
+                    foreach (var rec in s.activeChunks.ToList())
+                    {
+                        var c = rec.content;
+                        if (c.use != "yards") continue;
+                        foreach (var h in c.sheds.Where(q => q.house).ToList())
+                        {
+                            int side = Math.Sign(D(h.z - rec.cz * 64)), fi = -1;
+                            for (int i = 0; i < c.flowers.Count && fi < 0; i++) { var fl = c.flowers[i]; if (s.InBloom(rec, i) && D(Abs(fl.x - h.x)) < 10 && Math.Sign(D(fl.z - h.z)) == side && D(Abs(fl.z - h.z)) > 8) fi = i; }
+                            if (fi < 0 || cases > 3) continue;
+                            cases++;
+                            var w = s.wasp; w.x = h.x; w.y = 1.2; w.z = h.z - side * (h.hd + 3); w.vx = w.vy = w.vz = 0; w.state = "fly"; w.land = null; w.energy = 1;
+                            var t = new LockTarget { kind = "flower", key = World.ChunkKey(rec.cx, rec.cz), i = fi };
+                            (Cmd cmd, string done) r = (null, null); int k = 0;
+                            for (; k < 60 * 40; k++) { r = Assist.Pilot(s, w, t, Idle()); if (r.done != null) break; s.Step(r.cmd); s.DrainEvents(); }
+                            res.Add((r.done, k / 60.0));
+                        }
+                    }
+                }
+                var landed = res.Where(r => r.done == "landed").ToList();
+                Ok(res.Count >= 10 && landed.Count == res.Count, $"from the front yard to a flower behind the house: {landed.Count} of {res.Count} flights land (the slowest in {(landed.Count > 0 ? landed.Max(r => r.secs) : 0):0.0} s)");
+            }
+            // 59. settling on the spot locked on a walker, and the hover the player sets (GDD 19.6 T3-1)
+            {
+                var res = new List<(string done, double off)>();
+                foreach (int side in new[] { 0, 1 }) foreach (double yy in new[] { 1.25, 0.9, 1.5 })
+                    {
+                        var s = new Sim(new Settings { seed = 1234, birds = false }, new SimOpts { noAI = true }); RunS(s, 1);
+                        Human hm = null; for (int k = 0; k < 60 * 60 * 20 && hm == null; k += 30) { RunS(s, 30); hm = s.active.Find(h => h.state == "stroll" && Hypot(h.vx, h.vz) > 0.5 && !h.special); }
+                        Num sp = Sqrt(hm.vx * hm.vx + hm.vz * hm.vz), ux = hm.vx / sp, uz = hm.vz / sp; Num ox = side != 0 ? -uz * 2 : -ux * 2, oz = side != 0 ? ux * 2 : -uz * 2;
+                        Place(s.wasp, P(hm.x + ox, 1.3, hm.z + oz));
+                        Num dx = hm.x - s.wasp.x, dy = yy - 1.3, dz = hm.z - s.wasp.z, dd = Sqrt(dx * dx + dy * dy + dz * dz);
+                        var t = Assist.PickTarget(s, s.wasp, new V3(dx / dd, dy / dd, dz / dd));
+                        (Cmd cmd, string done) r = (null, null); int n = 0;
+                        for (; n < 900; n++) { r = Assist.Pilot(s, s.wasp, t, Idle()); if (r.done != null) break; s.Step(r.cmd); s.DrainEvents(); }
+                        var p = Assist.TargetPos(s, t).Value; var w = s.wasp;
+                        res.Add((r.done, Math.Sqrt(D(Sq(w.x - p.x) + Sq(w.y - p.y) + Sq(w.z - p.z)))));
+                    }
+                double best = res.Min(r => r.off);
+                Ok(res.All(r => r.done == "perched") && best < 0.07, $"locked on six spots on a walker, assisted flight settles on all of them; on the open back {best * 100:0.0} cm from the spot (the rest {string.Join(", ", res.Select(r => (r.off * 100).ToString("0")))} cm)");
+                var s2 = new Sim(new Settings { seed = 1234, birds = false }, new SimOpts { noAI = true }); RunS(s2, 1);
+                s2.records.TryGet("0,0", out var rec); int fi = -1; for (int k = 0; k < rec.content.flowers.Count && fi < 0; k++) if (s2.InBloom(rec, k) && s2.NectarAt(rec, k) > 0) fi = k; var f = rec.content.flowers[fi];
+                var ft = new LockTarget { kind = "flower", key = "0,0", i = fi };
+                Place(s2.wasp, P(f.x + 1.5, f.y + 0.5, f.z - 1));
+                var set = Assist.HoverSetting(0.6, -0.5); var wide = Assist.HoverSetting(5, 9);
+                double r4 = 0, a4 = 0, a6 = 0;
+                for (int k = 1; k <= 420; k++) { var rr = Assist.HoverPilot(s2, s2.wasp, ft, Idle(), set.r, set.orbit); s2.Step(rr.cmd); s2.DrainEvents(); var w = s2.wasp; if (k == 300) { r4 = Hypot(w.x - f.x, w.z - f.z); a4 = Math.Atan2(D(w.x - f.x), D(w.z - f.z)); } if (k == 420) a6 = Math.Atan2(D(w.x - f.x), D(w.z - f.z)); }
+                double turned = Math.Atan2(Math.Sin(a6 - a4), Math.Cos(a6 - a4));
+                Ok(Math.Abs(r4 - 0.6) < 0.05 && turned < -0.3 && wide.r == Assist.hoverRMax && wide.orbit == Assist.hoverOrbitMax, $"a hover set 60 cm off and the other way round holds {r4:0.00} m off and drifts {turned:0.00} rad in 2 s; settings past the ranges are held to them");
+            }
             // 46. feature modifiers (T2-6): woods, towns, water and hives set at world creation act on generation
             {
                 (int forest, int town, int baths, int hives, bool apart) Census(Settings st)

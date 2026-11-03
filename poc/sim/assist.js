@@ -4,7 +4,7 @@
 // driven wasp's commands, so an assisted flight is recorded and replayed like any other input.
 import { T } from './tuning.js';
 import { chunkKey, flyPos, beePos, birdPos, dragonPos } from './world.js';
-import { toWorld, toLocal, segClosest } from './body.js';
+import { toWorld, toLocal, segClosest, dirToWorld } from './body.js';
 import { datan2, clamp, dsin, dcos } from './rng.js';
 import { Act } from './sim.js';
 
@@ -37,6 +37,20 @@ function humanPoint(hm, t) {
   if (!part) return null;
   const a = part.a, b = part.b, q = { x: a.x + (b.x - a.x) * t.t, y: a.y + (b.y - a.y) * t.t, z: a.z + (b.z - a.z) * t.t };
   return { p: toWorld(hm, { x: q.x + t.n.x * part.r, y: q.y + t.n.y * part.r, z: q.z + t.n.z * part.r }), n: dirWorld(hm, t.n) };
+}
+// The spot to fly to, off the locked spot by `off`, pushed out of any other part of the body that covers it (an arm
+// swung over the side, the head over a shoulder): the nearest place there the wasp can be (GDD 19.6 T3-1)
+function exposedSpot(hm, t, off) {
+  const part = partOf(hm, t.part);
+  if (!part) return null;
+  const a = part.a, b = part.b, q = { x: a.x + (b.x - a.x) * t.t, y: a.y + (b.y - a.y) * t.t, z: a.z + (b.z - a.z) * t.t };
+  let lp = { x: q.x + t.n.x * (part.r + off), y: q.y + t.n.y * (part.r + off), z: q.z + t.n.z * (part.r + off) };
+  const parts = hm.parts[hm.posture] || hm.parts.stand;
+  for (let it = 0; it < 3; it++) for (const o of parts) {
+    const c = segClosest(o.a, o.b, lp), ex = lp.x - c.x, ey = lp.y - c.y, ez = lp.z - c.z, d = Math.sqrt(ex * ex + ey * ey + ez * ez), need = o.r + off;
+    if (d < need && d > 1e-9) lp = { x: c.x + ex / d * need, y: c.y + ey / d * need, z: c.z + ez / d * need };
+  }
+  return toWorld(hm, lp);
 }
 function dirWorld(hm, n) { const o = toWorld(hm, { x: 0, y: 0, z: 0 }), p = toWorld(hm, n); return { x: p.x - o.x, y: p.y - o.y, z: p.z - o.z }; }
 
@@ -96,7 +110,7 @@ export function targetVel(sim, t) {
   }
   return a && b ? { x: (b.x - a.x) * 60, y: (b.y - a.y) * 60, z: (b.z - a.z) * 60 } : Z;
 }
-export const CHASE = { moving: 0.05, lead: 0.5, close: 0.35, closeMin: 2 }; // m/s that counts as moving; the most lead, s; extra throttle share over its pace (manual); the least closing speed, m/s (pilot)
+export const CHASE = { moving: 0.05, lead: 0.5, closeMin: 2 }; // m/s that counts as moving; the most lead, s; the least closing speed, m/s (pilot)
 
 // Obstacle avoidance for the assisted flight: a short look ahead along the line it means to fly, against what a wasp
 // collides with (boxes: fences, tables, walls; cylinders: trunks, poles, birdbaths; pitched roofs), each grown by a
@@ -244,13 +258,13 @@ function goalOf(sim, t, p) {
   if (t.kind === 'flower') return { x: p.x, y: p.y + T.land.headR + R + 0.001, z: p.z, above: true };
   if (t.kind === 'cup') return { x: p.x, y: p.y + 0.025, z: p.z, above: true };
   if (t.kind === 'bath') return { x: p.x, y: p.y + R + 0.004, z: p.z, above: true };
-  if (t.kind === 'human') { const hm = sim.humanByHex(t.hex), hp = hm && humanPoint(hm, t); if (!hp) return null; return { x: hp.p.x + hp.n.x * (R + 0.006), y: hp.p.y + hp.n.y * (R + 0.006), z: hp.p.z + hp.n.z * (R + 0.006), n: hp.n }; }
+  if (t.kind === 'human') { const hm = sim.humanByHex(t.hex), hp = hm && humanPoint(hm, t), e = hp && exposedSpot(hm, t, R + 0.006); if (!e) return null; return { x: e.x, y: e.y, z: e.z, n: hp.n }; }
   return { x: p.x, y: p.y, z: p.z };
 }
 
 // Landing: the share of its acceleration it counts on to brake with, the step of the look along a straight way in
 // past a person's body, and how near the goal that look stops (GDD 7.9)
-export const LAND = { brake: 0.5, bodyStep: 0.02, bodyStop: 0.03 };
+export const LAND = { brake: 0.5, bodyStep: 0.02, bodyStop: 0.03, spot: 0.04, stall: 90, gap: 60 }; // spot: how near the locked spot on a walker it lets go; stall: ticks touching them before it settles where it is
 // Can it fly straight to the goal? Not into a drink or water (over the rim), nor through anything solid, nor through
 // the person it is going to land on
 function straightIn(sim, w, t, g) {
@@ -268,6 +282,93 @@ function straightIn(sim, w, t, g) {
     for (const part of parts) { const q = segClosest(part.a, part.b, lp); if (sq(lp.x - q.x) + sq(lp.y - q.y) + sq(lp.z - q.z) < sq(part.r + R)) return false; }
   }
   return true;
+}
+
+// Routes past long walls (GDD 19.6 T3-1). The look-ahead above sees a metre; a house front, a mall or a run of fence
+// is longer than that, and turning along it never shows the goal. When the straight way to a goal further than `far`
+// is blocked by a box (a wall, a fence, a house, a shed, a table), the pilot picks a waypoint: over the box (its top,
+// and the roof on a shed or house, plus `clearTop`) or round one of its corners, `margin` out, whichever is shortest
+// with a clear way there (climbing counts half as much again; a waypoint still behind the same wall, the box and every
+// box joined to it, costs `blocked`).
+// The waypoint is planned again every `every` ticks, when it is reached, or when the goal moves `moved`. Planning is
+// the pilot's own: client-side, kept per sim and wasp, never in the sim's state.
+export const ROUTE = { far: 1.2, margin: 0.45, clearTop: 0.35, skin: 0.05, every: 12, moved: 0.3, reached: 0.3, climb: 1.5, blocked: 5 };
+const routeMemo = new WeakMap();
+function boxesAlong(sim, a, b) {
+  const CS = T.chunk.size, lox = Math.min(a.x, b.x) - 2, hix = Math.max(a.x, b.x) + 2, loz = Math.min(a.z, b.z) - 2, hiz = Math.max(a.z, b.z) + 2, out = [];
+  for (const r of sim.activeChunks) if (r.cx * CS + CS / 2 >= lox && r.cx * CS - CS / 2 <= hix && r.cz * CS + CS / 2 >= loz && r.cz * CS - CS / 2 <= hiz) for (const b of r.content.boxes) out.push(b);
+  return out;
+}
+// Where the straight way from a to b first enters box bx grown by m, as a share of the way (0..1), or -1 if it misses
+function boxEntry(a, b, bx, m) {
+  let t0 = 0, t1 = 1;
+  const A = [a.x, a.y, a.z], B = [b.x, b.y, b.z], LO = [bx.minx - m, bx.miny - m, bx.minz - m], HI = [bx.maxx + m, bx.maxy + m, bx.maxz + m];
+  for (let i = 0; i < 3; i++) {
+    const d = B[i] - A[i];
+    if (Math.abs(d) < 1e-9) { if (A[i] < LO[i] || A[i] > HI[i]) return -1; continue; }
+    let u = (LO[i] - A[i]) / d, v = (HI[i] - A[i]) / d;
+    if (u > v) { const q = u; u = v; v = q; }
+    if (u > t0) t0 = u;
+    if (v < t1) t1 = v;
+    if (t0 > t1) return -1;
+  }
+  return t0;
+}
+const inBox = (p, bx, m) => p.x > bx.minx - m && p.x < bx.maxx + m && p.y > bx.miny - m && p.y < bx.maxy + m && p.z > bx.minz - m && p.z < bx.maxz + m;
+function firstBox(boxes, a, b, g) {
+  let hit = null, ht = 2;
+  for (const bx of boxes) {
+    if (inBox(g, bx, 2 * ROUTE.skin)) continue; // the goal's own surface
+    const t = boxEntry(a, b, bx, ROUTE.skin);
+    if (t >= 0 && t < ht) { ht = t; hit = bx; }
+  }
+  return hit ? { bx: hit, t: ht } : null;
+}
+// The boxes joined to b, end to end or touching (a run of fence sections, a shop against its neighbour): one wall
+function wallOf(boxes, b) {
+  const set = [b], m = ROUTE.skin * 2;
+  for (let i = 0; i < set.length && set.length < 64; i++) {
+    const q = set[i];
+    for (const o of boxes) if (!set.includes(o) && o.minx < q.maxx + m && o.maxx > q.minx - m && o.minz < q.maxz + m && o.maxz > q.minz - m && o.miny < q.maxy + m && o.maxy > q.miny - m) set.push(o);
+  }
+  return set;
+}
+export function routeWaypoint(sim, w, g) {
+  const R = ROUTE, a = { x: w.x, y: w.y, z: w.z }, boxes = boxesAlong(sim, a, g), f = firstBox(boxes, a, g, g);
+  if (!f) return null;
+  const b = f.bx, wall = wallOf(boxes, b), M = R.margin, top = b.maxy + (b.shed ? (b.wood ? 0.55 : 1.9) : 0) + R.clearTop, y = Math.max(a.y, 0.4);
+  const cands = [{ x: a.x + (g.x - a.x) * f.t, y: top, z: a.z + (g.z - a.z) * f.t, up: true },
+    { x: b.minx - M, y, z: b.minz - M }, { x: b.maxx + M, y, z: b.minz - M }, { x: b.minx - M, y, z: b.maxz + M }, { x: b.maxx + M, y, z: b.maxz + M }];
+  let best = null, bc = Infinity;
+  for (const c of cands) {
+    if (firstBox(boxes, a, c, g)) continue; // no clear way there
+    const l1 = Math.sqrt(sq(c.x - a.x) + sq(c.y - a.y) + sq(c.z - a.z)), l2 = Math.sqrt(sq(g.x - c.x) + sq(g.y - c.y) + sq(g.z - c.z));
+    const on = firstBox(boxes, c, g, g); // still behind the same wall from there: that way gets nowhere
+    const cost = l1 + l2 + (c.up ? (R.climb - 1) * Math.max(0, c.y - a.y) : 0) + (on && wall.includes(on.bx) ? R.blocked : 0);
+    if (cost < bc) { bc = cost; best = { x: c.x, y: c.y, z: c.z }; }
+  }
+  return best;
+}
+function routeOf(sim, w, g) {
+  let m = routeMemo.get(sim);
+  if (!m) { m = new Map(); routeMemo.set(sim, m); }
+  const R = ROUTE, c = m.get(w.id);
+  if (c && sim.tick >= c.tick && sim.tick - c.tick < R.every && sq(c.g.x - g.x) + sq(c.g.y - g.y) + sq(c.g.z - g.z) < sq(R.moved) && !(c.wp && d2(w, c.wp) < sq(R.reached))) return c.wp;
+  const wp = routeWaypoint(sim, w, g);
+  m.set(w.id, { tick: sim.tick, g: { x: g.x, y: g.y, z: g.z }, wp });
+  return wp;
+}
+
+// A spot on a walker the wasp has been touching them for `stall` ticks without reaching (under a swinging arm, say):
+// it settles where it is, as near as it got. Touching them again after `gap` ticks off them starts the count again.
+const spotMemo = new WeakMap();
+function spotStalled(sim, w) {
+  let m = spotMemo.get(sim);
+  if (!m) { m = new Map(); spotMemo.set(sim, m); }
+  const c = m.get(w.id);
+  if (!c || sim.tick < c.seen || sim.tick - c.seen > LAND.gap) { m.set(w.id, { first: sim.tick, seen: sim.tick }); return false; }
+  c.seen = sim.tick;
+  return sim.tick - c.first > LAND.stall;
 }
 
 // One tick of the pilot: the command that takes the wasp to the target and settles it there (or catches it).
@@ -300,23 +401,37 @@ export function assistPilot(sim, w, t, cmd) {
   const g = g0;
   // straight in when the way is open; else from above for anything to land on, along the outward side for a person
   const hd = Math.sqrt(sq(g.x - w.x) + sq(g.z - w.z));
-  let wp = g;
+  let wp = g, routed = false;
   if (!moving && straightIn(sim, w, t, g)) wp = g;
+  else if (!moving && hd > ROUTE.far && (wp = routeOf(sim, w, g) || g) !== g) routed = true; // past a long wall
   else if (g.above && hd > 0.06) wp = { x: g.x, y: g.y + Math.min(0.4, 0.3 * hd + 0.04), z: g.z };
   else if (g.n && Math.sqrt(d2(w, g)) > 0.2) wp = { x: g.x + g.n.x * 0.15, y: g.y + g.n.y * 0.15, z: g.z + g.n.z * 0.15 };
   const dx = wp.x - w.x, dy = wp.y - w.y, dz = wp.z - w.z, d = Math.sqrt(dx * dx + dy * dy + dz * dz), dg = Math.sqrt(d2(w, g0)); // how near it really is
   const out = { ...cmd, mx: 0, my: 0, burst: hurry ? 1 : 0, sting: 0 };
   if (K.prey && dg < T.prey.catchDist * 0.9) { out.mz = 0; out.act = (sim.tick & 1) ? 1 : 0; return { cmd: out, done: null }; } // grab it
   if (dg < 0.004 && !K.prey) { out.mz = 0; out.burst = 0; return { cmd: out, done: null }; } // hold still: it settles on its own
-  // touching the person at their pace: let go of the controls and it settles on them (a walker too)
-  if (moving && t.kind === 'human' && w.contact && w.contact.humanHex === t.hex && sq(w.vx - v.x) + sq(w.vy) + sq(w.vz - v.z) < sq(T.land.maxSpeed)) { out.mz = 0; out.burst = 0; return { cmd: out, done: null }; }
+  // touching the person at their pace on the spot locked: let go of the controls and it settles there (a walker too;
+  // touching them anywhere else, it keeps flying on along them to the spot, GDD 19.6 T3-1)
+  const onThem = moving && t.kind === 'human' && w.contact && w.contact.humanHex === t.hex ? sim.humanByHex(t.hex) : null;
+  const stalled = onThem ? spotStalled(sim, w) : false; // kept up every tick it touches them
+  if (onThem && sq(w.vx - v.x) + sq(w.vy) + sq(w.vz - v.z) < sq(T.land.maxSpeed) && (dg < LAND.spot || stalled)) { out.mz = 0; out.burst = 0; return { cmd: out, done: null }; }
   // as fast as it can still stop in: cruising until the braking distance, then down to a crawl at the spot
   const want = moving ? clamp(Math.min(d, dg) * 2.2, K.prey ? 0.3 : 0.06, top) * (dg < 0.15 && !K.prey ? 0.6 : 1)
-    : clamp(Math.sqrt(2 * T.wasp.accel * LAND.brake * Math.min(d, dg)), K.prey ? 0.3 : 0.06, top);
+    : clamp(Math.sqrt(2 * T.wasp.accel * LAND.brake * (routed ? dg : Math.min(d, dg))), K.prey ? 0.3 : 0.06, top); // a waypoint is flown through
   let fx = dx, fy = dy, fz = dz; // the way to fly
   if (moving) { // its velocity plus closing speed (prey is run down; a person is come up to gently); burst when that is past cruising
     const close = (K.prey ? Math.max(want, CHASE.closeMin) : want) / Math.max(d, 1e-6);
     fx = v.x + dx * close; fy = v.y + dy * close; fz = v.z + dz * close;
+    if (onThem) { // touching them: slide along the body toward the spot rather than press into it
+      const nW = dirToWorld(onThem, w.contact.n);
+      let rx = fx - v.x, ry = fy - v.y, rz = fz - v.z;
+      const dn = rx * nW.x + ry * nW.y + rz * nW.z;
+      if (dn < 0) { rx -= dn * nW.x; ry -= dn * nW.y; rz -= dn * nW.z; fx = v.x + rx; fy = v.y + ry; fz = v.z + rz; }
+    }
+    { // the air moves it too: ask for the velocity less the wind's share, so it closes on the spot even downwind (T3-1)
+      const wd = sim._drift(w), k = Math.min(1, Math.sqrt(fx * fx + fy * fy + fz * fz) / top);
+      fx -= wd.x * k; fz -= wd.z * k;
+    }
     const sp = Math.sqrt(fx * fx + fy * fy + fz * fz), fast = sp > top, cap = fast ? T.wasp.burst * (w.carry ? T.wasp.carrySpeedMul : 1) : top;
     out.burst = fast || hurry ? 1 : 0;
     out.mz = Math.round(clamp(sp / cap, 0, 1) * 100);
@@ -337,8 +452,10 @@ export function assistPilot(sim, w, t, cmd) {
 // Hovering round a lock (GDD 7.9): H holds the wasp a short way off the target, facing it, and lets it drift slowly round
 // it at its own unhurried speed, matching its pace if it moves; from there E lands at once. Any move key takes over.
 // r, m off it; up, m above it; speed, m/s at most on top of the target's; orbit, rad/s round it; gain, 1/s back to station
-export const HOVER = { r: 0.35, up: 0.1, speed: 1.2, orbit: 0.5, gain: 3 };
-export function hoverPilot(sim, w, t, cmd) {
+export const HOVER = { r: 0.35, up: 0.1, speed: 1.2, orbit: 0.5, gain: 3, rMin: 0.15, rMax: 1.2, orbitMax: 1.5 };
+// The player's own hover (GDD 19.6 T3-1): how far off and how fast round, set with the mouse wheel while hovering
+export function hoverSetting(r = HOVER.r, orbit = HOVER.orbit) { return { r: clamp(r, HOVER.rMin, HOVER.rMax), orbit: clamp(orbit, -HOVER.orbitMax, HOVER.orbitMax) }; }
+export function hoverPilot(sim, w, t, cmd, set = HOVER) {
   if (w.state === 'landed' || w.state === 'perched') return { cmd: { ...cmd, mx: 0, my: 100, mz: 0, burst: 0, sting: 0, act: 0 }, done: null }; // up first
   if (w.state !== 'fly') return { cmd, done: 'gone' };
   const p = targetPos(sim, t);
@@ -348,7 +465,7 @@ export function hoverPilot(sim, w, t, cmd) {
   let ux = w.x - p.x, uz = w.z - p.z;
   const ul = Math.sqrt(ux * ux + uz * uz);
   if (ul < 1e-6) { ux = 1; uz = 0; } else { ux /= ul; uz /= ul; }
-  const a = datan2(ux, uz) + H.orbit / H.gain, sx = p.x + dsin(a) * H.r, sy = p.y + H.up, sz = p.z + dcos(a) * H.r;
+  const a = datan2(ux, uz) + set.orbit / H.gain, sx = p.x + dsin(a) * set.r, sy = p.y + H.up, sz = p.z + dcos(a) * set.r;
   // the velocity that takes it there and keeps it there: the target's own, plus the way back to station
   let fx = (sx - w.x) * H.gain, fy = (sy - w.y) * H.gain, fz = (sz - w.z) * H.gain;
   const fl = Math.sqrt(fx * fx + fy * fy + fz * fz);

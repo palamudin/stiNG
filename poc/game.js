@@ -5,7 +5,7 @@ import {
   Sim, Act, T, DT, ZONES, ZoneName, SwatKind, SwatKindName, StyleName, TopName, BottomName, Top, Bottom,
   toWorld, toLocal, dirToWorld, chunkKey, chunkOf, hash, Domain, rangeInt, resolveSting, zoneCover, segClosest, classify, predictedKind,
   NEST, NEST_ENTRANCE, flyPos, beePos, fmtClock, minuteOfDay, isLowerZone, broodTotal, sugarCap, proteinCap, waterCap, garmentGraph, dayWeather,
-  NetLab, LINKS, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetVel, CHASE, targetLabel, assistPilot, swoopPilot, hoverPilot, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE, SKILLS, SKILL_UNLOCKS, SKILL_RANKED, SKILL_HIVE, skillCost, ROLES,
+  NetLab, LINKS, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetVel, CHASE, targetLabel, assistPilot, swoopPilot, hoverPilot, hoverSetting, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE, SKILLS, SKILL_UNLOCKS, SKILL_RANKED, SKILL_HIVE, skillCost, ROLES,
 } from './sim/index.js';
 import { Rings, RING, ringGrid, ringGLSL } from './view/rings.js';
 
@@ -1915,7 +1915,7 @@ function buildCmd() {
     // a move key or the sting takes the controls back; Shift does not: it hurries the flight (burst speed)
     if (!w || cmd.mx || cmd.my || cmd.mz || cmd.sting) { input.pilot = null; if (w) toast('You have it', 'var(--muted)', 0.8); return cmd; }
     if (input.pilotMode === 'hover') { // H: hold a little way off it, drifting round (GDD 7.9)
-      const h = hoverPilot(sim, w, input.pilot, cmd);
+      const h = hoverPilot(sim, w, input.pilot, cmd, input.hover);
       if (h.done) { input.pilot = null; toast('It is gone', 'var(--muted)', 1); return cmd; }
       return h.cmd;
     }
@@ -1965,7 +1965,16 @@ function startPilot() {
   toast(`Flying to the ${targetLabel(sim, input.lock)}`, 'var(--yellow)', 1);
   return true;
 }
-// H (d-pad down): hover round the locked target at an unhurried pace, facing it; H again or a move key hands back, E lands
+// H (d-pad down): hover round the locked target at an unhurried pace, facing it; H again or a move key hands back, E lands.
+// While hovering, the mouse wheel sets how far off it holds and Shift with the wheel how fast and which way round it
+// drifts (GDD 19.6 T3-1); the setting is kept for the next hover.
+input.hover = hoverSetting();
+addEventListener('wheel', (e) => {
+  if (!(input.pilot && input.pilotMode === 'hover') || atlas.open) return;
+  const up = e.deltaY < 0;
+  input.hover = e.shiftKey ? hoverSetting(input.hover.r, input.hover.orbit + (up ? 0.25 : -0.25)) : hoverSetting(input.hover.r * (up ? 1 / 1.15 : 1.15), input.hover.orbit);
+  toast(e.shiftKey ? `Round it at ${input.hover.orbit.toFixed(2)} rad/s${input.hover.orbit < 0 ? ' (the other way)' : ''}` : `Holding ${Math.round(input.hover.r * 100)} cm off`, 'var(--muted)', 0.8);
+}, { passive: true });
 function toggleHover() {
   const w = sim && sim._driven();
   if (!w || !running || paused) return;

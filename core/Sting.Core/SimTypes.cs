@@ -244,7 +244,7 @@ namespace Sting.Core
     public sealed class Muni { public int n; public MuniCampaign active; public Num cooldownUntil; }
     public sealed class PendingSwitch { public int at, target; /** a colony of the line on its way through the relay (GDD 6.8), else 0 */ public int colony; }
     public sealed class SimStats { public Num stings, aiStings, remoteStings, full, deaths, caught, deposits; public Dictionary<string, Num> causes = new Dictionary<string, Num>(); }
-    public sealed class NetStats { public Num sent, recv, late, lateMax, rejected, dropped; public int firstLate, fixes, fixed_; }
+    public sealed class NetStats { public Num sent, recv, late, lateMax, rejected, dropped; public int firstLate, fixes, fixed_, walled; }
     public sealed class Plaus
     {
         public Dictionary<int, int> strikes = new Dictionary<int, int>(); public List<int> quarantined = new List<int>();

@@ -246,6 +246,12 @@ namespace Sting.Core.Tests
                 sm.wasps.Add(new RemoteWasp { id = 4242, caste = "worker", x = house.x, y = 2, z = house.z, state = "fly" });
                 A.Receive(new Msg[] { sm });
                 Okn(A.remote.Get(4242) == null && A.netStats.dropped == dropped + 1, "a player's wasp reported inside a house is not drawn there");
+                // its AI wasps (T3-1): one seen outside a house and then reported inside it stays where it was last seen outside
+                StateMsg Ai(long t, Num x) { var q = new StateMsg { peer = 1, tick = (int)t, driven = 4242 }; q.wasps.Add(new RemoteWasp { id = 5151, caste = "worker", x = x, y = 2, z = house.z, state = "fly" }); return q; }
+                int walled = A.netStats.walled; Num ox = house.x + house.hw + 0.5;
+                A.Receive(new Msg[] { Ai(A.tick + 2, ox) }); A.Receive(new Msg[] { Ai(A.tick + 62, house.x + house.hw - 0.5) }); // a second apart: not too fast
+                Num seenX = A.remote.Get(5151)?.x ?? -1; A.Receive(new Msg[] { Ai(A.tick + 122, house.x + house.hw + 0.6) });
+                Okn(seenX == ox && A.netStats.walled == walled + 1 && A.remote.Get(5151).x == house.x + house.hw + 0.6, $"another player's AI wasp reported inside a house is not drawn there; it is drawn again once out");
                 // fences and table tops are thinner than the margin: a move straight through one between two packets is caught instead
                 Box fence = null, table = null;
                 for (int x = -4; x < 4; x++) for (int z = -4; z < 4; z++)

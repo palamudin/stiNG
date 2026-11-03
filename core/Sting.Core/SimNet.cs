@@ -322,6 +322,8 @@ namespace Sting.Core
                 }
                 // display only, like speed: a player's own wasp is never inside a wall or the ground (T1-20)
                 if (r.id == m.driven && InSolid(r.x, r.y, r.z)) { netStats.dropped++; ids.Add(r.id); if (prev != null) prev.seen = tick; continue; }
+                // its AI wasps are not drawn in a wall either, but kept where last seen outside (GDD 19.6 T3-1)
+                if (r.id != m.driven && InSolid(r.x, r.y, r.z)) { netStats.walled++; ids.Add(r.id); if (prev != null) prev.seen = tick; continue; }
                 // nor does it go through a fence or a table top between two packets, which is too thin for that margin
                 if (r.id == m.driven && prev != null && prev.peer == m.peer && m.tick > prev.stamp && ThroughThin(new V3(prev.px, prev.py, prev.pz), new V3(r.x, r.y, r.z), (Num)(m.tick - prev.stamp) / 60)) { netStats.dropped++; ids.Add(r.id); prev.seen = tick; continue; }
                 ids.Add(r.id);
@@ -352,6 +354,7 @@ namespace Sting.Core
                     if (dt > 1) vx = vy = vz = 0;
                 }
                 else if (prev != null && prev.peer == m.peer) continue; // older than what we have
+                if (InSolid(r.x, r.y, r.z)) { netStats.walled++; if (prev != null) prev.seen = tick; continue; } // not drawn in a wall (T3-1)
                 var e = prev ?? new RemoteWasp();
                 e.id = r.id; e.caste = r.caste; e.x = r.x; e.y = r.y; e.z = r.z; e.vx = vx; e.vy = vy; e.vz = vz; e.state = r.state;
                 e.carry = prev?.carry; e.under = null; e.rival = r.rival;

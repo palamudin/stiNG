@@ -47,6 +47,21 @@ namespace Sting.Core
             return (p, new V3(e.x - o.x, e.y - o.y, e.z - o.z));
         }
 
+        /// the spot to fly to, off the locked spot by off, pushed out of any other part of the body that covers it (GDD 19.6 T3-1)
+        static V3? ExposedSpot(Human hm, LockTarget t, Num off)
+        {
+            var part = PartOf(hm, t.part);
+            if (part == null) return null;
+            V3 a = part.a, b = part.b, q = new V3(a.x + (b.x - a.x) * t.t, a.y + (b.y - a.y) * t.t, a.z + (b.z - a.z) * t.t);
+            var lp = new V3(q.x + t.n.x * (part.r + off), q.y + t.n.y * (part.r + off), q.z + t.n.z * (part.r + off));
+            for (int it = 0; it < 3; it++) foreach (var o in hm.PartsNow)
+                {
+                    var c = Body.SegClosest(o.a, o.b, lp); Num ex = lp.x - c.x, ey = lp.y - c.y, ez = lp.z - c.z, d = Sqrt(ex * ex + ey * ey + ez * ez), need = o.r + off;
+                    if (d < need && d > 1e-9) lp = new V3(c.x + ex / d * need, c.y + ey / d * need, c.z + ez / d * need);
+                }
+            return Body.ToWorld(hm.F, lp);
+        }
+
         /// where a target is now, or null when it is gone
         public static V3? TargetPos(Sim sim, LockTarget t)
         {
@@ -189,17 +204,15 @@ namespace Sting.Core
             if (t.kind == "bath") return new Goal { p = new V3(p.x, p.y + R + 0.004, p.z), above = true };
             if (t.kind == "human")
             {
-                var hm = sim.HumanByHex(t.hex); var hp = hm != null ? HumanPoint(hm, t) : null;
-                if (hp == null) return null;
-                V3 q = hp.Value.p, n = hp.Value.n; Num off = R + 0.006;
-                return new Goal { p = new V3(q.x + n.x * off, q.y + n.y * off, q.z + n.z * off), n = n };
+                var hm = sim.HumanByHex(t.hex); var hp = hm != null ? HumanPoint(hm, t) : null; var e = hp != null ? ExposedSpot(hm, t, R + 0.006) : null;
+                if (e == null) return null;
+                return new Goal { p = e.Value, n = hp.Value.n };
             }
             return new Goal { p = p };
         }
 
-        /// how far a moving target counts as moving (m/s), the most lead (s), the extra throttle share over its pace when
-        /// steering by hand, and the least closing speed the pilot keeps (m/s); see assist.js
-        public static readonly Num chaseMoving = 0.05, chaseLead = 0.5, chaseClose = 0.35, chaseCloseMin = 2;
+        /// how far a moving target counts as moving (m/s), the most lead (s), and the least closing speed the pilot keeps (m/s); see assist.js
+        public static readonly Num chaseMoving = 0.05, chaseLead = 0.5, chaseCloseMin = 2;
         /// how fast a target is moving, m/s (zero for anything that stays put); prey positions are functions of the tick
         public static V3 TargetVel(Sim sim, LockTarget t)
         {
@@ -296,9 +309,99 @@ namespace Sting.Core
 
         /// Landing: the share of its acceleration it counts on to brake with, the step of the look along a straight way in past
         /// a person's body, and how near the goal that look stops (GDD 7.9). Matches poc/sim/assist.js LAND.
-        public static readonly Num landBrake = 0.5, landBodyStep = 0.02, landBodyStop = 0.03;
+        public static readonly Num landBrake = 0.5, landBodyStep = 0.02, landBodyStop = 0.03, landSpot = 0.04;
+        public const int landStall = 90, landGap = 60;
+        sealed class SpotMemo { public int first, seen; }
+        static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Sim, Dictionary<int, SpotMemo>> spotMemo = new System.Runtime.CompilerServices.ConditionalWeakTable<Sim, Dictionary<int, SpotMemo>>();
+        /// touching a walker for landStall ticks without reaching the spot (under a swinging arm): it settles where it is
+        static bool SpotStalled(Sim sim, Wasp w)
+        {
+            var m = spotMemo.GetValue(sim, _ => new Dictionary<int, SpotMemo>());
+            if (!m.TryGetValue(w.id, out var c) || sim.tick < c.seen || sim.tick - c.seen > landGap) { m[w.id] = new SpotMemo { first = sim.tick, seen = sim.tick }; return false; }
+            c.seen = sim.tick;
+            return sim.tick - c.first > landStall;
+        }
         /// can it fly straight to the goal? Not into a drink or water (over the rim), nor through anything solid, nor through
         /// the person it is going to land on
+        // Routes past long walls (GDD 19.6 T3-1): see poc/sim/assist.js ROUTE. Over the first box in the way (its top, and
+        // the roof on a shed or house) or round one of its corners, whichever is shortest with a clear way there.
+        public static readonly Num rtFar = 1.2, rtMargin = 0.45, rtClearTop = 0.35, rtSkin = 0.05, rtMoved = 0.3, rtReached = 0.3, rtClimb = 1.5, rtBlocked = 5;
+        public const int rtEvery = 12;
+        sealed class RouteMemo { public int tick; public V3 g; public V3? wp; }
+        static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Sim, Dictionary<int, RouteMemo>> routeMemo = new System.Runtime.CompilerServices.ConditionalWeakTable<Sim, Dictionary<int, RouteMemo>>();
+        static List<Box> BoxesAlong(Sim sim, V3 a, V3 b)
+        {
+            Num CS = T.chunk.size, lox = Min(a.x, b.x) - 2, hix = Max(a.x, b.x) + 2, loz = Min(a.z, b.z) - 2, hiz = Max(a.z, b.z) + 2; var o = new List<Box>();
+            foreach (var r in sim.activeChunks) if (r.cx * CS + CS / 2 >= lox && r.cx * CS - CS / 2 <= hix && r.cz * CS + CS / 2 >= loz && r.cz * CS - CS / 2 <= hiz) o.AddRange(r.content.boxes);
+            return o;
+        }
+        /// where the straight way from a to b first enters box bx grown by m, as a share of the way (0..1), or -1
+        static Num BoxEntry(V3 a, V3 b, Box bx, Num m)
+        {
+            Num t0 = 0, t1 = 1;
+            Num[] A = { a.x, a.y, a.z }, B = { b.x, b.y, b.z }, LO = { bx.minx - m, bx.miny - m, bx.minz - m }, HI = { bx.maxx + m, bx.maxy + m, bx.maxz + m };
+            for (int i = 0; i < 3; i++)
+            {
+                Num d = B[i] - A[i];
+                if (Abs(d) < 1e-9) { if (A[i] < LO[i] || A[i] > HI[i]) return -1; continue; }
+                Num u = (LO[i] - A[i]) / d, v = (HI[i] - A[i]) / d;
+                if (u > v) { Num q = u; u = v; v = q; }
+                if (u > t0) t0 = u;
+                if (v < t1) t1 = v;
+                if (t0 > t1) return -1;
+            }
+            return t0;
+        }
+        static bool InBox(V3 p, Box bx, Num m) => p.x > bx.minx - m && p.x < bx.maxx + m && p.y > bx.miny - m && p.y < bx.maxy + m && p.z > bx.minz - m && p.z < bx.maxz + m;
+        static (Box bx, Num t)? FirstBox(List<Box> boxes, V3 a, V3 b, V3 g)
+        {
+            Box hit = null; Num ht = 2;
+            foreach (var bx in boxes)
+            {
+                if (InBox(g, bx, 2 * rtSkin)) continue; // the goal's own surface
+                Num t = BoxEntry(a, b, bx, rtSkin);
+                if (t >= 0 && t < ht) { ht = t; hit = bx; }
+            }
+            return hit != null ? (hit, ht) : ((Box, Num)?)null;
+        }
+        /// the boxes joined to b, end to end or touching (a run of fence sections): one wall
+        static List<Box> WallOf(List<Box> boxes, Box b)
+        {
+            var set = new List<Box> { b }; Num m = rtSkin * 2;
+            for (int i = 0; i < set.Count && set.Count < 64; i++)
+            {
+                var q = set[i];
+                foreach (var o in boxes) if (!set.Contains(o) && o.minx < q.maxx + m && o.maxx > q.minx - m && o.minz < q.maxz + m && o.maxz > q.minz - m && o.miny < q.maxy + m && o.maxy > q.miny - m) set.Add(o);
+            }
+            return set;
+        }
+        public static V3? RouteWaypoint(Sim sim, Wasp w, V3 g)
+        {
+            var a = new V3(w.x, w.y, w.z); var boxes = BoxesAlong(sim, a, g); var f = FirstBox(boxes, a, g, g);
+            if (f == null) return null;
+            var b = f.Value.bx; var wall = WallOf(boxes, b); Num M = rtMargin, top = b.maxy + (b.shed ? (b.wood ? 0.55 : 1.9) : 0) + rtClearTop, y = Max(a.y, 0.4);
+            var cands = new[] { (new V3(a.x + (g.x - a.x) * f.Value.t, top, a.z + (g.z - a.z) * f.Value.t), true),
+                (new V3(b.minx - M, y, b.minz - M), false), (new V3(b.maxx + M, y, b.minz - M), false), (new V3(b.minx - M, y, b.maxz + M), false), (new V3(b.maxx + M, y, b.maxz + M), false) };
+            V3? best = null; Num bc = Num.MaxValue;
+            foreach (var (c, up) in cands)
+            {
+                if (FirstBox(boxes, a, c, g) != null) continue; // no clear way there
+                Num l1 = Sqrt(Sq(c.x - a.x) + Sq(c.y - a.y) + Sq(c.z - a.z)), l2 = Sqrt(Sq(g.x - c.x) + Sq(g.y - c.y) + Sq(g.z - c.z));
+                var on = FirstBox(boxes, c, g, g); // still behind the same wall from there: that way gets nowhere
+                Num cost = l1 + l2 + (up ? (rtClimb - 1) * Max(0, c.y - a.y) : 0) + (on != null && wall.Contains(on.Value.bx) ? rtBlocked : 0);
+                if (cost < bc) { bc = cost; best = c; }
+            }
+            return best;
+        }
+        static V3? RouteOf(Sim sim, Wasp w, V3 g)
+        {
+            var m = routeMemo.GetValue(sim, _ => new Dictionary<int, RouteMemo>());
+            if (m.TryGetValue(w.id, out var c) && sim.tick >= c.tick && sim.tick - c.tick < rtEvery && Sq(c.g.x - g.x) + Sq(c.g.y - g.y) + Sq(c.g.z - g.z) < Sq(rtMoved)
+                && !(c.wp != null && D2(w, c.wp.Value) < Sq(rtReached))) return c.wp;
+            var wp = RouteWaypoint(sim, w, g);
+            m[w.id] = new RouteMemo { tick = sim.tick, g = g, wp = wp };
+            return wp;
+        }
         static bool StraightIn(Sim sim, Wasp w, LockTarget t, V3 g)
         {
             if (t.kind == "cup" || t.kind == "bath") return false;
@@ -348,24 +451,38 @@ namespace Sting.Core
             var v = TargetVel(sim, t); Num vs = Sqrt(v.x * v.x + v.y * v.y + v.z * v.z); bool moving = vs > chaseMoving;
             var g = g0;
             Num hd = Sqrt(Sq(g.p.x - w.x) + Sq(g.p.z - w.z));
-            V3 wp = g.p;
+            V3 wp = g.p; bool routed = false; V3? rw = null;
             if (!moving && StraightIn(sim, w, t, g.p)) wp = g.p;
+            else if (!moving && hd > rtFar && (rw = RouteOf(sim, w, g.p)) != null) { wp = rw.Value; routed = true; } // past a long wall
             else if (g.above && hd > 0.06) wp = new V3(g.p.x, g.p.y + Min(0.4, 0.3 * hd + 0.04), g.p.z);
             else if (g.n != null && Sqrt(D2(w, g.p)) > 0.2) { var n = g.n.Value; wp = new V3(g.p.x + n.x * 0.15, g.p.y + n.y * 0.15, g.p.z + n.z * 0.15); }
             Num dx = wp.x - w.x, dy = wp.y - w.y, dz = wp.z - w.z, d = Sqrt(dx * dx + dy * dy + dz * dz), dg = Sqrt(D2(w, g0.p)); // how near it really is
             var o = Copy(); o.burst = hurry ? 1 : 0;
             if (K.prey && dg < T.prey.catchDist * 0.9) { o.mz = 0; o.act = (sim.tick & 1) != 0 ? 1 : 0; return (o, null); } // grab it
             if (dg < 0.004 && !K.prey) { o.mz = 0; o.burst = 0; return (o, null); } // hold still: it settles on its own
-            // touching the person at their pace: let go of the controls and it settles on them (a walker too)
-            if (moving && t.kind == "human" && w.contact != null && w.contact.humanHex == t.hex && Sq(w.vx - v.x) + Sq(w.vy) + Sq(w.vz - v.z) < Sq(T.land.maxSpeed)) { o.mz = 0; o.burst = 0; return (o, null); }
+            // touching the person at their pace on the spot locked: let go of the controls and it settles there (a walker too;
+            // touching them anywhere else, it keeps flying on along them to the spot, GDD 19.6 T3-1)
+            var onThem = moving && t.kind == "human" && w.contact != null && w.contact.humanHex == t.hex ? sim.HumanByHex(t.hex) : null;
+            bool stalled = onThem != null && SpotStalled(sim, w); // kept up every tick it touches them
+            if (onThem != null && Sq(w.vx - v.x) + Sq(w.vy) + Sq(w.vz - v.z) < Sq(T.land.maxSpeed) && (dg < landSpot || stalled)) { o.mz = 0; o.burst = 0; return (o, null); }
             // as fast as it can still stop in: cruising until the braking distance, then down to a crawl at the spot
             Num want = moving ? Clamp(Min(d, dg) * 2.2, K.prey ? 0.3 : 0.06, top) * (dg < 0.15 && !K.prey ? 0.6 : 1)
-                : Clamp(Sqrt(2 * T.wasp.accel * landBrake * Min(d, dg)), K.prey ? 0.3 : 0.06, top);
+                : Clamp(Sqrt(2 * T.wasp.accel * landBrake * (routed ? dg : Min(d, dg))), K.prey ? 0.3 : 0.06, top); // a waypoint is flown through
             Num fx = dx, fy = dy, fz = dz; // the way to fly
             if (moving)
             { // its velocity plus closing speed (prey is run down; a person is come up to gently); burst when that is past cruising
                 Num close = (K.prey ? Max(want, chaseCloseMin) : want) / Max(d, 1e-6);
                 fx = v.x + dx * close; fy = v.y + dy * close; fz = v.z + dz * close;
+                if (onThem != null)
+                { // touching them: slide along the body toward the spot rather than press into it
+                    var nW = Body.DirToWorld(onThem.F, w.contact.n);
+                    Num rx = fx - v.x, ry = fy - v.y, rz = fz - v.z, dn = rx * nW.x + ry * nW.y + rz * nW.z;
+                    if (dn < 0) { rx -= dn * nW.x; ry -= dn * nW.y; rz -= dn * nW.z; fx = v.x + rx; fy = v.y + ry; fz = v.z + rz; }
+                }
+                { // the air moves it too: ask for the velocity less the wind's share, so it closes on the spot even downwind (T3-1)
+                    var wd = sim.Drift(w); Num kw = Min(1, Sqrt(fx * fx + fy * fy + fz * fz) / top);
+                    fx -= wd.x * kw; fz -= wd.z * kw;
+                }
                 Num sp = Sqrt(fx * fx + fy * fy + fz * fz); bool fast = sp > top; Num cap = fast ? T.wasp.burst * (w.carry != null ? T.wasp.carrySpeedMul : 1) : top;
                 o.burst = fast || hurry ? 1 : 0;
                 o.mz = RndI(Clamp(sp / cap, 0, 1) * 100);
@@ -380,8 +497,11 @@ namespace Sting.Core
 
         /// Hovering round a lock (GDD 7.9): H holds the wasp a short way off the target, facing it, and lets it drift slowly round
         /// it at its own unhurried speed, matching its pace if it moves; from there E lands at once. Matches poc/sim/assist.js HOVER.
-        public static readonly Num hoverR = 0.35, hoverUp = 0.1, hoverSpeed = 1.2, hoverOrbit = 0.5, hoverGain = 3;
-        public static (Cmd cmd, string done) HoverPilot(Sim sim, Wasp w, LockTarget t, Cmd cmd)
+        public static readonly Num hoverR = 0.35, hoverUp = 0.1, hoverSpeed = 1.2, hoverOrbit = 0.5, hoverGain = 3, hoverRMin = 0.15, hoverRMax = 1.2, hoverOrbitMax = 1.5;
+        /// the player's own hover (GDD 19.6 T3-1): how far off and how fast round, clamped to the ranges
+        public static (Num r, Num orbit) HoverSetting(Num r, Num orbit) => (Clamp(r, hoverRMin, hoverRMax), Clamp(orbit, -hoverOrbitMax, hoverOrbitMax));
+        public static (Cmd cmd, string done) HoverPilot(Sim sim, Wasp w, LockTarget t, Cmd cmd) => HoverPilot(sim, w, t, cmd, hoverR, hoverOrbit);
+        public static (Cmd cmd, string done) HoverPilot(Sim sim, Wasp w, LockTarget t, Cmd cmd, Num setR, Num setOrbit)
         {
             if (w.state == "landed" || w.state == "perched") return (new Cmd { mx = 0, my = 100, mz = 0, burst = 0, sting = 0, yawQ = cmd.yawQ, pitchQ = cmd.pitchQ, act = 0, alloc = cmd.alloc, pick = cmd.pick }, null); // up first
             if (w.state != "fly") return (cmd, "gone");
@@ -391,7 +511,7 @@ namespace Sting.Core
             // the station: on the wasp's side of the target, a little further round each tick
             Num ux = w.x - p.x, uz = w.z - p.z, ul = Sqrt(ux * ux + uz * uz);
             if (ul < 1e-6) { ux = 1; uz = 0; } else { ux /= ul; uz /= ul; }
-            Num a = DAtan2(ux, uz) + hoverOrbit / hoverGain, sx = p.x + DSin(a) * hoverR, sy = p.y + hoverUp, sz = p.z + DCos(a) * hoverR;
+            Num a = DAtan2(ux, uz) + setOrbit / hoverGain, sx = p.x + DSin(a) * setR, sy = p.y + hoverUp, sz = p.z + DCos(a) * setR;
             // the velocity that takes it there and keeps it there: the target's own, plus the way back to station
             Num fx = (sx - w.x) * hoverGain, fy = (sy - w.y) * hoverGain, fz = (sz - w.z) * hoverGain, fl = Sqrt(fx * fx + fy * fy + fz * fz);
             if (fl > hoverSpeed) { fx *= hoverSpeed / fl; fy *= hoverSpeed / fl; fz *= hoverSpeed / fl; }

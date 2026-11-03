@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, humanParts, malesAbout, chunkOf, toLocal, dirToWorld, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, groundSlope, pavingOf, pickTarget, assistPilot, swoopPilot, hoverPilot, HOVER, ROLES, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS,
+  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, groundSlope, pavingOf, pickTarget, assistPilot, swoopPilot, hoverPilot, hoverSetting, HOVER, ROLES, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS,
 } from '../sim/index.js';
 import { applyTuning, parseTuning, tuningHash, tuningLeaves, TUNE } from '../sim/tunefile.js';
 
@@ -2268,6 +2268,58 @@ function seated(sim, pred) {
   };
   const up = hold(1, best.x - 3), down = hold(-1, best.x + 10);
   ok(up > down * 1.1 && Math.abs(w.y - 1) < 0.3, `holding a metre above the ground, up the rise costs ${(up * 1000).toFixed(1)} and down it ${(down * 1000).toFixed(1)} thousandths of a tank`);
+}
+
+// 58. Routes past long walls (GDD 19.6 T3-1): assisted flight from a front yard to a flower in the backyard behind the
+// house plans a way round a corner or over the roof, where the metre's look-ahead alone stalled at the wall
+{
+  const res = [];
+  for (const seed of [1234, 7, 99]) {
+    const s = new Sim({ seed, birds: false }, { noAI: true }); run(s, 1);
+    let cases = 0;
+    for (const rec of s.activeChunks) {
+      const c = rec.content;
+      if (c.use !== 'yards') continue;
+      for (const h of c.sheds.filter((q) => q.house)) {
+        const side = Math.sign(h.z - rec.cz * 64), fi = c.flowers.findIndex((f, i) => s.inBloom(rec, i) && Math.abs(f.x - h.x) < 10 && Math.sign(f.z - h.z) === side && Math.abs(f.z - h.z) > 8);
+        if (fi < 0 || cases > 3) continue;
+        cases++;
+        const w = s.wasp; Object.assign(w, { x: h.x, y: 1.2, z: h.z - side * (h.hd + 3), vx: 0, vy: 0, vz: 0, state: 'fly', land: null, energy: 1 });
+        const t = { kind: 'flower', key: chunkKey(rec.cx, rec.cz), i: fi };
+        let r = null, k = 0; for (; k < 60 * 40; k++) { r = assistPilot(s, w, t, idle()); if (r.done) break; s.step(r.cmd); s.drainEvents(); }
+        res.push({ done: r.done, secs: k / 60 });
+      }
+    }
+  }
+  const landed = res.filter((r) => r.done === 'landed');
+  ok(res.length >= 10 && landed.length === res.length, `from the front yard to a flower behind the house: ${landed.length} of ${res.length} flights land (the slowest in ${Math.max(...landed.map((r) => r.secs)).toFixed(1)} s)`);
+}
+
+// 59. Settling on the spot locked on a walker, and the hover the player sets (GDD 19.6 T3-1): touching a walker
+// elsewhere it slides on to the spot, allows for the wind, and only where the spot cannot be reached (under a swinging
+// arm) settles as near as it got after a second and a half; the wheel sets how far off a hover holds and which way round
+{
+  const res = [];
+  for (const side of [0, 1]) for (const yy of [1.25, 0.9, 1.5]) {
+    const s = new Sim({ seed: 1234, birds: false }, { noAI: true }); run(s, 1);
+    let hm = null; for (let k = 0; k < 60 * 60 * 20 && !hm; k += 30) { run(s, 30); hm = s.active.find((h) => h.state === 'stroll' && Math.hypot(h.vx, h.vz) > 0.5 && !h.special); }
+    const sp = Math.hypot(hm.vx, hm.vz), ux = hm.vx / sp, uz = hm.vz / sp, off = side ? { x: -uz * 2, z: ux * 2 } : { x: -ux * 2, z: -uz * 2 };
+    place(s.wasp, { x: hm.x + off.x, y: 1.3, z: hm.z + off.z });
+    const dx = hm.x - s.wasp.x, dy = yy - 1.3, dz = hm.z - s.wasp.z, dd = Math.hypot(dx, dy, dz), t = pickTarget(s, s.wasp, { x: dx / dd, y: dy / dd, z: dz / dd });
+    let r = null, k = 0; for (; k < 900; k++) { r = assistPilot(s, s.wasp, t, idle()); if (r.done) break; s.step(r.cmd); s.drainEvents(); }
+    const p = targetPos(s, t), w = s.wasp;
+    res.push({ done: r.done, off: Math.hypot(w.x - p.x, w.y - p.y, w.z - p.z) });
+  }
+  const best = Math.min(...res.map((r) => r.off));
+  ok(res.every((r) => r.done === 'perched') && best < 0.07, `locked on six spots on a walker, assisted flight settles on all of them; on the open back ${(best * 100).toFixed(1)} cm from the spot (the rest ${res.map((r) => (r.off * 100).toFixed(0)).join(', ')} cm)`);
+  const s = new Sim({ seed: 1234, birds: false }, { noAI: true }); run(s, 1);
+  const rec = s.records.get('0,0'), fi = rec.content.flowers.findIndex((f, k) => s.inBloom(rec, k) && s.nectarAt(rec, k) > 0), f = rec.content.flowers[fi], t = { kind: 'flower', key: '0,0', i: fi };
+  place(s.wasp, { x: f.x + 1.5, y: f.y + 0.5, z: f.z - 1 });
+  const set = hoverSetting(0.6, -0.5), wide = hoverSetting(5, 9);
+  let r4 = 0, a4 = 0, a6 = 0;
+  for (let k = 1; k <= 420; k++) { const rr = hoverPilot(s, s.wasp, t, idle(), set); s.step(rr.cmd); s.drainEvents(); const w = s.wasp; if (k === 300) { r4 = Math.hypot(w.x - f.x, w.z - f.z); a4 = Math.atan2(w.x - f.x, w.z - f.z); } if (k === 420) a6 = Math.atan2(w.x - f.x, w.z - f.z); }
+  const turned = Math.atan2(Math.sin(a6 - a4), Math.cos(a6 - a4));
+  ok(Math.abs(r4 - 0.6) < 0.05 && turned < -0.3 && wide.r === HOVER.rMax && wide.orbit === HOVER.orbitMax, `a hover set 60 cm off and the other way round holds ${r4.toFixed(2)} m off and drifts ${turned.toFixed(2)} rad in 2 s; settings past the ranges are held to them`);
 }
 
 // Tuning as data (GDD 13, T1-22): one plain-text file feeds both sims
