@@ -313,7 +313,33 @@ const TMP2 = new THREE.Vector2();
 
 // The far ring's vertex shader: scatter.js's wild placement again in GLSL (the same grid, hashes and rules), then the
 // impostor quad billboarded about its trunk, culled against the view, dithered in where the meshes end.
-const FAR_VERT = (nk, nv, V) => /* glsl */ `
+// scatter.js's wild rule, written again in GLSL on the clipmap: the same grid, hashes and thresholds. Returns false for
+// an empty cell; k is the kind (0 oak, 1 birch, 2 pine, 3 bush), with the place, scales, turn and variety
+export const PLACE_GLSL = /* glsl */ `
+bool wildPlace(int ix, int iz, float G, float sea, float wildFrom, out vec2 base, out int k, out float sxz, out float sy, out float rot, out float var) {
+  base = (vec2(float(ix), float(iz)) + 0.15 + 0.7 * vec2(w2hash01(ix, iz, 21), w2hash01(ix, iz, 22))) * G;
+  k = 0; sxz = 1.0; sy = 1.0; rot = 0.0; var = 0.0;
+  if (wildFrom > 0.0 && length(base) < wildFrom) return false; // inside the settled area the chunks' own trees stand
+  vec4 gd = clipAt(base); float h = gd.x, f = gd.z, wet = gd.y, trail = gd.w, wl = clipWater(base);
+  if (h < wl + 0.7 || trail > 0.25) return false;
+  float p = f * 0.88 + ${FOREST.meadow.toFixed(3)};
+  float r = w2hash01(ix, iz, 23);
+  if (r > p) { // a bush where the forest thins, else nothing
+    if (!(r < p + 0.22 * min(1.0, f * 3.0) * (1.0 - f) + 0.004)) return false;
+    k = 3;
+  } else {
+    vec3 n = clipNormal(base); if (1.0 - n.y > 0.52) return false; // steep ground (scatter.js: slope > 0.9 over 1.5 m)
+    float alt = h - sea;
+    if (alt > 120.0 + 40.0 * w2noise(base / 300.0, 31) || (wet < 0.38 && f > 0.4)) k = 2;
+    else if (wet > 0.62 && w2hash01(ix, iz, 28) < 0.45) k = 1;
+  }
+  float s = k == 3 ? 0.8 + 0.6 * w2hash01(ix, iz, 26) : 0.82 + 0.45 * w2hash01(ix, iz, 29);
+  sy = k == 3 ? 0.8 + 0.5 * w2hash01(ix, iz, 27) : s; sxz = k == 3 ? s : s * (0.9 + 0.2 * w2hash01(ix, iz, 30));
+  rot = w2hash01(ix, iz, 24) * 6.283; var = w2hash01(ix, iz, 25);
+  return true;
+}
+`;
+const FAR_VERT = (nk, nv, V) => PLACE_GLSL + /* glsl */ `
 in vec2 aCell;
 uniform vec4 uMeta[${nk * nv}];
 uniform float uSp, uGrid, uRin, uRout, uMul, uSea, uWildFrom, uFade, uTime; uniform vec3 uCam; uniform mat4 uVP; uniform vec2 uWind;
@@ -321,35 +347,16 @@ out vec2 vUv; out float vKill, vVar, vFade; out vec3 vW; flat out int vSlice; fl
 void main() {
   vec2 org = floor(uCam.xz / uSp) * uSp;
   vec2 cw = org + aCell * uSp;
-  // the cell of scatter.js's grid this stands for (the grid's own cell, or one of the four in a doubled cell)
   int ix = int(floor(cw.x / uGrid)), iz = int(floor(cw.y / uGrid));
-  if (uMul > 1.5) { ix += int(w2hash01(ix, iz, 19) * 2.0); iz += int(w2hash01(ix, iz, 20) * 2.0); }
-  vec2 base = (vec2(float(ix), float(iz)) + 0.15 + 0.7 * vec2(w2hash01(ix, iz, 21), w2hash01(ix, iz, 22))) * uGrid;
-  float dist = length(base - uCam.xz);
-  vKill = 1.0; vFade = 0.0; vVar = 0.0; vW = vec3(0.0); vUv = uv; vSlice = 0; vRow = 0;
+  if (uMul > 1.5) { ix += int(w2hash01(ix, iz, 19) * 2.0); iz += int(w2hash01(ix, iz, 20) * 2.0); } // one of the four cells of a doubled cell
+  vec2 base; int k; float sxz, sy, rot; vKill = 1.0; vFade = 0.0; vVar = 0.0; vW = vec3(0.0); vUv = uv; vSlice = 0; vRow = 0;
   gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+  float dist = length((vec2(float(ix), float(iz)) + 0.5) * uGrid - uCam.xz);
   if (dist < uRin - uFade || dist > uRout) return;
-  if (uWildFrom > 0.0 && length(base) < uWildFrom) return; // inside the settled area the chunks' own trees stand
-  vec4 gd = clipAt(base); float h = gd.x, f = gd.z, wet = gd.y, trail = gd.w, wl = clipWater(base);
-  if (h < wl + 0.7 || trail > 0.25) return;
-  float p = f * 0.88 + ${FOREST.meadow.toFixed(3)};
-  float r = w2hash01(ix, iz, 23);
-  int k = 0;
-  if (r > p) { // a bush where the forest thins, else nothing
-    if (!(r < p + 0.22 * min(1.0, f * 3.0) * (1.0 - f) + 0.004)) return;
-    k = 3;
-  } else {
-    vec3 n = clipNormal(base); if (1.0 - n.y > 0.52) return; // steep ground (scatter.js: slope > 0.9 over 1.5 m)
-    float alt = h - uSea;
-    if (alt > 120.0 + 40.0 * w2noise(base / 300.0, 31) || (wet < 0.38 && f > 0.4)) k = 2;
-    else if (wet > 0.62 && w2hash01(ix, iz, 28) < 0.45) k = 1;
-  }
+  if (!wildPlace(ix, iz, uGrid, uSea, uWildFrom, base, k, sxz, sy, rot, vVar)) return;
   if (k >= ${nk}) return;
-  float s = k == 3 ? 0.8 + 0.6 * w2hash01(ix, iz, 26) : 0.82 + 0.45 * w2hash01(ix, iz, 29);
-  float sy = k == 3 ? 0.8 + 0.5 * w2hash01(ix, iz, 27) : s, sxz = k == 3 ? s : s * (0.9 + 0.2 * w2hash01(ix, iz, 30));
+  float h = clipHeight(base);
   int v = int(w2hash01(int(floor(base.x * 7.0)), int(floor(base.y * 7.0)), 11) * ${nv}.0);
-  float rot = w2hash01(ix, iz, 24) * 6.283;
-  vVar = w2hash01(ix, iz, 25);
   // the quad: billboarded about the trunk, the size of the baked box, scaled; a doubled cell's card is wider
   int row = k * ${nv} + v; vRow = row; vec4 M = uMeta[row];
   float w = M.x * sxz * (uMul > 1.5 ? 1.5 : 1.0), hgt = M.y * sy;

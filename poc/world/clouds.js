@@ -67,9 +67,11 @@ vec4 marchClouds(vec3 ro, vec3 rd, float tmax, float jit, vec3 sunCol, vec3 sunD
     float d = cloudDens(p, t < 9000.0);
     if (d > 0.001) {
       float od = cloudDens(p + sunDir * 60.0, false) * 60.0 + cloudDens(p + sunDir * 220.0, false) * 160.0;
-      float beer = exp(-od * 0.014), powder = 1.0 - exp(-d * 2.5);
+      float beer = exp(-od * 0.01), powder = 1.0 - exp(-d * 2.5);
       float hN = clamp((p.y - C_BASE) / (C_TOP - C_BASE), 0.0, 1.0);
-      vec3 S = sunCol * beer * ph * (0.5 + 0.5 * powder) * 1.6 + amb * (0.25 + 0.6 * hN);
+      // a cloud's albedo is about 0.9 and much of its light has scattered many times: a floor of the sun's light
+      // everywhere, more where the sun reaches, the phase on top; the sky's light from above (radiances: over pi)
+      vec3 S = sunCol / 3.1416 * 0.9 * (0.35 + 0.65 * beer) * (0.7 + 2.5 * ph) * (0.6 + 0.4 * powder) + amb / 3.1416 * (0.6 + 0.5 * hN);
       float a = 1.0 - exp(-d * dt * 0.02);
       acc += S * a * T; T *= 1.0 - a;
       if (T < 0.02) break;

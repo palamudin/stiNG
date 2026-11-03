@@ -1,0 +1,54 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>World v3 far forest: the GPU rule against scatter.js</title>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
+<pre id="out">running</pre>
+<script type="module">
+// The far forest's placement (trees.js, PLACE_GLSL on the clipmap) against the near forest's (scatter.js, on the
+// source): over 16 tiles, which cells hold a tree, of what kind, at what scale. The clipmap holds interpolated texels
+// where the source is exact, so a few cells near a threshold may differ; the share that agrees is reported.
+import * as THREE from 'three';
+import { World } from '../index.js';
+import { wildSource } from '../sources/wild.js';
+import { placeTile } from '../scatter.js';
+import { PLACE_GLSL, FOREST } from '../trees.js';
+import { NOISE_GLSL } from '../noise.js';
+import { treeDesign, TREE_KINDS } from '../treecards.js';
+const renderer = new THREE.WebGLRenderer();
+const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(55, 1, 0.1, 60000);
+const src = wildSource({ seed: 7 });
+const world = new World(renderer, scene, camera, src, { quality: 'low', clip: { levels: 12 } });
+const X0 = 1700, Z0 = 1500; // the demo's shore
+world.build(X0, Z0);
+// the CPU rule over 16 tiles round the point
+const cfg = { ...FOREST }, design = { oak: treeDesign('oak', 1), birch: treeDesign('birch', 1) };
+const cpu = new Map(); // "ix,iz" -> [kind, sxz, sy]
+const T = cfg.tile, G = cfg.grid, ti0 = Math.floor(X0 / T), tj0 = Math.floor(Z0 / T);
+const kinds = TREE_KINDS;
+for (let tj = tj0 - 2; tj < tj0 + 2; tj++) for (let ti = ti0 - 2; ti < ti0 + 2; ti++) {
+  const items = placeTile(src, ti, tj, kinds, cfg, design);
+  items.forEach((perV, k) => perV.forEach((a) => { for (let i = 0; i < a.length; i += 8) { const ix = Math.floor(a[i] / G), iz = Math.floor(a[i + 1] / G); if (k < 4) cpu.set(ix + ',' + iz, [k, a[i + 4], a[i + 5]]); } }));
+}
+// the GPU rule over the same cells
+const cells = []; for (let tj = tj0 - 2; tj < tj0 + 2; tj++) for (let ti = ti0 - 2; ti < ti0 + 2; ti++) for (let gz = 0; gz < T / G; gz++) for (let gx = 0; gx < T / G; gx++) cells.push(Math.floor(ti * T / G) + gx, Math.floor(tj * T / G) + gz);
+const N = cells.length / 2, W = 256, H = Math.ceil(N / W);
+const data = new Float32Array(W * H * 4); for (let i = 0; i < N; i++) { data[i * 4] = cells[i * 2]; data[i * 4 + 1] = cells[i * 2 + 1]; }
+const tex = new THREE.DataTexture(data, W, H, THREE.RGBAFormat, THREE.FloatType); tex.needsUpdate = true;
+const rt = new THREE.WebGLRenderTarget(W, H, { type: THREE.FloatType, depthBuffer: false });
+const m = new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, uniforms: { ...world.clip.uniforms, uP: { value: tex } },
+  vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }',
+  fragmentShader: `precision highp float; precision highp int;\n${world.clip.glsl()}\n${NOISE_GLSL}\n${PLACE_GLSL}\nuniform highp sampler2D uP; out vec4 o;
+void main() { vec2 c = texelFetch(uP, ivec2(gl_FragCoord.xy), 0).xy; vec2 base; int k; float sxz, sy, rot, vr;
+  bool on = wildPlace(int(c.x), int(c.y), ${G.toFixed(2)}, ${src.sea.toFixed(2)}, 0.0, base, k, sxz, sy, rot, vr);
+  o = vec4(on ? 1.0 : 0.0, float(k), sxz, sy); }` });
+const sc = new THREE.Scene(), q = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), m); q.frustumCulled = false; sc.add(q);
+renderer.setRenderTarget(rt); renderer.render(sc, new THREE.Camera()); const px = new Float32Array(W * H * 4); renderer.readRenderTargetPixels(rt, 0, 0, W, H, px); renderer.setRenderTarget(null);
+let both = 0, cpuOnly = 0, gpuOnly = 0, neither = 0, kindAgree = 0, scaleErr = 0;
+for (let i = 0; i < N; i++) {
+  const key = cells[i * 2] + ',' + cells[i * 2 + 1], c = cpu.get(key), g = px[i * 4] > 0.5;
+  if (c && g) { both++; if (c[0] === Math.round(px[i * 4 + 1])) kindAgree++; scaleErr = Math.max(scaleErr, Math.abs(c[1] - px[i * 4 + 2]), Math.abs(c[2] - px[i * 4 + 3])); }
+  else if (c) cpuOnly++; else if (g) gpuOnly++; else neither++;
+}
+window.__result = { cells: N, both, cpuOnly, gpuOnly, neither, agree: (both + neither) / N, kindAgree: both ? kindAgree / both : 1, scaleErr };
+document.getElementById('out').textContent = JSON.stringify(window.__result, null, 1);
+</script>

@@ -42,6 +42,11 @@ vec4 mapColor(vec2 uv) {
   vec3 P = uCamPos + v * dist; vec2 xz = P.xz;
   vec4 T = clipAt(xz); float W = clipWater(xz); vec3 N = clipNormal(xz);
   float h = T.x - uSea, depth = W - T.x;
+  // widths for the lines come from the unsnapped pixel (a snapped value has no derivative inside its block)
+  float du = texture(tDepth, uv).r; vec3 vzu = viewRayZ(uv); vec3 vu = normalize((uCamWorld * vec4(vzu, 0.0)).xyz);
+  vec2 xzu = (uCamPos + vu * ((exp2(min(du, 0.9999) * uLogF) - 1.0) * length(vzu))).xz;
+  float hu = clipAt(xzu).x, depthU = clipWater(xzu) - hu;
+  float cw = max(fwidth(hu / ${MAP.contour.toFixed(1)}) * 1.2, 1e-3), e = max(fwidth(depthU) * 1.5, 1e-3);
   bool water = depth > 0.0;
   vec3 col;
   if (water) {
@@ -53,17 +58,16 @@ vec4 mapColor(vec2 uv) {
     float sh = clamp(dot(N, normalize(vec3(-0.5, 0.75, -0.5))), 0.0, 1.0);
     col *= 0.55 + 0.6 * sh;
     // forests: a dot pattern in world space; trails: dashed
-    vec2 dc = floor(xz / 9.0); float dot_ = step(0.6, length(fract(xz / 9.0) - 0.5) * 2.0) * w2hash01(int(dc.x), int(dc.y), 777);
-    col *= mix(1.0, 0.82, smoothstep(0.35, 0.7, T.z) * (1.0 - dot_) * 0.9);
+    vec2 dc = floor(xz / 9.0); float inDot = 1.0 - step(0.55, length(fract(xz / 9.0) - 0.5) * 2.0);
+    col *= mix(1.0, 0.78, smoothstep(0.35, 0.7, T.z) * inDot * step(0.35, w2hash01(int(dc.x), int(dc.y), 777)));
     float dash = step(0.5, fract((xz.x + xz.y) / 6.0));
     col = mix(col, L(0.45, 0.3, 0.18), smoothstep(0.3, 0.6, T.w) * dash);
     // contours
-    float cf = fract(h / ${MAP.contour.toFixed(1)}), cw = fwidth(h / ${MAP.contour.toFixed(1)}) * 1.2;
+    float cf = fract(h / ${MAP.contour.toFixed(1)});
     float line = 1.0 - smoothstep(0.0, cw, min(cf, 1.0 - cf));
     col *= 1.0 - 0.28 * line * (1.0 - smoothstep(1.0, 3.0, cw));
   }
   // the coast and lake shores: a dark line where the water meets the land (the depth's zero crossing)
-  float e = fwidth(depth) * 1.5;
   float shore = 1.0 - smoothstep(0.0, e, abs(depth));
   col = mix(col, L(0.12, 0.2, 0.3), shore * 0.85);
   return vec4(col, 1.0);
@@ -120,7 +124,7 @@ export class Places {
       wet += o[1];
     }
     const x = (i + 0.5) * C, z = (j + 0.5) * C, land = n - water;
-    if (sea >= 2 && land >= 2) this.list.push({ kind: 'water', sub: 'shore', x, z, name: 'the shore' });
+    if (sea >= 2 && land >= 2 && hash01(i, j, 90) < 0.2) this.list.push({ kind: 'water', sub: 'shore', x, z, name: 'the shore' }); // one pin for a stretch of coast
     if (land === 0) return;
     const hm = hsum / land;
     if (meadow / land > 0.7 && hash01(i, j, 91) < 0.5) this.list.push({ kind: 'food', sub: 'meadow', x, z, h: hm, name: placeName(i, j, seed + 1) + ' meadow' });

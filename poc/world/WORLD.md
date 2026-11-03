@@ -110,6 +110,30 @@ lakes (once, at their centre) and the shore; meadows in bloom and damp fruit woo
 trees), crags (crevices) and dry banks (burrows) as nest sites. In the game the sim's own place list (GDD 19.6 T3-2) is
 the authority; this scan is the template's stand-in.
 
+**Checks** (run from `poc/`; browser pages headless, software WebGL):
+
+| Check | Result |
+|---|---|
+| `node world/test/world.test.mjs` (W3 part) | 25 lakes in a 35 km square at their own levels; every point in the inner half of a basin is under its level; the water level field jumps 1,059 times along radial lines and the ground is above both levels at every jump; 40% of a 20 km square is under water. Every card tree kind and variety meshes at three levels with unit normals (oak 624 / 164 / 24 triangles). The atlas is 10.5% leaf pixels. The seasons turn in order; deep winter snow 1.0, ice 0.99, leaves gone 1.0; midsummer bloom 1.0. Six weather kinds over three years, the same for the same day. The composite's inside is the sim's ground plus one lift, its outside the wild ground exactly, and the band changes by less than 3 m a step. A 3 km scan round the wild origin finds water, food and nest sites. |
+| `world/test/gpu-parity.html` | The GLSL twin against the JS at 4,096 points per seed, three seeds: height within 1.3 cm (a lake's trigonometry at kilometre coordinates in float32; none over 2 cm), the water level within 1.3e-4 m. |
+| `world/test/forest-parity.html` | The GPU placement rule against `scatter.js` over 16 tiles (2,704 cells): 99.85% agree on whether a tree stands (2 cells each way at thresholds, from the clipmap's interpolation), every kind agrees, scales within 1.5e-7. |
+| `index.html?world2` | Boots with the card trees and the game's own trunks. |
+
+**Not verified.** Frame times on a real GPU: the template now shows them per pass where the browser gives timer
+queries, so the first real numbers come from your machine. Phones. The impostors in motion (the eight views switch
+by dither-free snapping; a real GPU will show whether the step reads).
+
+**Known limits (W3).**
+- A lake seen from kilometres away is drawn from a coarse clipmap level, where its level field jumps between 512 m
+  texels: its edge goes blocky, and on a plateau above low land a sliver of its water can show beyond the rim.
+- Clouds do not shadow the game's own objects (people, houses), only what World v3 draws.
+- The ice is a sheet over the water's shading, not a surface of its own; nothing walks on it.
+- Snow lies by height, not by cover: a snowy day whitens nothing until the season does.
+- The map's pins come from a stand-in scan; the sim's place list (T3-2) replaces it in the game.
+- The composite's wild land is scenery to the sim: no collision, no places, no weather feedback.
+- Tree shadows from the far ring: none (impostors cast none); the ground under a far forest is darkened by its
+  forest-floor colour instead.
+
 **The game's weather.** The game sets `auto: false` and the fields itself: `cloud` 0..1 (the sim's weather kind),
 `rain`, `snow`, `storm`, `flash`, with `haze`, `mist`, `wet`, `wind` and `wind10` as before, and `day` for the season
 if it wants the seasons (the sim has its own season, GDD 6.4: map it to `day`).
