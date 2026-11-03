@@ -40,6 +40,7 @@ export class World {
   constructor(renderer, scene, camera, source, opts = {}) {
     this.renderer = renderer; this.scene = scene; this.camera = camera; this.source = source;
     this.q = { ...QUALITY[opts.quality || 'high'] };
+    if (opts.grass) this.q.grass = opts.grass; // the caller's grass density, over the tier's
     if (opts.dof === false) this.q.dof = false; // a game camera that has to read the scene, not a macro lens
     this.shadowMin = opts.shadowBox ?? 3; // the shadow box's least half-width (the game wants the people round the wasp)
     this.time = 0;
@@ -164,6 +165,7 @@ export class World {
     this.sun.position.copy(this.sun.target.position).addScaledVector(this.sunDir, box * 4);
     this.uniforms.uShadowFar.value = box;
     this.uniforms.uWet.value = E.wet;
+    this.uniforms.uTime.value = this.time; // the grass and the trees sway on this clock (the post chain has its own)
     this.forest.update(eye, dt);
     this.grass.update(eye, Math.max(this.heightAt(eye.x, eye.z), this.source.sea));
     this.uniforms.uGrassR.value = this.grass.reach;

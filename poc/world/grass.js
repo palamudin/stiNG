@@ -19,19 +19,19 @@ import * as THREE from 'three';
 import { NOISE_GLSL } from './noise.js';
 
 export const GRASS = {
-  // Five rings, each about 1.7 times the last, overlapping by half: a ring thins out over the outer half of its radius
+  // Five rings, each about 1.7 times the last, overlapping widely: a ring thins out over the outer 60% of its radius
   // while the next thickens over the same band, so the density changes gently with distance and never in a step.
   // A blade's height belongs to its place (the same blade is as tall from 2 m as from 20 m); only its width grows with
   // distance, as a pixel covers more ground (bladeW), so far blades cover like near ones without changing the lawn.
   rings: [
-    { spacing: 0.045, radius: 2.5, blades: 6, segs: 3 },
-    { spacing: 0.065, radius: 5, blades: 5, segs: 3 },
-    { spacing: 0.1, radius: 9, blades: 5, segs: 2 },
-    { spacing: 0.16, radius: 15, blades: 5, segs: 2 },
-    { spacing: 0.26, radius: 26, blades: 4, segs: 2 },
+    { spacing: 0.045, radius: 3, blades: 6, segs: 3 },
+    { spacing: 0.068, radius: 6, blades: 5, segs: 3 },
+    { spacing: 0.105, radius: 11, blades: 5, segs: 2 },
+    { spacing: 0.17, radius: 19, blades: 4, segs: 2 },
+    { spacing: 0.28, radius: 32, blades: 3, segs: 1 },
   ],
   bladeW: { root: 0.0065, from: 1.5, power: 0.7 }, // width = root * max(1, distance / from) ^ power
-  band: 0.5,  // a ring thins over the outer (1 - band) of its radius; the next thickens over the same metres
+  band: 0.4,  // a ring thins over the outer (1 - band) of its radius; the next thickens over the same metres
   growIn: 0.25, // a clump grows in (and shrinks out) over this share of the density, never popping
   flowers: { spacing: 0.55, radius: 18 },
   // the share of the next scale step's clumps in, over the last 30% of a step (log2 of the scale)
