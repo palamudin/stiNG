@@ -91,6 +91,12 @@ export class World {
       if (this.source.sea > -1e5 && this.q.caustics) this.caustics = new Caustics(gl, this.waves, this.clip.glsl(), this.clip.uniforms, { res: this.q.caustics[0], grid: this.q.caustics[1], msaa: this.q.msaa ? 4 : 0 });
     }
     this.post.setWater(this.waves, this.caustics);
+    // the shore reads the first two cascades for its swash (terrain.js)
+    const TU = this.terrain.uniforms;
+    if (this.waves && this.source.sea > -1e5) {
+      TU.tWave0.value = this.waves.disp[0].texture; TU.tWave1.value = this.waves.disp[Math.min(1, this.waves.C - 1)].texture;
+      TU.uWaveL.value.set(this.waves.cascades[0], this.waves.cascades[Math.min(1, this.waves.C - 1)]);
+    } else TU.uRun.value.set(0, 0);
     this.drawsWater = !!(this.waves && this.source.waters); // the caller can stop drawing its own water bodies
     this._dtAvg = 1 / 60;
   }
@@ -173,6 +179,8 @@ export class World {
       const w10 = E.wind10 || [E.wind[0] * 8, E.wind[1] * 8];
       this.waves.update(this.time, w10, Math.PI / this._dtAvg);
       const st = this.waves.state;
+      // the run-up's sea state: significant height H0 and the deep-water wavelength L0 of the peak period (2 pi g / w^2)
+      if (this.source.sea > -1e5) { const wp = Math.sqrt(9.81 * st.kp + WAVES.T * st.kp ** 3); this.terrain.uniforms.uRun.value.set(this.waves.stats.Hs * 2 * Math.PI * 9.81 / (wp * wp), this.waves.stats.Hs); }
       U.uWLost.value = this.waves.lostSlope; U.uWPeak.value = Math.min(2 * Math.PI / WAVES.km, 2 * Math.PI / st.kp); // the ripples at the gravity-capillary minimum, or the peak if shorter
       if (this.caustics) {
         const fx2 = eye.x + TMPV.x * focusDist, fz2 = eye.z + TMPV.z * focusDist, size = THREE.MathUtils.clamp(focusDist * 2.2, 6, 96);

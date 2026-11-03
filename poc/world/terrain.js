@@ -9,7 +9,12 @@
 //   - a heightfield sun shadow marched through the clipmap for ground beyond the shadow map (hills shade valleys at
 //     km scale);
 //   - far forests drawn into the ground as a lumpy canopy past the trees' draw distance;
-//   - a little close-range detail (stone cells, soil speckle) that fades with distance.
+//   - a little close-range detail (stone cells, soil speckle) that fades with distance;
+//   - the shore (W2): the swash runs up and down the beach with the waves, a thin film of water with a line of foam at
+//     its edge, to a run-up limit from the sea state and the beach's own slope (Stockdon et al. 2006, the height the top
+//     2% of run-ups reach); the sand is wet up to that limit and damp a little above it (capillary rise in the sand; the
+//     4 cm is our estimate), darker because water fills the pores, and glossy under the film. A small lake's waves run
+//     up a few centimetres, so its wet band is narrow.
 import * as THREE from 'three';
 import { clipGrid } from './clipmap.js';
 import { NOISE_GLSL } from './noise.js';
@@ -35,6 +40,8 @@ const vec3 T_THATCH = L(0.30, 0.44, 0.13); // under the blades of a lawn: more b
 const vec3 T_EARTH = L(0.47, 0.40, 0.31);  // trodden earth, dry and packed
 `;
 
+const ZERO = new THREE.DataTexture(new Float32Array(4), 1, 1, THREE.RGBAFormat, THREE.FloatType); ZERO.needsUpdate = true;
+
 export function makeTerrain(clip, opts = {}) {
   const C = clip.cfg, g = clipGrid(C.cells);
   const geo = new THREE.InstancedBufferGeometry();
@@ -58,6 +65,10 @@ export function makeTerrain(clip, opts = {}) {
     uShore: { value: opts.shore ?? 1 },       // 1: the source has water, so beaches and mud
     uSnowLine: { value: opts.snowLine ?? 215 }, // metres above the water where snow starts
     uGrassR: { value: 0 },  // how far the grass blades reach round the camera (grass.js); the lawn's thatch lies under them
+    // the waves at the shore (World._water fills these from the wave field): the first two cascades' displacement, their
+    // tile sizes, and the sea state for the run-up: (H0 L0, Hs) with H0 the significant height, L0 the deep-water
+    // wavelength of the peak period
+    tWave0: { value: ZERO }, tWave1: { value: ZERO }, uWaveL: { value: new THREE.Vector2(1, 1) }, uRun: { value: new THREE.Vector2(0, 0) },
   };
   const CLIP = clip.glsl();
   const VERT_HEAD = `${CLIP}\nattribute float aLevel;\nvarying vec3 vW;\n`;
@@ -77,6 +88,7 @@ export function makeTerrain(clip, opts = {}) {
     sh.vertexShader = VERT_HEAD + sh.vertexShader.replace('#include <begin_vertex>', VERT_BODY);
     sh.fragmentShader = `${CLIP}\n${NOISE_GLSL}\n${WEAR_GLSL}\n${TERRAIN_SHADE_GLSL}
 uniform float uSea, uShadowFar, uTreeFar, uPaving, uTime, uWet, uShore, uSnowLine, uGrassR; uniform vec3 uSunDir;
+uniform sampler2D tWave0, tWave1; uniform vec2 uWaveL, uRun;
 varying vec3 vW;
 float hfShadow(vec2 p, float h0, float dist) {
   // march toward the sun through the clipmap; soft by the closest miss (Quilez's penumbra trick)
@@ -123,10 +135,30 @@ float hfShadow(vec2 p, float h0, float dist) {
   vec3 trailCol = uPaving > 0.5 ? mix(T_WALK, T_ASPHALT, smoothstep(0.75, 0.95, TD.w)) : T_DIRT * (0.95 + 0.25 * w2noise(P / 0.5, 76) * NF(0.5));
   // a trail is about 1.5 m wide: once a pixel covers much more, it is a fraction of the pixel, not a dash
   col = mix(col, trailCol, smoothstep(0.25, 0.6, TD.w) * (uPaving > 0.5 ? 1.0 : 1.0 - smoothstep(0.8, 3.0, fp)));
-  // the shore: wet mud under water, sand just above
+  // the shore: sand above the water, mud under it
   float shore = uShore * (1.0 - smoothstep(0.6, 1.6 + 0.5 * pa, hgt));
   col = mix(col, T_SAND * (0.97 + 0.12 * w2noise(P / 0.9, 77) * NF(0.9)), shore * (1.0 - smoothstep(0.35, 0.6, slope)));
-  col = mix(col, T_MUD, uShore * (1.0 - smoothstep(-0.4, 0.3, hgt)));
+  col = mix(col, T_MUD, uShore * (1.0 - smoothstep(-0.3, -0.03, hgt)));
+  // the swash: run-up limit R2 on this slope (Stockdon et al. 2006); the edge now follows the incident waves at this
+  // stretch of shore, so it runs up when a crest arrives and drains back after it
+  float film = 0.0, wetB = 0.0, damp = 0.0, fl = 0.0;
+  if (uShore > 0.5 && uRun.x > 1e-5 && hgt > -0.1 && hgt < 0.6) {
+    float tb = sqrt(max(1.0 - TN.y * TN.y, 0.0)) / max(TN.y, 0.05), HL = uRun.x;
+    float R2 = 1.1 * (0.35 * tb * sqrt(HL) + 0.5 * sqrt(HL * (0.563 * tb * tb + 0.004)));
+    // the incident waves where this cross-shore line meets the water (straight downhill by hgt / slope), so the edge
+    // runs along the shore as one line
+    vec2 Ps = P + (length(TN.xz) > 1e-4 ? normalize(TN.xz) : vec2(0.0)) * clamp(hgt / max(tb, 0.01), 0.0, 20.0);
+    float hw = texture(tWave0, Ps / uWaveL.x).y + texture(tWave1, Ps / uWaveL.y).y;
+    float sEdge = R2 * clamp(0.45 + 0.55 * hw / max(0.5 * uRun.y, 1e-4), 0.0, 1.0);
+    float aa = max(fwidth(hgt), 0.002), above = smoothstep(-0.05, 0.0, hgt);
+    film = (1.0 - smoothstep(sEdge - aa, sEdge + aa, hgt)) * smoothstep(-0.03, 0.0, hgt);
+    wetB = (1.0 - smoothstep(R2, R2 + aa, hgt)) * above;
+    damp = (1.0 - smoothstep(R2, R2 + 0.04 + aa, hgt)) * (1.0 - wetB) * above;
+    col *= (1.0 - 0.4 * wetB) * (1.0 - 0.2 * damp) * (1.0 - 0.15 * film); // wet sand: water in the pores roughly halves what the grains send back
+    // foam at the swash's leading edge, broken into bubbles
+    fl = (1.0 - smoothstep(0.0, aa * 2.0 + 0.003, abs(hgt - sEdge))) * film * step(0.004, sEdge) * smoothstep(-0.1, 0.5, w2noise(P / 0.07 + uTime * 0.3, 214) * NF(0.07) + 0.2);
+    col = mix(col, vec3(0.75), fl * 0.8);
+  }
   // stone on steep ground, in soft blocks
   vec2 bc = floor(P / 0.75);
   float block = w2hash01(int(bc.x), int(bc.y), 78);
@@ -138,7 +170,7 @@ float hfShadow(vec2 p, float h0, float dist) {
   col = mix(col, T_SNOW, snow);
   col *= 1.0 - 0.35 * uWet * (1.0 - snow);
   diffuseColor.rgb = col;
-  float TROUGH = mix(0.95, 0.75, rk) * (1.0 - 0.5 * uWet) * (1.0 - 0.4 * shore * step(hgt, 0.4));
+  float TROUGH = mix(mix(mix(0.95, 0.75, rk) * (1.0 - 0.5 * uWet), 0.45, wetB), 0.16, film * (1.0 - fl)); // the film is rippled and bubbly, not a mirror
 `)
       .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = TROUGH;')
       .replace('#include <normal_fragment_begin>', /* glsl */ `#include <normal_fragment_begin>

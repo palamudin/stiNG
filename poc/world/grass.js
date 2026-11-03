@@ -6,8 +6,10 @@
 //
 // Three rings: thousands of blades a square metre round the camera (a lawn is green because it is solid grass), fewer
 // and broader further out, cross-faded by thinning; the ground under them is the lawn's own dark thatch (terrain.js),
-// so a gap between blades reads as more grass, not as painted ground. When the camera rises the rings scale with its
-// height above the ground, and past a few tens of metres the grass gives way to the ground's colour.
+// so a gap between blades reads as more grass, not as painted ground. When the camera rises the rings grow with its
+// height above the ground in whole steps (x1, x2, x4, x8), so every clump stays where it grew while the camera moves;
+// between two steps the coarser rings dissolve in over the last part of the range and the finer ones out, clump by
+// clump, nothing sliding. Past a few tens of metres the grass gives way to the ground's colour.
 // At a wasp's height a blade is a wall; from a person's height it is a lawn.
 //
 // Wear (the fourth channel below 0.3, sources/sting.js): where people sit, stand and walk the lawn is shorter and the
@@ -24,6 +26,8 @@ export const GRASS = {
     { spacing: 0.28, radius: 24, blades: 5, segs: 2, width: 0.03, hMul: 1.4 },
   ],
   flowers: { spacing: 0.55, radius: 18 },
+  // the share of the next scale step's clumps in, over the last 30% of a step (log2 of the scale)
+  dissolve: (t) => { const k = Math.min(1, Math.max(0, (t - 0.7) / 0.3)); return k * k * (3 - 2 * k); },
 };
 // The ground's wear, read the same way by the grass and the ground under it
 export const WEAR_GLSL = /* glsl */ `
@@ -58,7 +62,7 @@ function clumpGeometry(blades, segs, seed) {
 
 const GRASS_VERT_HEAD = /* glsl */ `
 attribute float aT, aSide; attribute vec4 aB; attribute vec2 aCell;
-uniform float uSpacing, uRadius, uInner, uScale, uTime, uSea, uDensity, uFlower, uAlt, uShore, uSnowLine, uBladeW, uHMul, uWoodH; uniform vec2 uGrassH; uniform vec2 uWind; uniform vec3 uCamG;
+uniform float uSpacing, uRadius, uInner, uScale, uFade, uTime, uSea, uDensity, uFlower, uAlt, uShore, uSnowLine, uBladeW, uHMul, uWoodH; uniform vec2 uGrassH; uniform vec2 uWind; uniform vec3 uCamG;
 varying float vT, vCol, vRootK; varying vec3 vGW; varying vec3 vTint; varying float vKill;
 vec3 gPos; vec3 gNor;
 `;
@@ -83,6 +87,10 @@ const GRASS_BUILD = /* glsl */ `
   float edge = 1.0 - smoothstep(R * 0.65, R, dist);
   float inner = uInner > 0.0 ? smoothstep(Ri * 0.6, Ri, dist) : 1.0;
   float keep = dens * edge * inner * (1.0 - smoothstep(8.0, 30.0, uAlt));
+  // between two steps of scale: this step's clumps go (uFade > 0) or the next step's come (uFade < 0), clump by clump
+  float dis = w2hash01(ci.x, ci.y, 213);
+  if (uFade > 0.0 && dis < uFade) keep = 0.0;
+  if (uFade < 0.0 && dis >= -uFade) keep = 0.0;
   vKill = w2hash01(ci.x, ci.y, 203) > keep ? 1.0 : 0.0;
   float rnd = w2hash01(ci.x, ci.y, 204);
   float H = mix(uGrassH.x, uGrassH.y, gd.y) * (0.55 + 0.9 * aB.w) * (0.75 + 0.5 * rnd) * uHMul * (uFlower > 0.5 ? 1.3 : 1.0);
@@ -136,7 +144,7 @@ export class Grass {
       geo.instanceCount = cells.length / 2;
       const U = {
         ...world.clip.uniforms, uTime: world.uniforms.uTime, uSea: { value: world.source.sea }, uShore: world.uniforms.uShore, uSnowLine: world.uniforms.uSnowLine, uSunDir: world.uniforms.uSunDir, uSunColor: world.sky.uniforms.uSunColor,
-        uSpacing: { value: spacing }, uRadius: { value: radius }, uInner: { value: inner }, uScale: { value: 1 }, uDensity: { value: this.density }, uFlower: { value: flower ? 1 : 0 },
+        uSpacing: { value: spacing }, uRadius: { value: radius }, uInner: { value: inner }, uScale: { value: 1 }, uFade: { value: 0 }, uDensity: { value: this.density }, uFlower: { value: flower ? 1 : 0 },
         uBladeW: { value: width }, uHMul: { value: hMul }, uWoodH: { value: world.source.grassWood ?? 1 },
         uWind: { value: new THREE.Vector2(0.8, 0.3) }, uCamG: { value: new THREE.Vector3() }, uAlt: { value: 0 },
         uGrassH: { value: new THREE.Vector2(...(world.source.grassHeight || [0.1, 0.42])) }, // metres, dry to wet ground
@@ -163,11 +171,17 @@ export class Grass {
   }`);
       };
       mat.customProgramCacheKey = () => 'w2grass' + (flower ? 'f' : '') + world.clip.cfg.levels; // the clipmap's level count is in the code
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.frustumCulled = false; mesh.receiveShadow = true; mesh.castShadow = false;
-      mesh.userData.U = U; mesh.userData.instances = cells.length / 2;
-      this.group.add(mesh); this.meshes.push(mesh);
-      return mesh;
+      // two meshes share the clumps' geometry and program: this step of scale, and the next one while it dissolves in
+      for (const next of [false, true]) {
+        const Um = next ? { ...U, uScale: { value: 2 }, uFade: { value: 0 }, uCamG: U.uCamG, uAlt: U.uAlt, uWind: U.uWind } : U;
+        const m = next ? mat.clone() : mat;
+        if (next) { m.onBeforeCompile = (sh) => { mat.onBeforeCompile(sh); Object.assign(sh.uniforms, Um); }; m.customProgramCacheKey = mat.customProgramCacheKey; }
+        const mesh = new THREE.Mesh(geo, m);
+        mesh.frustumCulled = false; mesh.receiveShadow = true; mesh.castShadow = false;
+        mesh.userData.U = Um; mesh.userData.next = next; mesh.userData.instances = cells.length / 2;
+        mesh.visible = !next;
+        this.group.add(mesh); this.meshes.push(mesh);
+      }
     };
     const d = Math.sqrt(this.density);
     let inner = 0;
@@ -177,14 +191,18 @@ export class Grass {
   }
   update(eye, ground) {
     const alt = Math.max(0.05, eye.y - ground);
-    const scale = Math.min(8, Math.max(1, alt / 2.0));
+    // the rings' scale in whole steps of two, from the height over the ground: within a step nothing moves; over the last
+    // 30% of a step the next one dissolves in (a clump's own hash decides when), so the change is spread, not a jump
+    const lv = Math.log2(Math.min(8, Math.max(1, alt / 2.0))), L = Math.min(3, Math.floor(lv)), f = L >= 3 ? 0 : GRASS.dissolve(lv - L);
     for (const m of this.meshes) {
       const U = m.userData.U;
-      U.uCamG.value.copy(eye); U.uScale.value = scale; U.uAlt.value = alt;
+      U.uCamG.value.copy(eye); U.uAlt.value = alt;
       U.uWind.value.set(...this.world.env.wind);
+      if (m.userData.next) { U.uScale.value = 2 ** (L + 1); U.uFade.value = -f; m.visible = f > 0; }
+      else { U.uScale.value = 2 ** L; U.uFade.value = f; }
     }
     this.group.visible = alt < 30;
-    this.reach = this.group.visible ? GRASS.rings[GRASS.rings.length - 1].radius * scale * (1 - Math.min(1, Math.max(0, (alt - 8) / 22))) : 0;
+    this.reach = this.group.visible ? GRASS.rings[GRASS.rings.length - 1].radius * 2 ** (L + (f > 0 ? 1 : 0)) * (1 - Math.min(1, Math.max(0, (alt - 8) / 22))) : 0;
   }
-  get instances() { return this.meshes.reduce((a, m) => a + m.userData.instances, 0); }
+  get instances() { return this.meshes.reduce((a, m) => a + (m.visible ? m.userData.instances : 0), 0); }
 }

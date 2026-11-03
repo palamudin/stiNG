@@ -96,7 +96,19 @@ One wave field drives every water surface: the lakes of the wild world and the g
 **Not verified.** Frame times on a real GPU (the passes per frame: 1 spectrum, 2 log2 N FFT, 2 per cascade, mips,
 the caustic grid). Phones. The look of glints in motion.
 
+**The shore** (`terrain.js`).
+- **The swash** runs up and down the beach as a thin film with foam at its edge, driven by the incident waves where
+  each cross-shore line meets the water.
+- **The run-up limit** is R2 (Stockdon et al. 2006), from the sea state (H0, L0) and the beach's own slope. A 600 m
+  lake under 6.8 m/s runs up about 3 cm, so the wet band is a few tens of centimetres of sand, not metres.
+- **Damp sand.** A further 4 cm of damp sand from capillary rise (our estimate).
+
+**Grass when the camera moves** (`grass.js`). The rings scale in whole steps (x1, x2, x4, x8) with the height over the
+ground, and dissolve clump by clump into the next step over the last 30% of each step. A clump never slides: before
+this, a continuous scale moved every clump whenever the camera's height over the ground changed.
+
 **Known limits.**
+- The swash has no lag between uprush and backwash; its edge follows the incident waves directly.
 - At grazing angles the screen-space reflection steps in bands at low resolution.
 - Floor caustics are also drawn in the shade of a tree (the composite cannot tell shade from a dark floor).
 - The camera under water is not handled.
