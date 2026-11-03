@@ -60,6 +60,24 @@ sun.shadow.normalBias = 0.01;
 scene.add(sun, sun.target);
 const sunDir = new THREE.Vector3(0.45, 1, 0.3).normalize();
 
+// Quality (GDD 20 G5): the render resolution is the display's (up to 2 pixels a CSS pixel; 1 on the low setting) times
+// a scale the controller steers to hold the frame rate: 55 fps on a desktop, 30 on a touch screen. Frames slower than
+// the target by 15% for a second take the scale down a step; frames 25% faster for three seconds bring it back up.
+const QUALITY = { min: 0.45, down: 0.85, up: 1.08, slow: 1.15, fast: 0.8, holdDown: 1, holdUp: 3 };
+const quality = { scale: 1, base: Math.min(devicePixelRatio, 2), ema: 0, over: 0, under: 0, applied: 0 };
+function applyPixelRatio() {
+  const r = Math.max(0.5, quality.base * quality.scale);
+  if (Math.abs(r - quality.applied) < 0.01) return;
+  quality.applied = r; renderer.setPixelRatio(r); resize();
+}
+function qualityFrame(dt) {
+  if (!opts.autoRes || !running || paused || dt <= 0 || dt > 2) { quality.over = quality.under = 0; return; } // a frame over 2 s is a hidden tab, not a slow one
+  const ms = dt * 1000, target = 1000 / (touch.on ? 30 : 55);
+  quality.ema = quality.ema ? quality.ema + (ms - quality.ema) * 0.1 : ms;
+  if (quality.ema > target * QUALITY.slow) { quality.under = 0; if ((quality.over += dt) > QUALITY.holdDown && quality.scale > QUALITY.min) { quality.scale = Math.max(QUALITY.min, quality.scale * QUALITY.down); quality.over = 0; applyPixelRatio(); } }
+  else if (quality.ema < target * QUALITY.fast) { quality.over = 0; if ((quality.under += dt) > QUALITY.holdUp && quality.scale < 1) { quality.scale = Math.min(1, quality.scale * QUALITY.up); quality.under = 0; applyPixelRatio(); } }
+  else quality.over = quality.under = 0;
+}
 function resize() {
   renderer.setSize(innerWidth, innerHeight, false);
   camera.aspect = innerWidth / innerHeight;
@@ -278,7 +296,7 @@ let running = false, paused = false;
 const input = { pick: 0, keys: new Set(), lmb: false, yaw: 0, pitch: 0, alloc: 1, autopilot: null, free: { yaw: 0, pitch: 0, held: false },
   lock: null, pilot: null, autoTurn: false, turning: false, gazeOff: 0, gDown: 0, gLong: false }; // lock-on, assisted flight, eye turn (GDD 7.9)
 // Player options from the Esc menu, kept per browser
-const opts = { volume: 0.7, sens: 1, invert: false, reflex: true, autoGrab: null }; // autoGrab null: on for touch, off otherwise
+const opts = { volume: 0.7, sens: 1, invert: false, reflex: true, autoGrab: null, autoRes: true }; // autoGrab null: on for touch, off otherwise
 try { Object.assign(opts, JSON.parse(localStorage.getItem('sting.options') || '{}')); } catch { /* optional */ }
 const saveOpts = () => { try { localStorage.setItem('sting.options', JSON.stringify(opts)); } catch { /* optional */ } };
 const ySign = () => (opts.invert ? -1 : 1);
@@ -2091,6 +2109,7 @@ function showOpts() {
   $('optInvert').checked = opts.invert;
   $('optReflex').checked = opts.reflex;
   $('optGrab').checked = opts.autoGrab ?? touch.on;
+  $('optRes').checked = opts.autoRes;
 }
 showOpts();
 $('optVol').addEventListener('input', (e) => {
@@ -2101,6 +2120,7 @@ $('optSens').addEventListener('input', (e) => { opts.sens = +e.target.value / 10
 $('optInvert').addEventListener('change', (e) => { opts.invert = e.target.checked; saveOpts(); });
 $('optReflex').addEventListener('change', (e) => { opts.reflex = e.target.checked; saveOpts(); });
 $('optGrab').addEventListener('change', (e) => { opts.autoGrab = e.target.checked; saveOpts(); });
+$('optRes').addEventListener('change', (e) => { opts.autoRes = e.target.checked; saveOpts(); if (!opts.autoRes) { quality.scale = 1; applyPixelRatio(); } });
 $('bQuit').addEventListener('click', () => {
   if (!lab) saveWorld(true);
   paused = false; running = false; input.keys.clear(); input.lmb = false;
@@ -3125,8 +3145,9 @@ function updateCamera(p, dt) {
 
 let last = performance.now(), acc = 0, panelTimer = 0;
 function frame(now) {
-  const dt = Math.min(0.1, (now - last) / 1000);
+  const raw = (now - last) / 1000, dt = Math.min(0.1, raw);
   last = now;
+  qualityFrame(raw);
   padUI(now); // menus with a controller (Xbox)
   if (atlas.open) atlasControls(dt); // the big map has the controls until it is closed
   if (running && !paused) {
@@ -3247,7 +3268,7 @@ function applyDisplaySettings() {
   const low = $('gfx').value === 'low';
   renderer.shadowMap.enabled = !low;
   sun.castShadow = !low;
-  renderer.setPixelRatio(low ? 1 : Math.min(devicePixelRatio, 2));
+  quality.base = low ? 1 : Math.min(devicePixelRatio, 2); if (!opts.autoRes) quality.scale = 1; quality.applied = 0; applyPixelRatio();
   scene.fog.near = low ? 22 : 30; scene.fog.far = low ? 80 : 115;
   resize();
   document.body.classList.toggle('hardcore', $('hudMode').value === 'hardcore');
@@ -3363,7 +3384,7 @@ warm.p = (async () => {
 })();
 
 // test hook for automated checks
-window.__sting = { get sim() { return sim; }, get lab() { return lab; }, input, padUI, touch, buildCmd, atlas, opts, start: () => $("bStart").click(), humanViews, waspViews, rings, toggleNest, toggleLab, saveWorld, camera, scene, warm };
+window.__sting = { get sim() { return sim; }, get lab() { return lab; }, input, padUI, touch, buildCmd, atlas, opts, start: () => $("bStart").click(), humanViews, waspViews, rings, toggleNest, toggleLab, saveWorld, camera, scene, warm, quality };
 window.__garment = (hm) => garmentGraph(hm.tr, hm.clothing, hm.posture, hm.parts[hm.posture]);
 window.__toWorld = toWorld;
 window.__weather = dayWeather;

@@ -151,6 +151,7 @@ Run the tests from this folder with `node test/sim.test.mjs`, `node test/net.tes
 | 121 | Graded ground: streets level across with their sidewalks and smooth along, cul-de-sacs graded as their street, town squares on the broad shape, lots and house, mall and shop pads level | 20 | 25 |
 | 122 | Flight that feels the slope: over hills a wasp keeps its altitude, so it has to climb a rise; every metre climbed costs energy | 20 | 25 |
 | 123 | Loading screen at once with byte progress and field notes; the menu's world built and its shaders compiled behind it; the menu over the live world, and Fly instant; on hills the camera rig lifted as one with the wasp | 12.1 | 25 |
+| 124 | Auto resolution: the render scale is steered to hold 55 fps on a desktop and 30 on touch screens (pause menu option) | 20 | 25 |
 
 ## Verified
 
@@ -176,7 +177,7 @@ Run the tests from this folder with `node test/sim.test.mjs`, `node test/net.tes
 - AI wasps in state packets are not checked against solid geometry (their owner does not collide them far from its player).
 - With terrain on, hills block sight lines between people only, and small sheds, tables and fences follow the ground rather than standing on level pads.
 - On hilly worlds the paving is painted into the ground; flat worlds still draw it as meshes.
-- The download bar weighs files by sizes written into the page; a file that has grown fills only its share. Shaders are warmed for the menu's world only; a world with other settings warms behind the loader when Fly is pressed. The frame rate on phones with ground rings is not yet measured (G5).
+- The download bar weighs files by sizes written into the page; a file that has grown fills only its share. Shaders are warmed for the menu's world only; a world with other settings warms behind the loader when Fly is pressed. The frame rate on phones with ground rings is not yet measured on real hardware. Trees, water and sky are still the plain PoC look; a world-building module with forests, water, volumetric light and clouds is in progress in a separate thread (GDD 20.4).
 - Assisted flight steers round what is within a metre ahead (a trunk, a fence) but plans no route: a hedge or a house wall longer than it can see past still needs the player, and it does not dodge swats or birds.
 - Progression is at T0 (GDD 18.48, 18.49, 18.57): each line's XP and tree, the wasp in hand's job skills, five roles levelled by masters, multi-colony play and the gauge. a trained wasp that goes home retires inside rather than flying again; the XP, mastery and gauge figures are first guesses to tune with play. The PoC runs progression `open`, so any species can also be picked on the start screen.
 - A bee colony's drones are drawn only at their congregation area, and its young queen's flight carries no risk of being lost.

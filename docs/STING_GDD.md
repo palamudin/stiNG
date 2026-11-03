@@ -40,7 +40,7 @@
 17. Open questions
 18. Findings from the proof of concept
 19. Feature tiers and the current stack
-20. Plan: terrain, far detail and the map
+20. Plan: terrain, far detail and the map, and the world view seam (20.4)
 - Appendix A — Protocode
 - Appendix B — Glossary
 - Appendix C — Biology reference
@@ -2139,6 +2139,17 @@ Only the `motion` digest moved. 416 properties hold.
 
 **On hills the camera no longer follows the lie of the land.** The chase camera and the point it looks at were each lifted by the ground under themselves. On a slope the view tilted and bobbed as the wasp flew, as if the flight were being aligned with the ground. Now the whole camera rig is lifted by the ground under the wasp, so the view moves only with the wasp's own flight; the camera is just kept out of the ground. With 18.69 nothing aligns a flying wasp with the ground: it flies where it is steered, and assisted flight does the rest.
 
+### 18.71 Quality controller (GDD 20, G5 in part)
+
+**What it does.** The render resolution is now the display's (up to two pixels a CSS pixel, one on the low setting) times a scale that a controller steers to hold the frame rate:
+- **Targets.** 55 fps on a desktop, 30 on a touch screen.
+- **Steps.** Frames 15% slower than the target for a second take the scale down by 15%, to as little as 45%. Frames 25% faster for three seconds bring it back up by 8% at a time.
+- **What it ignores.** A frame over two seconds counts as a hidden tab, not a slow frame. The controller rests while paused or at the menu.
+- **The setting.** It is on by default, and "Auto resolution" in the pause menu turns it off.
+- **Check.** In the software-rendered test browser (under 3 fps) it stepped the resolution down within seconds of Fly.
+
+**Handed over.** Far detail (impostors for trees and houses), forests, water and sky now belong to the world-building module (20.3, 20.4). The frame-rate comparison of flat and hilly worlds on real hardware is left for when the new world module is in; the software renderer cannot measure a GPU.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -2147,7 +2158,7 @@ The current stack is the three.js PoC (playable, `poc/`) plus the C# core (`core
 
 ### 19.1 Tier 0: built
 
-Everything in `POC.md` (123 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony; the T0 of progression (18.48): XP, unit and hive skills, the year's turn; multi-colony play with the player gauge (18.49); wintering in somewhere warm (18.50); chasing moving prey with a lock, with a colony view you can click (18.51); obstacle avoidance in assisted flight (18.52); reaching what moves under a lock (18.53); the lock ending on arrival (18.54); Shift hurrying an assisted flight (18.55); landing at speed with hovering round a lock (18.56); lines, the wasp in hand and roles passed on by masters (18.57); playing with a controller only, Xbox included (18.58); touch controls for phones and tablets (18.59); the map: minimap sizes, the big map and a phone HUD (18.60); colony switching through the relay (18.61); auto grab (18.62); the year's turn for hornet and honeybee lines (18.63); lockable moths with fireflies on summer evenings (18.64); swarms seen with a young queen's mating flight (18.65); AI raids on enemy nests (18.66); ground v2 (18.67); ground rings with graded ground (18.68); flight that feels the slope (18.69); and the loading screen with warm-up and a menu over the live world (18.70). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
+Everything in `POC.md` (124 features) and its C# port (18.18), including the Tier 1 items built so far: T1-1 wind, T1-2 cold, T1-3 drowning in a drink, T1-4 clothing by temperature, T1-5 shake and flail (18.19), T1-17 panic by line of sight and T1-18 memory by recency and place (18.20), T1-14 hollow trees and nest thermals and T1-23 solo time (18.21), T1-6 fetching spray and T1-7 the exterminator's search (18.22), T1-13 worker ages and guards (18.23), T1-15 winter with choices (18.24), T1-8 seasonal ecology (18.27), T1-9 feral hives and robbing (18.28), T1-22 tuning as data (18.29), T1-16 senses for AI wasps (18.30), T1-10 barbecues (18.31), T1-19 chunk authority and contested pickups (18.32), T1-21 relevance tiers (18.33), T1-12 regions (18.34), T1-11 human days (18.35), T1-20 the remaining plausibility checks (18.36), and from Tier 2: T2-1 water (18.37), T2-2 extreme weather (18.38), T2-3 males (18.39), T2-4 lineage colonies (18.40), T2-5 town centres and beer gardens (18.41), T2-6 feature modifiers for woods, towns, water and hives (18.42), the polish of known limits (18.43), terrain (18.44), lock-on with assisted flight (18.45), the swoop (18.46), the three species (18.47): T2-9 species as data, T2-10 the hornet line, T2-11 the honeybee colony; the T0 of progression (18.48): XP, unit and hive skills, the year's turn; multi-colony play with the player gauge (18.49); wintering in somewhere warm (18.50); chasing moving prey with a lock, with a colony view you can click (18.51); obstacle avoidance in assisted flight (18.52); reaching what moves under a lock (18.53); the lock ending on arrival (18.54); Shift hurrying an assisted flight (18.55); landing at speed with hovering round a lock (18.56); lines, the wasp in hand and roles passed on by masters (18.57); playing with a controller only, Xbox included (18.58); touch controls for phones and tablets (18.59); the map: minimap sizes, the big map and a phone HUD (18.60); colony switching through the relay (18.61); auto grab (18.62); the year's turn for hornet and honeybee lines (18.63); lockable moths with fireflies on summer evenings (18.64); swarms seen with a young queen's mating flight (18.65); AI raids on enemy nests (18.66); ground v2 (18.67); ground rings with graded ground (18.68); flight that feels the slope (18.69); the loading screen with warm-up and a menu over the live world (18.70); and the quality controller (18.71). In short: the 60 Hz deterministic sim, chunked world frozen on discovery, humans with traits, zones, reach, swats, panic, clothing and garments, the colony economy and yearly cycle, every wasp on one code path, stinging, perching, walking, under-clothing play, escalation levels 0–5 with the exterminator and pest control, bees, webs, birds, dragonflies, rival colonies, nest sites, fruit, spills, saves, world modifiers, and peer-to-peer play in the lab with committed events, owner authority, plausibility checks and host rulings.
 
 ### 19.2 Tier 1: next, on the current stack
 
@@ -2286,7 +2297,7 @@ Every piece below is our own code, apart from three.js, which the PoC already dr
   - level flight over a hill keeps a constant altitude;
   - parity holds.
 
-**G5. Far detail and quality.**
+**G5. Far detail and quality. Quality controller built (18.71); far detail (impostors, forests) handed to the world-building module (20.4).**
 - **What.**
   - **Impostors.** Trees and houses beyond about 60 m become impostors. Each kind is baked at load from its own mesh into an atlas from eight sides and two heights, lit by normals, and cross-faded with a dither.
   - **Quality.** A controller steers the render scale (and the impostor distance) to hold a budget: 12 ms on desktop, 25 ms on phones.
@@ -2313,12 +2324,33 @@ Every piece below is our own code, apart from three.js, which the PoC already dr
   - sunset reddens by itself;
   - nothing in the sim changes.
 
+**Handed over (2026-11-03).** A separate thread is building a higher-fidelity world module: forests, water and terrain in high detail, volumetric light, clouds and macro depth of field. It keeps a naive, kid-friendly look ("Minecraft-ish, not that blocky"). Far detail for trees, and the sky of G7, are its work. Once it is done, this thread takes it over and plugs it in through the seam in 20.4.
+
 **What each goal post moves to Unity.**
 - **G1, G3, G4 and G6's place list and facts** are sim code, already in C#.
 - **G2** is a ring-mesh builder and a vertex shader.
 - **G5** is an impostor baker and a controller.
 - **G6's tiles** are an orthographic camera pass.
 - **G7** is one compute or pixel pass.
+
+### 20.4 The world view seam (for the world-building module)
+
+A world renderer, the current one or the new module, draws what the sim has. It never decides anything the sim needs. To plug in, it honours these points:
+
+1. **The ground is the sim's.** `groundAt(seed, x, z, settings)` (sim/world.js, `World.GroundAt` in C#) is the truth, with its grading under streets, lots, squares and buildings (18.68), and `groundSlope` with it.
+   - The sim works in height above the ground; the drawing lifts by the ground as drawn.
+   - Drawn ground must stay within a few centimetres of the sim's near the wasp: the rings hold 2 cm.
+   - Paving and land use come from `pavingOf` and the chunk's `use`.
+2. **Every gameplay object is where the chunk says.** `generateChunk(seed, cx, cz, settings)` places them all:
+   - trees (`x, z, r, h, cr`: the trunk is a solid cylinder of radius r and height h; the crown radius cr);
+   - birdbaths and fountains, flowers, sheds and houses (boxes), fences, tables, hives, rival nests, porch lights and the rest.
+   - A new look may dress them (bark, leaves, foliage cards, water surfaces), but trunk and box silhouettes must match their collision. Anything a wasp can land on, feed at or hide in must be drawn where it is.
+3. **Decoration is free.** Grass, undergrowth, ground cover, extra trees beyond the gameplay ones, clouds, light shafts and dust are decoration. They never collide and never block sight. Their variation must come from `hash(seed, Domain.Cosmetic, …)`, not `Math.random`, so every player sees the same world.
+4. **Determinism stops at the sim.** Nothing in the view feeds back into the sim or the network. The view reads sim state each frame and sim events (12).
+5. **Boot.** The module reports through the boot stages of 12.1: `STING_BOOT.stage('world' | 'shaders', fraction)`. Its shaders are warmed with the rest before the menu comes up.
+6. **Quality.** Its detail knobs (impostor and grass distance, shadow and volumetric quality, cloud steps) answer to the quality controller of 18.71 and the Graphics setting, and hold the frame budget on phones.
+7. **Portable.** Its settings are data: the palette, fog, sun, depth of field and colour grade, which become world, server and mod settings. Its shaders are short enough to carry to HLSL/URP for Unity.
+8. **Own code.** No libraries beyond three.js, which the PoC already draws with.
 
 ## Appendix A — Protocode
 
