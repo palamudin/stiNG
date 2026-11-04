@@ -189,7 +189,7 @@ void main() {
   vec3 col = texture(tColor, uv).rgb;
   float dist = d0 >= 1.0 ? 1e9 : rayDist(uv, d0);
   if (d0 >= 1.0) col = skyAt(v) + sunDisc(v) + uFlash * uSkyUp * 4.0; // lightning: the whole sky lights
-  float outDist = dist; bool wet = false;
+  float outDist = dist; bool wet = false; float layer = 0.0; // debug: 0 ground, 1 sea, 2 sheet, 3 body
 #if W_CASCADES > 0
   // the nearest water: the sea (iterated onto its waves), then the bodies (discs on the ground's plane)
   float tw = 1e10, kind = -1.0; vec2 x0 = vec2(0.0), gx = vec2(0.0), gy = vec2(0.0); vec4 bA = vec4(0.0), bB = vec4(0.0), bC = vec4(0.0);
@@ -232,7 +232,7 @@ void main() {
           gx = wPlaneHit(uv + vec2(1.0 / uRes.x, 0.0), P, gG).xz - P.xz; gy = wPlaneHit(uv + vec2(0.0, 1.0 / uRes.y), P, gG).xz - P.xz;
           wShallow(gSheet.x); gDampSea = wDamp;
           col = waterShade(uv, v, P, P.xz, gG, gx, gy, dist, col, 3.0, 0.0, vec3(0.0), 0.0);
-          outDist = dist; wet = true;
+          outDist = dist; wet = true; layer = 2.0;
         }
       }
     }
@@ -249,7 +249,7 @@ void main() {
       col = waterShade(uv, v, P, P.xz, bB.xy, gx, gy, dist, col, kind, bB.z, c, bC.z > 0.5 ? eR : bA.z);
       if (bC.z > 0.5) col = mix(bank, col, smoothstep(0.0, 0.3, eD));
     }
-    outDist = tw; wet = true;
+    outDist = tw; wet = true; layer = kind == 0.0 ? 1.0 : 3.0;
   }
 #endif
   if (d0 < 1.0 || wet) { vec3 ins; vec3 T = airT(min(outDist, 2e5), v, ins); col = col * T + ins; }
@@ -263,6 +263,8 @@ void main() {
       col = col * cl.a + (cl.rgb * T + ins * (1.0 - cl.a));
     }
   }
+  // debug 6: which path drew the pixel — ground untouched, sea tinted blue, the swash sheet red, a water body green
+  if (uDebug > 5.5) { vec3 tc = layer == 1.0 ? vec3(0.2, 0.4, 1.0) : layer == 2.0 ? vec3(1.0, 0.15, 0.1) : layer == 3.0 ? vec3(0.1, 1.0, 0.2) : vec3(1.0); col = layer > 0.5 ? mix(col, tc * dot(col, vec3(0.33)) * 2.0, 0.65) : col; }
   if (uDebug > 0.5 && uDebug < 1.5) { vec3 Pg = uCamPos + v * dist; col = vec3(wet ? 1.0 : 0.0, Pg.y < 0.0 ? 1.0 : 0.0, d0 >= 1.0 ? 1.0 : 0.0) * 2.0; }
   // half floats end at 65504: the sun's disc is brighter than that, and an infinity here turns into NaN in the passes after;
   // and a NaN from any pixel's shading would spread over the whole frame through the depth of field's kernel (a close

@@ -412,12 +412,12 @@ float shoreReach(vec2 pl, float tk, float R2) { return R2 * (0.55 + 0.45 * shore
 // the run-up limit, held to the crest's own height above the still water: the water goes no higher than the wave
 // that threw it (Stockdon's limit grows with the slope and would climb a steep bank by a metre)
 float shoreRunupCapped(float tb, vec2 st) { return min(shoreRunup(tb, st), 0.5 * st.x * 1.15); }
-// the tongue's fingers: its reach varies along the shore in tongues a metre or four long in the water's direction and
-// half a metre wide across it (the noise read in the frame of the direction to the line), by up to a quarter of the
-// reach; a new pattern each wave
-float shoreFingers(vec2 p, vec2 dir, float reach, float tk) {
-  vec2 ac = vec2(-dir.y, dir.x); vec2 q = vec2(dot(p, ac) / 0.55, dot(p, dir) / 2.8) + vec2(tk * 0.37, tk * 0.11);
-  return reach * 0.25 * (w2noise(q, 621) * 0.7 + w2noise(q * 2.7, 625) * 0.3);
+// the tongue's fingers: the reach varies along the shore only — read at the nearest shore point pl, so every point on
+// one cross-shore line shares one reach and the fingers point straight up the beach — in tongues half a metre to a
+// metre and a half wide, by up to a quarter of the reach, a new pattern each wave
+float shoreFingers(vec2 pl, float reach, float tk) {
+  vec2 o = vec2(tk * 0.37, tk * 0.11);
+  return reach * 0.25 * (w2noise(pl / 0.9 + o, 621) * 0.7 + w2noise(pl / 0.35 + o * 1.3, 625) * 0.3);
 }
 // the tongue's level above the still water, tau seconds after the bore reached the line, on a beach of slope tb: the
 // water runs up at the bore's speed and decelerates at g sin(beta), so the level is a parabola in time to its reach
@@ -448,8 +448,7 @@ vec3 shoreSheet(vec2 p, vec4 sh, float hgt, vec3 nG, float t, vec2 st) {
   float tb = sqrt(max(1.0 - nG.y * nG.y, 0.0)) / max(nG.y, 0.05), R2 = shoreRunupCapped(tb, st);
   vec2 pl; vec2 ck = shoreLineClock(p, sh, t, st, pl); float f = ck.x, t0 = ck.y;
   float reach = shoreReach(pl, t0, R2), tup = shoreTongueUp(reach, tb, st.y), tau = f * st.y;
-  vec2 dirL = normalize(sh.yz + vec2(1e-6, 0.0));
-  float R = shoreTongueLevel(tau, reach, tup); R += (R / max(reach, 1e-3)) * shoreFingers(p, dirL, reach, t0); // fingers at the tip
+  float R = shoreTongueLevel(tau, reach, tup); R += (R / max(reach, 1e-3)) * shoreFingers(pl, reach, t0); // fingers at the tip
   float over = R - hgt; if (over <= 0.0) return vec3(0.0);
   float film = min(over * 0.18, 0.05);
   // the foam at the water's scale: the lip's white travels with the tip and fades over a second and a half behind
@@ -477,7 +476,7 @@ vec2 shoreWet(vec2 p, vec4 sh, float hgt, vec3 nG, float t, vec2 st) {
   float dark = 0.0, gloss = 0.0;
   for (int k = 0; k < 4; k++) {
     float tk = t0 - float(k) * T;
-    float reach = shoreReach(pl, tk, R2); reach += shoreFingers(p, normalize(sh.yz + vec2(1e-6, 0.0)), reach, tk);
+    float reach = shoreReach(pl, tk, R2); reach += shoreFingers(pl, reach, tk);
     if (reach <= hgt) continue;
     float tup = shoreTongueUp(reach, tb, T), q = sqrt(max(1.0 - hgt / reach, 0.0)), since = t - tk;
     float tArrive = tup * (1.0 - q), tLeave = tup * (1.0 + q); // the parabola's rising and falling branches reach hgt then

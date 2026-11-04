@@ -335,11 +335,11 @@ vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, floa
     fm = max(fm, smoothstep(1.0 - 0.5 * lf, 1.1 - 0.5 * lf, pat) * 0.45);
   }
   col = mix(col, amb * 0.9 + uSunColor * sunUp * 0.25 * cloud, fm * 0.7);
-  if (uDebug > 1.5) col = vec3(D / 3.0, F, ss.a) * 2.0;
+  if (uDebug > 1.5 && uDebug < 5.5) col = vec3(D / 3.0, F, ss.a) * 2.0;
 #ifdef W_SHORE
-  if (uDebug > 3.5) { vec4 shd = shoreAt(x0); col = vec3(fract(-shd.x / 10.0) * 0.8, clamp(swFoam, 0.0, 1.0), 0.5 + 2.0 * swSlope.x); }
+  if (uDebug > 3.5 && uDebug < 5.5) { vec4 shd = shoreAt(x0); col = vec3(fract(-shd.x / 10.0) * 0.8, clamp(swFoam, 0.0, 1.0), 0.5 + 2.0 * swSlope.x); }
 #endif
-  if (uDebug > 2.5) col = vec3(clamp(L / 5.0, 0.0, 1.0), sqrt(sv.x + sv.y) * 4.0, cz / 3.0) * 2.0;
+  if (uDebug > 2.5 && uDebug < 5.5) col = vec3(clamp(L / 5.0, 0.0, 1.0), sqrt(sv.x + sv.y) * 4.0, cz / 3.0) * 2.0;
   return col;
 }
 // the sea: the plane hit, then iterated onto the displaced surface (near the camera, where the waves are larger than
