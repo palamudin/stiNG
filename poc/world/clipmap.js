@@ -5,7 +5,8 @@
 //
 // What is new:
 //   - every texel holds four channels from the source: height, moisture, forest, trail (or paving), so shading, grass
-//     and water read the same data the mesh stands on;
+//     and water read the same data the mesh stands on; a second array (W3) holds the water level, the sea or a
+//     lake's own, read by the shore, the grass, the water and the caustics;
 //   - all levels live in one float array render target (one sampler, one draw call for the whole ground);
 //   - a source with a GLSL twin is drawn into the levels on the GPU (a whole level costs microseconds), a source
 //     without one (the sim's own ground) is filled on the CPU a strip at a time within a per-frame budget;
@@ -26,6 +27,9 @@ export class Clipmap {
     // 8-bit one, so the type is set on the replacement: an 8-bit target clamps every height to 0..1 m
     this.rt = new THREE.WebGLArrayRenderTarget(C.win, C.win, C.levels, { depthBuffer: false });
     Object.assign(this.rt.texture, { type: THREE.FloatType, format: THREE.RGBAFormat, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, generateMipmaps: false });
+    this.rtW = new THREE.WebGLArrayRenderTarget(C.win, C.win, C.levels, { depthBuffer: false });
+    Object.assign(this.rtW.texture, { type: THREE.FloatType, format: THREE.RGBAFormat, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, generateMipmaps: false });
+    this.sea = source.sea; // a source with no water field: this everywhere
     this.lv = [];
     for (let l = 0; l < C.levels; l++) {
       const s = C.base * 2 ** l;
@@ -33,6 +37,7 @@ export class Clipmap {
     }
     this.uniforms = {
       uClip: { value: this.rt.texture },
+      uClipW: { value: this.rtW.texture },
       uClipLv: { value: this.lv.map(() => new THREE.Vector4()) },
       uClipFade: { value: new Float32Array(C.levels) },
     };
@@ -54,6 +59,18 @@ void main() {
 }`,
         depthTest: false, depthWrite: false,
       });
+      this._fillW = new THREE.ShaderMaterial({
+        glslVersion: THREE.GLSL3,
+        uniforms: this._fill.uniforms,
+        vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }',
+        fragmentShader: `precision highp float; precision highp int;\n${source.glsl}\nuniform vec2 uWin; uniform float uCell; out vec4 outColor;
+void main() {
+  ivec2 t = ivec2(gl_FragCoord.xy); ivec2 w = ivec2(uWin);
+  ivec2 idx = w + ((t - w) & 127);
+  outColor = vec4(wildWater(vec2(idx) * uCell), 0.0, 0.0, 1.0);
+}`,
+        depthTest: false, depthWrite: false,
+      });
     } else {
       this._copy = new THREE.ShaderMaterial({
         glslVersion: THREE.GLSL3,
@@ -68,7 +85,15 @@ void main() {
         L.tex.minFilter = L.tex.magFilter = THREE.NearestFilter; L.tex.generateMipmaps = false;
       }
     }
-    this._smp = [0, 0, 0, 0];
+    this._smp = [0, 0, 0, 0, 0];
+    this._clearW();
+  }
+  // a source without a water field (CPU fill): the water layer is the sea everywhere
+  _clearW() {
+    if (this.gpu) return;
+    const r = this.renderer, prev = r.getRenderTarget(), cc = r.getClearColor(new THREE.Color()), ca = r.getClearAlpha();
+    for (let l = 0; l < this.cfg.levels; l++) { r.setRenderTarget(this.rtW, l); r.setClearColor(new THREE.Color(this.sea, 0, 0), 1); r.clear(true, false, false); }
+    r.setClearColor(cc, ca); r.setRenderTarget(prev);
   }
 
   // Re-centre every level on (x, z) and bring data in. budgetMs bounds the CPU fill; the GPU fill always completes.
@@ -101,8 +126,9 @@ void main() {
   // so materials compiled against them keep working; the fill path follows the new source.
   setSource(source) {
     if (!!source.glsl !== !!this.source.glsl) throw new Error('setSource: a source with a GLSL twin cannot replace one without (make a new Clipmap)');
-    this.source = source;
+    this.source = source; this.sea = source.sea;
     if (this.gpu) Object.assign(this._fill.uniforms, source.uniforms);
+    this._clearW();
     for (const L of this.lv) { L.wi = L.wj = null; L.job = null; L.ready = false; L.fade = 0; }
   }
   // A full rebuild at (x, z), finishing the CPU fill whatever it costs (loading screens, teleports)
@@ -121,6 +147,9 @@ void main() {
     this._fill.uniforms.uCell.value = L.s;
     this._quad.material = this._fill;
     r.setRenderTarget(this.rt, l);
+    r.render(this._scene, this._cam);
+    this._quad.material = this._fillW;
+    r.setRenderTarget(this.rtW, l);
     r.render(this._scene, this._cam);
     r.setRenderTarget(prev);
     this.stats.gpuLevels++;
@@ -158,7 +187,7 @@ void main() {
     const C = this.cfg, last = C.levels - 1;
     return /* glsl */ `
 #define CLIP_LEVELS ${C.levels}
-uniform highp sampler2DArray uClip;
+uniform highp sampler2DArray uClip, uClipW;
 uniform vec4 uClipLv[CLIP_LEVELS]; // centre x, centre z, cell size, half extent
 uniform float uClipFade[CLIP_LEVELS];
 vec4 clipTexel(int l, int i, int j) { return texelFetch(uClip, ivec3(i & 127, j & 127, l), 0); }
@@ -183,6 +212,13 @@ int clipFinest(vec2 p) {
 }
 vec4 clipAt(vec2 p) { return clipSurface(clipFinest(p), p); }
 float clipHeight(vec2 p) { return clipAt(p).x; }
+// the water level (the sea, or a lake's own level): the finest level's texels, interpolated the same way
+float clipWater(vec2 p) {
+  int l = clipFinest(p); float s = uClipLv[l].z; vec2 g = p / s; vec2 g0 = floor(g); vec2 f = g - g0; int i = int(g0.x), j = int(g0.y);
+  float a = texelFetch(uClipW, ivec3(i & 127, j & 127, l), 0).x, b = texelFetch(uClipW, ivec3((i + 1) & 127, j & 127, l), 0).x;
+  float c = texelFetch(uClipW, ivec3(i & 127, (j + 1) & 127, l), 0).x, d = texelFetch(uClipW, ivec3((i + 1) & 127, (j + 1) & 127, l), 0).x;
+  return f.x > f.y ? a + (b - a) * f.x + (d - b) * f.y : a + (d - c) * f.x + (c - a) * f.y;
+}
 vec3 clipNormal(vec2 p) {
   int l = clipFinest(p); float e = uClipLv[l].z;
   float hx = clipSurface(l, p + vec2(e, 0.0)).x - clipSurface(l, p - vec2(e, 0.0)).x;

@@ -3,8 +3,8 @@
 <script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
 </head><body>
 <script type="module">
-// The wild source's GLSL twin against its JS: 4096 points from a centimetre to 12 km, all four channels.
-// Writes window.__result = { max: [h, moist, forest, trail], worst: {...}, n }.
+// The wild source's GLSL twin against its JS: 4096 points from a centimetre to 12 km, all four channels, and the
+// water level (W3) as a fifth. Writes window.__result = { max: [h, moist, forest, trail, water], worst: {...}, n }.
 import * as THREE from 'three';
 import { wildSource } from '../sources/wild.js';
 import { hash01 } from '../noise.js';
@@ -20,13 +20,15 @@ for (const seed of [7, 1234, 99]) {
   }
   const ptex = new THREE.DataTexture(pts, N, N, THREE.RGBAFormat, THREE.FloatType); ptex.needsUpdate = true;
   const rt = new THREE.WebGLRenderTarget(N, N, { type: THREE.FloatType, depthBuffer: false });
-  const m = new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, uniforms: { ...src.uniforms, uP: { value: ptex } },
+  const m = new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, uniforms: { ...src.uniforms, uP: { value: ptex }, uW: { value: 0 } },
     vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }',
-    fragmentShader: `precision highp float; precision highp int;\n${src.glsl}\nuniform highp sampler2D uP; out vec4 o; void main() { o = wildSample(texelFetch(uP, ivec2(gl_FragCoord.xy), 0).xy); }` });
+    fragmentShader: `precision highp float; precision highp int;\n${src.glsl}\nuniform highp sampler2D uP; uniform float uW; out vec4 o; void main() { vec2 p = texelFetch(uP, ivec2(gl_FragCoord.xy), 0).xy; o = uW > 0.5 ? vec4(wildWater(p), 0.0, 0.0, 0.0) : wildSample(p); }` });
   const sc = new THREE.Scene(); const q = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), m); q.frustumCulled = false; sc.add(q);
   renderer.setRenderTarget(rt); renderer.render(sc, new THREE.Camera());
-  const px = new Float32Array(N * N * 4); renderer.readRenderTargetPixels(rt, 0, 0, N, N, px); renderer.setRenderTarget(null);
-  const max = [0, 0, 0, 0], worst = {}, o4 = [0, 0, 0, 0];
+  const px = new Float32Array(N * N * 4); renderer.readRenderTargetPixels(rt, 0, 0, N, N, px);
+  m.uniforms.uW.value = 1; renderer.render(sc, new THREE.Camera());
+  const pw = new Float32Array(N * N * 4); renderer.readRenderTargetPixels(rt, 0, 0, N, N, pw); renderer.setRenderTarget(null);
+  const max = [0, 0, 0, 0, 0], worst = {}, o4 = [0, 0, 0, 0, 0];
   let bad = 0;
   for (let k = 0; k < N * N; k++) {
     src.sample(pts[k * 4], pts[k * 4 + 1], o4);
@@ -34,6 +36,7 @@ for (const seed of [7, 1234, 99]) {
       const d = Math.abs(o4[c] - px[k * 4 + c]);
       if (d > max[c]) { max[c] = d; worst[c] = { x: pts[k * 4], z: pts[k * 4 + 1], js: o4[c], gpu: px[k * 4 + c] }; }
     }
+    { const d = Math.abs(o4[4] - pw[k * 4]); if (d > max[4]) { max[4] = d; worst[4] = { x: pts[k * 4], z: pts[k * 4 + 1], js: o4[4], gpu: pw[k * 4] }; } }
     if (Math.abs(o4[0] - px[k * 4]) > 0.02) bad++;
   }
   out[seed] = { max, worst, over2cm: bad, n: N * N };

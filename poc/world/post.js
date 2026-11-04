@@ -15,6 +15,7 @@ import * as THREE from 'three';
 import { SKY_GLSL } from './sky.js';
 import { waterGLSL, WATER_SHADE_GLSL, WATER } from './water.js';
 import { NOISE_GLSL } from './noise.js';
+import { MAP_GLSL } from './map.js';
 
 const VS = 'out vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }';
 
@@ -25,6 +26,7 @@ function target(w, h, o = {}) {
   return new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, depthBuffer: false, magFilter: THREE.LinearFilter, minFilter: THREE.LinearFilter, ...o });
 }
 
+const NOTIMER = { begin() {}, end() {} };
 export class Post {
   constructor(renderer, sky, opts = {}) {
     this.renderer = renderer; this.sky = sky;
@@ -45,6 +47,8 @@ export class Post {
       uWL: { value: new THREE.Vector4(1, 1, 1, 1) }, uWLost: { value: 0 }, uWPeak: { value: 0.05 }, uGlint: { value: WATER.glint },
       uBody: { value: Array.from({ length: WATER.bodies }, () => new THREE.Vector4()) }, uBodyB: { value: Array.from({ length: WATER.bodies }, () => new THREE.Vector4()) }, uBodyC: { value: Array.from({ length: WATER.bodies }, () => new THREE.Vector4()) }, uBodies: { value: 0 },
       tCaus: { value: null }, uCaus: { value: new THREE.Vector4(0, 0, 1, 0) },
+      tCloud: { value: null }, uCloudOn: { value: 0 }, uCloudBase: { value: 1000 }, uIce: { value: 0 }, uFlash: { value: 0 },
+      uMap: { value: 0 }, uSnowLine: { value: 1e9 },
       ...sky.uniforms,
     };
     // ---- composite (rebuilt when the wave field's cascades change: setWater)
@@ -130,10 +134,24 @@ void main() {
     this.size = new THREE.Vector2();
     this._alloc(1, 1);
   }
+  // the map pass: the finished (sRGB) frame, blended into a map drawn from the clipmap (map.js)
+  _mapPass() {
+    return pass(`${NOISE_GLSL}\n${this.clipGLSL}\n${MAP_GLSL}
+void main() {
+  vec3 photo = texture(tColor, vUv).rgb;
+  vec4 m = mapColor(vUv);
+  // the map's colours are linear: to sRGB like the frame, then blended in by how far into the map we are
+  vec3 ms = pow(max(m.rgb, 0.0), vec3(1.0 / 2.2));
+  oColor = vec4(mix(photo, ms, uMap * m.a), 1.0);
+}`, this.U);
+  }
   _composite(C) {
-    return pass(`${SKY_GLSL}\n${NOISE_GLSL}\n#define W_CASCADES ${C}\n${C ? waterGLSL(C) : ''}
+    return pass(`${SKY_GLSL}\n${NOISE_GLSL}\n${this.clipGLSL ? this.clipGLSL + '\n#define W_CLIP' : ''}\n#define W_CASCADES ${C}\n${C ? waterGLSL(C) : ''}
 uniform sampler2D tColor, tDepth, uSkyView; uniform mat4 uInvProj, uCamWorld, uViewProj; uniform vec3 uCamPos, uSun, uSunColor, uSkyUp, uSkyHz;
-uniform float uLogF, uSea, uMist, uMistH, uTime, uWet, uWaterOn, uDebug; uniform vec2 uRes;
+uniform float uLogF, uSea, uMist, uMistH, uTime, uWet, uWaterOn, uDebug, uCloudOn, uCloudBase, uFlash; uniform vec2 uRes; uniform sampler2D tCloud;
+#if W_CASCADES == 0
+uniform float uIce;
+#endif
 #define WATER_DEBUG
 vec3 viewRay(vec2 uv) { vec4 p = uInvProj * vec4(uv * 2.0 - 1.0, 1.0, 1.0); p.xyz /= p.w; return normalize((uCamWorld * vec4(p.xyz, 0.0)).xyz); }
 vec3 viewRayZ(vec2 uv) { vec4 p = uInvProj * vec4(uv * 2.0 - 1.0, 1.0, 1.0); p.xyz /= p.w; return p.xyz / -p.z; }
@@ -169,12 +187,24 @@ void main() {
   float d0 = texture(tDepth, uv).r;
   vec3 col = texture(tColor, uv).rgb;
   float dist = d0 >= 1.0 ? 1e9 : rayDist(uv, d0);
-  if (d0 >= 1.0) col = skyAt(v) + sunDisc(v);
+  if (d0 >= 1.0) col = skyAt(v) + sunDisc(v) + uFlash * uSkyUp * 4.0; // lightning: the whole sky lights
   float outDist = dist; bool wet = false;
 #if W_CASCADES > 0
   // the nearest water: the sea (iterated onto its waves), then the bodies (discs on the ground's plane)
   float tw = 1e10, kind = -1.0; vec2 x0 = vec2(0.0), gx = vec2(0.0), gy = vec2(0.0); vec4 bA = vec4(0.0), bB = vec4(0.0), bC = vec4(0.0);
-  if (uWaterOn > 0.5 && v.y < 0.0 && uCamPos.y > uSea) { tw = wSeaHit(uv, v, uSea, x0, gx, gy); kind = 0.0; }
+  // the open water (W3): the level is the sea, or a lake's own, read at the point the ray reaches; the ray crossed a
+  // surface at that level only if the point lies under it (a straight ray down cannot cross a flat lake and come back
+  // out), and a ray that reaches the sky crosses the sea's plane
+  float yb = -1e9;
+  if (uWaterOn > 0.5) {
+    if (d0 >= 1.0) yb = uSea;
+#ifdef W_CLIP
+    else { vec3 Pg = uCamPos + v * dist; float Wg = clipWater(Pg.xz); if (Pg.y < Wg - 0.002) yb = Wg; }
+#else
+    else yb = uSea;
+#endif
+  }
+  if (yb > -1e8 && v.y < 0.0 && uCamPos.y > yb) { tw = wSeaHit(uv, v, yb, x0, gx, gy); kind = 0.0; }
   for (int i = 0; i < ${WATER.bodies}; i++) {
     if (i >= uBodies) break;
     vec4 b = uBody[i], c2 = uBodyB[i]; vec3 c = vec3(b.x, b.w, b.y); vec3 n = vec3(-c2.x, 1.0, -c2.y);
@@ -198,6 +228,16 @@ void main() {
   }
 #endif
   if (d0 < 1.0 || wet) { vec3 ins; vec3 T = airT(min(outDist, 2e5), v, ins); col = col * T + ins; }
+  // the clouds (clouds.js, quarter resolution): behind anything nearer than where the ray enters their slab
+  if (uCloudOn > 0.5) {
+    float te = abs(v.y) < 1e-4 ? 1e9 : (uCloudBase - uCamPos.y) / v.y;
+    if (uCamPos.y > uCloudBase) te = 0.0;
+    if (te > 0.0 && te < outDist) {
+      vec4 cl = texture(tCloud, uv);
+      vec3 ins; vec3 T = airT(min(te, 2e5), v, ins); // the air between the eye and the clouds
+      col = col * cl.a + (cl.rgb * T + ins * (1.0 - cl.a));
+    }
+  }
   if (uDebug > 0.5 && uDebug < 1.5) { vec3 Pg = uCamPos + v * dist; col = vec3(wet ? 1.0 : 0.0, Pg.y < 0.0 ? 1.0 : 0.0, d0 >= 1.0 ? 1.0 : 0.0) * 2.0; }
   // half floats end at 65504: the sun's disc is brighter than that, and an infinity here turns into NaN in the passes after
   oColor = vec4(min(col, vec3(6.0e4)), min(outDist, 60000.0));
@@ -205,9 +245,11 @@ void main() {
   }
 
   // the wave field (wavegpu.js) and the sea's caustics (caustics.js); null for none
-  setWater(field, caustics) {
+  // clip: the clipmap (its GLSL and uniforms), so the composite can read the water level where a ray lands
+  setWater(field, caustics, clip) {
     const C = field ? field.C : 0, U = this.U;
-    if (C !== this.C) { this.composite.dispose(); this.C = C; this.composite = this._composite(C); }
+    if (clip && !this.clipGLSL) { this.clipGLSL = clip.glsl(); Object.assign(U, clip.uniforms); this.composite.dispose(); this.composite = this._composite(C); this.C = C; this.mapPass = this._mapPass(); }
+    else if (C !== this.C) { this.composite.dispose(); this.C = C; this.composite = this._composite(C); }
     if (field) {
       U.uWL.value = field.U.uL.value;
       for (let c = 0; c < C; c++) { U['tWD' + c] = { value: field.disp[c].texture }; U['tWS' + c] = { value: field.slope[c].texture }; }
@@ -232,7 +274,7 @@ void main() {
   _run(mat, out) { this.quad.material = mat; this.renderer.setRenderTarget(out); this.renderer.render(this.scene, this.cam); }
 
   render(scene, camera, opts = {}) {
-    const r = this.renderer, U = this.U, size = r.getDrawingBufferSize(this.size);
+    const r = this.renderer, U = this.U, size = r.getDrawingBufferSize(this.size), T = opts.timer || NOTIMER;
     this.setSize(size.x, size.y);
     camera.updateMatrixWorld();
     U.uInvProj.value.copy(camera.projectionMatrixInverse);
@@ -243,14 +285,17 @@ void main() {
     U.uRes.value.set(this.w, this.h);
     // the scene
     const prevTM = r.toneMapping; r.toneMapping = THREE.NoToneMapping;
-    r.setRenderTarget(this.rtScene); r.clear(); r.render(scene, camera);
+    T.begin('scene'); r.setRenderTarget(this.rtScene); r.clear(); r.render(scene, camera); T.end();
     U.tDepth.value = this.rtScene.depthTexture;
+    // the clouds at quarter resolution, before the composite blends them in
+    T.begin('clouds'); if (opts.clouds) { opts.clouds.render(this.rtQ, this.rtScene.depthTexture, camera, U.uLogF.value, this.rtQ.width, this.rtQ.height, camera.position, opts.skyUp); U.tCloud.value = this.rtQ.texture; U.uCloudOn.value = 1; } else U.uCloudOn.value = 0; T.end();
     // composite
-    U.tColor.value = this.rtScene.texture; this._run(this.composite, this.rtA);
+    T.begin('composite'); U.tColor.value = this.rtScene.texture; this._run(this.composite, this.rtA); T.end();
     let cur = this.rtA;
     // god rays, when the sun is in front of the camera
     const s = new THREE.Vector4(U.uSun.value.x, U.uSun.value.y, U.uSun.value.z, 0).applyMatrix4(U.uViewProj.value);
     const front = s.w > 0 && U.uSun.value.y > -0.05;
+    T.begin('rays');
     if (front && opts.rays !== false) {
       U.uSunUV.value.set(s.x / s.w * 0.5 + 0.5, s.y / s.w * 0.5 + 0.5);
       const edge = Math.max(Math.abs(U.uSunUV.value.x - 0.5), Math.abs(U.uSunUV.value.y - 0.5));
@@ -259,7 +304,9 @@ void main() {
       U.tColor.value = this.rtQ.texture; this._run(this.raysBlur, this.rtQ2);
       U.tRays.value = this.rtQ2.texture;
     } else { r.setRenderTarget(this.rtQ2); r.clear(); U.tRays.value = this.rtQ2.texture; }
+    T.end();
     // depth of field
+    T.begin('dof');
     if (opts.dof !== false) {
       U.tColor.value = cur.texture; this._run(this.cocPass, this.rtHalf);
       U.uTexel.value.set(1 / this.rtHalf.width, 1 / this.rtHalf.height);
@@ -267,16 +314,22 @@ void main() {
       U.tColor.value = cur.texture; U.tBlur.value = this.rtHalf2.texture; this._run(this.dofMix, this.rtB);
       cur = this.rtB;
     }
+    T.end();
     // bloom
+    T.begin('bloom');
     let src = cur;
     U.uBloomMax.value = 24 / Math.max(U.uExposure.value, 1e-3); // about 24x display white, in scene units
     for (let i = 0; i < this.mips.length; i++) { U.uTexel.value.set(1 / src.width, 1 / src.height); U.tColor.value = src.texture; this._run(this.down, this.mips[i]); src = this.mips[i]; }
     let up = this.mips[this.mips.length - 1];
     for (let i = this.mips.length - 2; i >= 0; i--) { U.uTexel.value.set(1 / up.width, 1 / up.height); U.tColor.value = up.texture; U.tPrev.value = this.mips[i].texture; this._run(this.up, this.mipsUp[i]); up = this.mipsUp[i]; }
     U.tBloom.value = up.texture;
-    // out
+    T.end();
+    // out: to the screen, or through the map pass when the view is turning into a map (map.js)
+    const toMap = this.mapPass && U.uMap.value > 0.001;
     U.tColor.value = cur.texture;
-    this._run(this.final, null);
+    T.begin('final'); this._run(this.final, toMap ? this.rtB : null);
+    if (toMap) { U.tColor.value = this.rtB.texture; this._run(this.mapPass, null); }
+    T.end();
     r.toneMapping = prevTM;
   }
 }

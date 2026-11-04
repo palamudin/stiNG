@@ -11,6 +11,11 @@ import { applyTuning } from '../../sim/tunefile.js';
 import { stingSource } from '../sources/sting.js';
 import { u64, DEFAULT_SETTINGS } from '../../sim/index.js';
 import { WAVES, omega, seaState, fieldStats, integralVar, ifftStockham, fieldAtCPU, downwindShare } from '../waves.js';
+import { lakeAt } from '../sources/wild.js';
+import { treeDesign as cardDesign, meshTreeCards, leafAtlas, TREE_KINDS as CARD_KINDS } from '../treecards.js';
+import { dayWeather, weatherAt, seasonAt, seasonName, YEAR } from '../seasons.js';
+import { compositeSource, findSite } from '../sources/composite.js';
+import { Places } from '../map.js';
 applyTuning(T, readFileSync(new URL('../../../tuning/sting.tune', import.meta.url), 'utf8'));
 
 let failures = 0;
@@ -141,6 +146,59 @@ const ok = (c, msg) => { console.log((c ? 'PASS ' : 'FAIL ') + msg); if (!c) fai
   ok(jxx < 1, `waves: at the highest crest of a lake the surface is squeezed together (1 + dDx/dx = ${jxx.toFixed(3)})`);
   const w = omega(Math.sqrt(WAVES.g / WAVES.T));
   ok(Math.abs(w / Math.sqrt(WAVES.g / WAVES.T) - Math.sqrt(2 * WAVES.g / Math.sqrt(WAVES.g / WAVES.T))) < 1e-9 && Math.abs(2 * Math.PI / Math.sqrt(WAVES.g / WAVES.T) - 0.0171) < 0.0003, `waves: the slowest ripple is ${(200 * Math.PI / Math.sqrt(WAVES.g / WAVES.T)).toFixed(2)} cm long and runs at ${(w / Math.sqrt(WAVES.g / WAVES.T) * 100).toFixed(1)} cm/s`);
+}
+
+// W3: the wild world's water level field, the card trees and their atlas, the seasons and weather, the composite
+{
+  // lakes: where the water level field jumps from a lake's level to the sea, the ground is above both, so no water
+  // shows at the jump; inside the basin the floor is under the level; the shore crosses at a gentle slope
+  const src = wildSource({ seed: 7 }), P = src.params, o = [0, 0, 0, 0, 0];
+  let lakes = 0, jumps = 0, badJumps = 0, bowl = 0, badBowl = 0, maxSlope = 0;
+  for (let j = -8; j <= 8; j++) for (let i = -8; i <= 8; i++) {
+    const lk = lakeAt(P, (i + 0.5) * 2200, (j + 0.5) * 2200); if (!lk) continue; lakes++;
+    const cx = lk.cx, cz = lk.cz, R = lk.R, level = lk.level;
+    for (let a = 0; a < 6.283; a += 0.13) {
+      let prevW = null, prevH = null;
+      for (let r = 0; r < R * 1.5; r += 4) {
+        const x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r; src.sample(x, z, o);
+        if (r < R * 0.5) { bowl++; if (o[0] >= o[4]) badBowl++; }
+        if (prevW !== null && Math.abs(o[4] - prevW) > 0.5) { jumps++; if (o[0] < Math.max(o[4], prevW) + 0.5 || prevH < Math.max(o[4], prevW) + 0.5) badJumps++; }
+        if (prevH !== null && r > R * 0.7 && r < R * 1.05 && o[0] > o[4] && prevH <= prevW) maxSlope = Math.max(maxSlope, (o[0] - prevH) / 4);
+        prevW = o[4]; prevH = o[0];
+      }
+    }
+  }
+  ok(lakes > 20 && badBowl === 0, `wild world: ${lakes} lakes at their own levels; every point in the inner half of a basin is under its level (${bowl} points)`);
+  ok(jumps > 0 && badJumps === 0, `wild world: the water level field jumps ${jumps} times along radial lines and the ground is above both levels at every jump`);
+  let sea = 0, n = 0; for (let k = 0; k < 3000; k++) { const x = (hash01(k, 1, 9) - 0.5) * 20000, z = (hash01(k, 2, 9) - 0.5) * 20000; src.sample(x, z, o); n++; if (o[0] < o[4]) sea++; }
+  ok(sea / n > 0.25 && sea / n < 0.55, `wild world: ${(100 * sea / n).toFixed(0)}% of a 20 km square is under water (an ocean coast with lakes)`);
+  // card trees: every design meshes at three levels, leaves carry the crown's sphere normal, wood the cylinder's
+  let worst = '';
+  for (const k of CARD_KINDS) { if (k === 'rock') continue; for (let v = 1; v <= 3; v++) { const d = cardDesign(k, v); for (let l = 0; l < 3; l++) { const m = meshTreeCards(d, l); if (m.tris === 0 || m.pos.some((x) => !Number.isFinite(x))) worst = `${k} ${v} level ${l}`; for (let i = 0; i < m.verts; i++) { const nl = Math.hypot(m.nor[i * 3], m.nor[i * 3 + 1], m.nor[i * 3 + 2]); if (Math.abs(nl - 1) > 1e-3) worst = `${k} ${v} level ${l}: normal ${nl}`; } } } }
+  const oak = meshTreeCards(cardDesign('oak', 1), 0), oak2 = meshTreeCards(cardDesign('oak', 1), 2);
+  ok(!worst && oak.tris > 400 && oak.tris < 900 && oak2.tris < 40, `card trees: every kind and variety meshes at three levels with unit normals; an oak is ${oak.tris} triangles near and ${oak2.tris} far${worst ? ' (bad: ' + worst + ')' : ''}`);
+  const A = leafAtlas(); let alpha = 0; for (let i = 3; i < A.data.length; i += 4) alpha += A.data[i] ? 1 : 0;
+  ok(alpha / (A.size * A.size) > 0.05 && alpha / (A.size * A.size) < 0.3, `leaf atlas: ${A.size} px, ${(100 * alpha / (A.size * A.size)).toFixed(1)}% leaf pixels, in 2 x 2 blocks`);
+  // seasons: the year's turn, the weather's odds, the sun's track
+  const names = [45, 135, 225, 315].map(seasonName);
+  const W = seasonAt(315), Su = seasonAt(135), Au = seasonAt(230);
+  ok(names.join() === 'spring,summer,autumn,winter' && W.snow > 0.9 && W.freeze > 0.9 && W.leafGone > 0.9 && Su.snow === 0 && Su.bloom > 0.9 && Su.leafGone === 0 && Au.autumn > 0.5, `seasons: ${names.join(', ')}; deep winter snow ${W.snow.toFixed(2)}, ice ${W.freeze.toFixed(2)}, leaves gone ${W.leafGone.toFixed(2)}; midsummer bloom ${Su.bloom.toFixed(2)}; autumn colour ${Au.autumn.toFixed(2)}`);
+  const kinds = {}; for (let d = 0; d < YEAR.days * 3; d++) { const w = dayWeather(7, d); kinds[w.kind] = (kinds[w.kind] || 0) + 1; }
+  const same = JSON.stringify(dayWeather(7, 33)) === JSON.stringify(dayWeather(7, 33)) && dayWeather(7, 33).kind !== undefined;
+  ok(same && Object.keys(kinds).length === 6 && kinds.storm > 5 && kinds.clear > 100, `weather: six kinds over three years (${Object.entries(kinds).map(([k, v]) => k + ' ' + v).join(', ')}), the same for the same day`);
+  const night = weatherAt(7, 10, 2), noon = weatherAt(7, 10, 12);
+  ok(night.wind.length === 2 && noon.cover >= 0 && noon.cover <= 1 && noon.haze > 0 && noon.mist > 0, `weather at an hour: cover ${noon.cover.toFixed(2)}, haze ${noon.haze.toFixed(2)}, wind ${Math.hypot(...noon.wind).toFixed(1)} m/s at noon of day 10`);
+  // the composite: inside the settled area the sim's ground plus the lift; beyond the band the wild world; the site is land
+  const settings = { ...DEFAULT_SETTINGS, terrain: 2, seed: 1234 }, sim = { seed: u64(1234), settings, records: new Map() };
+  const st = stingSource(sim), wd = wildSource({ seed: 1234 }), cs = compositeSource(st, wd, { radius: 300, band: 120 });
+  const hIn = cs.height(10, 20), hSt = st.height(10, 20), hOut = cs.height(2000, 0), hW = wd.height(2000 + cs.site.x, cs.site.z);
+  ok(Math.abs(hIn - hSt - cs.lift) < 1e-9 && Math.abs(hOut - hW) < 1e-9 && cs.lift > wd.sea + 9, `composite: inside the town the sim's ground lifted by ${cs.lift.toFixed(1)} m (the site at ${cs.site.x.toFixed(0)}, ${cs.site.z.toFixed(0)}); beyond the band the wild ground exactly`);
+  let mono = true, prev = cs.height(0, 300); for (let r = 300; r <= 420; r += 2) { const h = cs.height(0, r); if (Math.abs(h - prev) > 3) mono = false; prev = h; }
+  ok(mono, 'composite: across the band the ground changes by less than 3 m per 2 m step (no wall at the seam)');
+  // the map's places: a scan round the wild start finds water, food and nest sites
+  const pl = new Places(wd, { cell: 220, radius: 3000 }); while (pl.scan(0, 0, 1e9)) { /* until done */ }
+  const by = {}; for (const p of pl.list) by[p.kind] = (by[p.kind] || 0) + 1;
+  ok(pl.list.length > 5 && by.water && by.nest, `map: ${pl.list.length} places within 3 km of the wild origin (${Object.entries(by).map(([k, v]) => k + ' ' + v).join(', ')})`);
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');

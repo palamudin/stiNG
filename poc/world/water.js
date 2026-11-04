@@ -40,7 +40,7 @@ const f = (v) => (Number.isInteger(v) ? v.toFixed(1) : String(v));
 export function waterGLSL(C, B = WATER.bodies) {
   const cs = [...Array(C).keys()];
   return /* glsl */ `
-uniform vec2 uWind; uniform float uWLost, uWPeak, uGlint;
+uniform vec2 uWind; uniform float uWLost, uWPeak, uGlint, uIce;
 uniform vec4 uWL; // tile sizes of the cascades
 ${cs.map((c) => `uniform sampler2D tWD${c}, tWS${c};`).join(' ')}
 uniform vec4 uBody[${B}];  // centre x, z, radius, water level at the centre
@@ -240,6 +240,8 @@ vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, floa
     spec *= mix(1.0, gm, uGlint);
   }
   vec3 col = mix(under, refl, F) + spec;
+  // ice (W3, deep winter): a pale, rough sheet over the water, the sky softly in it, no glints, no floor
+  if (uIce > 0.0) { float ic = smoothstep(0.0, 0.6, uIce) * (1.0 - 0.5 * step(0.5, bodyK) * step(bodyK, 2.5)); vec3 iceCol = vec3(0.72, 0.8, 0.88) * (uSkyUp * 0.7 + uSunColor * max(uSun.y, 0.0) * 0.25) * (0.9 + 0.1 * w2noise(x0 / 1.5, 302)); col = mix(col, iceCol + skyAt(R) * 0.08, ic); }
   // ---- foam: where the surface folds, and at the very edge of the sea
   vec4 dsp = wDisp(x0, gx, gy);
   float fold = 1.0 - smoothstep(0.15, 0.55, dsp.w);

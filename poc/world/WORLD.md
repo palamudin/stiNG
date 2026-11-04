@@ -7,17 +7,23 @@ source and never writes to the sim. Design notes and how the game uses it: GDD 2
 const world = new World(renderer, scene, camera, source, { quality: 'medium', clip: { levels: 11 }, sun, hemi, shadowBox: 18, lens: { fstop: 8 } });
 world.build(x, z);                                   // a full fill at (x, z), behind a loading screen
 // each frame
-world.set({ hour, haze, mist, wet, wind: [x, z], wind10: [x, z] }); // wind10: m/s at 10 m, for the waves (optional)
+world.set({ hour, day, auto: true, map: 0 });         // the template: the weather and the season follow the clock (seasons.js)
+world.set({ hour, auto: false, haze, mist, wet, wind: [x, z], wind10: [x, z], cloud, rain, snow, storm, flash }); // the game: its own weather
 world.update(dt, cameraPosition, focusDistance);
 world.render();                                      // scene -> post chain -> screen
 world.heightAt(x, z);                                // the source's exact height
 world.setSource(source, x, z);                       // a new world into the same World (its uniforms stay the same objects)
 ```
 
-**A source** is `{ kind, params, sea, sample(x, z, out) -> [height, moisture, forest, paving], height(x, z), glsl, uniforms,
-objects?(cx, cz), trunks?, grassHeight, cosmetic?, water?, waters?(cx, cz) }`. `glsl` (a `wildSample(vec2)` returning the same four channels) lets the clipmap
-fill on the GPU; without it the clipmap fills on the CPU within a budget. `objects` hands the forest a chunk's own trees
-(`x, z, r, h, cr, shade`), one tree each; `trunks: false` leaves the trunks to the caller.
+**A source** is `{ kind, params, sea, sample(x, z, out) -> [height, moisture, forest, paving, waterLevel], height(x, z),
+waterAt?(x, z), lakeAt?(x, z), glsl, uniforms, objects?(cx, cz), trunks?, wildFrom?, grassHeight, wildGrass?, cosmetic?,
+water?, waters?(cx, cz) }`. `glsl` (a `wildSample(vec2)` returning the first four channels and a `wildWater(vec2)` for the
+fifth) lets the clipmap fill on the GPU; without it the clipmap fills on the CPU within a budget. `objects` hands the
+forest a chunk's own trees (`x, z, r, h, cr, shade`), one tree each; `trunks: false` leaves their trunks to the caller.
+`wildFrom` (metres from the origin) says where the settled area ends and the wild rule plants the forest.
+
+The fifth channel (W3) is the water level there: the sea, or a lake's own level inside its basin. Everything that reads
+the shore, the grass line, the caustics and the open water reads it from the clipmap (`clipWater`).
 
 `cosmetic` is decoration's salt (the game's: `hash(seed, Domain.Cosmetic, 0)`, GDD 20.4 point 3). `water` is
 `{ fetch, cascades }` for the wave field; `waters(cx, cz)` lists a chunk's water bodies as `{ x, z, r, top, depth, kind }`
@@ -25,15 +31,113 @@ fill on the GPU; without it the clipmap fills on the CPU within a budget. `objec
 
 - `sources/sting.js`: the game's world (the sim's `groundAt`, land use, `pavingOf`, the chunk's trees with no trunks, and
   its birdbaths, fountains and the sim's puddles while the ground is wet).
-- `sources/wild.js`: a standalone wild world with water, for the template page `../world.html`.
+- `sources/wild.js`: a standalone wild world with an ocean coast, lakes at their own levels, and mountains to 780 m, for
+  the template page `../world.html`.
+- `sources/composite.js`: the game's world set down in the wild one: inside `radius` the sim's, blended over a band
+  into the wild generator at a site chosen for it (flat, dry, above the sea). A start can be urban, semi-urban or wild
+  by that radius. Gameplay beyond the settled area would need the wild height in the sim with a C# twin (the game
+  thread's call); until then the wild land is scenery.
 
 **Lifting other objects.** `clipLiftGLSL({ levels })` (clipmap.js) is GLSL with `clipHeight` and a `ringHeightAt` answered
 by it, so materials that call `ringHeightAt` stand on this ground. Put `world.clip.uniforms` into their uniforms. World v2's
 own objects carry `userData.ring` and `userData.world2`, so the game's patching leaves them alone.
 
 **Tiers** (`QUALITY` in index.js): low, medium, high, ultra: clipmap levels, render scale, shadow size, grass and tree
-distances, depth of field, god rays, MSAA, cloud steps, the wave grid (64, 128, 128, 256) and the sea's caustics (off,
-256/192, 512/384, 1024/640: texture and grid).
+distances, depth of field, god rays, MSAA, volumetric clouds (off on low), the wave grid (64, 128, 128, 256) and the
+sea's caustics (off, 256/192, 512/384, 1024/640: texture and grid).
+
+**GPU timings** (`gputimer.js`): `world.timer.ms` holds the last second's average milliseconds per pass (scene, clouds,
+composite, rays, dof, bloom, final, waves) where the browser gives `EXT_disjoint_timer_query_webgl2` (desktop Chrome
+and Edge; Firefox and Safari give nothing, and the stats say so). The template shows them.
+
+## W3: the fjord world, forests to a million, clouds, weather, seasons, the map
+
+**Terrain** (`sources/wild.js`). The continental noise now lowers the land toward its low side into an ocean with bays
+and headlands, and the ridges (to 780 m) stand on its high side, so the coast is a fjord coast. Lakes: at most one per
+2.2 km cell (three in four cells try), a bowl carved into the broad shape with a shore that wanders, its level a few
+metres under the lowest of the broad shape at the centre and four rim points, the land round it held above the level
+for a third of the radius out. The water level field (channel 5) is the lake's inside and to 0.4 of the rim, the sea
+elsewhere; it jumps only where the ground is held above both, so the jump never shows water. Lakes in the sea's reach
+or up the mountains are not made. Forests run to the snow line (560 m).
+
+**Forests** (`treecards.js`, `trees.js`, `scatter.js`). Trees are cards: a trunk and branches of low-poly cylinders and
+a crown of leaf clusters, three crossed quads each, cut out of a pixel-art leaf atlas drawn from the hash (blocks of
+2 x 2 pixels; the Minecraft idea: texture over geometry). Three levels of detail (oak: 624, 164, 24 triangles). Up close
+it is cards of chunky leaves; from a few metres a tree. Lighting: the crown's sphere normal on every leaf, so the
+crown shades as one mass; occlusion from height and depth into the crown (a smoothstep, cheap); the sun through the
+leaves toward the eye. Alpha to coverage on the MSAA target softens the cut-outs.
+- **Near** (to 420 m): the meshes, placed per 64 m tile on the CPU (`scatter.js`, deterministic), or the sim's trees
+  one for one in the settled area (the trunk hidden per instance where the game draws it as the sim's cylinder).
+- **Far** (420 m to 6 km): the same trees as impostors, one quad each, baked at start-up from the level-0 meshes from
+  eight sides (albedo and normals, 128 px, two atlases), placed entirely on the GPU: the vertex shader runs
+  `scatter.js`'s rule again in GLSL on the clipmap (the same grid, hashes and rules), so the impostors stand where the
+  meshes stood, cross-faded by dither. The quad is billboarded about the trunk's foot and tilts toward a high camera.
+  Culled against the view in the vertex shader. Beyond 1.2 km one card stands for the four trees of its cell. On the
+  high tier that is about 1.16 million cells a frame submitted, most dropped in the vertex shader before a pixel.
+- **Beyond** 6 km the canopy is painted into the ground.
+- The sun's light on every tree, near or far, takes the clouds' shadow.
+
+**Clouds** (`clouds.js`). A slab from 1000 to 1650 m, marched per pixel at quarter resolution (28 steps, jittered):
+coverage patches 3 km across with the weather's cover, eroded by 3D noise read at points snapped to 24 m cells, so the
+clouds come out as soft blocks. Lighting: Beer-Lambert toward the sun over two samples, a two-lobe Henyey-Greenstein
+phase, a powder term, the sky's light from above. Composited behind anything nearer than the slab. A second pass draws
+the clouds' shadow (the sun's transmittance through the column) into a 512 x 512 map over 14 km round the camera,
+which the ground, grass, trees, far forest read. The sun's light on everything is also scaled by the cover (the
+average under a cloudy sky).
+
+**Weather** (`seasons.js`). Each day's weather is a hash of the day with the season's odds: clear, fair, overcast,
+rain, storm or fog. The state at any hour blends the day's into the next day's over the night; a storm builds in the
+afternoon and breaks in the evening, with lightning (a hash of the half second: the sky and the light flash); fog
+lies in the morning. Rain and snow (`rain.js`) are one quad instanced 6000 times in a box round the camera, moved in
+the vertex shader: streaks along the fall plus the wind, or drifting flakes when the day is cold. Rain wets the ground
+and rings the water (W2).
+
+**Seasons** (`seasons.js`). The day of the year sets: the sun's track (the real one at latitude 50 for the season's
+declination: long days in summer, short in winter), the leaves (fresh and yellow-green in spring, deep in summer,
+yellow, orange or red by the tree's variety in autumn, falling leaf by leaf, bare in winter; pines keep theirs), the
+flowers (in bloom from late spring to late summer), the grass (yellowing in autumn), the snow line (860 m in summer,
+down to the sea in deep winter: the ground, the upper leaves and the far cards whiten), and the lakes and the sea
+(frozen over in deep winter: a pale rough sheet).
+
+**The map** (`map.js`). Zooming out from the wasp, the view turns into a map: between 350 m and 2.6 km the camera
+tips toward straight down, the lens narrows (backing off to keep the framing) and the view turns north-up, while a
+pass after the tone mapping redraws the frame from the clipmap: pixels snapped to a 4 px grid, a hypsometric palette
+by height, hillshade from the ground's normal under a north-west light, water flat blue by depth with a dark shore
+line, forests dotted, trails dashed, contours every 20 m, snow white. The blend is continuous with the zoom. Pins are
+HTML over the canvas, projected each frame and clustered when they crowd; a click opens a card with what the place
+offers and how far it is. Places are scanned from the source on the CPU, a few 220 m cells a frame, out to 6 km:
+lakes (once, at their centre) and the shore; meadows in bloom and damp fruit woods (food); dense old woods (hollow
+trees), crags (crevices) and dry banks (burrows) as nest sites. In the game the sim's own place list (GDD 19.6 T3-2) is
+the authority; this scan is the template's stand-in.
+
+**Checks** (run from `poc/`; browser pages headless, software WebGL):
+
+| Check | Result |
+|---|---|
+| `node world/test/world.test.mjs` (W3 part) | 25 lakes in a 35 km square at their own levels; every point in the inner half of a basin is under its level; the water level field jumps 1,059 times along radial lines and the ground is above both levels at every jump; 40% of a 20 km square is under water. Every card tree kind and variety meshes at three levels with unit normals (oak 624 / 164 / 24 triangles). The atlas is 10.5% leaf pixels. The seasons turn in order; deep winter snow 1.0, ice 0.99, leaves gone 1.0; midsummer bloom 1.0. Six weather kinds over three years, the same for the same day. The composite's inside is the sim's ground plus one lift, its outside the wild ground exactly, and the band changes by less than 3 m a step. A 3 km scan round the wild origin finds water, food and nest sites. |
+| `world/test/gpu-parity.html` | The GLSL twin against the JS at 4,096 points per seed, three seeds: height within 1.3 cm (a lake's trigonometry at kilometre coordinates in float32; none over 2 cm), the water level within 1.3e-4 m. |
+| `world/test/forest-parity.html` | The GPU placement rule against `scatter.js` over 16 tiles (2,704 cells): 99.85% agree on whether a tree stands (2 cells each way at thresholds, from the clipmap's interpolation), every kind agrees, scales within 1.5e-7. |
+| `index.html?world2` | Boots with the card trees and the game's own trunks. |
+
+**Not verified.** Frame times on a real GPU: the template now shows them per pass where the browser gives timer
+queries, so the first real numbers come from your machine. Phones. The impostors in motion (the eight views switch
+by dither-free snapping; a real GPU will show whether the step reads).
+
+**Known limits (W3).**
+- A lake seen from kilometres away is drawn from a coarse clipmap level, where its level field jumps between 512 m
+  texels: its edge goes blocky, and on a plateau above low land a sliver of its water can show beyond the rim.
+- Clouds do not shadow the game's own objects (people, houses), only what World v3 draws.
+- The ice is a sheet over the water's shading, not a surface of its own; nothing walks on it.
+- Snow lies by height, not by cover: a snowy day whitens nothing until the season does.
+- The map's pins come from a stand-in scan; the sim's place list (T3-2) replaces it in the game.
+- The composite's wild land is scenery to the sim: no collision, no places, no weather feedback.
+- Tree shadows from the far ring: none (impostors cast none); the ground under a far forest is darkened by its
+  forest-floor colour instead.
+
+**The game's weather.** The game sets `auto: false` and the fields itself: `cloud` 0..1 (the sim's weather kind),
+`rain`, `snow`, `storm`, `flash`, with `haze`, `mist`, `wet`, `wind` and `wind10` as before, and `day` for the season
+if it wants the seasons (the sim has its own season, GDD 6.4: map it to `day`).
+
 
 ## Water (W2)
 

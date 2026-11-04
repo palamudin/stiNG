@@ -19,6 +19,7 @@ import * as THREE from 'three';
 import { clipGrid } from './clipmap.js';
 import { NOISE_GLSL } from './noise.js';
 import { WEAR_GLSL } from './grass.js';
+import { CLOUD_SHADOW_GLSL } from './clouds.js';
 
 export const TERRAIN_SHADE_GLSL = /* glsl */ `
 // the palette: sRGB picks, made linear by L()
@@ -65,12 +66,14 @@ export function makeTerrain(clip, opts = {}) {
     uShore: { value: opts.shore ?? 1 },       // 1: the source has water, so beaches and mud
     uSnowLine: { value: opts.snowLine ?? 215 }, // metres above the water where snow starts
     uGrassR: { value: 0 },  // how far the grass blades reach round the camera (grass.js); the lawn's thatch lies under them
+    tCloudShadow: { value: null }, uCloudRect: { value: new THREE.Vector4(0, 0, 1, 0) }, // the clouds' shadow map round the camera (clouds.js)
+    uGrassTint: { value: new THREE.Vector3(1, 1, 1) }, uSnowOn: { value: 0 }, // the season's grass colour and snow (seasons.js)
     // the waves at the shore (World._water fills these from the wave field): the first two cascades' displacement, their
     // tile sizes, and the sea state for the run-up: (H0 L0, Hs) with H0 the significant height, L0 the deep-water
     // wavelength of the peak period
     tWave0: { value: ZERO }, tWave1: { value: ZERO }, uWaveL: { value: new THREE.Vector2(1, 1) }, uRun: { value: new THREE.Vector2(0, 0) },
   };
-  const CLIP = clip.glsl();
+  const CLIP = clip.glsl() + CLOUD_SHADOW_GLSL;
   const VERT_HEAD = `${CLIP}\nattribute float aLevel;\nvarying vec3 vW;\n`;
   const VERT_BODY = /* glsl */ `
   int lvl = int(aLevel);
@@ -87,7 +90,7 @@ export function makeTerrain(clip, opts = {}) {
     Object.assign(sh.uniforms, U);
     sh.vertexShader = VERT_HEAD + sh.vertexShader.replace('#include <begin_vertex>', VERT_BODY);
     sh.fragmentShader = `${CLIP}\n${NOISE_GLSL}\n${WEAR_GLSL}\n${TERRAIN_SHADE_GLSL}
-uniform float uSea, uShadowFar, uTreeFar, uPaving, uTime, uWet, uShore, uSnowLine, uGrassR; uniform vec3 uSunDir;
+uniform float uSea, uShadowFar, uTreeFar, uPaving, uTime, uWet, uShore, uSnowLine, uGrassR, uSnowOn; uniform vec3 uSunDir, uGrassTint;
 uniform sampler2D tWave0, tWave1; uniform vec2 uWaveL, uRun;
 varying vec3 vW;
 float hfShadow(vec2 p, float h0, float dist) {
@@ -113,11 +116,14 @@ float hfShadow(vec2 p, float h0, float dist) {
   #define NF(S) (1.0 - smoothstep(0.2 * (S), 0.55 * (S), fp))
   float near = 1.0 - smoothstep(6.0, 60.0, dist);
   float slope = 1.0 - TN.y;
-  float hgt = TD.x - uSea;
+  float TW = clipWater(P);      // the water level here: the sea, or a lake's own (W3)
+  float hgt = TD.x - TW;        // height above the water line, for the shore
+  float alt = TD.x - uSea;      // height above the sea, for the snow
   // grass by moisture, broken up in patches
   float pa = w2noise(P / 9.0, 71) * 0.5 * NF(9.0) + w2noise(P / 2.1, 72) * 0.25 * NF(2.1);
   vec3 col = mix(T_GRASS_DRY, T_GRASS, smoothstep(0.1, 0.42, TD.y + pa * 0.25));
   col = mix(col, T_GRASS_WET, smoothstep(0.65, 0.95, TD.y + pa * 0.15));
+  col *= uGrassTint;
   col *= 1.0 + 0.2 * w2noise(P / 0.7, 73) * NF(0.7);
   // under the blades near the camera the lawn's ground is its own dark thatch, so gaps read as more grass
   float under = (1.0 - smoothstep(uGrassR * 0.5, uGrassR, dist)) * step(0.01, uGrassR);
@@ -177,7 +183,7 @@ float hfShadow(vec2 p, float h0, float dist) {
   float rk = smoothstep(0.32, 0.5, slope + 0.08 * pa) * (1.0 - smoothstep(0.85, 1.0, TD.w));
   col = mix(col, rock, rk);
   // snow on the peaks, not on cliffs
-  float snow = smoothstep(uSnowLine - 10.0, uSnowLine + 20.0, hgt + 25.0 * pa) * (1.0 - smoothstep(0.45, 0.65, slope));
+  float snow = smoothstep(uSnowLine - 10.0, uSnowLine + 20.0, alt + 25.0 * pa) * (1.0 - smoothstep(0.45, 0.65, slope));
   col = mix(col, T_SNOW, snow);
   col *= 1.0 - 0.35 * uWet * (1.0 - snow);
   diffuseColor.rgb = col;
@@ -197,6 +203,7 @@ float hfShadow(vec2 p, float h0, float dist) {
       .replace('#include <lights_fragment_end>', /* glsl */ `#include <lights_fragment_end>
   float hs = 1.0;
   if (dist > uShadowFar * 0.6) hs = mix(1.0, hfShadow(P, TD.x + 0.05 + 0.0005 * dist, dist), smoothstep(uShadowFar * 0.6, uShadowFar, dist));
+  hs *= cloudShadow(P);
   reflectedLight.directDiffuse *= hs; reflectedLight.directSpecular *= hs;
   reflectedLight.indirectDiffuse *= mix(1.0, 0.7, canopy);
 `);

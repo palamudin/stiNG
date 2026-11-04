@@ -9,24 +9,30 @@ import { hash01, vnoise, smoothstep } from './noise.js';
 
 export function placeTile(src, ti, tj, kinds, cfg, design) {
   const T = cfg.tile, items = kinds.map(() => Array.from({ length: cfg.variants }, () => []));
-  const push = (k, x, z, rot, vr, sxz, sy) => { const v = Math.floor(hash01(Math.floor(x * 7), Math.floor(z * 7), 11) * cfg.variants); items[k][v].push(x, z, rot, vr, sxz, sy, 0, 0); };
-  if (src.objects) { // the game's world: the sim's own trees, one for one
+  // the 7th float: 1 when the game draws the trunk itself (the sim's solid cylinder), so the mesh leaves it out
+  const push = (k, x, z, rot, vr, sxz, sy, noTrunk = 0) => { const v = Math.floor(hash01(Math.floor(x * 7), Math.floor(z * 7), 11) * cfg.variants); items[k][v].push(x, z, rot, vr, sxz, sy, noTrunk, 0); };
+  // the game's world: the sim's own trees, one for one, in the tiles the settled area covers (all of them, or those
+  // within wildFrom in a composite source); the wild rule plants the rest
+  const T0 = cfg.tile, settled = src.objects && (!src.wildFrom || Math.hypot((ti + 0.5) * T0, (tj + 0.5) * T0) < src.wildFrom + T0);
+  if (settled) {
     const cx = ti, cz = tj; // tiles are chunks here
     const c = src.objects(cx, cz);
     for (const t of c.trees) {
       const k = t.shade < 0.28 ? 1 : 0, d = k ? design.birch : design.oak;
       const rot = hash01(Math.floor(t.x * 10), Math.floor(t.z * 10), 3) * 6.283;
-      push(k, t.x, t.z, rot, t.shade, t.cr / 2.3, t.h / Math.max(3, d.height * 0.62));
+      // the sim's trunk height h is the design's crown height, its crown radius cr the design's (GDD 20.4 point 2)
+      push(k, t.x, t.z, rot, t.shade, t.cr / Math.max(0.5, d.crownR), t.h / Math.max(1, d.crownY), src.trunks === false ? 1 : 0);
     }
-    return items;
+    if (!src.wildFrom) return items;
   }
-  const G = cfg.grid, o = [0, 0, 0, 0], x0 = ti * T, z0 = tj * T;
+  const G = cfg.grid, o = [0, 0, 0, 0, 0], x0 = ti * T, z0 = tj * T;
   for (let gz = 0; gz < T / G; gz++) for (let gx = 0; gx < T / G; gx++) {
     const ix = Math.floor(x0 / G) + gx, iz = Math.floor(z0 / G) + gz;
     const x = (ix + 0.15 + 0.7 * hash01(ix, iz, 21)) * G, z = (iz + 0.15 + 0.7 * hash01(ix, iz, 22)) * G;
+    if (src.wildFrom && Math.hypot(x, z) < src.wildFrom) continue; // the settled area has its own trees
     src.sample(x, z, o);
     const h = o[0], f = o[2], wet = o[1], trail = o[3];
-    if (h < src.sea + 0.7 || trail > 0.25) continue;
+    if (h < (o[4] ?? src.sea) + 0.7 || trail > 0.25) continue; // o[4]: the water level here (W3)
     const p = f * 0.88 + cfg.meadow;
     const r = hash01(ix, iz, 23);
     if (r > p) {
@@ -51,7 +57,7 @@ export function placeTile(src, ti, tj, kinds, cfg, design) {
     const r = hash01(ix, iz, 43);
     if (r > 0.3) continue; // most cells are skipped before sampling
     src.sample(x, z, o);
-    const h = o[0], alt = h - src.sea;
+    const h = o[0], alt = h - (o[4] ?? src.sea);
     if (alt < -0.3 || o[3] > 0.3) continue;
     const slope = Math.abs(src.height(x + 1, z) - h) + Math.abs(src.height(x, z + 1) - h);
     const p = 0.3 * smoothstep(0.25, 0.7, slope) + 0.08 * (1 - smoothstep(0.3, 2.5, Math.abs(alt - 0.8))) + 0.025 * o[2] + 0.006;
