@@ -50,7 +50,7 @@ namespace Sting.Core
     {
         public const int TICK_RATE = 60;
         public static readonly Num DT = 1.0 / TICK_RATE;
-        public const int GEN_VERSION = 12; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11); 6: birdbaths (T2-1); 7: town centres (T2-5); 8: ponds; 9: a pond beside the home park; 10: lobed ponds with a path, benches and a walker; 11: footings under small things; 12: streets, house pads and front yards graded to code
+        public const int GEN_VERSION = 13; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11); 6: birdbaths (T2-1); 7: town centres (T2-5); 8: ponds; 9: a pond beside the home park; 10: lobed ponds with a path, benches and a walker; 11: footings under small things; 12: streets, house pads and front yards graded to code; 13: wild land round a settled area
 
         public static Num population = 8200000000;
         public static class chunk { public static Num size = 64; public static int activeRadius = 1, discoverRadius = 2; }
@@ -345,6 +345,8 @@ namespace Sting.Core
         public bool exterminator = true, birds = true, rivals = true, pestControl = true;
         /// feature modifiers (T2-6): act at generation; see World.Features
         public int woods = 1, towns = 1, terrain; public Num water = 1, hives = 1;
+        /// 0, or the radius in metres of the settled area round the home tree, wild land beyond (GDD 21.6)
+        public int settled;
         /// which species a line may play (GDD 6.8): "earned", "open" or "fixed:&lt;species&gt;"; the PoC runs open
         public string progression = "open";
         /// skills (GDD 6.8): "earned" (learned with XP) or "all" (every unlock from the start, for testing)
@@ -371,7 +373,7 @@ namespace Sting.Core
                 + "|seasonDays=" + N(seasonDays) + "|reaction=" + N(reaction) + "|escalation=" + N(escalation)
                 + "|exterminator=" + B(exterminator) + "|birds=" + B(birds) + "|rivals=" + B(rivals)  + "|pestControl=" + B(pestControl)
                 + "|woods=" + woods + "|towns=" + towns + "|water=" + N(water) + "|hives=" + N(hives) + "|terrain=" + terrain + "|progression=" + progression + "|skills=" + skills
-                + "|tune=" + Tune.Hash; // peers must share the tuning file too (T1-22)
+                + (settled != 0 ? "|settled=" + settled : "") + "|tune=" + Tune.Hash; // peers must share the tuning file too (T1-22)
             return R.Fnv32(str).ToString("x8");
         }
 
@@ -395,6 +397,7 @@ namespace Sting.Core
             if (water != d.water) t.Add(water > d.water ? "wet" : "dry");
             if (hives != d.hives) t.Add(hives != 0 ? $"hives {X(hives)}" : "no hives");
             if (terrain != d.terrain) t.Add(terrain > 1 ? "hilly" : "rolling");
+            if (settled != 0) t.Add("wild beyond " + settled + " m");
             if (skills != d.skills) t.Add(skills == "all" ? "all skills" : skills);
             if (progression != d.progression) t.Add(progression == "earned" ? "species earned" : progression.StartsWith("fixed:") ? progression.Substring(6) + "s only" : progression);
             return string.Join(" · ", t);

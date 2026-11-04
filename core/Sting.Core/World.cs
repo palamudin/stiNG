@@ -388,6 +388,7 @@ namespace Sting.Core
         public static string LandUse(ulong seed, int cx, int cz, Settings st = null)
         {
             if (cx == 0 && cz == 0) return "park";
+            if (st != null && st.settled > 0 && Sqrt((Num)(cx * cx + cz * cz)) * CS > st.settled) return "wild"; // past the settled area
             var R = RegionOf(cx, cz);
             if (TownQuarter(seed, cx, cz, st) != null) return "town";
             return BaseUse(Region(seed, R.rx, R.rz, st), R.lx, R.lz);
@@ -573,7 +574,7 @@ namespace Sting.Core
         static readonly Dictionary<long, List<Pad>> pads = new Dictionary<long, List<Pad>>(); static string padTag;
         static List<Pad> PadsOf(ulong seed, int cx, int cz, Settings st)
         {
-            var F = Features(st); string tag = seed + ":" + F.woods + "," + F.towns + "," + N(F.water) + "," + N(F.hives) + ShapeTag();
+            var F = Features(st); string tag = seed + ":" + F.woods + "," + F.towns + "," + N(F.water) + "," + N(F.hives) + "," + F.settled + ShapeTag();
             lock (pads)
             {
                 if (padTag != tag) { padTag = tag; pads.Clear(); }
@@ -609,7 +610,32 @@ namespace Sting.Core
         static string N(Num v) => ((double)v).ToString("R", System.Globalization.CultureInfo.InvariantCulture);
         /// The ground's height: the shape times the modifier, flat when the terrain modifier is 0 and round the home
         /// tree, damped under built-up land, graded under streets, lots, squares and buildings. The sim works in height above it.
+        /// a world settled only round the home tree (GDD 21.6; world.js settledOf): the site on the wild land and the band
+        public static (int S, WildSite site, Num R0, Num R1) SettledOf(ulong seed, Settings st)
+        {
+            int S = Wild.Seed(seed); var site = Wild.Site(S, st.settled); Num R0 = st.settled + Wild.Edge;
+            return (S, site, R0, R0 + Wild.Band);
+        }
+        /// the wild land at (x, z) of a settled world, in the sim's coordinates
+        public static Num[] WildHere(ulong seed, Num x, Num z, Settings st, Num[] o = null)
+        {
+            var I = SettledOf(seed, st);
+            return Wild.At(I.S, x + I.site.x, z + I.site.z, o);
+        }
         public static Num GroundAt(ulong seed, Num x, Num z, Settings st)
+        {
+            if (st != null && st.settled > 0)
+            {
+                var I = SettledOf(seed, st); Num r = Sqrt(x * x + z * z);
+                if (r >= I.R1) return Wild.At(I.S, x + I.site.x, z + I.site.z)[0];
+                Num hs = GroundSim(seed, x, z, st) + I.site.h;
+                if (r <= I.R0) return hs;
+                Num k = Smooth(Min(1, (r - I.R0) / (I.R1 - I.R0)));
+                return hs + (Wild.At(I.S, x + I.site.x, z + I.site.z)[0] - hs) * k;
+            }
+            return GroundSim(seed, x, z, st);
+        }
+        static Num GroundSim(ulong seed, Num x, Num z, Settings st)
         {
             int terrain = st?.terrain ?? 0;
             if (terrain == 0) return 0;
@@ -636,7 +662,7 @@ namespace Sting.Core
         public static int FootingCount(ulong seed, int cx, int cz, Settings st) => FootingsOf(seed, cx, cz, st).Count;
         static List<Pad> FootingsOf(ulong seed, int cx, int cz, Settings st)
         {
-            var F = Features(st); string tag = seed + ":" + F.woods + "," + F.towns + "," + N(F.water) + "," + N(F.hives) + ShapeTag();
+            var F = Features(st); string tag = seed + ":" + F.woods + "," + F.towns + "," + N(F.water) + "," + N(F.hives) + "," + F.settled + ShapeTag();
             lock (feet)
             {
                 if (feetTag != tag) { feetTag = tag; feet.Clear(); }
@@ -708,7 +734,7 @@ namespace Sting.Core
         }
         static Num StreetAt(ulong seed, Num x, Num z0, Settings st, int terrain)
         {
-            var F = Features(st); string tag = seed + ":" + F.woods + "," + F.towns + "," + N(F.water) + "," + N(F.hives) + ShapeTag();
+            var F = Features(st); string tag = seed + ":" + F.woods + "," + F.towns + "," + N(F.water) + "," + N(F.hives) + "," + F.settled + ShapeTag();
             lock (streetNodes) { if (streetTag != tag) { streetTag = tag; streetNodes.Clear(); streetLevels.Clear(); } }
             Num Nn = T.terrain.grade.node; int row = (int)Floor(z0 / CS + 0.5); Num u = x / Nn - 0.5; int i = (int)Floor(u); Num f = u - i;
             Num a = StreetLevel(seed, i, row, z0, st, terrain), b = StreetLevel(seed, i + 1, row, z0, st, terrain), c = StreetLevel(seed, i + 2, row, z0, st, terrain);
@@ -803,7 +829,7 @@ namespace Sting.Core
         /// the ground's slope (rise per metre along x and z), from the heights a quarter metre either side
         public static (Num x, Num z) GroundSlope(ulong seed, Num x, Num z, Settings st)
         {
-            if ((st?.terrain ?? 0) == 0) return (0, 0);
+            if ((st?.terrain ?? 0) == 0 && (st?.settled ?? 0) == 0) return (0, 0);
             Num e = 0.25;
             return ((GroundAt(seed, x + e, z, st) - GroundAt(seed, x - e, z, st)) / (2 * e), (GroundAt(seed, x, z + e, st) - GroundAt(seed, x, z - e, st)) / (2 * e));
         }
@@ -1095,6 +1121,22 @@ namespace Sting.Core
             else if ((c.use = LandUse(seed, cx, cz, st)) == "yards") AddYards();
             else if (c.use == "mall") AddMall();
             else if (c.use == "town") AddTown();
+            else if (c.use == "wild") // wild land past the settled area (GDD 21.6): trees where the wild forest stands, meadow flowers
+            {
+                var o = new Num[5];
+                for (int k = 0; k < 40; k++)
+                {
+                    Num x = ox + Range(H(2200 + k * 2), -30, 30), z = oz + Range(H(2201 + k * 2), -30, 30);
+                    WildHere(seed, x, z, st, o);
+                    if (o[0] > o[4] + 0.6 && Unit(H(2300 + k)) < o[2] * 0.85 && Free(x, z, 1.5)) { AddTree(x, z, 2400 + k * 4); occupied.Add(new Occ { x = x, z = z, r = 1 }); }
+                }
+                for (int k = 0; k < 3; k++)
+                {
+                    Num x = ox + Range(H(2600 + k * 2), -26, 26), z = oz + Range(H(2601 + k * 2), -26, 26);
+                    WildHere(seed, x, z, st, o);
+                    if (o[0] > o[4] + 1 && o[2] < 0.3 && Unit(H(2610 + k)) < 0.6) AddFlowers(x, z, 2620 + k * 80);
+                }
+            }
             else if (c.use == "forest")
             {
                 int npf = RangeInt(H(2010), 1, 3);
@@ -1134,7 +1176,7 @@ namespace Sting.Core
             }
             // trees: a few in a park, yard trees, dense at the forest edge, hardly any by a mall
             bool forest = c.use == "forest";
-            int nt = forest ? RangeInt(H(2000), 16, 26) : c.use == "yards" ? RangeInt(H(2001), 1, 4) : c.use == "mall" ? RangeInt(H(2002), 0, 3) : c.use == "town" ? RangeInt(H(2003), 0, 3) : RangeInt(H(11), isOrigin ? 3 : 2, isOrigin ? 6 : 8);
+            int nt = c.use == "wild" ? 0 : forest ? RangeInt(H(2000), 16, 26) : c.use == "yards" ? RangeInt(H(2001), 1, 4) : c.use == "mall" ? RangeInt(H(2002), 0, 3) : c.use == "town" ? RangeInt(H(2003), 0, 3) : RangeInt(H(11), isOrigin ? 3 : 2, isOrigin ? 6 : 8);
             for (int i = 0; i < nt; i++)
             {
                 Num x = ox + Range(H(150 + i * 4), -30, 30), z = oz + Range(H(151 + i * 4), -30, 30);

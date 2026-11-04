@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, humanParts, malesAbout, chunkOf, toLocal, dirToWorld, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, groundSlope, pavingOf, pondsOf, inPond, pondEdge, pickTarget, assistPilot, swoopPilot, hoverPilot, hoverSetting, HOVER, ROLES, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS,
+  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, groundSlope, pavingOf, pondsOf, inPond, pondEdge, settledOf, wildHere, pickTarget, assistPilot, swoopPilot, hoverPilot, hoverSetting, HOVER, ROLES, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS,
 } from '../sim/index.js';
 import { applyTuning, parseTuning, tuningHash, tuningLeaves, TUNE } from '../sim/tunefile.js';
 
@@ -2403,6 +2403,34 @@ function seated(sim, pred) {
   }
   ok(chunks > 20 && street <= 0.1 + 1e-9 && drive <= 0.15 + 1e-9 && level === pads && steep / n < 2e-4,
     `on a hilly world over ${chunks} yards chunks: streets at most ${(street * 100).toFixed(1)}% (10% allowed), drives at most ${(drive * 100).toFixed(1)}% (15%), all ${pads} house pads level; ${steep} of ${n} spots steeper than 2:1 (steepest ${worst.toFixed(2)}), where banks meet`);
+}
+
+// 63. Wild land round a settled area (GDD 21.6, GEN_VERSION 13): inside the settled radius the sim's own ground lifted
+// onto a flat dry site of the wild land, blending over a band into the wild land beyond, where nothing is built and
+// trees stand only out of the water; a sim runs over it
+{
+  const st = { settled: 400, terrain: 1 }, S = 1234n, I = settledOf(S, st), o = [0, 0, 0, 0, 0];
+  let inside = true, beyond = true, step = 0;
+  for (let k = 0; k < 64; k++) {
+    const a = k * 0.0982, r1 = 120 + k * 3, x = Math.cos(a) * r1, z = Math.sin(a) * r1;
+    if (Math.abs(groundAt(S, x, z, st) - groundAt(S, x, z, { terrain: 1 }) - I.site.h) > 1e-9) inside = false;
+    const r2 = I.R1 + 10 + k * 40, x2 = Math.cos(a) * r2, z2 = Math.sin(a) * r2;
+    if (groundAt(S, x2, z2, st) !== wildHere(S, x2, z2, st, o)[0]) beyond = false;
+    for (let r = I.R0 - 4; r < I.R1 + 4; r += 2) step = Math.max(step, Math.abs(groundAt(S, Math.cos(a) * (r + 2), Math.sin(a) * (r + 2), st) - groundAt(S, Math.cos(a) * r, Math.sin(a) * r, st)));
+  }
+  let wild = 0, built = 0, wet = 0, trees = 0, settledChunks = 0;
+  for (let cz = -12; cz <= 12; cz++) for (let cx = -12; cx <= 12; cx++) {
+    const use = landUse(S, cx, cz, st), far = Math.hypot(cx, cz) * 64 > 400;
+    if (far !== (use === 'wild')) built++;
+    if (use !== 'wild') { settledChunks++; continue; }
+    wild++; const c = generateChunk(S, cx, cz, st);
+    if (c.roads.length || c.sheds.length || c.tables.length || c.shops.length || c.malls.length) built++;
+    for (const t of c.trees) { trees++; wildHere(S, t.x, t.z, st, o); if (o[0] <= o[4] + 0.6) wet++; }
+  }
+  const s = new Sim({ seed: 1234, birds: false, settled: 400, terrain: 1 }, { noAI: true }); run(s, 600);
+  const above = s.wasp.y >= 0;
+  ok(I.site.h >= 10 && I.site.h <= 90 && inside && beyond && step < 3 && wild > 400 && settledChunks > 30 && built === 0 && trees > 300 && wet === 0 && above && rulesHash(st) !== rulesHash({ terrain: 1 }) && worldTag(st).includes('wild beyond 400 m'),
+    `the settled area sits on the wild land ${I.site.h.toFixed(1)} m above the sea at (${I.site.x.toFixed(0)}, ${I.site.z.toFixed(0)}): its own ground inside, the wild land beyond, no step over 3 m across the band (${step.toFixed(2)} per 2 m); ${settledChunks} settled chunks, ${wild} wild ones with nothing built and ${trees} trees, none in the water; a sim runs over it`);
 }
 
 // Tuning as data (GDD 13, T1-22): one plain-text file feeds both sims

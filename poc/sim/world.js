@@ -1,6 +1,7 @@
 // World generation, clock, weather and schedules (GDD 4, 5, 8.2). All pure functions of seed and time.
 import { Domain, hash, unit, range, rangeInt, u64, dsin, dcos, TAU, rnd, datan2, clamp01, h32 } from './rng.js';
 import { T } from './tuning.js';
+import { wildAt, wildSite, wildSeed, WILD } from './wild.js';
 
 const CS = T.chunk.size;
 export const chunkOf = (v) => Math.floor(v / CS + 0.5);
@@ -261,16 +262,16 @@ export function features(s) {
 const TABLE_CAP = 65536, tableSets = new Map();
 let lastTables = null;
 function worldTables(seed, s) {
-  const woods = s?.woods ?? 1, towns = s?.towns ?? 1, water = s?.water ?? 1, hives = s?.hives ?? 1, L = lastTables;
-  if (L && L.seed === seed && L.woods === woods && L.towns === towns && L.water === water && L.hives === hives) return L.t;
-  const tag = seed + ':' + woods + ',' + towns + ',' + water + ',' + hives;
+  const woods = s?.woods ?? 1, towns = s?.towns ?? 1, water = s?.water ?? 1, hives = s?.hives ?? 1, settled = s?.settled ?? 0, L = lastTables;
+  if (L && L.seed === seed && L.woods === woods && L.towns === towns && L.water === water && L.hives === hives && L.settled === settled) return L.t;
+  const tag = seed + ':' + woods + ',' + towns + ',' + water + ',' + hives + ',' + settled;
   let t = tableSets.get(tag);
   if (!t) {
     if (tableSets.size >= 8) tableSets.clear();
     t = { use: new Map(), region: new Map(), roll: new Map(), ponds: new Map(), paving: new Map(), pads: new Map(), feet: new Map(), street: new Map(), streetE: new Map() };
     tableSets.set(tag, t);
   }
-  lastTables = { seed, woods, towns, water, hives, t };
+  lastTables = { seed, woods, towns, water, hives, settled, t };
   return t;
 }
 function keep(map, key, v) { if (map.size >= TABLE_CAP) map.clear(); map.set(key, v); return v; }
@@ -559,7 +560,30 @@ function makeFootings(seed, cx, cz, settings) {
   }
   return F;
 }
+// A world settled only round the home tree (GDD 21.6): the sim's ground within the settled area, lifted onto the wild
+// land's site for it, blending over WILD.band m (from WILD.edge past the settled radius) into the wild land beyond
+export function settledOf(seed, settings) {
+  const R = settings.settled, S = wildSeed(seed), site = wildSite(S, R), R0 = R + WILD.edge;
+  return { R, S, site, R0, R1: R0 + WILD.band };
+}
+const WO = [0, 0, 0, 0, 0];
 export function groundAt(seed, x, z, settings) {
+  if (settings && settings.settled) {
+    const I = settledOf(seed, settings), r = Math.sqrt(x * x + z * z);
+    if (r >= I.R1) return wildAt(I.S, x + I.site.x, z + I.site.z, WO)[0];
+    const hs = groundSim(seed, x, z, settings) + I.site.h;
+    if (r <= I.R0) return hs;
+    const k = smooth(Math.min(1, (r - I.R0) / (I.R1 - I.R0)));
+    return hs + (wildAt(I.S, x + I.site.x, z + I.site.z, WO)[0] - hs) * k;
+  }
+  return groundSim(seed, x, z, settings);
+}
+// the wild land at (x, z) of a settled world, in the sim's coordinates: [height, moisture, forest, trail, water level]
+export function wildHere(seed, x, z, settings, out = [0, 0, 0, 0, 0]) {
+  const I = settledOf(seed, settings);
+  return wildAt(I.S, x + I.site.x, z + I.site.z, out);
+}
+function groundSim(seed, x, z, settings) {
   const terrain = settings ? settings.terrain || 0 : 0;
   if (!terrain) return 0;
   let h = groundBase(seed, x, z, settings, terrain);
@@ -616,7 +640,7 @@ function groundBase(seed, x, z, settings, terrain) {
 }
 // The ground's slope (rise per metre along x and z), from the heights a quarter metre either side
 export function groundSlope(seed, x, z, settings) {
-  if (!(settings && settings.terrain)) return { x: 0, z: 0 };
+  if (!(settings && (settings.terrain || settings.settled))) return { x: 0, z: 0 };
   const e = 0.25;
   return { x: (groundAt(seed, x + e, z, settings) - groundAt(seed, x - e, z, settings)) / (2 * e), z: (groundAt(seed, x, z + e, settings) - groundAt(seed, x, z - e, settings)) / (2 * e) };
 }
@@ -674,6 +698,7 @@ export function landUse(seed, cx, cz, settings) {
 }
 function makeLandUse(seed, cx, cz, settings) {
   if (cx === 0 && cz === 0) return 'park';
+  if (settings && settings.settled && Math.sqrt(cx * cx + cz * cz) * CS > settings.settled) return 'wild'; // past the settled area
   const R = regionOf(cx, cz);
   if (townQuarter(seed, cx, cz, settings)) return 'town';
   return baseUse(regionLayout(seed, R.rx, R.rz, settings), R.lx, R.lz);
@@ -930,7 +955,19 @@ export function generateChunk(seed, cx, cz, settings) {
   } else if ((c.use = landUse(seed, cx, cz, settings)) === 'yards') addYards();
   else if (c.use === 'mall') addMall();
   else if (c.use === 'town') addTown();
-  else if (c.use === 'forest') {
+  else if (c.use === 'wild') { // wild land past the settled area (GDD 21.6): trees where the wild forest stands, meadow flowers, nothing built
+    const o = [0, 0, 0, 0, 0];
+    for (let k = 0; k < 40; k++) { // a tree a try where the forest is thick enough here, never in the water
+      const x = ox + range(H(2200 + k * 2), -30, 30), z = oz + range(H(2201 + k * 2), -30, 30);
+      wildHere(seed, x, z, settings, o);
+      if (o[0] > o[4] + 0.6 && unit(H(2300 + k)) < o[2] * 0.85 && free(x, z, 1.5)) { addTree(x, z, 2400 + k * 4); occupied.push({ x, z, r: 1 }); }
+    }
+    for (let k = 0; k < 3; k++) {
+      const x = ox + range(H(2600 + k * 2), -26, 26), z = oz + range(H(2601 + k * 2), -26, 26);
+      wildHere(seed, x, z, settings, o);
+      if (o[0] > o[4] + 1 && o[2] < 0.3 && unit(H(2610 + k)) < 0.6) addFlowers(x, z, 2620 + k * 80);
+    }
+  } else if (c.use === 'forest') {
     const np = rangeInt(H(2010), 1, 3);
     for (let i = 0; i < np; i++) addFlowers(ox + range(H(2020 + i), -26, 26), oz + range(H(2030 + i), -26, 26), 2100 + i * 80);
   } else {
@@ -961,7 +998,7 @@ export function generateChunk(seed, cx, cz, settings) {
     for (let i = 0; i < np; i++) addFlowers(ox + range(H(20 + i), -28, 28), oz + range(H(40 + i), -28, 28), 400 + i * 80);
   }
   // trees: a few in a park, yard trees, dense at the forest edge, hardly any by a mall
-  const nt = c.use === 'forest' ? rangeInt(H(2000), 16, 26) : c.use === 'yards' ? rangeInt(H(2001), 1, 4) : c.use === 'mall' ? rangeInt(H(2002), 0, 3) : c.use === 'town' ? rangeInt(H(2003), 0, 3) : rangeInt(H(11), isOrigin ? 3 : 2, isOrigin ? 6 : 8);
+  const nt = c.use === 'wild' ? 0 : c.use === 'forest' ? rangeInt(H(2000), 16, 26) : c.use === 'yards' ? rangeInt(H(2001), 1, 4) : c.use === 'mall' ? rangeInt(H(2002), 0, 3) : c.use === 'town' ? rangeInt(H(2003), 0, 3) : rangeInt(H(11), isOrigin ? 3 : 2, isOrigin ? 6 : 8);
   for (let i = 0; i < nt; i++) {
     const x = ox + range(H(150 + i * 4), -30, 30), z = oz + range(H(151 + i * 4), -30, 30);
     if (free(x, z, c.use === 'forest' ? 1.5 : 3)) { addTree(x, z, 200 + i * 4); occupied.push({ x, z, r: c.use === 'forest' ? 1 : 2 }); }

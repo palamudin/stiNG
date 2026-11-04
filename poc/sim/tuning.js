@@ -5,7 +5,7 @@ import { TUNE } from './tunefile.js';
 
 export const TICK_RATE = 60;
 export const DT = 1 / TICK_RATE;
-export const GEN_VERSION = 12; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11); 6: birdbaths (T2-1); 7: town centres (T2-5); 8: ponds; 9: a pond beside the home park; 10: lobed ponds with a path, benches and a walker; 11: footings under small things; 12: streets, house pads and front yards graded to code
+export const GEN_VERSION = 13; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11); 6: birdbaths (T2-1); 7: town centres (T2-5); 8: ponds; 9: a pond beside the home park; 10: lobed ponds with a path, benches and a walker; 11: footings under small things; 12: streets, house pads and front yards graded to code; 13: wild land round a settled area
 
 export const T = {
   population: 8200000000,
@@ -399,6 +399,8 @@ export const DEFAULT_SETTINGS = {
   reaction: 1, escalation: 1, exterminator: true, birds: true, rivals: true, pestControl: true,
   // feature modifiers (T2-6): act at generation; see world.js features()
   woods: 1, towns: 1, water: 1, hives: 1, terrain: 0,
+  // settled: 0, or the radius in metres of the settled area round the home tree, wild land beyond (GDD 21.6)
+  settled: 0,
   // Which species a line may play (GDD 6.8): 'earned' (wasps first, the rest through the year's turn), 'open' (all
   // three from the start: test builds and personal worlds), or 'fixed:<species>'. The PoC runs open.
   progression: 'open',
@@ -438,7 +440,7 @@ const RULE_KEYS = ['dayMinutes', 'humanDensity', 'beeAggression', 'seasonDays', 
 export function rulesHash(settings) {
   const s = { ...DEFAULT_SETTINGS, ...settings };
   let h = 0x811c9dc5;
-  const str = 'gen' + GEN_VERSION + '|' + RULE_KEYS.map((k) => k + '=' + s[k]).join('|') + '|tune=' + TUNE.hash; // peers must share the tuning file too (T1-22)
+  const str = 'gen' + GEN_VERSION + '|' + RULE_KEYS.map((k) => k + '=' + s[k]).join('|') + (s.settled ? '|settled=' + s.settled : '') + '|tune=' + TUNE.hash; // peers must share the tuning file too (T1-22)
   for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
   return (h >>> 0).toString(16).padStart(8, '0');
 }
@@ -462,6 +464,7 @@ export function worldTag(settings) {
   if (s.water !== d.water) t.push(s.water > d.water ? 'wet' : 'dry');
   if (s.hives !== d.hives) t.push(s.hives ? `hives ${x(s.hives)}` : 'no hives');
   if (s.terrain !== d.terrain) t.push(s.terrain > 1 ? 'hilly' : 'rolling');
+  if (s.settled) t.push(`wild beyond ${s.settled} m`);
   if (s.skills !== d.skills) t.push(s.skills === 'all' ? 'all skills' : s.skills);
   if (s.progression !== d.progression) t.push(s.progression === 'earned' ? 'species earned' : s.progression.startsWith('fixed:') ? s.progression.slice(6) + 's only' : s.progression);
   return t.join(' · ');

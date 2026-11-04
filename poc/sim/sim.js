@@ -8,7 +8,7 @@ import {
 } from './body.js';
 import {
   chunkOf, chunkKey, NEST, NEST_ENTRANCE, SPAWN, generateChunk, ticksPerMinute, clockMinutes, dayOf, minuteOfDay,
-  isRaining, dayWeather, tempAt, windAt, isDaylight, humanWindow, flyPos, beePos, birdPos, dragonPos, shedSites, shedRoof, groundAt, makeNest, inPond, pondEdge,
+  isRaining, dayWeather, tempAt, windAt, isDaylight, humanWindow, flyPos, beePos, birdPos, dragonPos, shedSites, shedRoof, groundAt, settledOf, wildHere, makeNest, inPond, pondEdge,
 } from './world.js';
 import { newColony, colonyStep, destroyNest, colonyFinished, seasonPhase, reproShare, broodTotal, spOf } from './colony.js';
 
@@ -1136,14 +1136,14 @@ export class Sim {
     const n = W.substeps, h = DT / n, p0 = { x: w.x, y: w.y, z: w.z };
     // on hills the air does not rise with the ground (GDD 20 G4): the wasp keeps its height above sea level, so its
     // height above the ground falls by as much as the ground rose under it, and a hill has to be climbed
-    const g0 = this.settings.terrain ? this.ground(w.x, w.z) : 0;
+    const g0 = this.hilly ? this.ground(w.x, w.z) : 0;
     for (let i = 0; i < n; i++) {
       const v0 = { x: w.vx, y: w.vy, z: w.vz }; // the speed going in, before a collision stops it
       w.x += w.vx * h; w.y += w.vy * h; w.z += w.vz * h;
       this._collide(w);
       if (w.swoopUntil > this.tick && w.state === 'fly' && this._swoopHit(w, v0, cmd)) return;
     }
-    if (this.settings.terrain) { const dg = this.ground(w.x, w.z) - g0; if (dg !== 0) { w.y -= dg; this._collide(w); } }
+    if (this.hilly) { const dg = this.ground(w.x, w.z) - g0; if (dg !== 0) { w.y -= dg; this._collide(w); } }
     this._webCheck(w, p0);
     this._cupCheck(w);
     if (this._onHotGrate(w)) { this._die(w, 'burned on a grill', null); return; } // T1-10
@@ -1159,7 +1159,7 @@ export class Sim {
     const W = T.wind, wind = this.wind, t = this.tick;
     const gust = 1 + this.weatherToday.gust * dsin(t * 0.031) * dsin(t * 0.0137 + 1);
     let k = W.felt * gust * clamp01(w.y / W.refHeight) * spw(w).felt;
-    if (this.settings.terrain) k *= 1 + T.terrain.exposure * Math.max(0, this.ground(w.x, w.z)); // windier on a rise (T2-6)
+    if (this.hilly) k *= 1 + T.terrain.exposure * Math.min(20, Math.max(0, this.ground(w.x, w.z) - this.groundBase)); // windier on a rise (T2-6), up to 20 m above the settled area's base
     return { x: wind.x * k, z: wind.z * k };
   }
 
@@ -1782,7 +1782,7 @@ export class Sim {
       let x, z;
       if (paved.length) { const p = paved[Math.floor(u(0) * paved.length)]; x = p.minx + (p.maxx - p.minx) * u(1); z = p.minz + (p.maxz - p.minz) * u(2); }
       else { x = (rec.cx + (u(1) - 0.5) * 0.9) * CS; z = (rec.cz + (u(2) - 0.5) * 0.9) * CS; }
-      if (this.settings.terrain && !paved.length) { // on open ground, rain settles in the lowest of a few spots (T2-6)
+      if (this.hilly && !paved.length) { // on open ground, rain settles in the lowest of a few spots (T2-6)
         let lo = this.ground(x, z);
         for (let j = 1; j < T.terrain.poolTries; j++) { const qx = (rec.cx + (u(10 + j * 2) - 0.5) * 0.9) * CS, qz = (rec.cz + (u(11 + j * 2) - 0.5) * 0.9) * CS, g = this.ground(qx, qz); if (g < lo) { lo = g; x = qx; z = qz; } }
       }
@@ -2949,10 +2949,14 @@ export class Sim {
         if (sq(ax + dx * t - cy.x) + sq(az + dz * t - cy.z) < cy.r * cy.r) return false;
       }
     }
-    return !this.settings.terrain || this._overHills(a, b);
+    return !this.hilly || this._overHills(a, b);
   }
   // The ground's height here (terrain, T2-6); 0 on flat worlds
   ground(x, z) { return groundAt(this.seed, x, z, this.settings); }
+  // the ground has a shape (a hilly world, or wild land round a settled area, GDD 21.6); heights are measured from
+  // groundBase, the settled area's site on the wild land (0 otherwise)
+  get hilly() { return !!(this.settings.terrain || this.settings.settled); }
+  get groundBase() { return this.settings.settled ? settledOf(this.seed, this.settings).site.h : 0; }
   // A sight line between two people's eyes clears every rise between them
   _overHills(a, b) {
     const H = T.panic.sightHeight, ya = this.ground(a.x, a.z) + H, yb = this.ground(b.x, b.z) + H;

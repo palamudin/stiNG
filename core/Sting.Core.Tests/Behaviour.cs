@@ -1833,6 +1833,32 @@ namespace Sting.Core.Tests
                 Ok(chunks > 20 && street <= 0.1 + 1e-6 && drive <= 0.15 + 1e-6 && level == pads && (double)steep / n < 2e-4,
                     $"on a hilly world over {chunks} yards chunks: streets at most {street * 100:0.0}% (10% allowed), drives at most {drive * 100:0.0}% (15%), all {pads} house pads level; {steep} of {n} spots steeper than 2:1 (steepest {worst:0.00}), where banks meet");
             }
+            // 63. wild land round a settled area (GDD 21.6, GEN_VERSION 13)
+            {
+                var st = new Settings { settled = 400, terrain = 1 }; var t1 = new Settings { terrain = 1 }; var I = World.SettledOf(1234, st);
+                bool inside = true, beyond = true; double step = 0;
+                for (int k = 0; k < 64; k++)
+                {
+                    double a = k * 0.0982, r1 = 120 + k * 3, x = Math.Cos(a) * r1, z = Math.Sin(a) * r1;
+                    if (Math.Abs(D(World.GroundAt(1234, x, z, st) - World.GroundAt(1234, x, z, t1) - I.site.h)) > 1e-6) inside = false;
+                    double r2 = D(I.R1) + 10 + k * 40, x2 = Math.Cos(a) * r2, z2 = Math.Sin(a) * r2;
+                    if (World.GroundAt(1234, x2, z2, st) != World.WildHere(1234, x2, z2, st)[0]) beyond = false;
+                    for (double r = D(I.R0) - 4; r < D(I.R1) + 4; r += 2) step = Math.Max(step, Math.Abs(D(World.GroundAt(1234, Math.Cos(a) * (r + 2), Math.Sin(a) * (r + 2), st) - World.GroundAt(1234, Math.Cos(a) * r, Math.Sin(a) * r, st))));
+                }
+                int wild = 0, built = 0, wet = 0, trees = 0, settledChunks = 0;
+                for (int cz = -12; cz <= 12; cz++) for (int cx = -12; cx <= 12; cx++)
+                    {
+                        string use = World.LandUse(1234, cx, cz, st); bool far = Math.Sqrt(cx * cx + cz * cz) * 64 > 400;
+                        if (far != (use == "wild")) built++;
+                        if (use != "wild") { settledChunks++; continue; }
+                        wild++; var c = World.GenerateChunk(1234, cx, cz, st);
+                        if (c.roads.Count + c.sheds.Count + c.tables.Count + c.shops.Count + c.malls.Count > 0) built++;
+                        foreach (var t in c.trees) { trees++; var o = World.WildHere(1234, t.x, t.z, st); if (o[0] <= o[4] + 0.6) wet++; }
+                    }
+                var s = new Sim(new Settings { seed = 1234, birds = false, settled = 400, terrain = 1 }, new SimOpts { noAI = true }); RunS(s, 600);
+                Ok(D(I.site.h) >= 10 && D(I.site.h) <= 90 && inside && beyond && step < 3 && wild > 400 && settledChunks > 30 && built == 0 && trees > 300 && wet == 0 && s.wasp.y >= 0 && st.RulesHash() != t1.RulesHash() && st.WorldTag().Contains("wild beyond 400 m"),
+                    $"the settled area sits on the wild land {D(I.site.h):0.0} m above the sea at ({D(I.site.x):0}, {D(I.site.z):0}); {settledChunks} settled chunks, {wild} wild ones with nothing built and {trees} trees, none in the water; no step over 3 m across the band ({step:0.00} per 2 m); a sim runs over it");
+            }
             // 46. feature modifiers (T2-6): woods, towns, water and hives set at world creation act on generation
             {
                 (int forest, int town, int baths, int hives, bool apart) Census(Settings st)

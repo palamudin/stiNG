@@ -256,10 +256,13 @@ namespace Sting.Core
                         if (Sq(ax + dx * t - cy.x) + Sq(az + dz * t - cy.z) < cy.r * cy.r) return false;
                     }
                 }
-            return settings.terrain == 0 || OverHills(ax, az, bx, bz);
+            return !Hilly || OverHills(ax, az, bx, bz);
         }
         /// the ground's height here (terrain, T2-6); 0 on flat worlds
         public Num Ground(Num x, Num z) => World.GroundAt(seed, x, z, settings);
+        /// the ground has a shape: a hilly world, or wild land round a settled area (GDD 21.6); heights from GroundBase
+        public bool Hilly => settings.terrain != 0 || settings.settled != 0;
+        public Num GroundBase => settings.settled != 0 ? World.SettledOf(seed, settings).site.h : 0;
         /// a sight line between two people's eyes clears every rise between them
         bool OverHills(Num ax, Num az, Num bx, Num bz)
         {

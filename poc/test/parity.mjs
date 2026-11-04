@@ -4,7 +4,7 @@ import { writeFileSync, readFileSync } from 'node:fs';
 import { T, SKILLS } from '../sim/tuning.js';
 import { applyTuning } from '../sim/tunefile.js';
 applyTuning(T, readFileSync(new URL('../../tuning/sting.tune', import.meta.url), 'utf8')); // T1-22: the shipped tuning
-import { generateChunk, buildList, dayWeather, windAt, humanWindow, flyPos, beePos, birdPos, dragonPos, makeNest, shedSites, shedRoof, groundAt, groundSlope } from '../sim/world.js';
+import { generateChunk, buildList, settledOf, wildHere, dayWeather, windAt, humanWindow, flyPos, beePos, birdPos, dragonPos, makeNest, shedSites, shedRoof, groundAt, groundSlope } from '../sim/world.js';
 import { hash, Domain, u64, datan2, dsin, h32 } from '../sim/rng.js';
 import { newColony, colonyStep, destroyNest, colonyFinished, seasonPhase, sugarCap, proteinCap, waterCap } from '../sim/colony.js';
 import { Sim } from '../sim/sim.js';
@@ -76,6 +76,14 @@ for (const seed of seeds) {
     for (const q of P) { d.f(q.s); d.f(q.m); d.f(q.n); d.s(q.c); for (const k of ['x', 'y', 'z', 'sx', 'sy', 'sz', 'rx', 'ry', 'rz', 'top']) d.f(q[k]); for (const v of q.wb) d.f(v); d.f(q.near); }
   }
   out(`build.${seed}`, d.hex());
+}
+// wild land round a settled area (GDD 21.6): the site, the ground across the band and beyond, the wild channels, wild chunks
+{
+  const d = Digest(), st = { settled: 400, terrain: 1 }, I = settledOf(1234n, st);
+  d.f(I.site.x); d.f(I.site.z); d.f(I.site.h);
+  for (let k = 0; k < 400; k++) { const x = (k % 20) * 97.3 - 900, z = Math.floor(k / 20) * 103.1 - 1000; d.f(groundAt(1234n, x, z, st)); for (const v of wildHere(1234n, x, z, st)) d.f(v); }
+  for (let cz = -1; cz <= 1; cz++) for (let cx = 7; cx <= 9; cx++) digestChunk(generateChunk(1234n, cx, cz, st), d);
+  out('wild', d.hex());
 }
 // weather and schedules
 for (const seed of seeds) {

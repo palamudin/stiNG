@@ -128,6 +128,13 @@ namespace Sting.Core.Tests
                     }
                 Out($"build.{seed}", d.Hex);
             }
+            { // wild land round a settled area (GDD 21.6)
+                var d = new Digest(); var st = new Settings { settled = 400, terrain = 1 }; var I = World.SettledOf(1234, st);
+                d.F(I.site.x); d.F(I.site.z); d.F(I.site.h);
+                for (int k = 0; k < 400; k++) { Num x = (k % 20) * (Num)97.3 - 900, z = (k / 20) * (Num)103.1 - 1000; d.F(World.GroundAt(1234, x, z, st)); foreach (var v in World.WildHere(1234, x, z, st)) d.F(v); }
+                for (int cz = -1; cz <= 1; cz++) for (int cx = 7; cx <= 9; cx++) d.Chunk(World.GenerateChunk(1234, cx, cz, st));
+                Out("wild", d.Hex);
+            }
             foreach (var seed in Seeds)
             {
                 var d = new Digest();

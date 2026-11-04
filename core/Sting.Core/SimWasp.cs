@@ -194,7 +194,7 @@ namespace Sting.Core
             }
             int n = T.wasp.substeps; Num h = T.DT / n; var p0 = w.P;
             // on hills the air does not rise with the ground (GDD 20 G4): the wasp keeps its height above sea level
-            bool hills = settings.terrain != 0; Num g0 = hills ? Ground(w.x, w.z) : 0;
+            bool hills = Hilly; Num g0 = hills ? Ground(w.x, w.z) : 0;
             for (int i = 0; i < n; i++)
             {
                 var v0 = new V3(w.vx, w.vy, w.vz); // the speed going in, before a collision stops it
@@ -221,7 +221,7 @@ namespace Sting.Core
             var wind = Wind; int t = tick;
             Num gust = 1 + WeatherToday.gust * DSin((Num)t * 0.031) * DSin((Num)t * 0.0137 + 1); // hard in a storm (T2-2)
             Num k = T.wind.felt * gust * Clamp01(w.y / T.wind.refHeight) * Spw(w).felt;
-            if (settings.terrain != 0) k *= 1 + T.terrain.exposure * Max(0, Ground(w.x, w.z)); // windier on a rise (T2-6)
+            if (Hilly) k *= 1 + T.terrain.exposure * Min(20, Max(0, Ground(w.x, w.z) - GroundBase)); // windier on a rise (T2-6), up to 20 m above the settled area's base
             return new V3(wind.x * k, 0, wind.z * k);
         }
 
@@ -726,7 +726,7 @@ namespace Sting.Core
                 Num x, z;
                 if (paved.Count > 0) { var p = paved[(int)Floor(U(0) * paved.Count)]; x = p.minx + (p.maxx - p.minx) * U(1); z = p.minz + (p.maxz - p.minz) * U(2); }
                 else { x = (rec.cx + (U(1) - 0.5) * 0.9) * CSz; z = (rec.cz + (U(2) - 0.5) * 0.9) * CSz; }
-                if (settings.terrain != 0 && paved.Count == 0) // on open ground, rain settles in the lowest of a few spots (T2-6)
+                if (Hilly && paved.Count == 0) // on open ground, rain settles in the lowest of a few spots (T2-6)
                 {
                     Num lo = Ground(x, z);
                     for (int j = 1; j < T.terrain.poolTries; j++) { Num qx = (rec.cx + (U(10 + j * 2) - 0.5) * 0.9) * CSz, qz = (rec.cz + (U(11 + j * 2) - 0.5) * 0.9) * CSz, g = Ground(qx, qz); if (g < lo) { lo = g; x = qx; z = qz; } }
