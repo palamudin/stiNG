@@ -22,7 +22,7 @@ import { WaveField } from './wavegpu.js';
 import { ShoreField, shoreLive } from './shorefield.js';
 import { WaterSurface } from './water3/surface.js';
 import { Caustics } from './caustics.js';
-import { WATER } from './water.js';
+import { WATER, WATER_PRESETS } from './water.js';
 import { WAVES, swellState } from './waves.js';
 import { weatherAt, seasonAt } from './seasons.js';
 import { Rain } from './rain.js';
@@ -82,7 +82,12 @@ export class World {
     // the water's controls (the template's water panel, after Ultra-Water's): the sea state and the surf. windDir null:
     // the weather's; shoreAuto: the surf from the swell (its height and period), else the panel's values
     const fetch0 = (source.water && source.water.fetch) || 120000;
-    const ctl0 = { windDir: null, fetchKm: fetch0 / 1000, waveScale: 1, spread: WAVES.spread, swellScale: 1, swellDir: Math.round(WAVES.swellTurn * 180 / Math.PI), chop: WAVES.chop, timeScale: 1, shoreAuto: true, amplitude: 0.8, wavelength: 30, speed: 1, steepness: 1, foam: 1 };
+    // the panel's 'Water' (after Ultra-Water's): colour preset, clarity, roughness, refraction, crest glow, whitecaps,
+    // shore foam band, caustics, glitter; and the foam's size and amount
+    this.uLook = { value: new THREE.Vector4(1, 0, 0.06, 1.6) }; this.uLook2 = { value: new THREE.Vector4(0.06, 0.05, 1.3, 0.2) }; this.uLook3 = { value: new THREE.Vector4(1, 1, 0.75, 0) };
+    this.uAbs = { value: new THREE.Vector3(...WATER.absorb) }; this.uSca = { value: new THREE.Vector3(...WATER.scatter) };
+    const ctl0 = { preset: 'ours', clarity: 1, roughness: 0, refraction: 0.06, sssPeak: 1.6, sssView: 0.06, foamBias: 0.05, foamScale: 1.3, shoreBand: 0.2, caustics: 1, glitter: WATER.glint, foamSize: 1, foamAmount: 0.75,
+      windDir: null, fetchKm: fetch0 / 1000, waveScale: 1, spread: WAVES.spread, swellScale: 1, swellDir: Math.round(WAVES.swellTurn * 180 / Math.PI), chop: WAVES.chop, timeScale: 1, shoreAuto: true, amplitude: 0.8, wavelength: 30, speed: 1, steepness: 1, foam: 1 };
     this.waterCtl = opts.waterCtl || {}; for (const k in ctl0) if (!(k in this.waterCtl)) this.waterCtl[k] = ctl0[k]; // the caller's object, kept across rebuilds
     this.uSurf = { value: new THREE.Vector4(0.8, 30, 1, 1) }; this.uSurfX = { value: new THREE.Vector4(1, 0, 0, 0) };
     this.uWTime = { value: 0 }; this.waterTime = 0; // the water's clock: the panel's time scale
@@ -271,6 +276,10 @@ export class World {
       // the surf's range), or the panel's values
       if (swell && ctl.shoreAuto) { ctl.amplitude = Math.min(1.5, Math.max(0.2, 0.35 + 0.55 * swell.Hs)); ctl.wavelength = Math.min(60, Math.max(12, 0.45 * 9.81 * swell.T * swell.T / (2 * Math.PI))); ctl.speed = 1; ctl.steepness = 1; }
       this.uSurf.value.set(swell ? ctl.amplitude : 0, ctl.wavelength, ctl.speed, ctl.steepness); this.uSurfX.value.x = ctl.foam;
+      const pr = WATER_PRESETS[ctl.preset] || WATER_PRESETS.ours;
+      this.uAbs.value.set(...pr.absorb); this.uSca.value.set(...pr.scatter);
+      this.uLook.value.set(ctl.clarity, ctl.roughness, ctl.refraction, ctl.sssPeak); this.uLook2.value.set(ctl.sssView, ctl.foamBias, ctl.foamScale, ctl.shoreBand);
+      this.uLook3.value.set(ctl.caustics, ctl.foamSize, ctl.foamAmount, 0); U.uGlint.value = ctl.glitter;
       this.uSwDir.value.copy(this.waves.U.uSwDir.value);
       const st = this.waves.state;
       // the run-up's sea state: significant height H0 and the deep-water wavelength L0 of the peak period (2 pi g / w^2)

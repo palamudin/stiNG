@@ -210,6 +210,19 @@ const WCTL = {};
     ['speed', 'Speed', 0.3, 2, 0.01],
     ['steepness', 'Steepness', 0, 1.5, 0.01],
     ['foam', 'Foam charge', 0, 2, 0.01],
+    ['foamSize', 'Foam size', 0.1, 4, 0.01],
+    ['foamAmount', 'Foam amount', 0, 1, 0.01],
+    ['Water'],
+    ['clarity', 'Clarity', 0.2, 4, 0.01],
+    ['roughness', 'Roughness', 0, 0.2, 0.001, (v) => v.toFixed(3)],
+    ['refraction', 'Refraction', 0, 0.2, 0.001, (v) => v.toFixed(3)],
+    ['sssPeak', 'Crest glow', 0, 6, 0.01],
+    ['sssView', 'Glow to view', 0, 0.5, 0.001, (v) => v.toFixed(3)],
+    ['foamBias', 'Whitecap bias', -0.5, 1.5, 0.01],
+    ['foamScale', 'Whitecap scale', 0, 6, 0.01],
+    ['shoreBand', 'Shore foam band', 0, 2, 0.01],
+    ['caustics', 'Caustics', 0, 2, 0.01],
+    ['glitter', 'Glitter', 0, 1, 0.01],
   ];
   const shoreKeys = ['amplitude', 'wavelength', 'speed', 'steepness'], outs = {}, ins = {};
   const box = document.createElement('div'); box.style.display = 'grid'; box.style.gap = '8px';
@@ -225,8 +238,12 @@ const WCTL = {};
   const bt = document.createElement('div'); bt.className = 'seg';
   bt.innerHTML = '<button id="wWindAuto">Wind dir from weather</button><button id="wShoreAuto">Surf from the swell</button>';
   box.appendChild(bt);
+  const ps = document.createElement('div'); ps.className = 'seg'; ps.id = 'wPreset';
+  ps.innerHTML = ['ours', 'clear', 'tropical', 'toxic green', 'purple', 'rust orange', 'murky brown'].map((p) => `<button data-v="${p}"${p === 'ours' ? ' class="on"' : ''}>${p}</button>`).join('');
+  box.appendChild(ps);
+  ps.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; for (const x of ps.querySelectorAll('button')) x.classList.toggle('on', x === b); WCTL.preset = b.dataset.v; });
   const note = document.createElement('p'); note.className = 'note';
-  note.textContent = 'The sea state: fetch is the open water the wind has blown over (a lake uses its own width), the swell comes from weather far away, choppiness pinches the crests, time scale runs the water faster or slower. The surf: its first train, by its wavelength in deep water, its speed and its steepness; it follows the swell until a slider here is moved.';
+  note.textContent = 'Foam size and amount: the breakers\' puffs and streaks. Water: the colour preset, clarity (absorption divided by it), roughness, refraction, the glow through steep crests, whitecaps where the surface folds, the width of the shore\'s foam line, caustics, glitter. The sea state: fetch is the open water the wind has blown over (a lake uses its own width), the swell comes from weather far away, choppiness pinches the crests, time scale runs the water faster or slower. The surf: its first train, by its wavelength in deep water, its speed and its steepness; it follows the swell until a slider here is moved.';
   box.appendChild(note);
   $('segQ').before(box);
   $('wWindAuto').addEventListener('click', () => { WCTL.windDir = null; });

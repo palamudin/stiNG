@@ -35,6 +35,19 @@ export const WATER = {
   glint: 0.75,
 };
 
+// the water's colour presets (the panel's 'Water', water 3): absorption per metre (the channel absorbed least is the
+// colour seen through shallow water) and scattering per metre (the deep water's glow). 'ours' is WATER's; the others
+// are the reference pack's (Ultra-Water, MIT; its scatter, an in-scatter colour there, used as the scattering here)
+export const WATER_PRESETS = {
+  ours: { absorb: WATER.absorb, scatter: WATER.scatter },
+  clear: { absorb: [0.40, 0.062, 0.032], scatter: [0.0, 0.05, 0.08] },
+  tropical: { absorb: [0.36, 0.045, 0.06], scatter: [0.0, 0.085, 0.085] },
+  'toxic green': { absorb: [0.45, 0.1, 1.1], scatter: [0.05, 0.1, 0.004] },
+  purple: { absorb: [0.22, 0.85, 0.1], scatter: [0.05, 0.0, 0.09] },
+  'rust orange': { absorb: [0.1, 0.34, 1.2], scatter: [0.11, 0.035, 0.004] },
+  'murky brown': { absorb: [0.55, 0.62, 0.9], scatter: [0.045, 0.045, 0.022] },
+};
+
 const f = (v) => (Number.isInteger(v) ? v.toFixed(1) : String(v));
 
 // The glints' Poisson table (W3.1): count = the inverse distribution function at u for the mean of the row, rows on a

@@ -13,7 +13,7 @@ import { SHORE } from '../shorefield.js';
 import { SWASH_GLSL } from './swash.js';
 
 export const SURF_FOAM = {
-  billows: { n: 80, cell: 1.6, per: 3 }, // a grid n x n of cells this size round the camera, this many billows a cell
+  billows: { n: 80, cell: 1.6, per: 4 }, // the pool; the panel's foam amount draws a share of it // a grid n x n of cells this size round the camera, this many billows a cell
   streaks: { n: 64, cell: 2.0, per: 1 },
 };
 
@@ -34,7 +34,7 @@ export class SurfFoam {
       uSurf: world.uSurf, uSurfX: world.uSurfX, uWTime: world.uWTime, uSwDir: world.uSwDir,
       uCam: surface.U.uCam, uSeaLevel: surface.U.uSeaLevel, uWL: surface.U.uWL,
       tWD1: { value: field.disp[1].texture }, tWD2: { value: field.disp[2].texture },
-      tFoam: surface.U.tFoam, uSun: world.sky.uniforms.uSun, uSunColor: world.sky.uniforms.uSunColor, uSkyUp: surface.U.uSkyUp,
+      tFoam: surface.U.tFoam, uLook3: world.uLook3, uSun: world.sky.uniforms.uSun, uSunColor: world.sky.uniforms.uSunColor, uSkyUp: surface.U.uSkyUp,
     };
     const head = /* glsl */ `precision highp float; precision highp int;
 #include <common>
@@ -43,7 +43,7 @@ ${NOISE_GLSL}
 ${world.clip.glsl()}
 ${shore.glsl()}
 ${SWASH_GLSL}
-uniform vec3 uCam; uniform float uSeaLevel; uniform vec4 uWL; uniform sampler2D tWD1, tWD2;
+uniform vec3 uCam; uniform float uSeaLevel; uniform vec4 uWL, uLook3; uniform sampler2D tWD1, tWD2; // uLook3: (caustics, foam size, foam amount, -)
 // the cell this instance stands in (world-anchored round the camera) and its seeds
 vec2 foamAnchor(int n, float cell, int per, out vec4 seed) {
   int id = gl_InstanceID / per, sub = gl_InstanceID - id * per;
@@ -96,7 +96,8 @@ float foamWaterY(vec2 xz, float level, float bed) {
   float depth = -bed, h = textureLod(tWD1, xz / uWL.y, 3.0).y * smoothstep(0.6, 5.0, depth) + textureLod(tWD2, xz / uWL.z, 3.0).y * smoothstep(0.2, 2.0, depth);
   return level + max(h, bed + 0.04);
 }
-float foamPop(FoamState o, vec4 seed) { float th = seed.z * 0.45; return smoothstep(th, th + 0.2, o.breaking) * uSurfX.x; }
+// a piece is drawn when its breaker breaks hard enough for its seed, and when it falls in the panel's share of the pool
+float foamPop(FoamState o, vec4 seed) { float th = seed.z * 0.45; return smoothstep(th, th + 0.2, o.breaking) * uSurfX.x * step(fract(seed.y * 7.13 + seed.w * 3.71), uLook3.z); }
 `;
     const B = SURF_FOAM.billows, S = SURF_FOAM.streaks;
     const billowVert = /* glsl */ `${head}
@@ -113,7 +114,7 @@ void main() {
   vSand = clamp(smoothstep(0.0, 0.8, o.backAge) * (0.25 + 0.65 * o.breaking) * smoothstep(-1.8, 0.35, o.bed), 0.0, 0.85);
   vPlunge = crash;
   // small puffs, a wasp's scale: 10 to 60 cm, a little bigger in the crash
-  float size = (0.1 + 0.26 * o.breaking) * mix(0.7, 1.7, seed.w) * (1.0 + 0.1 * o.age);
+  float size = (0.1 + 0.26 * o.breaking) * mix(0.7, 1.7, seed.w) * (1.0 + 0.1 * o.age) * uLook3.y;
   size *= mix(1.0, 0.65, smoothstep(1.0, 4.0, o.age)) * (1.0 + 0.6 * crash);
   float waterY = foamWaterY(o.center, o.level, o.bed) + o.waveHeight * (1.0 - smoothstep(0.5, 3.0, o.age));
   vec3 C = vec3(o.center.x, o.bed > 0.0 ? o.level + o.bed + 0.045 : waterY + 0.065, o.center.y);
@@ -163,7 +164,7 @@ void main() {
   vec2 tangent = vec2(-o.dir.y, o.dir.x);
   vec2 jitter = tangent * (seed.w - 0.5) * 5.0 + o.dir * (seed.z - 0.5) * 2.0;
   vec2 ctr = anchor + jitter + o.dir * (o.speed * o.hitT - age * (1.15 + 1.65 * o.breaking)) + tangent * sin(seed.x * 17.0 + age * 1.3) * age * 0.16;
-  float len = min(2.0, (0.25 + 1.1 * o.breaking) * (0.35 + age * 0.55)), wid = (0.03 + 0.08 * o.breaking) * mix(0.6, 1.5, seed.z);
+  float len = min(2.0, (0.25 + 1.1 * o.breaking) * (0.35 + age * 0.55)) * uLook3.y, wid = (0.03 + 0.08 * o.breaking) * mix(0.6, 1.5, seed.z) * uLook3.y;
   vec2 xz = ctr - o.dir * position.y * len + tangent * position.x * wid;
   float bed = clipHeight(xz) - o.level;
   float y = bed > 0.0 ? o.level + bed + 0.04 : foamWaterY(xz, o.level, bed) + 0.04;

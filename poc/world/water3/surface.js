@@ -92,6 +92,7 @@ export class WaterSurface {
       uSurf: world.uSurf, uSurfX: world.uSurfX, uWTime: world.uWTime, uSwDir: world.uSwDir,
       uWave: world.uWave, // (the panel's wave scale, the sea's fetch m, -, -)
       tScene: { value: null }, tDepth: { value: null }, uVP: { value: new THREE.Matrix4() }, tFoam: { value: null },
+      uLook: world.uLook, uLook2: world.uLook2, uLook3: world.uLook3, uAbs: world.uAbs, uSca: world.uSca, // the panel's 'Water'
       uLogF: world.post.U.uLogF, uDebug: world.post.U.uDebug, uRain: world.post.U.uRain, uIce: world.post.U.uIce, uGlint: world.post.U.uGlint, uWPeak: world.post.U.uWPeak,
       tCaus: { value: world.caustics ? world.caustics.rt.texture : null }, uCaus: world.post.U.uCaus,
     };
@@ -218,7 +219,12 @@ uniform vec3 uSun, uSunColor, uSkyUp; uniform sampler2D uSkyView, tScene, tFoam;
 in vec3 vW; in vec2 vXZ; in float vCell, vNear, vJ; in vec2 vCoastSlope; in vec3 vCoast, vFlow; in vec4 vRough; out vec4 oColor;
 uniform float uDebug;
 const float W_N = ${f(WATER.n)};
-const vec3 W_ABS = vec3(${WATER.absorb.map(f).join(', ')}), W_SCA = vec3(${WATER.scatter.map(f).join(', ')});
+// the panel's 'Water' (index.js waterCtl): uAbs absorption and uSca scattering per metre (the colour preset), uLook
+// (clarity, roughness, refraction, crest glow), uLook2 (crest glow toward the view, whitecap bias, whitecap scale, shore
+// foam band), uLook3 (caustics, foam size, foam amount, -)
+uniform vec3 uAbs, uSca; uniform vec4 uLook, uLook2, uLook3;
+#define W_ABS (uAbs / max(uLook.x, 0.05))
+#define W_SCA uSca
 ${WATER_CAUSTIC_GLSL}
 float wFresnel(float ci) {
   ci = clamp(ci, 0.0, 1.0); float st2 = (1.0 - ci * ci) / (W_N * W_N); if (st2 >= 1.0) return 1.0;
@@ -291,7 +297,7 @@ void main() {
   vec3 fph = w3FlowPh(vXZ); mat2 fM = w3FlowM(fv);
   vec2 gu = w3Gust(vXZ);
   // ---- the slope: mean and variance over the pixel's footprint (LEAN), each short cascade detiled as the vertices are
-  vec2 m = vCoastSlope, sv = vec2(uWLost * 0.5); vec2 gx = dFdx(vXZ), gy = dFdy(vXZ);
+  vec2 m = vCoastSlope, sv = vec2(uWLost * 0.5 + uLook.y * uLook.y); vec2 gx = dFdx(vXZ), gy = dFdy(vXZ);
   ${cs.map((c) => `{ float L = uWL[${c}], kc = k[${Math.min(c, 3)}]${c === 1 ? ' * gu.x' : c > 1 ? ' * gu.y' : ''}; vec2 u = vXZ / L;
     vec4 a = textureGrad(tWS${c}, u, gx / L, gy / L);${c > 0 ? `
     vec2 R = ${rot(c, 1)}, Ri = ${rot(c, -1)};
@@ -323,7 +329,7 @@ void main() {
     // a bubbly band behind the tip while it climbs; sparse remnants in the backwash, thinning as it drains; the
     // bore's white over the sheet, fresh as it arrives
     float aa = 0.004 + 4e-5 * length(cameraPosition - vW);
-    swLace = smoothstep(0.0, 0.04, s) * (s < 0.35 ? smoothstep(-aa, aa, th) * (1.0 - smoothstep(0.0, 0.06 + aa, th)) : 0.3 * smoothstep(0.0, 0.03, th) * (1.0 - smoothstep(0.35, 0.6, s))) * (1.0 - smoothstep(0.0, 0.3, depth));
+    swLace = smoothstep(0.0, 0.04, s) * (s < 0.35 ? smoothstep(-aa, aa, th) * (1.0 - smoothstep(0.0, 0.3 * uLook2.w + aa, th)) : 0.3 * smoothstep(0.0, 0.03, th) * (1.0 - smoothstep(0.35, 0.6, s))) * (1.0 - smoothstep(0.0, 0.3, depth));
     swWhite = (s < SW3_UP ? 1.0 - 0.5 * s / SW3_UP : 0.5 * (1.0 - smoothstep(SW3_UP, 0.6, s))) * smoothstep(0.0, 0.05, s) * smoothstep(0.0, 0.08, th) * (1.0 - smoothstep(0.1, 0.3, depth)); // grown in as the bore arrives
     if (depth < 0.0) thin = 0.015; // the sheet on the sand: thin, and still a mirror
   }
@@ -346,7 +352,7 @@ void main() {
   float Lp = D / max(-Tr.y, 0.15); // the path down to the floor
   vec3 Pf = vW + Tr * min(Lp, 8.0);
   vec4 cf = uVP * vec4(Pf, 1.0); vec2 ruv = cf.w > 0.0 ? clamp(cf.xy / cf.w * 0.5 + 0.5, vec2(0.001), vec2(0.999)) : suv;
-  ruv = mix(suv, ruv, edge);
+  ruv = mix(suv, ruv, edge * uLook.z / 0.06); // the refraction's strength (0.06: as drawn)
   vec3 floorCol = texture(tScene, ruv).rgb;
   // the floor's light: the sun's share lost to the surface and the water on its way down and focused by the
   // caustics, the sky's share lost to the water; then the path up to the eye (Beer-Lambert) and the water's own glow
@@ -354,7 +360,7 @@ void main() {
   float share = es / max(es + ek, 1e-6);
   vec3 Ts = refract(-uSun, vec3(0.0, 1.0, 0.0), 1.0 / W_N);
   vec2 Pb = vW.xz + Tr.xz * Lp;
-  float cz = wCaustic(Pb, D, fp);
+  float cz = mix(1.0, wCaustic(Pb, D, fp), uLook3.x);
   vec3 lit = floorCol * (share * exp(-ext * D / max(-Ts.y, 0.1)) * (1.0 - wFresnel(sunUp)) * cz + (1.0 - share) * exp(-ext * D * 1.2) * 0.934);
   vec3 Tw = exp(-ext * Lp);
   vec3 body = lit * Tw + W_SCA / ext * (1.0 - Tw) * amb;
@@ -400,14 +406,15 @@ void main() {
 #ifdef W3_COAST
   { float crest = clamp((vW.y - lv) / max(uSurf.x, 0.1), 0.0, 1.5), steep = smoothstep(0.12, 0.45, length(vCoastSlope));
     float back = 0.35 + 0.65 * pow(max(dot(-V, normalize(vec3(uSun.x, 0.0, uSun.z) + vec3(0.0, 0.2, 0.0))), 0.0), 3.0);
-    c += vec3(0.04, 0.42, 0.3) * (uSunColor * sunUp * 0.5 + uSkyUp * 0.35) * crest * crest * steep * back * edge; }
+    c += vec3(0.04, 0.42, 0.3) * (uSunColor * sunUp * 0.5 + uSkyUp * 0.35) * crest * (crest * steep * back * uLook.w / 1.6 + uLook2.x / 0.06 * 0.08) * edge; }
 #endif
   // ice (deep winter): a pale, rough sheet over the water, the sky softly in it
   if (uIce > 0.0) { float ic = smoothstep(0.0, 0.6, uIce) * edge; vec3 iceCol = vec3(0.72, 0.8, 0.88) * (uSkyUp * 0.7 + uSunColor * sunUp * 0.25) * (0.9 + 0.1 * w2noise(vXZ / 1.5, 302)); c = mix(c, iceCol + skyAt(Rv) * 0.08, ic); }
   // ---- foam: where the surface folds (whitecaps), on the breakers' faces, the lace behind them, the surf zone's
   // standing foam, and the swash's lace at its tip and white behind it; one pattern of three scales covered to a
   // share set by each foam's strength
-  float fm = (1.0 - smoothstep(0.15, 0.55, vJ)) * smoothstep(-0.2, 0.6, w2noise(vXZ / 0.3, 99));
+  // whitecaps where the surface folds: the Jacobian under 0.6 + bias, by the scale (defaults 0.05 and 1.3)
+  float fm = clamp((0.6 + uLook2.y - vJ) * uLook2.z, 0.0, 1.0) * smoothstep(0.25, 0.6, texture(tFoam, vXZ / 1.4).r + 0.2);
   // the foam's pattern: the baked lace (water3/foamtex.js) at two scales, drifting apart slowly so it churns
   float pat = 0.62 * texture(tFoam, vXZ / 3.1 + vec2(uTime * 0.011, -uTime * 0.007)).r + 0.38 * texture(tFoam, vXZ / 1.17 - vec2(uTime * 0.017, uTime * 0.005)).r + 0.12;
   float wf = clamp(vCoast.x, 0.0, 1.0), lc = clamp(vCoast.y, 0.0, 1.0);
