@@ -2443,9 +2443,13 @@ On seed 12346 a hive had stood beside the nest, so a game began in a fight. This
 
 **What it costs.** The shadow map is redrawn every other frame, not every frame, which halves the cost of drawing it. A map one frame old still puts its shadows in the right places, because its matrix is the one it was drawn with. Only a moving person's or wasp's shadow trails by a frame. Reading the map in the shaders costs the same as before: the sample count is unchanged, and only the map is bigger.
 
-### 18.87 The wasp lifted whole; rough water takes a wasp under
+### 18.87 No ground in the wasp's flight; rough water takes a wasp under; teleports made ready first
 
-**The wasp lifted whole.** On hills everything is drawn lifted onto the ground in its vertex shader, each vertex by the ground under it. A flying wasp was lifted the same way, so its body leaned with the slope beneath it, as if it pitched itself. Wasps (the driven one, AI, rivals and remote players') are now lifted as one, by the ground under the wasp (`rigidWasp`), with their own materials apart from the lifted ones. In flight only the player pitches the wasp.
+**No ground in the wasp's flight.** Nothing about the ground's shape moves or turns a flying wasp; only the player does, and the ground stops it only where the wasp would fly into it.
+- **Height.** The sim holds a flying wasp's height above the sea as the ground passes under it (its heights are kept above the ground, and corrected by the ground's change each step).
+- **Drawn height.** The driven wasp and its camera are drawn on the sim's own ground (`waspLift`), not the drawn one, whose samples and blends put a ripple in its height.
+- **Pitch.** On hills everything is drawn lifted onto the ground in its vertex shader, each vertex by the ground under it, and a flying wasp was lifted the same way, so its body leaned with the slope beneath it. Wasps (the driven one, AI, rivals and remote players') are now lifted as one, by the ground under the wasp (`rigidWasp`), with their own materials apart from the lifted ones.
+- **Wind.** The wind no longer blows harder on a rise (`terrain.exposure` is gone, in both sims). The air is still stiller in the last 3 m over the ground, as on a flat world.
 
 **Rough water.** Calm water bears a wasp: it stands on it and drinks at it. The wind whips a water rough by its fetch:
 - roughness = (wind × min(1, radius / `roughFetch` 5 m) − `roughCalm` 1.2 m/s) / (`roughWild` 2.8 − `roughCalm`), clamped to 0..1;
@@ -2456,6 +2460,13 @@ On seed 12346 a hive had stood beside the nest, so a game began in a fight. This
 - AI water carriers pass over a rough pond for a bath or a puddle.
 
 The sim's wind is the day's at the hour (`windAt`). This is in the sim with its C# twin and behaviour block 64. The scenario digests did not change. Wild lakes and the sea are drawn by World v3 but are not yet in the sim, so they do not take a wasp under.
+
+**Teleport (dev) behind a curtain.** A teleport used to drop the wasp at the new place at once, while the ground there was still the old place's (World v3 streams its clipmap in from where it was), so it looked like a void walled by stretched ground until a zoom out and in. Now a curtain covers the view, and the sim holds still while:
+- the new place's chunks are built and lifted;
+- the ground is rebuilt whole round it (World v3's `build`, or the rings reset);
+- a dozen frames are drawn unseen, so grass, trees and shaders are in.
+
+Then the curtain lifts. Over a wild lake or the sea the wasp is set 3 m over the water, not over its bed.
 
 ---
 

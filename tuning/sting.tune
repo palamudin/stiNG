@@ -951,7 +951,6 @@ flatR = 14
 rise = 24
 sightStep = 4
 poolTries = 3
-exposure = 0.05
 
 [terrain.grade]
 oct = 2

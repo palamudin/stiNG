@@ -5,7 +5,7 @@ import {
   Sim, Act, T, DT, ZONES, ZoneName, SwatKind, SwatKindName, StyleName, TopName, BottomName, Top, Bottom,
   toWorld, toLocal, dirToWorld, chunkKey, chunkOf, hash, Domain, rangeInt, resolveSting, zoneCover, segClosest, classify, predictedKind,
   NEST, NEST_ENTRANCE, flyPos, beePos, fmtClock, minuteOfDay, isLowerZone, broodTotal, sugarCap, proteinCap, waterCap, garmentGraph, dayWeather,
-  NetLab, LINKS, generateChunk, wildHere, pondsOf, pondEdge, POND_PATH, buildList, settledOf, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetVel, CHASE, targetLabel, assistPilot, swoopPilot, hoverPilot, hoverSetting, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE, SKILLS, SKILL_UNLOCKS, SKILL_RANKED, SKILL_HIVE, skillCost, ROLES,
+  NetLab, LINKS, generateChunk, wildHere, landUse, pondsOf, pondEdge, POND_PATH, buildList, settledOf, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetVel, CHASE, targetLabel, assistPilot, swoopPilot, hoverPilot, hoverSetting, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE, SKILLS, SKILL_UNLOCKS, SKILL_RANKED, SKILL_HIVE, skillCost, ROLES,
 } from './sim/index.js';
 import { Rings, RING, ringGrid, ringGLSL } from './view/rings.js';
 import { Batch, place } from './view/merge.js';
@@ -315,6 +315,10 @@ const ringMeshes = rings.lv.map((L, l) => {
 });
 // the ground's height as drawn there, for the camera and the sun
 function terrAt(x, z) { return world2 ? world2.heightAt(x, z) : TERR.on ? rings.heightAt(x, z) : 0; }
+// the driven wasp and its camera are lifted by the sim's own ground, not the drawn one: the sim holds a flying wasp's
+// height above the sea as the ground passes under it, so drawn on the sim's ground it flies level, with nothing of
+// the ground's shape in its height or its pitch (the drawn ground's samples and blends would put a ripple in it)
+function waspLift(x, z) { return sim && sim.hilly ? sim.ground(x, z) : terrAt(x, z); }
 function terrFrame(focus) {
   if (world2) { // World v2 draws the ground, flat or hilly; everything else is lifted onto it
     TERR.on = true; ground.visible = false;
@@ -1751,7 +1755,7 @@ function renderWasps(alpha, t, dt) {
     if (driven) drivenPos = p;
     // looking out of its own eyes: the body is not drawn (compound eyes see nearly all the way round)
     g.visible = w.state !== 'under' && w.state !== 'robbing' && !(driven && eyeBlend > 0.5); // inside clothes or a hive
-    g.position.copy(p); g.position.y += terrAt(p.x, p.z); // lifted whole (rigidWasp)
+    g.position.copy(p); g.position.y += driven ? waspLift(p.x, p.z) : terrAt(p.x, p.z); // lifted whole (rigidWasp)
     g.scale.setScalar((CASTE_SCALE[w.caste] || 1) * speciesSize(w.sp));
     g.rotation.order = 'YXZ';
     if (driven && w.state !== 'balled') { g.rotation.y = input.yaw; g.rotation.x = w.state === 'landed' ? 0 : -input.pitch * 0.6; }
@@ -3031,12 +3035,33 @@ function atlasControls(dt) {
   if (moved || ++atlas.frame % 6 === 0) drawAtlas();
 }
 // dev tools: put the wasp down at (x, z), 3 m over the ground, still; the sim brings the chunks round it in
+// A teleport (dev): the place is made ready behind a curtain before the wasp is shown there. The sim holds still while
+// the new place's chunks are built and lifted, the ground (World v3's clipmap, or the rings) is rebuilt whole round
+// it, and a few frames are drawn unseen so the grass, the trees and the shaders are in; then the curtain lifts.
+// Over wild water (a lake or the sea, drawn but not in the sim) the wasp is set 3 m over the water, not the bed.
+const TP = { hold: 0, el: null };
 function devTeleport(x, z) {
   const w = sim && sim._driven(); if (!w || !devOpts.dev) return;
-  Object.assign(w, { x, z, y: 3, vx: 0, vy: 0, vz: 0, state: 'fly', energy: 1 }); w.land = null;
-  const e = pos.get(w.id); if (e) { e.p.set(x, 3, z); e.c.set(x, 3, z); }
+  let y = 3;
+  if (sim.settings.settled && landUse(sim.seed, chunkOf(x), chunkOf(z), sim.settings) === 'wild') { const o = wildHere(sim.seed, x, z, sim.settings); if (o[4] > o[0]) y += o[4] - o[0]; }
+  if (!TP.el) { TP.el = document.createElement('div'); TP.el.style.cssText = 'position:fixed;inset:0;z-index:50;background:#0d0f0c;color:#cfc9b8;display:flex;align-items:center;justify-content:center;font:600 15px/1 system-ui,sans-serif;letter-spacing:.08em;transition:opacity .35s;pointer-events:none'; document.body.appendChild(TP.el); }
+  TP.el.textContent = `TELEPORTING TO ${Math.round(x)}, ${Math.round(z)}`; TP.el.style.opacity = '1'; TP.el.hidden = false;
+  Object.assign(w, { x, z, y, vx: 0, vy: 0, vz: 0, state: 'fly', energy: 1 }); w.land = null;
+  const e = pos.get(w.id); if (e) { e.p.set(x, y, z); e.c.set(x, y, z); }
   if (ov.on) { ov.fx = x; ov.fz = z; }
-  syncChunks(); toast(`Teleported to ${Math.round(x)}, ${Math.round(z)}`, 'var(--muted)', 1.5);
+  sim._updateChunks(true); syncChunks(); // the new place's chunks now, not after the next step
+  if (TERR.on && !world2) { rings.reset(); terrFrame(new THREE.Vector3(x, 0, z)); }
+  if (world2) world2.build(x, z); // the ground whole at the new place, not streamed in from the old one
+  terrApply(scene); // its new things lifted now, not at the next sweep
+  TP.hold = 12; // frames drawn behind the curtain before it lifts
+}
+// each frame while a teleport is held: the place keeps filling in; when the ground is in and the frames are done, lift
+function teleportFrame() {
+  if (!TP.hold) return false;
+  const busy = world2 ? world2.clip.busy || world2.clip.sharpness() < 0.999 : false;
+  if (!busy) TP.hold--;
+  if (!TP.hold) { TP.el.style.opacity = '0'; setTimeout(() => { if (!TP.hold) TP.el.hidden = true; }, 400); toast(`Teleported to ${Math.round(sim.wasp.x)}, ${Math.round(sim.wasp.z)}`, 'var(--muted)', 1.5); }
+  return true;
 }
 function closeAtlas() { atlas.open = false; $('atlas').hidden = true; atlas.pts.clear(); if (running && !paused && !ui.nest) lock(); }
 function toggleAtlas() { if (atlas.open) closeAtlas(); else openAtlas(); }
@@ -3663,7 +3688,7 @@ function updateCamera(p, dt) {
   camPos.copy(pos); // in the sim's frame, height above the ground
   if (TERR.on) { // on hills (T2-6, GDD 20 G4) the camera rig is lifted as one with the wasp, by the ground under the wasp:
     // nothing in the view follows the lie of the land, only the wasp's own flight; the camera is kept out of the ground
-    const fg = terrAt(focus.x, focus.z);
+    const fg = waspLift(focus.x, focus.z);
     pos = pos.clone(); pos.y += fg;
     look = look.clone(); look.y += fg;
     const under = terrAt(pos.x, pos.z) + 0.02;
@@ -3683,7 +3708,8 @@ function frame(now) {
   qualityFrame(raw);
   padUI(now); // menus with a controller (Xbox)
   if (atlas.open) atlasControls(dt); // the big map has the controls until it is closed
-  if (running && !paused) {
+  const held = teleportFrame(); // a teleport being made ready: the sim waits, the view fills in
+  if (running && !paused && !held) {
     if (sim) updateAssist(dt);
     const scale = timeScale(), cap = Math.max(8, Math.ceil(8 * scale));
     acc += dt * scale;

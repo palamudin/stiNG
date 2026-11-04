@@ -166,7 +166,7 @@ Run the tests from this folder with `node test/sim.test.mjs`, `node test/net.tes
 | 136 | Wild land round a settled area: a town, a village or a park set on a site of the wild fjord land (coast, lakes, mountains), the sim's ground blended into the wild, wild chunks with trees and nothing built; JS and C# agree | 18.80 | 25 |
 | 137 | Zooming out into the map (north-up, drag pans), pins for the nest, sister and rival nests, water and hives, the nest's pin at the screen edge to find home in the dark; moonlight in phases, starlight, the moon and stars | 18.81 | 25 |
 | 138 | Pond benches on legs; shadows 96 m across on a 4096 map, pushed ahead along the view, redrawn every other frame | 18.86 | 25 |
-| 139 | The wasp lifted whole onto hills, never leaning with the slope; rough water: the wind whips a pond rough by its fetch and its surface takes a wasp under, to fight its way out or drown | 18.87 | 25 |
+| 139 | No ground in the wasp's flight: drawn on the sim's ground and lifted whole, never leaning or rippling with the slope, the wind no stronger on a rise; rough water: the wind whips a pond rough by its fetch and its surface takes a wasp under, to fight its way out or drown; dev teleports made ready behind a curtain | 18.87 | 25 |
 
 ## Verified
 

@@ -221,7 +221,6 @@ namespace Sting.Core
             var wind = Wind; int t = tick;
             Num gust = 1 + WeatherToday.gust * DSin((Num)t * 0.031) * DSin((Num)t * 0.0137 + 1); // hard in a storm (T2-2)
             Num k = T.wind.felt * gust * Clamp01(w.y / T.wind.refHeight) * Spw(w).felt;
-            if (Hilly) k *= 1 + T.terrain.exposure * Min(20, Max(0, Ground(w.x, w.z) - GroundBase)); // windier on a rise (T2-6), up to 20 m above the settled area's base
             return new V3(wind.x * k, 0, wind.z * k);
         }
 

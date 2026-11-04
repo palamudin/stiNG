@@ -1141,7 +1141,7 @@ namespace Sting.Core.Tests
                 (Num x, Num z, Num g) top = (0, 0, Num.MinValue), bottom = (0, 0, Num.MaxValue);
                 for (int j = 0; j < 40; j++) for (int i = 0; i < 40; i++) { Num x = pkx * 64 - 30 + i * (Num)1.5, z = pkz * 64 - 30 + j * (Num)1.5, g = sh.Ground(x, z); if (g > top.g) top = (x, z, g); if (g < bottom.g) bottom = (x, z, g); }
                 Num Wd(Sim s0, Num x, Num z) { var w = s0.wasp; Num ox = w.x, oy = w.y, oz = w.z; w.x = x; w.y = 1; w.z = z; var d = s0.Drift(w); w.x = ox; w.y = oy; w.z = oz; return Sqrt(d.x * d.x + d.z * d.z); }
-                Ok(top.g > 0 && Wd(sh, top.x, top.z) > Wd(sh, bottom.x, bottom.z) && Wd(sf, top.x, top.z) == Wd(sf, bottom.x, bottom.z), $"the wind is stronger on a rise ({D(Wd(sh, top.x, top.z)):0.000} against {D(Wd(sh, bottom.x, bottom.z)):0.000} m/s at the foot of it)");
+                Ok(top.g > 0 && Wd(sh, top.x, top.z) == Wd(sh, bottom.x, bottom.z) && Wd(sf, top.x, top.z) == Wd(sf, bottom.x, bottom.z), $"the ground's shape takes no part in the wind on a wasp: on a rise as at its foot ({D(Wd(sh, top.x, top.z)):0.000} against {D(Wd(sh, bottom.x, bottom.z)):0.000} m/s)");
                 var rs = Persist.Restore(Persist.Snapshot(sh));
                 Ok(rs.settings.terrain == 2 && new Settings { terrain = 2 }.WorldTag() == "hilly" && new Settings { terrain = 1 }.WorldTag() == "rolling" && new Settings { terrain = 1 }.RulesHash() != new Settings().RulesHash(),
                     "terrain is a world setting: kept in saves, in the world tag and in the rules peers compare");

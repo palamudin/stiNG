@@ -1829,7 +1829,7 @@ function seated(sim, pred) {
     pairs++; if (!sh.canSee(a, b)) blocked++;
   }
   ok(blocked > 0 && blocked < pairs, `a rise between two people hides them from each other (${blocked} of ${pairs} open sight lines on a flat world are blocked on a hilly one)`);
-  // rain settles in hollows; the wind is stronger on a rise
+  // rain settles in hollows; the wind on a wasp is the same on a rise as at its foot
   let rd = 1; while (!dayWeather(1234n, rd).rain || dayWeather(1234n, rd).pour > 1) rd++;
   const rh = sh._plausRec(pk[0], pk[1]), rf = sf._plausRec(pk[0], pk[1]);
   const ph = sh.puddlesIn(rh, rd), pf = sf.puddlesIn(rf, rd), mean = (ps) => ps.reduce((m, p) => m + sh.ground(p.x, p.z), 0) / ps.length;
@@ -1837,7 +1837,7 @@ function seated(sim, pred) {
   let top = null, bottom = null;
   for (let j = 0; j < 40; j++) for (let i = 0; i < 40; i++) { const p = { x: pk[0] * 64 - 30 + i * 1.5, z: pk[1] * 64 - 30 + j * 1.5 }, g = sh.ground(p.x, p.z); if (!top || g > top.g) top = { ...p, g }; if (!bottom || g < bottom.g) bottom = { ...p, g }; }
   const wd = (s, p) => { const w = { x: p.x, y: 1, z: p.z }; const d = s._drift(w); return Math.hypot(d.x, d.z); };
-  ok(top.g > 0 && wd(sh, top) > wd(sh, bottom) && wd(sf, top) === wd(sf, bottom), `the wind is stronger on a rise (${wd(sh, top).toFixed(3)} against ${wd(sh, bottom).toFixed(3)} m/s at the foot of it)`);
+  ok(top.g > 0 && wd(sh, top) === wd(sh, bottom) && wd(sf, top) === wd(sf, bottom), `the ground's shape takes no part in the wind on a wasp: on a rise as at its foot (${wd(sh, top).toFixed(3)} against ${wd(sh, bottom).toFixed(3)} m/s)`);
   const r = restore(snapshot(sh));
   ok(r.settings.terrain === 2 && worldTag({ terrain: 2 }) === 'hilly' && worldTag({ terrain: 1 }) === 'rolling' && rulesHash({ terrain: 1 }) !== rulesHash({}), 'terrain is a world setting: kept in saves, in the world tag and in the rules peers compare');
 }

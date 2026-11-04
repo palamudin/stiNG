@@ -389,10 +389,10 @@ export const T = {
   // the small thing on it (GDD 18.75). A street keeps within street grade (nodes every node m, window m either side);
   // a house's pad is within drive grade of the street over its front yard, its banks 2:1 at most, up to bank m (GDD 21). Flat within flatR m of the
   // home tree, rising to full over rise m. Hills block sight lines
-  // (checked every sightStep m); puddles settle at the lowest of poolTries spots; the wind is stronger by exposure
-  // per metre of rise. roll: how much each land use lets the ground roll (blended between chunk centres).
+  // (checked every sightStep m); puddles settle at the lowest of poolTries spots (the wind on a wasp
+  // takes nothing from the ground's shape: a rise is no windier). roll: how much each land use lets the ground roll (blended between chunk centres).
   terrain: { amp: 1.9, cell: 60, octaves: 5, warp: 0.5, ridge: 0, terrace: 0, terraceStep: 0.5,
-    grade: { oct: 2, walk: 1.6, road: 3, lot: 3, house: 2.5, shed: 1, apron: 0.3, pond: 3, reach: 3, street: 0.1, node: 8, window: 64, drive: 0.15, bank: 9 }, flatR: 14, rise: 24, sightStep: 4, poolTries: 3, exposure: 0.05,
+    grade: { oct: 2, walk: 1.6, road: 3, lot: 3, house: 2.5, shed: 1, apron: 0.3, pond: 3, reach: 3, street: 0.1, node: 8, window: 64, drive: 0.15, bank: 9 }, flatR: 14, rise: 24, sightStep: 4, poolTries: 3,
     roll: { park: 1, forest: 1, yards: 0.45, mall: 0.12, town: 0.1 } },
   plaus: { futureTicks: 120, stingReach: 1.6, humanDrift: 3, maxSwatDelay: 240, maxSwats: 4, rateWindow: 120, rateMax: 6,
     maxSpeed: 12, strikes: 3, pickupReach: 0.3, solidDepth: 0.08, sipMax: 0.12, maxPain: 2 }, // maxPain: no species stings harder (GDD 6.8)

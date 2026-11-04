@@ -1159,7 +1159,6 @@ export class Sim {
     const W = T.wind, wind = this.wind, t = this.tick;
     const gust = 1 + this.weatherToday.gust * dsin(t * 0.031) * dsin(t * 0.0137 + 1);
     let k = W.felt * gust * clamp01(w.y / W.refHeight) * spw(w).felt;
-    if (this.hilly) k *= 1 + T.terrain.exposure * Math.min(20, Math.max(0, this.ground(w.x, w.z) - this.groundBase)); // windier on a rise (T2-6), up to 20 m above the settled area's base
     return { x: wind.x * k, z: wind.z * k };
   }
 
