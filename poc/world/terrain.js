@@ -159,7 +159,9 @@ float hfShadow(vec2 p, float h0, float dist) {
   // the shore: sand above the water, mud under it
   float shore = uShore * (1.0 - smoothstep(0.6, 1.6 + 0.5 * pa, hgt));
   col = mix(col, T_SAND * (0.97 + 0.12 * w2noise(P / 0.9, 77) * NF(0.9)), shore * (1.0 - smoothstep(0.35, 0.6, slope)));
-  col = mix(col, T_MUD, uShore * (1.0 - smoothstep(-0.3, -0.03, hgt)));
+  // under the water: a sandy beach keeps its sand (wet, darker: below), mud where the shore is not sand
+  float sandy = shore * (1.0 - smoothstep(0.35, 0.6, slope));
+  col = mix(col, T_MUD, uShore * (1.0 - smoothstep(-0.3, -0.03, hgt)) * (1.0 - sandy));
   // the swash: run-up limit R2 on this slope (Stockdon et al. 2006); the edge now follows the incident waves at this
   // stretch of shore, so it runs up when a crest arrives and drains back after it
   float film = 0.0, wetB = 0.0, damp = 0.0, fl = 0.0, TROUGH_WET = 1.0;
@@ -175,7 +177,7 @@ float hfShadow(vec2 p, float h0, float dist) {
     vec2 ws = shoreWet(P, shoreAt(P), hgt, TN, uTime, shoreState(TW));
     R2 = -1.0; film = 0.0; float edgeF = 0.0; wetB = ws.x * above; damp = 0.0;
     col *= 1.0 - 0.4 * wetB;
-    TROUGH_WET = mix(1.0, 0.3, ws.y);
+    TROUGH_WET = mix(1.0, 0.5, ws.y); // damp sand is damp-shiny; the sheet of water over it is the mirror
 #else
     // no table: the edge follows the incident waves where this cross-shore line meets the water (downhill by hgt / slope)
     vec2 Ps = P + (length(TN.xz) > 1e-4 ? normalize(TN.xz) : vec2(0.0)) * clamp(hgt / max(tb, 0.01), 0.0, 20.0);

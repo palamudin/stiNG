@@ -208,7 +208,7 @@ vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, floa
   cloud = shoreCloud(P.xz); // the clouds' shadow: the sun's share of the light here
 #endif
   vec2 m, sv; wSlope(x0, gx, gy, m, sv);
-  vec2 rs = wRain(P.xz, uTime, uWet) * (1.0 - smoothstep(0.02, 0.08, fp));
+  vec2 rs = wRain(P.xz, uTime, uRain) * (1.0 - smoothstep(0.02, 0.08, fp)); // rings while rain falls (uRain), not while the ground is still wet (uWet)
   m += rs + g + swSlope; // the plane's own tilt and the shore wave's are part of the mean slope
   vec3 n = normalize(vec3(-m.x, 1.0, -m.y));
   float nv = max(dot(n, V), 1e-3);

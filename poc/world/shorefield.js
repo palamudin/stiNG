@@ -411,9 +411,10 @@ float shoreFingers(vec2 p, float tk) { return 0.03 * w2noise(p / 0.35 + vec2(tk 
 // the tongue's level above the still water, tau seconds after the bore reached the line, on a beach of slope tb: the
 // water runs up at the bore's speed and decelerates at g sin(beta), so the level is a parabola in time to its reach
 // and back (Shen and Meyer 1963), the uprush taking sqrt(2 reach / (g tb^2)) — 6 s for 0.4 m on a 1:20 beach — and
-// the backwash as long, so the water is still draining when the next crest comes; held under 0.48 of the period so a
-// tongue is done before the next (a bigger set compresses the motion a little)
-float shoreTongueUp(float reach, float tb, float T) { return min(sqrt(2.0 * reach / (SW_G * tb * tb + 1e-6)), 0.48 * T); }
+// the backwash as long, so the water is still draining when the next crest comes; held under half the period so a
+// tongue is done as the next arrives and the foot of the swash zone always carries its film (a bigger set
+// compresses the motion a little)
+float shoreTongueUp(float reach, float tb, float T) { return min(sqrt(2.0 * reach / (SW_G * tb * tb + 1e-6)), 0.5 * T); }
 float shoreTongueLevel(float tau, float reach, float tup) { float x = tau / tup; return x >= 2.0 ? 0.0 : reach * (1.0 - (1.0 - x) * (1.0 - x)); }
 // the line's clock at p (land, sh = shoreAt(p)): the nearest shore point pl and (f, t0): the fraction of the period
 // since the last front arrived at the line, and that arrival's time

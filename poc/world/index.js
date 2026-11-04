@@ -239,7 +239,7 @@ export class World {
     // clouds: the weather's cover, drifting with the wind
     this.clouds.set(E.cloud ?? 0.35, E.cloudDens ?? 1, this.time, E.wind);
     // post
-    U.uTime.value = this.time; U.uWet.value = E.wet; U.uWind.value.set(E.wind[0], E.wind[1]); U.uFlash.value = E.flash || 0;
+    U.uTime.value = this.time; U.uWet.value = E.wet; U.uRain.value = E.rain || 0; U.uWind.value.set(E.wind[0], E.wind[1]); U.uFlash.value = E.flash || 0;
     // water: the wind at 10 m (the game's own, else the drawing wind scaled to a breeze), waves past the frame rate faded
     this.timer.begin('waves');
     if (this.waves) {
