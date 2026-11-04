@@ -24,7 +24,7 @@ import * as THREE from 'three';
 import { POISSON, poissonTableData } from './water.js';
 
 export const SHORE = {
-  beach: true,                    // the beach layer (the swash sheet, the wet sand, the sea's edge lifted by the tongue); off: the water ends at the still-water line with the breakers alone
+  beach: false,                   // the beach layer (the swash sheet, the wet sand, the sea's edge lifted by the tongue); off: the water ends at the still-water line with the breakers alone
   tex: 256,                       // texels a chunk side
   levels: [{ s: 0.5, slots: 32, margin: 32 }, { s: 4, slots: 12, margin: 256 }, { s: 16, slots: 6, margin: 1024 }], // texel size, slots kept, metres the bake looks past the chunk
   near: 1,                        // chunks round the eye's wanted at each level (1: the 3 x 3)

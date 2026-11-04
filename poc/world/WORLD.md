@@ -215,6 +215,13 @@ water at the very edge foams in patches, more where the waves work.
 **Sand under the water is matte**: wet sand shines only above the water; under it the sand's roughness is back to
 dry and the shine is the water's own surface.
 
+**The beach layer is off** (`SHORE.beach = false`, W3.1): the water and its foam end at the still-water line, the
+sand wet over the first centimetres at the border. The sheet and the sand's memory below read the tongue's clock and
+reach at the nearest point of the water line; where the coast bends that point jumps from one stretch to another along
+straight lines (the coast's medial axis), and the tongue jumped with it: straight-edged zigzags on the sand, white once
+the sea's foam was carried onto the sheet. Kept in the code for a driver without that jump (a solved swash, or a clock
+smoothed along the shore).
+
 **The swash sheet** (`post.js`, `shoreSheet`). The water washes the sand as water: on every sand pixel within reach
 of the line the composite asks whether the tongue's level stands above the sand — one tongue per wave, on the water
 line's own clock (the phase of the wave arriving at the nearest shore point, so every height of the beach sees the
