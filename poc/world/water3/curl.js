@@ -84,9 +84,16 @@ void main() {
       float shoal = pow(clamp(max(dC, 0.6) / ${SHORE.dMax.toFixed(1)}, 0.04, 1.0), -0.25);
       float a0 = uSurf.x * gNear * gExpo * shoal * sw3Group(cx, uWTime), a = min(a0, 0.42 * dC + 0.02), rel = a0 / dC;
       float cyc = floor((ph + 3.14159265) / 6.2831853), early = 0.5 + 0.5 * w2noise(cx / 33.0 + vec2(cyc * 7.3, cyc * 3.1), 614);
-      float lo = 0.12 + 0.14 * early, hi = 0.3 + 0.2 * early;
-      float stage = clamp(smoothstep(lo, hi + 0.15, rel) * uLook3.w, 0.0, 1.0);
-      float show = smoothstep(lo, lo + 0.08, rel) * (1.0 - smoothstep(hi + 0.2, hi + 0.45, rel)) * smoothstep(0.03, 0.2, a0) * smoothstep(0.1, 0.35, dC);
+      // an event, once for each crest: the crest breaks where the depth falls to a0 / rb (its break line); the time since
+      // it crossed it (the distance past it, over the sand's slope, at the crest's speed) runs the lip: it is thrown,
+      // curls over, plunges and is gone within te seconds (longer for a bigger wave), and the wave goes on as a bore.
+      // The next crest does it again at its own break line
+      float rb = 0.21 + 0.17 * early, db = a0 / rb;
+      vec3 cn = clipNormal(cx); float tb = max(sqrt(max(1.0 - cn.y * cn.y, 0.0)) / max(cn.y, 0.05), 0.004);
+      float tSince = (db - dC) / tb / sqrt(9.81 * max(dC, 0.1));
+      float te = 0.8 + 0.7 * clamp(a0, 0.0, 1.5), ev = tSince / te;
+      float stage = clamp(smoothstep(0.0, 0.85, ev) * uLook3.w, 0.0, 1.0);
+      float show = smoothstep(0.0, 0.12, ev) * (1.0 - smoothstep(0.95, 1.25, ev)) * smoothstep(0.03, 0.2, a0) * smoothstep(0.1, 0.35, dC);
       if (show > 0.002) {
         // the lip: phase 0 (the crest) to lipWidth behind it, root to tip. Past the tip the sheet goes straight down
         // into the water in front of the face (the lip plunging in), ahead of the crest straight down into the wave's

@@ -40,7 +40,7 @@ import { WATER, WATER_CAUSTIC_GLSL, POISSON } from '../water.js';
 import { SWASH_GLSL, SURF_GLSL } from './swash.js';
 import { SurfFoam } from './surffoam.js';
 import { bakeFoamTexture } from './foamtex.js';
-import { FoamField } from './foamfield.js';
+import { FoamField, FOAM_FIELD } from './foamfield.js';
 import { CurlMesh } from './curl.js';
 import { SHORE } from '../shorefield.js';
 
@@ -217,7 +217,7 @@ void main() {
 ${head}
 ${coast}
 ${SKY_GLSL}
-uniform vec3 uSun, uSunColor, uSkyUp; uniform sampler2D uSkyView, tScene, tFoam, tFoamField; uniform vec3 uFoamWin; uniform mat4 uVP; uniform float uWLost, uRain, uIce, uGlint, uWPeak;
+uniform vec3 uSun, uSunColor, uSkyUp; uniform sampler2D uSkyView, tScene, tFoam, tFoamField, tFoamFar; uniform vec3 uFoamWin, uFoamFarWin; uniform mat4 uVP; uniform float uWLost, uRain, uIce, uGlint, uWPeak;
 in vec3 vW; in vec2 vXZ; in float vCell, vNear, vJ; in vec2 vCoastSlope; in vec3 vCoast, vFlow; in vec4 vRough; out vec4 oColor;
 uniform float uDebug;
 const float W_N = ${f(WATER.n)};
@@ -422,7 +422,9 @@ void main() {
   // the foam field (water3/foamfield.js): what the whitecaps and breakers made, carried in and lingering; past its
   // window the folds' own whitecaps, this frame's
   float ff = 0.0, inField = 0.0;
-  { vec2 fu = (vXZ - uFoamWin.xy) / uFoamWin.z; float e = min(min(fu.x, fu.y), min(1.0 - fu.x, 1.0 - fu.y)); if (e > 0.0) { inField = smoothstep(0.0, 0.08, e); ff = texture(tFoamField, fu).r * inField; } }
+  { vec2 fu = (vXZ - uFoamFarWin.xy) / uFoamFarWin.z; float e = min(min(fu.x, fu.y), min(1.0 - fu.x, 1.0 - fu.y)); if (e > 0.0) { inField = smoothstep(0.0, 0.08, e); ff = texture(tFoamFar, fu).r * inField; } }
+  { vec2 fu = (vXZ - uFoamWin.xy) / uFoamWin.z; float e = min(min(fu.x, fu.y), min(1.0 - fu.x, 1.0 - fu.y)); if (e > 0.0) { float k = smoothstep(0.0, 0.08, e); ff = mix(ff, texture(tFoamField, fu).r, k); inField = max(inField, k); } }
+  ff = clamp(ff, 0.0, 1.0);
   float fm = clamp((0.6 + uLook2.y - vJ) * uLook2.z, 0.0, 1.0) * smoothstep(0.25, 0.6, texture(tFoam, vXZ / 1.4).r + 0.2) * (1.0 - inField);
   // the foam's pattern: the baked lace (water3/foamtex.js) at two scales, drifting apart slowly so it churns
   float fs = max(uLook3.y, 0.05); // the panel's foam size: the lace's scale too
@@ -469,6 +471,7 @@ void main() {
     this.foam = shore ? new SurfFoam(world, this) : null;
     // the foam that lasts and travels (water3/foamfield.js): made by whitecaps and breakers, carried in, lingering
     this.field = new FoamField(world, this); Object.assign(U, this.field.read);
+    this.fieldFar = new FoamField(world, this, FOAM_FIELD.far, ['tFoamFar', 'uFoamFarWin']); Object.assign(U, this.fieldFar.read); // the open sea's whitecaps, 2 km round
     // the breakers' curl over it (water3/curl.js): a mesh of its own, where there is a shore table
     this.curl = shore ? new CurlMesh(world, this) : null;
     if (this.curl) this.scene.add(this.curl.mesh);
@@ -484,9 +487,10 @@ void main() {
     U.uSkyUp.value.copy(W.sky.skyUp);
     const wt = W.uWTime.value, wdt = this._wt === undefined ? 0 : wt - this._wt; this._wt = wt;
     this.field.update(W.renderer, wdt, camera, wind || [0, 0], W.waterCtl.linger);
+    this.fieldFar.update(W.renderer, wdt, camera, wind || [0, 0], W.waterCtl.linger * 2.0); // open-sea foam lingers longer (the panel's time, doubled)
     U.uTime.value = W.uWTime.value; U.uWLost.value = W.waves.lostSlope || 0;
     const dt = this._t === null ? 0 : Math.min(Math.max(time - this._t, 0), 0.25); this._t = time;
     if (wind) U.uDrift.value.x += wind[0] * 0.6 * dt, U.uDrift.value.y += wind[1] * 0.6 * dt; // gusts run at about the wind's pace
   }
-  dispose() { this.mesh.geometry.dispose(); this.mat.dispose(); if (this.foam) this.foam.dispose(); this.foamRT.dispose(); this.field.dispose(); if (this.curl) this.curl.dispose(); }
+  dispose() { this.mesh.geometry.dispose(); this.mat.dispose(); if (this.foam) this.foam.dispose(); this.foamRT.dispose(); this.field.dispose(); this.fieldFar.dispose(); if (this.curl) this.curl.dispose(); }
 }
