@@ -211,7 +211,7 @@ const WCTL = {};
     ['steepness', 'Steepness', 0, 1.5, 0.01],
     ['curl', 'Curl', 0, 2, 0.01],
     ['foam', 'Foam charge', 0, 2, 0.01],
-    ['foamSize', 'Foam size', 0.1, 4, 0.01],
+    ['foamSize', 'Foam size', 0.02, 4, 0.01],
     ['foamAmount', 'Foam amount', 0, 1, 0.01],
     ['linger', 'Foam linger', 0.2, 15, 0.1, (v) => v.toFixed(1) + ' s'],
     ['Water'],

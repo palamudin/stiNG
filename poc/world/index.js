@@ -86,8 +86,8 @@ export class World {
     // shore foam band, caustics, glitter; and the foam's size and amount
     this.uLook = { value: new THREE.Vector4(1, 0, 0.06, 1.6) }; this.uLook2 = { value: new THREE.Vector4(0.06, 0.05, 1.3, 0.2) }; this.uLook3 = { value: new THREE.Vector4(1, 1, 0.75, 0) };
     this.uAbs = { value: new THREE.Vector3(...WATER.absorb) }; this.uSca = { value: new THREE.Vector3(...WATER.scatter) };
-    const ctl0 = { preset: 'ours', clarity: 1, roughness: 0, refraction: 0.06, sssPeak: 1.6, sssView: 0.06, foamBias: 0.05, foamScale: 1.3, shoreBand: 0.2, caustics: 1, glitter: WATER.glint, foamSize: 1, foamAmount: 0.75, linger: 4, curl: 1,
-      windDir: null, fetchKm: fetch0 / 1000, waveScale: 1, spread: WAVES.spread, swellScale: 1, swellDir: Math.round(WAVES.swellTurn * 180 / Math.PI), chop: WAVES.chop, timeScale: 1, shoreAuto: true, amplitude: 0.8, wavelength: 30, speed: 1, steepness: 1, foam: 1 };
+    const ctl0 = { preset: 'ours', clarity: 1, roughness: 0, refraction: 0.06, sssPeak: 1.6, sssView: 0.06, foamBias: 0.05, foamScale: 1.3, shoreBand: 0.2, caustics: 1, glitter: WATER.glint, foamSize: 0.1, foamAmount: 0.75, linger: 4, curl: 1,
+      windDir: null, fetchKm: fetch0 / 1000, waveScale: 1, spread: WAVES.spread, swellScale: 1, swellDir: Math.round(WAVES.swellTurn * 180 / Math.PI), chop: WAVES.chop, timeScale: 1, shoreAuto: true, amplitude: 0.8, wavelength: 30, speed: 1, steepness: 1, foam: 0.45 };
     this.waterCtl = opts.waterCtl || {}; for (const k in ctl0) if (!(k in this.waterCtl)) this.waterCtl[k] = ctl0[k]; // the caller's object, kept across rebuilds
     this.uSurf = { value: new THREE.Vector4(0.8, 30, 1, 1) }; this.uSurfX = { value: new THREE.Vector4(1, 0, 0, 0) };
     this.uWTime = { value: 0 }; this.waterTime = 0; // the water's clock: the panel's time scale
