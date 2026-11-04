@@ -102,7 +102,7 @@ vec2 wRain(vec2 p, float t, float amt) {
     if (w2hash01(ci, cj, 94 + int(floor(t * 0.9 + ph))) > amt) continue;
     vec2 ctr = c + vec2(w2hash01(ci, cj, 95), w2hash01(ci, cj, 96));
     vec2 d = g - ctr; float r = length(d);
-    float ring = sin((r - r0 * 1.6) * 28.0) * exp(-pow((r - r0 * 1.6) * 6.0, 2.0)) * (1.0 - r0);
+    float rr = (r - r0 * 1.6) * 6.0; float ring = sin((r - r0 * 1.6) * 28.0) * exp(-rr * rr) * (1.0 - r0); // squared by hand: pow of a negative base is undefined
     s += r > 1e-3 ? d / r * ring * 0.25 : vec2(0.0);
   }
   return s;

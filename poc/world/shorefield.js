@@ -165,7 +165,7 @@ struct ShoreWave { float y; vec2 slope; float foam; float lace; float a; float p
 ShoreWave shoreWaves(vec2 p, vec4 sh, float depth, float t, float cell, vec2 st) {
   ShoreWave o = ShoreWave(0.0, vec2(0.0), 0.0, 0.0, 0.0, 0.0, 0.0);
   float sdf = sh.x; vec2 dir = sh.yz;
-  float env = smoothstep(220.0, 60.0, -sdf) * step(1e-3, dot(dir, dir)) * smoothstep(-0.3, 0.3, depth);
+  float env = (1.0 - smoothstep(60.0, 220.0, -sdf)) * step(1e-3, dot(dir, dir)) * smoothstep(-0.3, 0.3, depth);
   if (env <= 0.0 || st.x <= 0.0) return o;
   float cel = shoreCelerity(depth);
   float shoal = clamp(pow(max(depth, 0.6) / ${SHORE.dMax.toFixed(1)}, -0.25), 1.0, 2.2);
@@ -175,7 +175,7 @@ ShoreWave shoreWaves(vec2 p, vec4 sh, float depth, float t, float cell, vec2 st)
     float a0 = 0.5 * st.x * (i == 0 ? 1.0 : 0.45) * env * shoal * group;
     float a = min(a0, 0.39 * depth), rel = a0 / max(depth, 0.05);
     float ph = w * (t + sh.w) + pn * (i == 0 ? 1.0 : 1.37) + float(i) * 2.1;
-    float c = 0.5 + 0.5 * cos(ph), cp = pow(c, 0.6), s = sin(ph);
+    float c = max(0.5 + 0.5 * cos(ph), 0.0), cp = pow(c, 0.6), s = sin(ph); // max: a GPU's cos can overshoot 1 by a bit at large phases, and pow of a negative is NaN
     float bl = 1.0 - smoothstep(0.1, 0.3, k * cell / 6.2831853);
     o.y += bl * a * (2.0 * cp * c - 0.78);
     o.slope += bl * dir * (-1.6 * a * k * cp * s);
@@ -200,7 +200,7 @@ vec3 shoreSwash(vec2 p, vec4 sh, float hgt, float R2, float t, vec2 st) {
   float ph = w * (t + sh.w) + shorePhaseNoise(p);
   float f = fract(ph / 6.2831853);              // 0 as the front passes, climbing to 1 before the next
   float reach = R2 * (0.55 + 0.45 * shoreGroup(p, t)); // this set's run-up
-  float up = smoothstep(reach, reach - 0.03, hgt);
+  float up = 1.0 - smoothstep(reach - 0.03, reach, hgt);
   float film = up * (1.0 - smoothstep(0.42, 0.6, f + 0.2 * hgt / max(reach, 1e-3)));   // the film sits, then drains from the top down
   float edge = up * (1.0 - smoothstep(0.0, 0.06, f)) * smoothstep(-0.02, 0.0, hgt);
   return vec3(film, edge, reach);
