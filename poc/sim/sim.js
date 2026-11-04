@@ -1019,7 +1019,7 @@ export class Sim {
         w.walking = false;
         if (cmd.mx || cmd.mz) this._walk(w, cmd);
         if (w.state !== 'landed') break;
-        if (this._cupCheck(w)) break;
+        if (this._cupCheck(w) || this._waterCheck(w)) break;
         if (this._onHotGrate(w)) { this._die(w, 'burned on a grill', null); break; } // T1-10
         this._feed(w, driven);
         if (w.state !== 'landed') break;
@@ -1145,7 +1145,7 @@ export class Sim {
     }
     if (this.hilly) { const dg = this.ground(w.x, w.z) - g0; if (dg !== 0) { w.y -= dg; this._collide(w); } }
     this._webCheck(w, p0);
-    this._cupCheck(w);
+    this._cupCheck(w); this._waterCheck(w);
     if (this._onHotGrate(w)) { this._die(w, 'burned on a grill', null); return; } // T1-10
     // grounded without fuel: starvation clock
     if (w.energy <= 0 && w.y <= W.radius + 1e-6) {
@@ -1835,6 +1835,7 @@ export class Sim {
     w.chew++;
     w.energy -= T.energy.cruisePerSec * DT * T.energy.hoverShare;
     if (w.chewAt && w.chewAt.water) { // a load of water (T2-1)
+      if (this._waterCheck(w)) return; // the wind has got up: the surface takes it
       if (w.chew < T.water.fillTicks / (w.colony === 'own' ? 1 + T.roles.fill * this.roleLevel('water') : 1)) return; // water carriers' level (GDD 6.8)
       w.state = 'fly'; w.chewAt = null;
       w.carry = { kind: 'water', amount: T.water.amount, what: 'water' };
@@ -1931,6 +1932,35 @@ export class Sim {
     }
   }
 
+  // How rough a water's surface is now (0 calm .. 1 whitecaps): the wind over it by its fetch, so a birdbath or a
+  // puddle stays glassy and a pond whips up on a windy afternoon (GDD 7.5)
+  waterRough(s) {
+    const W = T.water, v = this.wind, f = Math.min(1, s.r / W.roughFetch);
+    return clamp01((Math.sqrt(v.x * v.x + v.z * v.z) * f - W.roughCalm) / (W.roughWild - W.roughCalm));
+  }
+  // Calm water bears a wasp (it stands on it and drinks at it); rough water does not: touching the surface it goes
+  // under, and must fight its way out (_drownStep) or drown. Returns true if it went under.
+  _waterCheck(w) {
+    const W = T.water, v = this.wind;
+    if (Math.sqrt(v.x * v.x + v.z * v.z) < W.roughCalm + W.sinkAt * (W.roughWild - W.roughCalm)) return false; // no water is that rough now
+    if (w.state !== 'fly' && w.state !== 'stunned' && w.state !== 'landed' && w.state !== 'chewing') return false;
+    if (w.state === 'chewing' && !(w.chewAt && w.chewAt.water)) return false;
+    if (w.y > 1.2 || (w.waterSafe || 0) > this.tick) return false;
+    for (const rec of this.activeChunks) {
+      for (const s of this.waterIn(rec)) {
+        if (w.y - T.wasp.radius > s.y + W.touch || w.y < s.y - 0.05) continue;
+        if (s.pond ? !inPond(s.pond, w.x, w.z) : sq(w.x - s.x) + sq(w.z - s.z) > s.r * s.r) continue;
+        if (this.waterRough(s) < W.sinkAt) continue;
+        const driven = w.id === this.drivenId;
+        w.state = 'drowning'; w.vx = w.vy = w.vz = 0; w.land = null; w.chewAt = null; w.y = s.y;
+        w.drown = { key: chunkKey(rec.cx, rec.cz), water: s.kind, until: this.tick + T.drown.ticks, progress: 0, prevBurst: 1 };
+        this.emit('fellIn', { id: w.id, driven, water: s.kind });
+        return true;
+      }
+    }
+    return false;
+  }
+
   _fallIn(w, cup, key, driven) {
     w.state = 'drowning'; w.vx = w.vy = w.vz = 0; w.land = null;
     w.x = cup.x; w.y = cup.level; w.z = cup.z;
@@ -1990,6 +2020,11 @@ export class Sim {
       // a wet, stunned wasp would only fall straight back in
       const rec = this.records.get(d.key), cp = rec && d.i !== undefined ? this.cupsIn(rec)[d.i] : null;
       w.drown = null; w.state = 'stunned'; w.stateTicks = 30;
+      if (d.water) { // off rough water: up and away, let be a moment to get clear
+        w.state = 'fly'; w.y += 0.05; w.vy = 0.6; w.waterSafe = this.tick + T.water.sinkGrace;
+        this.emit('climbedOut', { id: w.id });
+        return;
+      }
       if (cp) {
         const yw = w.yaw || 0, sx = dsin(yw), sz = dcos(yw), out = T.cup.r + T.wasp.radius + 0.012;
         w.x = cp.x + sx * out; w.y = T.cup.rim + T.wasp.radius; w.z = cp.z + sz * out;
@@ -1999,7 +2034,7 @@ export class Sim {
       this.emit('climbedOut', { id: w.id });
       return;
     }
-    if (this.tick >= d.until) this._die(w, 'drowned in a drink', null);
+    if (this.tick >= d.until) this._die(w, d.water ? `drowned in a ${d.water}` : 'drowned in a drink', null);
   }
 
   _nestTouch(w) {
@@ -4969,7 +5004,7 @@ export class Sim {
       let best = null, bs = Infinity;
       const R2 = T.water.range * T.water.range;
       this.activeChunks.forEach((rec, ri) => this.waterIn(rec).forEach((s) => {
-        if (sq(s.x - home.x) + sq(s.z - home.z) > R2) return;
+        if (sq(s.x - home.x) + sq(s.z - home.z) > R2 || this.waterRough(s) >= T.water.sinkAt) return; // not a pond whipped up by the wind
         const sc = Math.sqrt(dist2(w, s)) + h32(w.id, s.i, ri + 60, this.day) * 6;
         if (sc < bs) { bs = sc; best = { kind: 'water', key: chunkKey(rec.cx, rec.cz), i: s.i }; }
       }));

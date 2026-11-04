@@ -495,7 +495,7 @@ namespace Sting.Core
                     var rec = activeChunks[ri];
                     foreach (var s in WaterIn(rec))
                     {
-                        if (Sq(s.x - home.x) + Sq(s.z - home.z) > R2) continue;
+                        if (Sq(s.x - home.x) + Sq(s.z - home.z) > R2 || WaterRough(s) >= T.water.sinkAt) continue; // not a pond whipped up by the wind
                         Num sc = Sqrt(D2(w, new V3(s.x, s.y, s.z))) + H32(w.id, s.i, ri + 60, day) * 6;
                         if (sc < bs) { bs = sc; best = new AiTarget { kind = "water", key = rec.key, i = s.i }; }
                     }

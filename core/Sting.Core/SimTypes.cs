@@ -29,7 +29,7 @@ namespace Sting.Core
     public sealed class UnderMove { public int to, t; }
     public sealed class Under { public string hex, posture, key; public int node, sel, entered; public UnderMove move; public Num nextPress; public bool mxHeld, mzHeld; }
     public sealed class Ball { public Num temp, progress, prevBurst, bees; /** balled by the line's own bees (T2-11), and ticks with none on it */ public bool own; public int idle; }
-    public sealed class Drown { public string key; public int until, i = -1; public Num progress, prevBurst; }
+    public sealed class Drown { public string key, water; public int until, i = -1; public Num progress, prevBurst; }
     public sealed class Cup { public Num x, z, level; public int i; }
     public sealed class Nectar { public Num lv; public long m; }
     public sealed class Rob { public string key; public int h; public Num progress, prevSting; }
@@ -79,6 +79,8 @@ namespace Sting.Core
         public Land land; public int noLandUntil; public string trapCause;
         /// the swoop (GDD 7.9): the tick its dash ends, and the tick the next one may start
         public int swoopUntil, swoopReady;
+        /// the tick until which it is let be by rough water, having just fought its way out (GDD 7.5)
+        public int waterSafe;
         /// the tick it last spat out a firefly
         public int spat = int.MinValue / 2;
         /// its species (GDD 6.8); a bee that has stung a person and dies of it (T2-11); pollen packed so far, in ticks

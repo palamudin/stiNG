@@ -61,7 +61,7 @@ namespace Sting.Core
                     w.walking = false;
                     if (cmd.mx != 0 || cmd.mz != 0) Walk(w, cmd);
                     if (w.state != "landed") break;
-                    if (CupCheck(w)) break;
+                    if (CupCheck(w) || WaterCheck(w)) break;
                     if (OnHotGrate(w)) { Die(w, "burned on a grill", null); break; } // T1-10
                     Feed(w, driven);
                     if (w.state != "landed") break;
@@ -204,7 +204,7 @@ namespace Sting.Core
             }
             if (hills) { Num dg = Ground(w.x, w.z) - g0; if (dg != 0) { w.y -= dg; Collide(w); } }
             WebCheck(w, p0);
-            CupCheck(w);
+            CupCheck(w); WaterCheck(w);
             if (OnHotGrate(w)) { Die(w, "burned on a grill", null); return; } // T1-10
 
             // grounded without fuel: starvation clock
@@ -800,6 +800,7 @@ namespace Sting.Core
             w.energy -= T.energy.cruisePerSec * T.DT * T.energy.hoverShare;
             if (w.chewAt != null && w.chewAt.water) // a load of water (T2-1)
             {
+                if (WaterCheck(w)) return; // the wind has got up: the surface takes it
                 if (w.chew < T.water.fillTicks / (w.colony == "own" ? 1 + T.roles.fill * RoleLevel("water") : (Num)1)) return; // water carriers' level (GDD 6.8)
                 w.state = "fly"; w.chewAt = null;
                 w.carry = new Carry { kind = "water", amount = T.water.amount, what = "water" };
@@ -1176,6 +1177,35 @@ namespace Sting.Core
             return (sugar, protein);
         }
 
+        /// How rough a water's surface is now (0 calm .. 1 whitecaps): the wind over it by its fetch (sim.js)
+        public Num WaterRough(WaterSrc s)
+        {
+            var v = Wind; Num f = Min(1, s.r / T.water.roughFetch);
+            return Clamp01((Sqrt(v.x * v.x + v.z * v.z) * f - T.water.roughCalm) / (T.water.roughWild - T.water.roughCalm));
+        }
+        /// Calm water bears a wasp; rough water does not: touching the surface it goes under (sim.js). True if it did.
+        bool WaterCheck(Wasp w)
+        {
+            var v = Wind;
+            if (Sqrt(v.x * v.x + v.z * v.z) < T.water.roughCalm + T.water.sinkAt * (T.water.roughWild - T.water.roughCalm)) return false; // no water is that rough now
+            if (w.state != "fly" && w.state != "stunned" && w.state != "landed" && w.state != "chewing") return false;
+            if (w.state == "chewing" && !(w.chewAt != null && w.chewAt.water)) return false;
+            if (w.y > 1.2 || w.waterSafe > tick) return false;
+            foreach (var rec in activeChunks)
+                foreach (var s in WaterIn(rec))
+                {
+                    if (w.y - T.wasp.radius > s.y + T.water.touch || w.y < s.y - 0.05) continue;
+                    if (s.pond != null ? !World.InPond(s.pond, w.x, w.z, 0) : Sq(w.x - s.x) + Sq(w.z - s.z) > s.r * s.r) continue;
+                    if (WaterRough(s) < T.water.sinkAt) continue;
+                    bool driven = w.id == drivenId;
+                    w.state = "drowning"; w.vx = w.vy = w.vz = 0; w.land = null; w.chewAt = null; w.y = s.y;
+                    w.drown = new Drown { key = rec.key, water = s.kind, until = tick + T.drown.ticks, progress = 0, prevBurst = 1 };
+                    Emit("fellIn", ("id", w.id), ("driven", driven), ("water", s.kind));
+                    return true;
+                }
+            return false;
+        }
+
         void FallIn(Wasp w, Cup cup, string key, bool driven)
         {
             w.state = "drowning"; w.vx = w.vy = w.vz = 0; w.land = null;
@@ -1246,6 +1276,12 @@ namespace Sting.Core
                 // out over the rim and down the outside of the cup (GDD 7.5), the way it faces (see sim.js)
                 Cup cp = d.i >= 0 && records.TryGet(d.key, out var drec) ? CupsIn(drec)[d.i] : null;
                 w.drown = null; w.state = "stunned"; w.stateTicks = 30;
+                if (d.water != null) // off rough water: up and away, let be a moment to get clear
+                {
+                    w.state = "fly"; w.y += 0.05; w.vy = 0.6; w.waterSafe = tick + T.water.sinkGrace;
+                    Emit("climbedOut", ("id", w.id));
+                    return;
+                }
                 if (cp != null)
                 {
                     Num sx = DSin(w.yaw), sz = DCos(w.yaw), o = T.cup.r + T.wasp.radius + 0.012;
@@ -1257,7 +1293,7 @@ namespace Sting.Core
                 Emit("climbedOut", ("id", w.id));
                 return;
             }
-            if (tick >= d.until) Die(w, "drowned in a drink", null);
+            if (tick >= d.until) Die(w, d.water != null ? "drowned in a " + d.water : "drowned in a drink", null);
         }
 
         void AddDeposited(string kind, Num amt)

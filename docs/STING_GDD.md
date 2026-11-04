@@ -2443,6 +2443,20 @@ On seed 12346 a hive had stood beside the nest, so a game began in a fight. This
 
 **What it costs.** The shadow map is redrawn every other frame, not every frame, which halves the cost of drawing it. A map one frame old still puts its shadows in the right places, because its matrix is the one it was drawn with. Only a moving person's or wasp's shadow trails by a frame. Reading the map in the shaders costs the same as before: the sample count is unchanged, and only the map is bigger.
 
+### 18.87 The wasp lifted whole; rough water takes a wasp under
+
+**The wasp lifted whole.** On hills everything is drawn lifted onto the ground in its vertex shader, each vertex by the ground under it. A flying wasp was lifted the same way, so its body leaned with the slope beneath it, as if it pitched itself. Wasps (the driven one, AI, rivals and remote players') are now lifted as one, by the ground under the wasp (`rigidWasp`), with their own materials apart from the lifted ones. In flight only the player pitches the wasp.
+
+**Rough water.** Calm water bears a wasp: it stands on it and drinks at it. The wind whips a water rough by its fetch:
+- roughness = (wind × min(1, radius / `roughFetch` 5 m) − `roughCalm` 1.2 m/s) / (`roughWild` 2.8 − `roughCalm`), clamped to 0..1;
+- at `sinkAt` 0.5 or over, a wasp touching the surface (within `touch` 3 mm) goes under: standing on it, skimming it, landing on it, or drinking at it when the wind gets up;
+- under, it mashes burst (Space or Shift) to break the surface and fly off, or drowns in `drown.ticks` ("drowned in a pond"); AI wasps get the cup's chance to escape;
+- once out it is let be for `sinkGrace` 90 ticks to get clear;
+- a birdbath (22 cm) or a puddle (under 0.9 m) never gets rough; a pond (3–9 m) does in a wind over about 2 m/s;
+- AI water carriers pass over a rough pond for a bath or a puddle.
+
+The sim's wind is the day's at the hour (`windAt`). This is in the sim with its C# twin and behaviour block 64. The scenario digests did not change. Wild lakes and the sea are drawn by World v3 but are not yet in the sim, so they do not take a wasp under.
+
 ---
 
 ## 19. Feature tiers and the current stack

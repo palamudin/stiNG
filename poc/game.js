@@ -1724,6 +1724,19 @@ scene.add(bulge);
 const WATER_MAT = new THREE.MeshLambertMaterial({ color: '#6f93ad', transparent: true, opacity: 0.75, depthWrite: false }); // T2-1
 const CARRY_MAT = { pollen: mat('#e8b830'), wasp: mat('#d4a514'), moth: mat('#8a8478'), 'bee brood': mat('#efe6cf'), fly: mat('#1b1a17'), caterpillar: mat('#6fa83a'), bee: mat('#a7742a'), pulp: mat('#b7ab92'), water: new THREE.MeshLambertMaterial({ color: '#9cc7e6', transparent: true, opacity: 0.7 }) };
 
+// A wasp is lifted onto the ground whole, by the ground under it (terrAt), never vertex by vertex like the world's
+// fixed things: a body lifted per vertex leans with the slope below it, and in flight only the player pitches the
+// wasp. Its materials are kept apart from the lifted ones (the same colours elsewhere are lifted per vertex).
+const RIGID = new Map();
+function rigidMat(m) {
+  let r = RIGID.get(m);
+  if (!r) { r = m.clone(); if (r.defines) delete r.defines.TERRAIN; r.userData.terr = true; r.needsUpdate = true; RIGID.set(m, r); }
+  return r;
+}
+function rigidWasp(g) {
+  g.traverse((o) => { o.userData.ring = true; o.frustumCulled = true; if (o.material) o.material = Array.isArray(o.material) ? o.material.map(rigidMat) : rigidMat(o.material); });
+  return g;
+}
 function renderWasps(alpha, t, dt) {
   const seen = new Set();
   let drivenPos = null;
@@ -1731,14 +1744,14 @@ function renderWasps(alpha, t, dt) {
   for (const w of sim.wasps) {
     seen.add(w.id);
     let g = waspViews.get(w.id);
-    if (!g) { g = buildWasp(false, sim.isRival(w), w.caste, w.sp || 'wasp'); if (sim.hilly) g.traverse((o) => { o.frustumCulled = false; }); waspViews.set(w.id, g); } // the line's sister colonies look like yours (T2-4)
+    if (!g) { g = rigidWasp(buildWasp(false, sim.isRival(w), w.caste, w.sp || 'wasp')); waspViews.set(w.id, g); } // the line's sister colonies look like yours (T2-4)
     const pp = pos.get(w.id);
     const p = pp ? new THREE.Vector3().lerpVectors(pp.p, pp.c, alpha) : V(w);
     const driven = w.id === sim.drivenId;
     if (driven) drivenPos = p;
     // looking out of its own eyes: the body is not drawn (compound eyes see nearly all the way round)
     g.visible = w.state !== 'under' && w.state !== 'robbing' && !(driven && eyeBlend > 0.5); // inside clothes or a hive
-    g.position.copy(p);
+    g.position.copy(p); g.position.y += terrAt(p.x, p.z); // lifted whole (rigidWasp)
     g.scale.setScalar((CASTE_SCALE[w.caste] || 1) * speciesSize(w.sp));
     g.rotation.order = 'YXZ';
     if (driven && w.state !== 'balled') { g.rotation.y = input.yaw; g.rotation.x = w.state === 'landed' ? 0 : -input.pitch * 0.6; }
@@ -1776,7 +1789,7 @@ function renderWasps(alpha, t, dt) {
     g.userData.abdomen.rotation.x = w.state === 'attached' ? 0.5 + Math.sin(t * 0.8) * 0.06 : 0;
     const cv = g.userData.carry, packed = !!(w.carry && w.carry.what === 'pollen' && g.userData.pollen); // a bee's pollen sits in its leg baskets
     cv.visible = !!w.carry && !packed;
-    if (w.carry) cv.material = CARRY_MAT[w.carry.what] || CARRY_MAT.fly;
+    if (w.carry) cv.material = rigidMat(CARRY_MAT[w.carry.what] || CARRY_MAT.fly);
     if (g.userData.pollen) for (const pel of g.userData.pollen) pel.visible = packed;
     if (w.state === 'under') {
       const hv = humanViews.get(w.under.hex);
@@ -1789,8 +1802,8 @@ function renderWasps(alpha, t, dt) {
   for (const [id, r] of sim.remote) {
     seen.add(id);
     let g = waspViews.get(id);
-    if (!g) { g = buildWasp(!r.rival, !!r.rival, r.caste, remoteSpecies(r)); waspViews.set(id, g); g.position.set(r.x, r.y, r.z); }
-    const tgt = new THREE.Vector3(r.x, r.y, r.z);
+    const tgt = new THREE.Vector3(r.x, r.y + terrAt(r.x, r.z), r.z); // lifted whole (rigidWasp)
+    if (!g) { g = rigidWasp(buildWasp(!r.rival, !!r.rival, r.caste, remoteSpecies(r))); waspViews.set(id, g); g.position.copy(tgt); }
     if (g.position.distanceTo(tgt) > 0.5) g.position.copy(tgt); else g.position.lerp(tgt, 1 - Math.exp(-dt * 25));
     g.visible = r.state !== 'under';
     g.scale.setScalar((CASTE_SCALE[r.caste] || 1) * speciesSize(remoteSpecies(r)));
@@ -2753,7 +2766,7 @@ function updateHud() {
   else if (w.state === 'perched') status = `On #${w.perch.hex.slice(0, 4)} · ${zoneLabel(w.perch.zone)}`;
   else if (w.state === 'fighting') status = 'Fighting a rival wasp';
   else if (w.state === 'robbing') status = `Inside the hive · ${Math.round(Math.min(1, w.rob.progress) * 100)}% · mash LMB · Space bails out`;
-  else if (w.state === 'drowning') status = `In the drink · ${Math.max(0, (w.drown.until - sim.tick) / 60).toFixed(1)} s`;
+  else if (w.state === 'drowning') status = `${w.drown.water ? 'Under in rough water' : 'In the drink'} · ${Math.max(0, (w.drown.until - sim.tick) / 60).toFixed(1)} s`;
   else if (!sim._driven()) status = '';
   else if ((w.bodyT ?? 30) < T.cold.flyBody) status = (w.bodyT ?? 30) < T.cold.torpor ? 'Torpid with cold · find warmth or die' : 'Too cold to fly · warm up (rest, sun, a person)';
   else if (sim.feeding) status = 'Feeding';
@@ -2767,7 +2780,7 @@ function updateHud() {
   const h = sim.hint || {};
   if (w.state === 'balled') hint = `Mash ${kbd('Shift')} to break out`;
   else if (w.state === 'webbed') hint = `Mash ${kbd('Shift')} to tear free`;
-  else if (w.state === 'drowning') hint = `Mash ${kbd('Space')} or ${kbd('Shift')} to climb out over the side`;
+  else if (w.state === 'drowning') hint = w.drown.water ? `Mash ${kbd('Space')} or ${kbd('Shift')} to break the surface and fly` : `Mash ${kbd('Space')} or ${kbd('Shift')} to climb out over the side`;
   else if (w.state === 'fighting') hint = `Mash ${kbd('LMB')} to sting it first`;
   else if (w.state === 'landed') hint = w.walking ? 'Walking · it follows the surface round edges, up trunks and under tables · look where you want to go' : `Resting costs no sugar in the warmth · mouse turns · ${kbd('W')}${kbd('A')}${kbd('S')}${kbd('D')} walk on any surface · ${kbd('LMB')} sting someone within reach · ${kbd('Space')} or ${kbd('Shift')} take off`;
   else if (w.state === 'perched') hint = `${kbd('W')}${kbd('A')}${kbd('S')}${kbd('D')} crawl (look up or down to climb) · ${kbd('LMB')} sting · ${kbd('Space')} take off · ${kbd('E')} crawl under at an opening`;
@@ -3161,6 +3174,7 @@ function deathWhy(e) {
   if (e.cause === 'left its sting in a person') return 'A honeybee\'s sting is barbed: it stays in the skin and pumps in the rest of the venom, and the bee dies. Every sting costs a bee. Take over another with Q.';
   if (e.cause === 'cooked by bees') return 'Bees ball an intruder and heat it. Mash Shift before it reaches 46 °C.';
   if (e.cause === 'drowned in a trap') return 'Sweet-smelling bottles at alert level 3 are traps.';
+  if (e.cause === 'drowned in a pond' || e.cause === 'drowned in a bath' || e.cause === 'drowned in a puddle') return 'Calm water bears a wasp; wind whips a pond rough and then the surface takes you. Drink at ponds on still days, at birdbaths and puddles when it blows, and mash Space or Shift the moment you go under.';
   if (e.cause === 'drowned in a drink') return 'Cups are deep. Feed just above the drink without touching it, and mash Space or Shift the moment you slip in.';
   if (e.cause === 'stung inside a hive') return 'Every second inside a hive is a chance for the bees to get you. Mash to grab fast, or bail out with Space.';
   if (e.cause === 'burned on a grill') return 'A lit grate burns on contact. Grab the meat from just above it, never land on it.';
@@ -3183,7 +3197,7 @@ function deathWhy(e) {
     default: return '';
   }
 }
-const DEATH_TITLE = { 'left its sting in a person': 'BARBED', 'taken by a hornet': 'TAKEN', 'eaten by a spider': 'EATEN', 'taken by a bird': 'TAKEN', 'killed by a rival wasp': 'KILLED', slap: 'SWATTED', cover: 'SMOTHERED', 'crushed under clothing': 'CRUSHED', insecticide: 'SPRAYED', 'drowned in a trap': 'DROWNED', 'cooked by bees': 'COOKED', starved: 'STARVED', 'old age': 'SPENT', 'taken by a dragonfly': 'TAKEN', cold: 'CHILLED', 'drowned in a drink': 'DROWNED', 'drowned under a lid': 'SHUT IN', 'stung inside a hive': 'STUNG', 'burned on a grill': 'BURNED', 'cooked over a grill': 'GRILLED' };
+const DEATH_TITLE = { 'left its sting in a person': 'BARBED', 'taken by a hornet': 'TAKEN', 'eaten by a spider': 'EATEN', 'taken by a bird': 'TAKEN', 'killed by a rival wasp': 'KILLED', slap: 'SWATTED', cover: 'SMOTHERED', 'crushed under clothing': 'CRUSHED', insecticide: 'SPRAYED', 'drowned in a trap': 'DROWNED', 'cooked by bees': 'COOKED', starved: 'STARVED', 'old age': 'SPENT', 'taken by a dragonfly': 'TAKEN', cold: 'CHILLED', 'drowned in a drink': 'DROWNED', 'drowned in a pond': 'DROWNED', 'drowned in a bath': 'DROWNED', 'drowned in a puddle': 'DROWNED', 'drowned under a lid': 'SHUT IN', 'stung inside a hive': 'STUNG', 'burned on a grill': 'BURNED', 'cooked over a grill': 'GRILLED' };
 
 function pushSwatAnims(list, frameHex, contactTick) {
   const frame = sim.humanByHex(frameHex);
@@ -3304,7 +3318,7 @@ function handleEvents(events) {
       case 'queenDied': toast('The queen is dead', 'var(--red)', 3); logEvent(`the queen died · ${e.cause}`); break;
       case 'webbed': if (e.driven) { toast('Stuck in a web · mash Shift', 'var(--red)', 2); blip(300, 260, 0.2, 0.05, 'triangle'); } break;
       case 'webEscape': if (e.id === sim.drivenId) toast('Tore free', 'var(--yellow)', 1.2); break;
-      case 'fellIn': if (e.driven) { toast('Slipped into the drink · mash Space or Shift', 'var(--red)', 2); blip(420, 180, 0.25, 0.05, 'sine'); } break;
+      case 'fellIn': if (e.driven) { toast(e.water ? 'The rough water took you under · mash Space or Shift' : 'Slipped into the drink · mash Space or Shift', 'var(--red)', 2); blip(420, 180, 0.25, 0.05, 'sine'); } break;
       case 'climbedOut': if (e.id === sim.drivenId) toast('Climbed out, sticky', 'var(--yellow)', 1.2); break;
       case 'robStart': if (e.driven) { toast(e.feral ? 'Into the wild hive · mash LMB to grab' : 'Into the hive · mash LMB to grab', 'var(--red)', 1.8); } break;
       case 'robbed': if (e.driven) toast('Honey and brood · now get out, the hive is up', 'var(--yellow)', 2.2); else logEvent(`worker ${e.id} robbed a hive`); break;

@@ -1859,6 +1859,37 @@ namespace Sting.Core.Tests
                 Ok(D(I.site.h) >= 10 && D(I.site.h) <= 90 && inside && beyond && step < 3 && wild > 400 && settledChunks > 30 && built == 0 && trees > 300 && wet == 0 && s.wasp.y >= 0 && st.RulesHash() != t1.RulesHash() && st.WorldTag().Contains("wild beyond 400 m"),
                     $"the settled area sits on the wild land {D(I.site.h):0.0} m above the sea at ({D(I.site.x):0}, {D(I.site.z):0}); {settledChunks} settled chunks, {wild} wild ones with nothing built and {trees} trees, none in the water; no step over 3 m across the band ({step:0.00} per 2 m); a sim runs over it");
             }
+            // 64. rough water (GDD 7.5): calm water bears a wasp; the wind whips a pond rough by its fetch and the surface
+            // takes a wasp under, to fight its way out or drown; a birdbath never gets rough
+            {
+                Sim At(V3 wind) { var s = new Sim(new Settings { seed = 1234, birds = false }, new SimOpts { noAI = true }); s.windOverride = wind; return s; }
+                Num R = T.wasp.radius; V3 windy = new V3(4, 0, 0), still = new V3(0.6, 0, 0.3);
+                (Sim s, List<SimEvent> ev, bool went) OnPond(V3 wind, bool mash, int n)
+                {
+                    var s = At(wind); bool went = false;
+                    var ev = RunS(s, n, (sim, i) =>
+                    {
+                        var d = sim.Driven(); if (d == null) return Idle();
+                        if (d.state == "drowning") { went = true; return Idle(c => c.burst = mash ? i % 2 : 0); }
+                        if (!went) { Place(d, P(-66.6, R + 0.002, -2.7)); d.state = "fly"; }
+                        return Idle();
+                    });
+                    return (s, ev, went);
+                }
+                var p0 = At(windy); p0.records.TryGet("-1,0", out var prec); p0.records.TryGet("0,0", out var brec);
+                var src = p0.WaterIn(prec).FirstOrDefault(q => q.kind == "pond"); var bath = p0.WaterIn(brec).FirstOrDefault(q => q.kind == "bath");
+                Ok(src != null && p0.WaterRough(src) >= T.water.sinkAt && bath != null && p0.WaterRough(bath) == 0 && At(still).WaterRough(src) == 0,
+                    $"a pond whips up in a 4 m/s wind (roughness {D(p0.WaterRough(src)):0.00}), a birdbath stays glassy, and a still day leaves the pond calm");
+                var calm = OnPond(still, false, 300);
+                Ok(!calm.went && Count(calm.ev, "fellIn") == 0, $"on a still day a wasp stands on the pond ({calm.s.wasp.state})");
+                var sank = OnPond(windy, false, 600); var died = sank.ev.FirstOrDefault(e => e.type == "waspDied" && (bool)e["driven"]); var fell = Find(sank.ev, "fellIn");
+                Ok(sank.went && fell != null && (string)fell["water"] == "pond" && Cause(died) == "drowned in a pond", $"in the wind the pond takes it under and it drowns ({Cause(died)})");
+                var o = OnPond(windy, true, 300); int oi = o.ev.FindIndex(e => e.type == "climbedOut");
+                Ok(o.went && oi >= 0 && o.ev.Skip(oi).Count(e => e.type == "fellIn") == 0 && o.s.wasp.state == "fly", $"mashing burst breaks the surface and it flies off, let be while it gets clear ({o.s.wasp.state})");
+                var b = At(windy); var bw = b.wasp;
+                var bev = RunS(b, 300, (sim, i) => { if (bw.state == "fly" || bw.state == "landed") Place(bw, P(bath.x, bath.y + R + 0.002, bath.z)); return Idle(); });
+                Ok(Count(bev, "fellIn") == 0, "at a birdbath in the same wind it is never taken under");
+            }
             // 46. feature modifiers (T2-6): woods, towns, water and hives set at world creation act on generation
             {
                 (int forest, int town, int baths, int hives, bool apart) Census(Settings st)

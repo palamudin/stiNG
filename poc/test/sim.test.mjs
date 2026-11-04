@@ -2433,6 +2433,35 @@ function seated(sim, pred) {
     `the settled area sits on the wild land ${I.site.h.toFixed(1)} m above the sea at (${I.site.x.toFixed(0)}, ${I.site.z.toFixed(0)}): its own ground inside, the wild land beyond, no step over 3 m across the band (${step.toFixed(2)} per 2 m); ${settledChunks} settled chunks, ${wild} wild ones with nothing built and ${trees} trees, none in the water; a sim runs over it`);
 }
 
+// 64. Rough water (GDD 7.5): calm water bears a wasp; the wind whips a pond rough by its fetch and then the surface
+// takes a wasp under, to fight its way out or drown. A birdbath never gets rough.
+{
+  const at = (wind) => { const s = new Sim({ seed: 1234, birds: false }, { noAI: true }); Object.defineProperty(s, 'wind', { get: () => wind }); return s; };
+  const pond = { x: -66.6, z: -2.7 }, R = T.wasp.radius;
+  const onPond = (s, mash, n = 600) => {
+    const w = s.wasp; let went = false;
+    const ev = run(s, n, (sim, i) => {
+      const d = sim._driven(); if (!d) return idle();
+      if (d.state === 'drowning') { went = true; return idle({ burst: mash ? i % 2 : 0 }); }
+      if (!went) { place(d, { x: pond.x, y: R + 0.002, z: pond.z }); d.state = 'fly'; }
+      return idle();
+    });
+    return { w, ev, went };
+  };
+  const calm = onPond(at({ x: 0.6, z: 0.3 }), false, 300);
+  const p0 = at({ x: 4, z: 0 }), src = p0.waterIn(p0.records.get('-1,0')).find((q) => q.kind === 'pond'), bath = p0.waterIn(p0.records.get('0,0')).find((q) => q.kind === 'bath');
+  ok(src && p0.waterRough(src) >= T.water.sinkAt && bath && p0.waterRough(bath) === 0 && at({ x: 0.6, z: 0.3 }).waterRough(src) === 0,
+    `a pond whips up in a 4 m/s wind (roughness ${src && p0.waterRough(src).toFixed(2)}), a birdbath stays glassy (${bath && p0.waterRough(bath).toFixed(2)}), and a still day leaves the pond calm`);
+  ok(!calm.went && count(calm.ev, 'fellIn') === 0, `on a still day a wasp stands on the pond (${calm.w.state})`);
+  const sank = onPond(at({ x: 4, z: 0 }), false, 600), died = sank.ev.find((e) => e.type === 'waspDied' && e.driven), fell = sank.ev.find((e) => e.type === 'fellIn');
+  ok(sank.went && fell && fell.water === 'pond' && died && died.cause === 'drowned in a pond', `in the wind the pond takes it under and it drowns (${died && died.cause})`);
+  const out = onPond(at({ x: 4, z: 0 }), true, 300), oi = out.ev.findIndex((e) => e.type === 'climbedOut');
+  ok(out.went && oi >= 0 && out.ev.slice(oi).filter((e) => e.type === 'fellIn').length === 0 && out.w.state === 'fly', `mashing burst breaks the surface and it flies off, let be while it gets clear (${out.w.state})`);
+  const b = at({ x: 4, z: 0 }), bw = b.wasp;
+  const bev = run(b, 300, (sim) => { if (bw.state === 'fly' || bw.state === 'landed') place(bw, { x: bath.x, y: bath.y + R + 0.002, z: bath.z }); return idle(); });
+  ok(count(bev, 'fellIn') === 0, 'at a birdbath in the same wind it is never taken under');
+}
+
 // Tuning as data (GDD 13, T1-22): one plain-text file feeds both sims
 {
   const { unknown, missing } = TUNE_RESULT;

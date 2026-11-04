@@ -194,6 +194,10 @@ export const T = {
     pondPark: 0.35, pondForest: 0.25, pondMin: 4, pondMax: 9, pondForestMin: 3, pondForestMax: 7, pondKeep: 0.5, // people keep this far from a pond's water
     puddles: 5, puddleRMin: 0.25, puddleRMax: 0.9, wetAfter: 20, dryMinutes: 360,
     fillTicks: 60, amount: 1, reach: 0.025,
+    // rough water (GDD 7.5): the wind over a water by its fetch (radius / roughFetch, at most 1) whips it from calm
+    // (roughCalm m/s) to whitecaps (roughWild); at sinkAt and over, a wasp touching the surface (within touch m) goes
+    // under, and once out is let be for sinkGrace ticks. A birdbath or a puddle never gets rough; a pond does on a windy day.
+    roughCalm: 1.2, roughWild: 2.8, roughFetch: 5, sinkAt: 0.5, touch: 0.003, sinkGrace: 90,
     capBase: 2, capPerAdult: 0.06, coolPerDay: 6, smoothing: 0.2,
     nestBase: 30, lethal: 34, lethalSpan: 4, broodCook: 0.6,
     divert: 0.4, income: 0.5, aiShare: 0.6, range: 45,
