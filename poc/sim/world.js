@@ -803,6 +803,7 @@ export function generateChunk(seed, cx, cz, settings) {
   };
 
   const addHive = (x, z, slot) => {
+    if ((x - NEST.treeX) * (x - NEST.treeX) + (z - NEST.treeZ) * (z - NEST.treeZ) < T.bees.nestClear * T.bees.nestClear) return; // not by the first nest
     occupied.push({ x, z, r: 4 });
     const dir = rangeInt(H(slot), 0, 4), fx = [0, 1, 0, -1][dir], fz = [1, 0, -1, 0][dir];
     const hive = { x, z, fx, fz, ex: x + fx * 0.24, ey: 0.47, ez: z + fz * 0.24, bees: [], slot };

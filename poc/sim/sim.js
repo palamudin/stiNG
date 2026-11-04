@@ -3444,9 +3444,10 @@ export class Sim {
   // derived from the seed like the nest sites (so old worlds keep their frozen content). Indices are stable.
   hivesIn(rec) {
     if (rec._hives) return rec._hives;
-    const F = T.feral, sd = Number(this.seed & 0xffffffffn), c = rec.content, list = c.hives.slice();
+    const F = { ...T.feral, nestClear2: T.bees.nestClear * T.bees.nestClear }, sd = Number(this.seed & 0xffffffffn), c = rec.content, list = c.hives.slice();
     const u = (a, b) => hseq(sd, rec.cx, rec.cz, a, b, 983);
     const wild = (x, y, z, nx, nz, slot) => {
+      if ((x - NEST.treeX) * (x - NEST.treeX) + (z - NEST.treeZ) * (z - NEST.treeZ) < F.nestClear2) return; // not by the first nest (T.bees.nestClear)
       const hv = { x, z, fx: nx, fz: nz, ex: x + nx * 0.03, ey: y, ez: z + nz * 0.03, bees: [], slot, feral: true };
       for (let k = 0; k < F.guards + F.foragers; k++) {
         const s = slot * 64 + k * 6;

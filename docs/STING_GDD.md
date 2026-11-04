@@ -2421,6 +2421,20 @@ It is in the rules hash only when set, so standard worlds keep their hash. It is
 - each chunk's merged and instanced meshes now keep their bounds at the ground's height in the chunk's middle, with 14 m to spare for its relief;
 - shared shapes, people and wasps are not culled.
 
+### 18.85 No start in a warzone, the nest always drawn, the classic sea at its level (GEN_VERSION 14)
+
+**Hives keep their distance.** No hive stands within 40 m of the first nest (`bees.nestClear`):
+- not a managed bee box from the generator;
+- not a wild colony in a hollow tree or a shed wall, which the sim derives from the seed.
+
+On seed 12346 a hive had stood beside the nest, so a game began in a fight. This is in the sim with its C# twin. The scenario digests changed, and JS and both C# builds match all 33.
+
+**The nest always drawn.** On shaped ground the nest is drawn lifted, and its bounds were at its foot, so some camera angles culled it. Nests are no longer culled.
+
+**The classic sea.** It shared its material with ponds and baths. Once that material was patched to be lifted onto the ground, the sea was lifted onto the land with it, and laid a sheet of water over the lawn round a village on the wild land. The sea now has its own material, never lifted.
+
+**The flashing in World v3** (fixed in its sky, 10:15). World v3 scaled the sky's colours in place each frame for cloud cover, but refilled them only when its table key changed. Between keys the light sank, by ×0.91 a frame at the game's usual cover, and jumped back at the next key. The sky now rebuilds its colours every frame, eased toward the table's entry.
+
 ---
 
 ## 19. Feature tiers and the current stack

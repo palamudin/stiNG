@@ -317,7 +317,7 @@ function terrFrame(focus) {
   }
   TERR.filled = true;
   if (sim.settings.settled) { // the sea round a settled world's wild land (GDD 21.6), at its level; never lifted (userData.ring)
-    if (!TERR.sea) { TERR.sea = new THREE.Mesh(new THREE.PlaneGeometry(1600, 1600), WATER_MAT); TERR.sea.rotation.x = -Math.PI / 2; TERR.sea.userData.ring = true; TERR.sea.receiveShadow = true; scene.add(TERR.sea); }
+    if (!TERR.sea) { const sm = WATER_MAT.clone(); sm.userData.terr = true; /* never lifted: the shared water material is lifted for ponds and baths */ TERR.sea = new THREE.Mesh(new THREE.PlaneGeometry(1600, 1600), sm); TERR.sea.rotation.x = -Math.PI / 2; TERR.sea.userData.ring = true; TERR.sea.receiveShadow = true; scene.add(TERR.sea); }
     TERR.sea.visible = true; TERR.sea.position.set(Math.round(focus.x / 64) * 64, 0, Math.round(focus.z / 64) * 64);
   } else if (TERR.sea) TERR.sea.visible = false;
   for (const l of rings.update(focus.x, focus.z)) ringTex[l].needsUpdate = true;
@@ -946,7 +946,8 @@ function updateChunkDynamics() {
 
 // a nest's colour by the species that built it: grey paper for wasps, tan paper for hornets, wax for bees (GDD 6.8)
 const NEST_TINT = { wasp: '#ffffff', hornet: '#d8b48a', bee: '#e9b347' };
-function buildNestMesh(n, abandoned, species = 'wasp') {
+function buildNestMesh(n, abandoned, species = 'wasp') { const g = buildNestParts(n, abandoned, species); if (sim.hilly) g.traverse((o) => { o.frustumCulled = false; }); return g; } // lifted onto the ground: never culled by its foot
+function buildNestParts(n, abandoned, species = 'wasp') {
   const g = new THREE.Group(), tint = NEST_TINT[species] || '#ffffff';
   if (n.site === 'wall' || n.site === 'attic' || n.site === 'hollow') {
     // the nest is inside the shed; outside you see papery comb pushing out of the gap

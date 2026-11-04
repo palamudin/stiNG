@@ -50,7 +50,7 @@ namespace Sting.Core
     {
         public const int TICK_RATE = 60;
         public static readonly Num DT = 1.0 / TICK_RATE;
-        public const int GEN_VERSION = 13; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11); 6: birdbaths (T2-1); 7: town centres (T2-5); 8: ponds; 9: a pond beside the home park; 10: lobed ponds with a path, benches and a walker; 11: footings under small things; 12: streets, house pads and front yards graded to code; 13: wild land round a settled area
+        public const int GEN_VERSION = 14; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11); 6: birdbaths (T2-1); 7: town centres (T2-5); 8: ponds; 9: a pond beside the home park; 10: lobed ponds with a path, benches and a walker; 11: footings under small things; 12: streets, house pads and front yards graded to code; 13: wild land round a settled area; 14: no hive near the first nest
 
         public static Num population = 8200000000;
         public static class chunk { public static Num size = 64; public static int activeRadius = 1, discoverRadius = 2; }
@@ -281,6 +281,8 @@ namespace Sting.Core
         public static class bees
         {
             public static int guards = 6, foragers = 14, ballMin = 3, alarmTicks = 1200, returnTicks = 90;
+            /// no hive, managed or wild, within this many metres of the first nest
+            public static Num nestClear = 40;
             public static Num pursueSpeed = 4.2, accel = 30, contact = 0.016, heatPerBeeSec = 0.13, startTemp = 35, lethal = 46, entranceAlarm = 0.5,
                 catchAlarmRadius = 3, hiveAlarmRadius = 8, escapePerPress = 0.35;
         }

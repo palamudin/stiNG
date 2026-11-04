@@ -933,6 +933,7 @@ namespace Sting.Core
             Num U(long a, long b) => HSeq(sd, rec.cx, rec.cz, a, b, 983);
             void Wild(Num x, Num y, Num z, Num nx, Num nz, int slot)
             {
+                if ((x - World.NEST.treeX) * (x - World.NEST.treeX) + (z - World.NEST.treeZ) * (z - World.NEST.treeZ) < T.bees.nestClear * T.bees.nestClear) return; // not by the first nest
                 var hv = new Hive { x = x, z = z, fx = nx, fz = nz, ex = x + nx * 0.03, ey = y, ez = z + nz * 0.03, slot = slot, feral = true };
                 for (int k = 0; k < T.feral.guards + T.feral.foragers; k++)
                 {

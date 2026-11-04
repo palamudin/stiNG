@@ -949,6 +949,7 @@ namespace Sting.Core
 
             void AddHive(Num x, Num z, long slot)
             {
+                if ((x - NEST.treeX) * (x - NEST.treeX) + (z - NEST.treeZ) * (z - NEST.treeZ) < T.bees.nestClear * T.bees.nestClear) return; // not by the first nest
                 occupied.Add(new Occ { x = x, z = z, r = 4 });
                 int dir = RangeInt(H(slot), 0, 4);
                 Num fx = new Num[] { 0, 1, 0, -1 }[dir], fz = new Num[] { 1, 0, -1, 0 }[dir];

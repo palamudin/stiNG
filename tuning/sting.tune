@@ -747,6 +747,7 @@ droneFrom = 780
 droneTo = 960
 
 [bees]
+nestClear = 40
 guards = 6
 foragers = 14
 pursueSpeed = 4.2

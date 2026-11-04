@@ -5,7 +5,7 @@ import { TUNE } from './tunefile.js';
 
 export const TICK_RATE = 60;
 export const DT = 1 / TICK_RATE;
-export const GEN_VERSION = 13; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11); 6: birdbaths (T2-1); 7: town centres (T2-5); 8: ponds; 9: a pond beside the home park; 10: lobed ponds with a path, benches and a walker; 11: footings under small things; 12: streets, house pads and front yards graded to code; 13: wild land round a settled area
+export const GEN_VERSION = 14; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11); 6: birdbaths (T2-1); 7: town centres (T2-5); 8: ponds; 9: a pond beside the home park; 10: lobed ponds with a path, benches and a walker; 11: footings under small things; 12: streets, house pads and front yards graded to code; 13: wild land round a settled area; 14: no hive near the first nest
 
 export const T = {
   population: 8200000000,
@@ -304,6 +304,7 @@ export const T = {
     dcaDist: 150, dcaUp: 18, droneFrom: 780, droneTo: 960 },
 
   bees: {
+    nestClear: 40, // no hive, managed or wild, within this many metres of the first nest: no start in a warzone
     guards: 6, foragers: 14, pursueSpeed: 4.2, accel: 30, contact: 0.016, ballMin: 3,
     heatPerBeeSec: 0.13, startTemp: 35, lethal: 46, entranceAlarm: 0.5, alarmTicks: 1200,
     catchAlarmRadius: 3, hiveAlarmRadius: 8, escapePerPress: 0.35, returnTicks: 90,
