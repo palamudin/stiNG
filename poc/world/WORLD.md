@@ -335,6 +335,16 @@ terrain, cut by the hardware and smoothed by MSAA; the trough is held 4 cm over 
   ~1.5 s, darkness ~45 s). Nothing on or above the line reads the shore table's per-texel values (they step on the
   land side: the teeth). The old water's effects are on the new surface: breaker whitewater, lace, surf-zone foam,
   whitecaps (the Jacobian), the scene's reflection (MSAA paths), glints, rain rings, ice.
+- **The sea state and the surf (after Ultra-Water, MIT).** The template's water panel: wind direction (the weather's
+  until moved), fetch (the sea's wind sea grows over it; a lake's over twice its distance to the shore, so its long waves
+  are a small share and its ripples full), wave scale, spread, swell height and direction, choppiness, time scale (the
+  water's own clock); the surf's first train by its deep-water wavelength, speed and steepness (from the swell until a
+  slider is moved), foam charge. Cascades 600 / 85 / 12 / 2.1 m. The surf (`water3/swash.js` SURF_GLSL): two trains on
+  the shore table's travel time, Green's law, height held to 0.42 of the depth, the crest leaning forward before it
+  collapses into a foam charge running ahead, backwash, and a memory of the last four breakers' foam; light through a
+  steep crest. The shoreline and the wet sand follow the first train. The breakers' whitewater as geometry
+  (`water3/surffoam.js`): billows that burst up where a crest crashes, ride in at the bore's speed and ground on the
+  sand, and backwash streaks; a fixed pool on a world-anchored grid round the camera, each a function of the clock.
 - **Not yet:** rocks as obstacles (channelling, splitting), partly submerged objects' thickness (the floor's depth is
   used, not the depth buffer's).
 

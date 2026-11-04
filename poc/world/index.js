@@ -79,7 +79,15 @@ export class World {
     this.clouds = new Clouds(renderer, this.sky);
     if (wet && floatRT && this.shoreMode === 'live') this.shore = shoreLive(this.clouds);
     this.uSwDir = { value: new THREE.Vector2(1, 0) }; // the far swell's direction (the wave field's), for the coast's trains and the sand
-    this.terrain = makeTerrain(this.clip, { sea: wet ? source.sea : 0, paving: source.kind === 'sting', shore: wet ? 1 : 0, snowLine: wet ? 215 : 1e9, shoreField: this.shore, uShoreWave: this.uShoreWave, uShoreSea: this.uShoreSea, swash3: this.waterMode === 3 && this.shore && !this.shore.live, uSwDir: this.uSwDir });
+    // the water's controls (the template's water panel, after Ultra-Water's): the sea state and the surf. windDir null:
+    // the weather's; shoreAuto: the surf from the swell (its height and period), else the panel's values
+    const fetch0 = (source.water && source.water.fetch) || 120000;
+    const ctl0 = { windDir: null, fetchKm: fetch0 / 1000, waveScale: 1, spread: WAVES.spread, swellScale: 1, swellDir: Math.round(WAVES.swellTurn * 180 / Math.PI), chop: WAVES.chop, timeScale: 1, shoreAuto: true, amplitude: 0.8, wavelength: 30, speed: 1, steepness: 1, foam: 1 };
+    this.waterCtl = opts.waterCtl || {}; for (const k in ctl0) if (!(k in this.waterCtl)) this.waterCtl[k] = ctl0[k]; // the caller's object, kept across rebuilds
+    this.uSurf = { value: new THREE.Vector4(0.8, 30, 1, 1) }; this.uSurfX = { value: new THREE.Vector4(1, 0, 0, 0) };
+    this.uWTime = { value: 0 }; this.waterTime = 0; // the water's clock: the panel's time scale
+    this.uWave = { value: new THREE.Vector4(1, fetch0, 0, 0) };
+    this.terrain = makeTerrain(this.clip, { sea: wet ? source.sea : 0, paving: source.kind === 'sting', shore: wet ? 1 : 0, snowLine: wet ? 215 : 1e9, shoreField: this.shore, uShoreWave: this.uShoreWave, uShoreSea: this.uShoreSea, swash3: this.waterMode === 3 && this.shore && !this.shore.live, uSwDir: this.uSwDir, uSurf: this.uSurf, uSurfX: this.uSurfX, uWTime: this.uWTime });
     this.group = new THREE.Group(); this.group.name = 'world2';
     this.group.add(this.terrain.mesh);
     this.uniforms = this.terrain.uniforms;
@@ -246,14 +254,23 @@ export class World {
     this.timer.begin('waves');
     if (this.waves) {
       this._dtAvg += (Math.min(Math.max(dt, 1 / 240), 0.2) - this._dtAvg) * 0.05;
+      const ctl = this.waterCtl;
+      this.waterTime += Math.min(Math.max(dt, 0), 0.25) * ctl.timeScale; this.uWTime.value = this.waterTime;
       const w10 = (E.wind10 || [E.wind[0] * 8, E.wind[1] * 8]).slice();
       { const m = Math.hypot(w10[0], w10[1]); if (m < WAVES.residual) { const d = m > 1e-3 ? [w10[0] / m, w10[1] / m] : [0.8, 0.6]; w10[0] = d[0] * WAVES.residual; w10[1] = d[1] * WAVES.residual; } } // never flat
+      if (ctl.windDir !== null) { const m = Math.hypot(w10[0], w10[1]), a = ctl.windDir * Math.PI / 180; w10[0] = m * Math.cos(a); w10[1] = m * Math.sin(a); }
+      this.waves.fetch = ctl.fetchKm * 1000; this.waves.U.uChop.value = ctl.chop; this.waves.U.uSpread.value = ctl.spread;
+      this.uWave.value.set(ctl.waveScale, ctl.fetchKm * 1000, 0, 0);
       // the swell from far away (the sea only): its height from the long fetch, its period long and growing with it, so
       // a bigger swell runs slower crests and longer splashes; the same swell drives the wave field and the shore trains
       const seaSw = this.source.sea > -1e5 ? swellState(Math.max(Math.hypot(w10[0], w10[1]), WAVES.swellMin), this.source.water.swellFetch || this.source.water.fetch) : null;
-      const swell = seaSw ? { Hs: Math.max(WAVES.swellHmin, seaSw.Hs), T: Math.min(10.5, Math.max(WAVES.swellT - 1, WAVES.swellT - 1 + 2.5 * seaSw.Hs)) } : null;
+      const swell = seaSw ? { Hs: Math.max(WAVES.swellHmin, seaSw.Hs) * ctl.swellScale, T: Math.min(10.5, Math.max(WAVES.swellT - 1, WAVES.swellT - 1 + 2.5 * seaSw.Hs)), turn: ctl.swellDir * Math.PI / 180 } : null;
       this.swell = swell;
-      this.waves.update(this.time, w10, Math.PI / this._dtAvg, swell);
+      this.waves.update(this.waterTime, w10, Math.PI / this._dtAvg, swell);
+      // the surf (water3/swash.js): from the swell (its height, and its period as a wavelength in deep water, held to
+      // the surf's range), or the panel's values
+      if (swell && ctl.shoreAuto) { ctl.amplitude = Math.min(1.5, Math.max(0.2, 0.35 + 0.55 * swell.Hs)); ctl.wavelength = Math.min(60, Math.max(12, 0.45 * 9.81 * swell.T * swell.T / (2 * Math.PI))); ctl.speed = 1; ctl.steepness = 1; }
+      this.uSurf.value.set(swell ? ctl.amplitude : 0, ctl.wavelength, ctl.speed, ctl.steepness); this.uSurfX.value.x = ctl.foam;
       this.uSwDir.value.copy(this.waves.U.uSwDir.value);
       const st = this.waves.state;
       // the run-up's sea state: significant height H0 and the deep-water wavelength L0 of the peak period (2 pi g / w^2)

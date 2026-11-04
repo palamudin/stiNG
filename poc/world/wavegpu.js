@@ -127,7 +127,7 @@ void main() {
     const U10 = Math.hypot(wind[0], wind[1]), U = this.U, P = this.state = seaState(U10, this.fetch);
     if (U10 > 1e-3) U.uWindDir.value.set(wind[0] / U10, wind[1] / U10);
     if (swell && swell.Hs > 0) {
-      const w = 2 * Math.PI / swell.T, a = WAVES.swellTurn, d = U.uWindDir.value;
+      const w = 2 * Math.PI / swell.T, a = swell.turn ?? WAVES.swellTurn, d = U.uWindDir.value;
       U.uSwK.value = w * w / WAVES.g; U.uSwVar.value = (swell.Hs / 4) ** 2; U.uSwS.value = WAVES.swellS; U.uSwN.value = swellNorm(WAVES.swellS);
       U.uSwDir.value.set(d.x * Math.cos(a) - d.y * Math.sin(a), d.x * Math.sin(a) + d.y * Math.cos(a));
     } else U.uSwVar.value = 0;

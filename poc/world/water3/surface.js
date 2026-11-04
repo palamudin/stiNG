@@ -37,7 +37,8 @@ import * as THREE from 'three';
 import { NOISE_GLSL } from '../noise.js';
 import { SKY_GLSL } from '../sky.js';
 import { WATER, WATER_CAUSTIC_GLSL, POISSON } from '../water.js';
-import { SWASH, SWASH_GLSL } from './swash.js';
+import { SWASH_GLSL, SURF_GLSL } from './swash.js';
+import { SurfFoam } from './surffoam.js';
 import { SHORE } from '../shorefield.js';
 
 export const SURFACE = {
@@ -87,7 +88,8 @@ export class WaterSurface {
       ...world.clip.uniforms, ...world.sky.uniforms, ...(shore ? shore.uniforms : {}),
       uCam: { value: new THREE.Vector3() }, uGridScale: { value: 1 }, uWL: { value: field.U.uL.value }, uTime: { value: 0 }, uDrift: { value: new THREE.Vector2() },
       uSeaLevel: { value: world.source.sea }, uSkyUp: { value: new THREE.Color() }, uWLost: { value: 0 },
-      uShoreWave: world.uShoreWave, uSwDir: world.uSwDir,
+      uSurf: world.uSurf, uSurfX: world.uSurfX, uWTime: world.uWTime, uSwDir: world.uSwDir,
+      uWave: world.uWave, // (the panel's wave scale, the sea's fetch m, -, -)
       tScene: { value: null }, tDepth: { value: null }, uVP: { value: new THREE.Matrix4() },
       uLogF: world.post.U.uLogF, uDebug: world.post.U.uDebug, uRain: world.post.U.uRain, uIce: world.post.U.uIce, uGlint: world.post.U.uGlint, uWPeak: world.post.U.uWPeak,
       tCaus: { value: world.caustics ? world.caustics.rt.texture : null }, uCaus: world.post.U.uCaus,
@@ -100,12 +102,27 @@ ${NOISE_GLSL}
 ${world.clip.glsl()}
 ${shore ? shore.glsl() + '\n#define W3_COAST' : ''}
 ${this.ssr ? '#define W3_SSR' : ''}
-uniform vec3 uCam; uniform float uGridScale, uSeaLevel, uTime; uniform vec4 uWL; uniform vec2 uDrift;
+uniform vec3 uCam; uniform float uGridScale, uSeaLevel, uTime; uniform vec4 uWL, uWave; uniform vec2 uDrift;
+// the water's kind, its roughness: the sea's wind sea grows over the sea's fetch; a lake's over its own width (twice
+// the distance to its shore, from the shore table), so its long waves are a small share of the sea's and its ripples
+// as full (short waves saturate within metres); the panel's wave scale on all of it. Per cascade
+vec4 w3Rough(vec2 p, float level) {
+  vec4 m = vec4(uWave.x);
+  if (level > uSeaLevel + 0.5) {
+    float fe = 400.0;
+#ifdef W3_COAST
+    vec4 sh = shoreAt(p); if (gShoreKnow > 0.0 && abs(sh.x) < 9.0e3) fe = clamp(-2.0 * sh.x, 20.0, uWave.y);
+#endif
+    float r = sqrt(fe / max(uWave.y, fe));
+    m *= vec4(0.0, clamp(3.0 * r, 0.05, 1.0), clamp(10.0 * r, 0.3, 1.0), 1.0);
+  }
+  return m;
+}
 ${cs.map((c) => `uniform sampler2D tWD${c}, tWS${c};`).join(' ')}
 vec2 w3Rot(vec2 v, vec2 cs) { return vec2(cs.x * v.x - cs.y * v.y, cs.y * v.x + cs.x * v.y); }
 // the cascades' weights by the depth under the water: the long ones need depth, the chop reaches the beach
 // (the first cascade holds the far swell; a lake, above the sea's level, has none)
-vec4 w3Damp(float depth, float level) { float sw = smoothstep(1.5, 8.0, depth) * step(level, uSeaLevel + 0.5), mid = smoothstep(0.3, 3.0, depth), ch = smoothstep(-0.2, 1.0, depth); return vec4(sw, mid, ch, ch); }
+vec4 w3Damp(float depth, float level) { return vec4(smoothstep(1.5, 8.0, depth) * step(level, uSeaLevel + 0.5), smoothstep(0.6, 5.0, depth), smoothstep(0.2, 2.0, depth), smoothstep(-0.2, 0.6, depth)); } // 600, 85, 12, 2.1 m tiles
 // the detiling blend's weight for cascade c at p (0: the plain read, 1: the rotated one)
 float w3Blend(vec2 p, float L, int c) { return smoothstep(-0.4, 0.4, w2noise(p / (L * ${f(S.blendTiles)}), 700 + c)); }
 // the chop's gusts: patches of rougher and calmer water drifting with the wind (cascade 1 a little, 2 and 3 more)
@@ -120,39 +137,8 @@ vec2 w3Gust(vec2 p) { float n = w2noise((p - uDrift) / ${f(S.gust)}, 710) + 0.5 
     // ---- the coast's swell (vertex): displacement and slope of the three trains, their foam; sw3Ctx has been run
     const coast = /* glsl */ `
 #ifdef W3_COAST
-uniform vec4 uShoreWave;
 ${SWASH_GLSL}
-vec2 gCoastSlope = vec2(0.0); vec3 gCoastFoam = vec3(0.0); // (whitewater, lace, the surf zone's standing foam)
-vec3 w3Coast(vec2 p, float depth, float cell) {
-  gCoastSlope = vec2(0.0); gCoastFoam = vec3(0.0);
-  float cel = sqrt(9.81 * clamp(depth, ${SHORE.dMin.toFixed(2)}, ${SHORE.dMax.toFixed(1)}));
-  float shoal = clamp(pow(max(depth, 0.6) / ${SHORE.dMax.toFixed(1)}, -0.25), 1.0, 2.2);
-  // three trains: variance Hs^2 / 16 split three ways (a = Hs / sqrt(24)), the set held under the breaking depth
-  float A0 = uShoreWave.x * 0.2041 * gNear * gExpo * shoal;
-  float A = A0 * min(1.0, 0.39 * depth / max(2.2 * A0, 1e-4)), rel = 2.2 * A0 / max(depth, 0.05);
-  vec3 d = vec3(0.0); float sy = 0.0, sx = 0.0; vec2 set = vec2(0.0);
-  for (int i = 0; i < 3; i++) {
-    float w = 6.2831853 / sw3Period(i), k = w / cel;
-    float bl = 1.0 - smoothstep(0.1, 0.3, k * cell / 6.2831853); // a train shorter than a few cells fades instead of aliasing
-    float a = A * bl, ph = sw3Phase(i, uTime, gTau, gPn);
-    // Gerstner: the water rides forward on the crest; steeper as the depth runs out, never looping
-    float q = min(0.5 + 2.0 * a / max(depth, 0.1), 0.9 / max(3.0 * a * k, 1e-4));
-    float c = cos(ph), s = sin(ph);
-    d.y += a * c; d.xz += gDir * (q * a * s);
-    sy += a * k * s; sx += q * a * k * c; set += vec2(c, s);
-  }
-  gCoastSlope = gDir * (sy / max(1.0 - sx, 0.1));
-  // whitewater: a crest breaks when the set's unbroken height passes 0.78 of the depth, early or late along its length
-  // in a new pattern every wave, stronger in the sets; white on its face, trailing behind it; lace behind that; and
-  // where waves break often, standing foam between the crests
-  float ph0 = sw3Phase(0, uTime, gTau, gPn), cyc = floor((ph0 + 3.14159) / 6.2831853);
-  float early = w2noise(p / 30.0 + vec2(cyc * 7.3, cyc * 3.1), 614);
-  float breaking = smoothstep(0.17 + 0.06 * early, 0.32 + 0.08 * early, rel) * smoothstep(0.03, 0.15, 1.1 * A0) * (0.4 + 0.6 * length(set) / 3.0);
-  float psi = mod(ph0 + 3.14159, 6.2831853) - 3.14159;
-  gCoastFoam = vec3(breaking * smoothstep(-0.7, 0.0, psi) * exp(-max(psi, 0.0) * 1.3), breaking * 0.3 * exp(-mod(ph0, 6.2831853) * 0.45),
-    smoothstep(0.17, 0.45, rel) * smoothstep(0.03, 0.15, 1.1 * A0) * (0.55 + 0.45 * smoothstep(0.45, 1.2, rel)));
-  return d;
-}
+${SURF_GLSL}
 #endif`;
 
     this.mat = new THREE.ShaderMaterial({
@@ -162,7 +148,7 @@ vec3 w3Coast(vec2 p, float depth, float cell) {
 #include <logdepthbuf_pars_vertex>
 ${head}
 ${coast}
-out vec3 vW; out vec2 vXZ; out float vCell, vNear, vJ; out vec2 vCoastSlope; out vec3 vCoast, vFlow;
+out vec3 vW; out vec2 vXZ; out float vCell, vNear, vJ; out vec2 vCoastSlope; out vec3 vCoast, vFlow; out vec4 vRough;
 void main() {
   bool skirt = position.y > 0.5;
   float r = length(position.xz);
@@ -173,6 +159,7 @@ void main() {
   float bed = -1e4, depth = 1e4;
   if (dc < ${S.floorReach.toFixed(1)}) { bed = clipHeight(xz); depth = level - bed; }
   vec4 k = w3Damp(depth, level);
+  vRough = skirt ? vec4(uWave.x) : w3Rough(xz, level); k *= vRough;
   float cell = max(r, 1.0) * ${grid.cellStep.toFixed(5)} * uGridScale;
   vec4 d = vec4(0.0); vNear = 0.0; vCoastSlope = vec2(0.0); vCoast = vec3(0.0);
   // the water's kind here: a river's share and velocity (none past the floor's reach)
@@ -182,7 +169,7 @@ void main() {
   if (!skirt) {
 #ifdef W3_COAST
     // the coast here (the sea's only: a lake has no swell), read once for the trains and the swash
-    if (bed > -1e3 && depth > -3.0 && level <= uSeaLevel + 0.5 && uShoreWave.x > 0.0) coast = sw3Ctx(xz);
+    if (bed > -1e3 && depth > -3.0 && level <= uSeaLevel + 0.5 && uSurf.x > 0.0) coast = sw3Ctx(xz);
     if (coast && depth > 0.0) { d.xyz += w3Coast(xz, depth, cell) * (1.0 - fl); vNear = gNear; vCoastSlope = gCoastSlope * (1.0 - fl); vCoast = gCoastFoam * (1.0 - fl); k.x *= 1.0 - gNear; }
 #endif
     k.x *= 1.0 - fl; // a river carries no swell
@@ -208,11 +195,11 @@ void main() {
   // the shoreline: over the sand the surface is a sheet at the shoreline's height, thin at its tip (1 cm) and
   // thickening behind it, and under the sand past the tip by as much as the sand stands over the shoreline; in the
   // last centimetres of water it is lifted to the same sheet. One height for this, the pixels' edge test and the sand
-  if (bed > -1e3 && depth < 0.5 && depth > -3.0 && level <= uSeaLevel + 0.5 && uShoreWave.x > 0.0) {
+  if (bed > -1e3 && depth < 0.5 && depth > -3.0 && level <= uSeaLevel + 0.5 && uSurf.x > 0.0) {
     float e = max(cell, 0.25);
     vec2 grad = vec2(clipHeight(xz + vec2(e, 0.0)) - clipHeight(xz - vec2(e, 0.0)), clipHeight(xz + vec2(0.0, e)) - clipHeight(xz - vec2(0.0, e))) / (2.0 * e);
     sw3Beach(xz, grad); gExpo *= 1.0 - fl; // no swash up a river's banks
-    float s, th = level + sw3Shore(xz, length(grad), uTime, s) - bed;
+    float s, th = level + sw3Shore(xz, length(grad), uWTime, s) - bed;
     float sheet = bed + (th > 0.0 ? min(0.12, 0.012 + 0.3 * th) : max(th, -0.15));
     P.y = depth < 0.0 ? sheet : max(P.y, sheet);
   }
@@ -227,7 +214,7 @@ ${head}
 ${coast}
 ${SKY_GLSL}
 uniform vec3 uSun, uSunColor, uSkyUp; uniform sampler2D uSkyView, tScene; uniform mat4 uVP; uniform float uWLost, uRain, uIce, uGlint, uWPeak;
-in vec3 vW; in vec2 vXZ; in float vCell, vNear, vJ; in vec2 vCoastSlope; in vec3 vCoast, vFlow; out vec4 oColor;
+in vec3 vW; in vec2 vXZ; in float vCell, vNear, vJ; in vec2 vCoastSlope; in vec3 vCoast, vFlow; in vec4 vRough; out vec4 oColor;
 uniform float uDebug;
 const float W_N = ${f(WATER.n)};
 const vec3 W_ABS = vec3(${WATER.absorb.map(f).join(', ')}), W_SCA = vec3(${WATER.scatter.map(f).join(', ')});
@@ -297,7 +284,7 @@ void main() {
   // the floor under this point of the surface, and the waves' weights for it (as the vertices had them)
   float lv = clipWater(vW.xz), bed = clipHeight(vW.xz), depth = lv - bed;
   float D = max(vW.y - bed, 0.0); // the water's thickness under the point
-  vec4 k = w3Damp(depth, lv); k.x *= 1.0 - vNear;
+  vec4 k = w3Damp(depth, lv) * vRough; k.x *= 1.0 - vNear;
   float fl = clamp(vFlow.x, 0.0, 1.0); vec2 fv = vFlow.yz; float sp = length(fv);
   k.x *= 1.0 - fl;
   vec3 fph = w3FlowPh(vXZ); mat2 fM = w3FlowM(fv);
@@ -327,10 +314,10 @@ void main() {
   // the sand at the wrong moment); its sheet's foam
   float swLace = 0.0, swWhite = 0.0, thin = 0.06;
 #ifdef W3_COAST
-  if (depth < 0.3 && depth > -3.0 && lv <= uSeaLevel + 0.5 && uShoreWave.x > 0.0) {
+  if (depth < 0.3 && depth > -3.0 && lv <= uSeaLevel + 0.5 && uSurf.x > 0.0) {
     vec3 cn = clipNormal(vW.xz); vec2 grad = -cn.xz / max(cn.y, 0.05);
     sw3Beach(vW.xz, grad); gExpo *= 1.0 - fl; // no swash up a river's banks
-    float s, th = lv + sw3Shore(vW.xz, length(grad), uTime, s) - bed;
+    float s, th = lv + sw3Shore(vW.xz, length(grad), uWTime, s) - bed;
     if (depth < 0.0 && th <= 0.0) discard;
     // a bubbly band behind the tip while it climbs; sparse remnants in the backwash, thinning as it drains; the
     // bore's white over the sheet, fresh as it arrives
@@ -407,6 +394,13 @@ void main() {
     spec *= mix(1.0, gm, uGlint);
   }
   vec3 c = mix(body, refl, F * edge) + spec * edge;
+  // light through a steep crest: where a surf wave stands high and its face is steep the water is thin enough for the
+  // sun and sky to come through it green, brightest looking toward the sun (the lip before it breaks)
+#ifdef W3_COAST
+  { float crest = clamp((vW.y - lv) / max(uSurf.x, 0.1), 0.0, 1.5), steep = smoothstep(0.12, 0.45, length(vCoastSlope));
+    float back = 0.35 + 0.65 * pow(max(dot(-V, normalize(vec3(uSun.x, 0.0, uSun.z) + vec3(0.0, 0.2, 0.0))), 0.0), 3.0);
+    c += vec3(0.04, 0.42, 0.3) * (uSunColor * sunUp * 0.5 + uSkyUp * 0.35) * crest * crest * steep * back * edge; }
+#endif
   // ice (deep winter): a pale, rough sheet over the water, the sky softly in it
   if (uIce > 0.0) { float ic = smoothstep(0.0, 0.6, uIce) * edge; vec3 iceCol = vec3(0.72, 0.8, 0.88) * (uSkyUp * 0.7 + uSunColor * sunUp * 0.25) * (0.9 + 0.1 * w2noise(vXZ / 1.5, 302)); c = mix(c, iceCol + skyAt(Rv) * 0.08, ic); }
   // ---- foam: where the surface folds (whitecaps), on the breakers' faces, the lace behind them, the surf zone's
@@ -449,6 +443,9 @@ void main() {
     this.mesh.onBeforeRender = (r, s, cam) => { U.uVP.value.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse); };
     // drawn on its own after the scene (post.js), reading the scene's colour under it
     this.scene = new THREE.Scene(); this.scene.add(this.mesh);
+    // the breakers' whitewater over it (water3/surffoam.js): where there is a shore table to find the surf with
+    this.foam = shore ? new SurfFoam(world, this) : null;
+    if (this.foam) this.scene.add(this.foam.streaks, this.foam.billows);
     this._t = null;
   }
   // once a frame: the camera, the light, the gusts' drift
@@ -458,9 +455,9 @@ void main() {
     const above = Math.max(0, camera.position.y - W.waterAt(camera.position.x, camera.position.z));
     U.uGridScale.value = Math.max(1, above / 2);
     U.uSkyUp.value.copy(W.sky.skyUp);
-    U.uTime.value = time; U.uWLost.value = W.waves.lostSlope || 0;
+    U.uTime.value = W.uWTime.value; U.uWLost.value = W.waves.lostSlope || 0;
     const dt = this._t === null ? 0 : Math.min(Math.max(time - this._t, 0), 0.25); this._t = time;
     if (wind) U.uDrift.value.x += wind[0] * 0.6 * dt, U.uDrift.value.y += wind[1] * 0.6 * dt; // gusts run at about the wind's pace
   }
-  dispose() { this.mesh.geometry.dispose(); this.mat.dispose(); }
+  dispose() { this.mesh.geometry.dispose(); this.mat.dispose(); if (this.foam) this.foam.dispose(); }
 }

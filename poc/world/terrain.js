@@ -73,7 +73,7 @@ export function makeTerrain(clip, opts = {}) {
   if (shore) Object.assign(U, shore.uniforms, { uShoreWave: opts.uShoreWave || { value: new THREE.Vector4(0, 8, 0, 8) }, uShoreSea: opts.uShoreSea || { value: opts.sea ?? 0 } });
   const CLIP = clip.glsl() + CLOUD_SHADOW_GLSL;
   // water 3: the sand wet where and since the water's own shoreline was over it (water3/swash.js)
-  if (shore && opts.swash3) U.uSwDir = opts.uSwDir;
+  if (shore && opts.swash3) Object.assign(U, { uSwDir: opts.uSwDir, uSurf: opts.uSurf, uSurfX: opts.uSurfX, uWTime: opts.uWTime });
   const SHORE = shore ? shore.glsl() + '\n' + SHORE_WAVE_GLSL + '\n#define T_SHORE\n' + (opts.swash3 ? SWASH_GLSL + '\n#define T_SWASH3\n' : '') : '';
   const VERT_HEAD = `${CLIP}\nattribute float aLevel;\nvarying vec3 vW;\n`;
   const VERT_BODY = /* glsl */ `
@@ -171,7 +171,7 @@ float hfShadow(vec2 p, float h0, float dist) {
     // water 3: wet where and since the water's shoreline was over the sand; the gloss gone a second and a half after
     // it left, the darkness in about 45 s (the highest sand, left first, dries first); under the water, wet
     vec2 ws = vec2(1.0 - smoothstep(-0.01, 0.0, hgt), 0.0);
-    if (TW <= uShoreSea + 0.5 && uShoreWave.x > 0.0) { vec2 grad = -TN.xz / max(TN.y, 0.05); sw3Beach(P, grad); gExpo *= 1.0 - clamp(clipFlow(P).x, 0.0, 1.0); vec3 sw = sw3Wet(P, hgt, length(grad), uTime); ws = vec2(max(ws.x, sw.x), sw.y * (1.0 - sw.z)); }
+    if (TW <= uShoreSea + 0.5 && uSurf.x > 0.0) { vec2 grad = -TN.xz / max(TN.y, 0.05); sw3Beach(P, grad); gExpo *= 1.0 - clamp(clipFlow(P).x, 0.0, 1.0); vec3 sw = sw3Wet(P, hgt, length(grad), uWTime); ws = vec2(max(ws.x, sw.x), sw.y * (1.0 - sw.z)); }
 #else
     vec2 ws = SHORE_BEACH == 1 ? shoreWet(P, shoreAt(P), hgt, TN, uTime, shoreState(TW)) : vec2(1.0 - smoothstep(-0.01, 0.03, hgt), 0.0);
 #endif

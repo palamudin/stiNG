@@ -56,7 +56,7 @@ async function makeWorld() {
     // the game's world set down in the wild one (sources/composite.js): the settled area's radius is the start's kind
     if (state.source !== 'sting') src = compositeSource(src, wildSource({ seed: state.seed, blocky: state.blocky }), { radius: state.source === 'town' ? 420 : 150 });
   }
-  world = new World(renderer, scene, camera, src, { quality: state.quality, shore: SHORE_MODE });
+  world = new World(renderer, scene, camera, src, { quality: state.quality, shore: SHORE_MODE, waterCtl: WCTL });
   world.build(cam.fx, cam.fz);
   standIns();
 }
@@ -143,7 +143,7 @@ function showStats() {
   if (!world) return;
   const i = world.frameInfo || { calls: 0, tris: 0 }; i.triangles = i.tris;
   const d = cam.dist, ds = d < 1 ? (d * 100).toFixed(0) + ' cm' : d < 1000 ? d.toFixed(d < 10 ? 1 : 0) + ' m' : (d / 1000).toFixed(2) + ' km';
-  const g = world.timer.ms, gpu = world.timer.on ? (g.total ? `gpu ${g.total.toFixed(1)} ms: ` + ['scene', 'shore', 'clouds', 'composite', 'rays', 'dof', 'bloom', 'final', 'waves'].filter((k) => g[k] !== undefined).map((k) => `${k} ${g[k].toFixed(1)}`).join(' · ') : 'gpu timing…') : 'gpu timing: not given by this browser';
+  const g = world.timer.ms, gpu = world.timer.on ? (g.total ? `gpu ${g.total.toFixed(1)} ms: ` + ['scene', 'water', 'shore', 'clouds', 'composite', 'rays', 'dof', 'bloom', 'final', 'waves'].filter((k) => g[k] !== undefined).map((k) => `${k} ${g[k].toFixed(1)}`).join(' · ') : 'gpu timing…') : 'gpu timing: not given by this browser';
   const w = world.weather, wx = w ? `${w.kind}, ${w.temp.toFixed(0)} °C, wind ${Math.hypot(...w.wind).toFixed(0)} m/s` : state.weather;
   const sm = world.post.samplers, dbg = world.post.U.uDebug.value, smt = (sm ? ` · samplers ${sm.composite}/${sm.max}` : '') + ` · shore by ${world.shoreMode}` + (world.surface ? ` · water ${(world.surface.stats.verts / 1000).toFixed(0)}k verts` : '') + (dbg ? " · DEBUG water's kinds: blue large, green river, bands its flow" : '');
   $('stats').textContent = `${fps.toFixed(0)} fps · ${i.calls} draws · ${(i.triangles / 1000).toFixed(0)}k tris · ${(world.forest.stats.far / 1000).toFixed(0)}k far cells${smt}\n${gpu}\nview ${ds} · ${seasonName(state.day)} day ${state.day} · ${wx} · ${world.forest.stats.trees} near trees`;
@@ -189,6 +189,57 @@ function segment(id, key, on) {
 segment('segSource', 'source', () => { if (state.source !== 'wild') { cam.fx = 0; cam.fz = 0; } else { const s = findStart(); cam.fx = s.x; cam.fz = s.z; } makeWorld(); });
 segment('segQ', 'quality', () => makeWorld());
 segment('segWeather', 'weather');
+// ---- the water's controls (after Ultra-Water's panel): the sea state and the surf, read by the world each frame. The
+// wind's direction follows the weather until its slider is moved; the surf follows the swell until one of its sliders
+// is moved ('from the swell' gives it back)
+const WCTL = {};
+{
+  const rows = [
+    ['Waves'],
+    ['windDir', 'Wind dir', -180, 180, 1, (v) => (v === null ? 'weather' : v.toFixed(0) + '°')],
+    ['fetchKm', 'Fetch', 1, 1000, 1, (v) => v.toFixed(0) + ' km'],
+    ['waveScale', 'Wave scale', 0, 3, 0.01],
+    ['spread', 'Spread', 0, 1, 0.01],
+    ['swellScale', 'Swell', 0, 3, 0.01],
+    ['swellDir', 'Swell dir', -180, 180, 1, (v) => v.toFixed(0) + '° off wind'],
+    ['chop', 'Choppiness', 0, 2, 0.01],
+    ['timeScale', 'Time scale', 0, 3, 0.01],
+    ['Shore waves'],
+    ['amplitude', 'Amplitude', 0, 1.5, 0.01, (v) => v.toFixed(2) + ' m'],
+    ['wavelength', 'Wavelength', 8, 60, 0.5, (v) => v.toFixed(1) + ' m'],
+    ['speed', 'Speed', 0.3, 2, 0.01],
+    ['steepness', 'Steepness', 0, 1.5, 0.01],
+    ['foam', 'Foam charge', 0, 2, 0.01],
+  ];
+  const shoreKeys = ['amplitude', 'wavelength', 'speed', 'steepness'], outs = {}, ins = {};
+  const box = document.createElement('div'); box.style.display = 'grid'; box.style.gap = '8px';
+  for (const r of rows) {
+    if (r.length === 1) { const h = document.createElement('div'); h.className = 'hint'; h.style.cssText = 'color: var(--yellow); letter-spacing: .12em; text-transform: uppercase; font-size: 10px; margin-top: 4px'; h.textContent = r[0]; box.appendChild(h); continue; }
+    const [key, label, lo, hi, step, fmt = (v) => v.toFixed(2)] = r;
+    const row = document.createElement('div'); row.className = 'row';
+    row.innerHTML = `<label for="w_${key}">${label}</label><input id="w_${key}" type="range" min="${lo}" max="${hi}" step="${step}"><output id="ow_${key}"></output>`;
+    box.appendChild(row);
+    const el = row.querySelector('input'); ins[key] = el; outs[key] = [row.querySelector('output'), fmt];
+    el.addEventListener('input', () => { WCTL[key] = parseFloat(el.value); if (shoreKeys.includes(key)) WCTL.shoreAuto = false; });
+  }
+  const bt = document.createElement('div'); bt.className = 'seg';
+  bt.innerHTML = '<button id="wWindAuto">Wind dir from weather</button><button id="wShoreAuto">Surf from the swell</button>';
+  box.appendChild(bt);
+  const note = document.createElement('p'); note.className = 'note';
+  note.textContent = 'The sea state: fetch is the open water the wind has blown over (a lake uses its own width), the swell comes from weather far away, choppiness pinches the crests, time scale runs the water faster or slower. The surf: its first train, by its wavelength in deep water, its speed and its steepness; it follows the swell until a slider here is moved.';
+  box.appendChild(note);
+  $('segQ').before(box);
+  $('wWindAuto').addEventListener('click', () => { WCTL.windDir = null; });
+  $('wShoreAuto').addEventListener('click', () => { WCTL.shoreAuto = true; });
+  // the panel follows the values (the weather's and the swell's set some of them)
+  setInterval(() => {
+    for (const k in outs) {
+      const v = WCTL[k]; if (v === undefined) continue;
+      const [o, fmt] = outs[k]; o.textContent = fmt(v);
+      if (v !== null && document.activeElement !== ins[k]) ins[k].value = v;
+    }
+  }, 300);
+}
 // ---- tours: a continuous zoom from the whole region down into the grass and back, turning slowly
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 function tween(from, to, secs, onDone) {
