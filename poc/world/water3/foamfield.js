@@ -51,7 +51,7 @@ void main() {
   // whitecaps: the open water folding (the 85 m and 12 m cascades' Jacobian), by the panel's bias and scale
   float lod1 = max(0.0, log2(TX * ${field.N}.0 / uWL.y)), lod2 = max(0.0, log2(TX * ${field.N}.0 / uWL.z)); // the folds the texel can hold
   float J = 1.0 + (textureLod(tWD1, p / uWL.y, lod1).w - 1.0) * smoothstep(0.6, 5.0, depth) + (textureLod(tWD2, p / uWL.z, lod2).w - 1.0) * smoothstep(0.2, 2.0, depth);
-  make = clamp((0.6 + uLook2.y - J) * uLook2.z, 0.0, 1.0) * 0.8;
+  make = clamp((0.6 + uLook2.y - J) * uLook2.z, 0.0, 1.0) * 0.5;
 #ifdef FF_COAST
   // the surf: its crest's whitewater and the charge it throws ahead, made in proportion to the wave that broke; the
   // foam behind carried shoreward at the bore's speed
@@ -59,12 +59,14 @@ void main() {
     w3Coast(p, depth, TX);
     float big = smoothstep(0.1, 0.9, uSurf.x * gNear * gExpo);
     make = max(make, gCoastFoam.x * mix(0.55, 1.0, big));
-    v += gDir * sqrt(9.81 * clamp(depth, 0.3, 6.0)) * 0.75 * gNear;
+    // foam left behind stays where it was made and only drifts in slowly; the bore's own white is made afresh at its
+    // front each frame (the crest's whitewater and charge), so it keeps up with the wave without the field dragging
+    v += gDir * 0.25 * gNear;
   }
 #endif
   float prev = prevAt(p - v * uDt); // carried from upstream
   // foam builds up where breaking goes on (a surf beach stays foamed), fading over the linger time where it stops
-  float f = min(prev * exp(-uDt / max(uLinger, 0.05)) + make * uDt * 3.0, 1.5);
+  float f = min(prev * exp(-uDt / max(uLinger, 0.05)) + make * uDt * 2.0, 1.0);
   oColor = vec4(f, 0.0, 0.0, 1.0);
 }`,
     });

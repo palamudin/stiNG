@@ -88,7 +88,7 @@ void main() {
       // it crossed it (the distance past it, over the sand's slope, at the crest's speed) runs the lip: it is thrown,
       // curls over, plunges and is gone within te seconds (longer for a bigger wave), and the wave goes on as a bore.
       // The next crest does it again at its own break line
-      float rb = 0.21 + 0.17 * early, db = a0 / rb;
+      float rb = 0.345 + 0.09 * early, db = a0 / rb; // the breaking limit (water3/swash.js)
       vec3 cn = clipNormal(cx); float tb = max(sqrt(max(1.0 - cn.y * cn.y, 0.0)) / max(cn.y, 0.05), 0.004);
       float tSince = (db - dC) / tb / sqrt(9.81 * max(dC, 0.1));
       float te = 0.8 + 0.7 * clamp(a0, 0.0, 1.5), ev = tSince / te;

@@ -125,7 +125,7 @@ vec3 w3Coast(vec2 p, float depth, float cell) {
     float cyc = floor((ph + 3.14159265) / 6.2831853);
     float early = 0.5 + 0.5 * w2noise(p / 33.0 + vec2(cyc * 7.3, cyc * 3.1 + float(i) * 31.0), 614);
     float energy = smoothstep(0.03, 0.2, a0);
-    float breaking = smoothstep(0.12 + 0.14 * early, 0.3 + 0.2 * early, rel0) * energy;
+    float breaking = smoothstep(0.30 + 0.09 * early, 0.39 + 0.09 * early, rel0) * energy; // the breaking limit: height 0.78 of the depth (amplitude 0.39), early or late along the crest
     // the lip leans furthest just before it collapses; over the next half radian the crest gives up to 48% of its
     // height to the whitewater running ahead
     float collapse = breaking * smoothstep(-0.75, -0.12, psi) * (1.0 - smoothstep(0.05, 0.7, psi));
