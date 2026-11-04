@@ -198,9 +198,12 @@ void main() {
     float hgt = -depth, e = max(cell, 0.25);
     float tb = length(vec2(clipHeight(xz + vec2(e, 0.0)) - bed, clipHeight(xz + vec2(0.0, e)) - bed)) / e;
     float tp, Tr; float eta = sw3Tongue(xz, tb, uTime, tp, Tr);
+    // one continuous surface: the tongue's level (level + eta), held to 5 cm over the sand. Past the tip it is under
+    // the sand by the same amount the sand stands over the tongue, so the edge is where the sand's height crosses the
+    // tongue's (a contour), interpolated smoothly across the grid's triangles; never a vertex raised beside one left
+    // at the sea's level (the triangles' sawtooth)
+    if (eta > 0.0) P.y = max(P.y, min(level + eta, bed + 0.05));
     if (eta > hgt) {
-      float th = clamp((eta - hgt) * 0.3, 0.004, 0.05);
-      P.y = max(P.y, bed + th);
       float up = step(tp, Tr);
       vSwash = vec3((1.0 - smoothstep(0.0, 0.025, eta - hgt)) * mix(0.35, 1.0, up), exp(-tp / (0.9 * Tr)) * smoothstep(0.0, 0.08, eta - hgt), 1.0);
     }
