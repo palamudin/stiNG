@@ -231,7 +231,7 @@ float hfShadow(vec2 p, float h0, float dist) {
   reflectedLight.indirectDiffuse *= mix(1.0, 0.7, canopy);
 `);
   };
-  mat.customProgramCacheKey = () => 'w2terrain' + C.levels; // the clipmap's level count is in the code
+  mat.customProgramCacheKey = () => 'w2terrain' + C.levels + (shore ? 's' : '') + (opts.swash3 ? '3' : ''); // the clipmap's level count and the shore's code are in it
 
   const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
   depth.onBeforeCompile = (sh) => {
