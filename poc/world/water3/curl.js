@@ -15,7 +15,7 @@
 import * as THREE from 'three';
 import { NOISE_GLSL } from '../noise.js';
 import { SHORE } from '../shorefield.js';
-import { SWASH_GLSL } from './swash.js';
+import { SWASH_GLSL, SURF_GLSL } from './swash.js';
 
 export const CURL = { stages: 32, samples: 32, lipWidth: 0.9 };
 
@@ -57,6 +57,7 @@ ${NOISE_GLSL}
 ${world.clip.glsl()}
 ${shore.glsl()}
 ${SWASH_GLSL}
+${SURF_GLSL}
 uniform vec3 uCam; uniform float uGridScale, uSeaLevel; uniform vec4 uLook3; uniform highp sampler2D tCurl;
 out vec3 vW; out vec3 vLip; // (u along the lip, stage, how much of it is shown)
 // the table, bilinear by hand
@@ -87,8 +88,12 @@ void main() {
       if (show > 0.002 && psi < ${(C.lipWidth + 0.3).toFixed(2)}) {
         float u = clamp(psi / ${C.lipWidth.toFixed(2)}, 0.0, 1.0);
         float H = 1.2 * a * show;
-        vec2 o = curlAt(u, stage) * H;
-        P = vec3(cx.x, level + 0.92 * 1.2 * a, cx.y) + vec3(gDir.x, 0.0, gDir.y) * o.x + vec3(0.0, o.y, 0.0);
+        vec2 o = curlAt(u, stage) * H, dir = gDir;
+        // the root on the water's own crest: the surface's displacement there (both trains, the lean forward before
+        // the collapse, the Gerstner shift: water3/swash.js w3Coast), so the lip grows out of the wave the water draws
+        vec3 top = vec3(cx.x, level + 1.1 * a, cx.y);
+        if (sw3Ctx(cx)) { vec3 d = w3Coast(cx, dC, 0.25); top = vec3(cx.x + d.x, level + d.y, cx.y + d.z); }
+        P = top + vec3(dir.x, 0.0, dir.y) * o.x + vec3(0.0, o.y, 0.0);
         vLip = vec3(u, stage, show);
       }
     }
