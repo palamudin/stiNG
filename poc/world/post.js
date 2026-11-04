@@ -352,7 +352,7 @@ void main() {
       T.begin('water');
       let src = this.rtScene.texture;
       if (!this.msaa) { U.tColor.value = this.rtScene.texture; this._run(this.copy, this.rtCopy); src = this.rtCopy.texture; }
-      opts.water.U.tScene.value = src;
+      opts.water.U.tScene.value = src; opts.water.U.tDepth.value = this.msaa ? this.rtScene.depthTexture : null;
       r.setRenderTarget(this.rtScene); const ac = r.autoClear; r.autoClear = false; r.render(opts.water.scene, camera); r.autoClear = ac;
       T.end();
     }

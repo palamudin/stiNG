@@ -78,7 +78,8 @@ export class World {
     this.sky = new Sky(renderer);
     this.clouds = new Clouds(renderer, this.sky);
     if (wet && floatRT && this.shoreMode === 'live') this.shore = shoreLive(this.clouds);
-    this.terrain = makeTerrain(this.clip, { sea: wet ? source.sea : 0, paving: source.kind === 'sting', shore: wet ? 1 : 0, snowLine: wet ? 215 : 1e9, shoreField: this.shore, uShoreWave: this.uShoreWave, uShoreSea: this.uShoreSea });
+    this.uSwDir = { value: new THREE.Vector2(1, 0) }; // the far swell's direction (the wave field's), for the coast's trains and the sand
+    this.terrain = makeTerrain(this.clip, { sea: wet ? source.sea : 0, paving: source.kind === 'sting', shore: wet ? 1 : 0, snowLine: wet ? 215 : 1e9, shoreField: this.shore, uShoreWave: this.uShoreWave, uShoreSea: this.uShoreSea, swash3: this.waterMode === 3 && this.shore && !this.shore.live, uSwDir: this.uSwDir });
     this.group = new THREE.Group(); this.group.name = 'world2';
     this.group.add(this.terrain.mesh);
     this.uniforms = this.terrain.uniforms;
@@ -253,6 +254,7 @@ export class World {
       const swell = seaSw ? { Hs: Math.max(WAVES.swellHmin, seaSw.Hs), T: Math.min(10.5, Math.max(WAVES.swellT - 1, WAVES.swellT - 1 + 2.5 * seaSw.Hs)) } : null;
       this.swell = swell;
       this.waves.update(this.time, w10, Math.PI / this._dtAvg, swell);
+      this.uSwDir.value.copy(this.waves.U.uSwDir.value);
       const st = this.waves.state;
       // the run-up's sea state: significant height H0 and the deep-water wavelength L0 of the peak period (2 pi g / w^2)
       if (this.source.sea > -1e5) {
