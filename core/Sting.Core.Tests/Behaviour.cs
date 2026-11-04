@@ -658,7 +658,8 @@ namespace Sting.Core.Tests
                 var s = new Sim(new Settings { seed = 1234, birds = false });
                 RunS(s, 1);
                 var rec = s.records.Get("0,1"); var h = rec.content.sheds.First(q => q.house);
-                Ok(!s.CanSee(h.x, h.z - h.hd - 2, h.x, h.z + h.hd + 2) && s.CanSee(h.x + h.hw + 3, h.z - h.hd - 2, h.x + h.hw + 3, h.z + h.hd + 2), "a house blocks the view across it; the gap beside it does not");
+                int gs = rec.content.garages.Any(g => Abs((g.x0 + g.x1) / 2 - h.x) < h.hw + 6 && Math.Sign(D(g.zf) - 64) == Math.Sign(D(h.z) - 64) && g.x0 > h.x) ? -1 : 1; // the side without a garage (S4)
+                Ok(!s.CanSee(h.x, h.z - h.hd - 2, h.x, h.z + h.hd + 2) && s.CanSee(h.x + gs * (h.hw + 3), h.z - h.hd - 2, h.x + gs * (h.hw + 3), h.z + h.hd + 2), "a house blocks the view across it; the gap beside it does not");
                 // pitched roofs are solid as drawn: a wasp is pushed out onto the slope, can land on it, and keeps dry under the eaves
                 {
                     var f = World.ShedRoof(h); Num R = T.wasp.radius;
@@ -1858,6 +1859,41 @@ namespace Sting.Core.Tests
                 var s = new Sim(new Settings { seed = 1234, birds = false, settled = 400, terrain = 1 }, new SimOpts { noAI = true }); RunS(s, 600);
                 Ok(D(I.site.h) >= 10 && D(I.site.h) <= 90 && inside && beyond && step < 3 && wild > 400 && settledChunks > 30 && built == 0 && trees > 300 && wet == 0 && s.wasp.y >= 0 && st.RulesHash() != t1.RulesHash() && st.WorldTag().Contains("wild beyond 400 m"),
                     $"the settled area sits on the wild land {D(I.site.h):0.0} m above the sea at ({D(I.site.x):0}, {D(I.site.z):0}); {settledChunks} settled chunks, {wild} wild ones with nothing built and {trees} trees, none in the water; no step over 3 m across the band ({step:0.00} per 2 m); a sim runs over it");
+            }
+            // 65. garages, drives and porch steps (GDD 21.2, S4, GEN_VERSION 15; sim.test.mjs)
+            {
+                var st = new Settings { terrain = 2 }; ulong S = 1234; Num G(Num x, Num z) => World.GroundAt(S, x, z, st);
+                int houses = 0, garages = 0, inLot = 0, level = 0, porchLevel = 0, clear = 0, drives = 0, doors = 0; double drive = 0;
+                for (int cz = -6; cz <= 6; cz++) for (int cx = -6; cx <= 6; cx++)
+                    {
+                        if (World.LandUse(S, cx, cz, st) != "yards") continue;
+                        var c = World.GenerateChunk(S, cx, cz, st); Num ox = cx * 64, oz = cz * 64; var parts = World.BuildList(c);
+                        foreach (var h in c.sheds.Where(q => q.house))
+                        {
+                            houses++;
+                            int s = h.z - oz > 0 ? 1 : -1; Num zf = h.z - s * h.hd, ph = G(h.x, h.z);
+                            var gr = c.garages.FirstOrDefault(q => q.x1 >= h.x - h.hw - 1.3 && q.x0 <= h.x + h.hw + 1.3 && (q.zf - oz > 0 ? 1 : -1) == s);
+                            var p = c.porches.FirstOrDefault(q => Abs(q.x - h.x) < 1e-9 && Abs(q.z - zf) < 1e-9);
+                            if (p != null && new[] { (-0.9, -0.05), (0.9, -0.05), (-0.9, -1.5), (0.9, -1.5) }.All(o => Abs(G(h.x + o.Item1, zf + s * o.Item2) - ph) < 1e-9)) porchLevel++;
+                            if (parts.Any(q => q.c == "#6b3b2a" && Abs(q.y - 1.49) < 1e-9 && Abs(q.x - h.x) < 1e-9)) doors++;
+                            if (gr == null) continue;
+                            garages++;
+                            int side = h.x - ox > 0 ? 1 : -1; bool apart = gr.x1 <= h.x - h.hw + 1e-9 || gr.x0 >= h.x + h.hw - 1e-9;
+                            if (apart && (gr.x0 - ox > 0 ? 1 : -1) == side && (gr.x1 - ox > 0 ? 1 : -1) == side && Abs(gr.x0 - ox) <= 31.6 && Abs(gr.x1 - ox) <= 31.6 && Abs(gr.zf - zf) < 1e-9) inLot++;
+                            if (new[] { (gr.x0, gr.z0), (gr.x1, gr.z0), (gr.x1, gr.z1), (gr.x0, gr.z1) }.All(q => Abs(G(q.Item1, q.Item2) - ph) < 1e-9)) level++;
+                            var d = c.drives.FirstOrDefault(q => q.minx >= gr.x0 && q.maxx <= gr.x1 && gr.zf >= q.minz - 1e-9 && gr.zf <= q.maxz + 1e-9);
+                            if (d == null) continue;
+                            drives++;
+                            Num xm = (d.minx + d.maxx) / 2, zs = oz + s * 5.6;
+                            for (int k = 0; k < 10; k++) { Num z0 = zs + (gr.zf - zs) * k / 10, z1 = zs + (gr.zf - zs) * (k + 1) / 10; drive = Math.Max(drive, D(Abs(G(xm, z1) - G(xm, z0)) / Abs(z1 - z0))); }
+                            bool Inside(Num x, Num z, Num r) => (x + r > d.minx && x - r < d.maxx && z + r > d.minz && z - r < d.maxz) || (x + r > gr.x0 && x - r < gr.x1 && z + r > gr.z0 && z - r < gr.z1);
+                            bool any = c.trees.Any(o => Inside(o.x, o.z, o.r)) || c.tables.Any(o => Inside(o.x, o.z, 0.3)) || c.flowers.Any(o => Inside(o.x, o.z, 0.3)) || c.hives.Any(o => Inside(o.x, o.z, 0.3)) || c.humans.Any(o => Inside(o.x, o.z, 0.3));
+                            if (!any && Abs(d.minz - Min(zs, gr.zf)) < 1e-9 && Abs(d.maxz - Max(zs, gr.zf)) < 1e-9) clear++;
+                        }
+                    }
+                Ok(houses > 40 && garages > houses * 0.6 && garages < houses * 0.95 && inLot == garages && level == garages, $"{garages} of {houses} houses have a garage beside them, every one in its own lot with its door in line with the house's front, on the house's level pad");
+                Ok(drives == garages && clear == drives && drive <= 0.15 + 1e-6, $"({drives} drives, {clear} clear) each garage has a drive from the sidewalk to its door, at most {drive * 100:0.0}% (15% allowed), with nothing set on it or in the garage");
+                Ok(porchLevel == houses && doors == houses, $"every front door has a level stoop and a step before it, the door at the stoop's height ({porchLevel} of {houses})");
             }
             // 64. rough water (GDD 7.5): calm water bears a wasp; the wind whips a pond rough by its fetch and the surface
             // takes a wasp under, to fight its way out or drown; a birdbath never gets rough

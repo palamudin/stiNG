@@ -193,7 +193,7 @@ export function buildList(c) {
     if (sh.house) { // a door to the street; the gable ends closed
       const along = long ? [1, 0] : [0, 1], across = long ? [0, 1] : [1, 0], half = long ? sh.hw : sh.hd, depth = long ? sh.hd : sh.hw;
       const ds = (long ? Math.sign(c.cz * CS - sh.z) : Math.sign(c.cx * CS - sh.x)) || 1;
-      part(0, 5, '#6b3b2a', sh.x + across[0] * ds * (depth + 0.02), 1.05, sh.z + across[1] * ds * (depth + 0.02), along[0] ? 1.0 : 0.06, 2.1, along[1] ? 1.0 : 0.06, false);
+      part(0, 5, '#6b3b2a', sh.x + across[0] * ds * (depth + 0.02), 1.49, sh.z + across[1] * ds * (depth + 0.02), along[0] ? 1.0 : 0.06, 2.1, along[1] ? 1.0 : 0.06, false); // at the stoop's height
       for (const s of [-1, 1]) part(2, 0, siding, sh.x + along[0] * s * half, sh.h, sh.z + along[1] * s * half, depth, rf.rise, 0, false, { ry: long ? 1.5707963267948966 : 0 });
     }
     // the roof's slabs: their top faces lie on the solid roof the sim collides with (shedRoof)
@@ -206,6 +206,16 @@ export function buildList(c) {
     const ss = shedSites(sh); // the crack in a wall and the gap under an eave (nest sites)
     part(0, 5, '#0d0a07', ss.wall.x - ss.wall.nx * 0.008, ss.wall.y, ss.wall.z - ss.wall.nz * 0.008, ss.wall.nx ? 0.012 : 0.05, 0.12, ss.wall.nz ? 0.012 : 0.05, true);
     part(0, 5, '#0d0a07', ss.attic.x - ss.attic.nx * 0.008, ss.attic.y, ss.attic.z - ss.attic.nz * 0.008, ss.attic.nx ? 0.012 : 0.4, 0.03, ss.attic.nz ? 0.012 : 0.4, true);
+  }
+  for (const g of c.garages) { // a garage (S4): the house's siding, a flat roof, an up-and-over door facing the drive
+    const w = g.x1 - g.x0, d = g.z1 - g.z0, mx = (g.x0 + g.x1) / 2, mz = (g.z0 + g.z1) / 2;
+    part(0, 0, SIDINGS[g.c], mx, g.h / 2, mz, w, g.h, d, false);
+    part(0, 5, '#4e4b52', mx, g.h + 0.06, mz, w + 0.2, 0.12, d + 0.2, false);
+    part(0, 5, '#d9d4c7', mx, 1.1, g.zf - g.s * 0.02, w - 0.8, 2.2, 0.06, false);
+  }
+  for (const p of c.porches) { // the stoop and its step, concrete
+    part(0, 5, '#b9b4a8', p.x, 0.22, p.z - p.s * 0.6, 1.8, 0.44, 1.2, true);
+    part(0, 5, '#aea99c', p.x, 0.11, p.z - p.s * 1.35, 1.8, 0.22, 0.3, true);
   }
   for (const t of c.trees) part(1, 5, '#5b4330', t.x, t.h / 2, t.z, t.r * 0.8, t.h, t.r, false, { n: 9 }); // the trunk (crowns are drawn apart: they sway)
   for (const t of c.tables) { // legs: the table's four, two under each bench end
@@ -380,10 +390,12 @@ function padsOf(seed, cx, cz, settings) {
   // its front yard a straight ramp from the sidewalk to the pad; its banks no steeper than 2:1 (pads 5 and 6, padHeight)
   const ramps = [];
   for (const b of c.houses) {
-    const road = c.roads[0], s = road ? Math.sign(b.z - (road.minz + road.maxz) / 2) : 1, zw = road ? (s > 0 ? road.maxz + Gr.walk : road.minz - Gr.walk) : b.z, zf = b.z - s * b.hd;
-    const pad = { k: 5, minx: b.x - b.hw, maxx: b.x + b.hw, minz: b.z - b.hd, maxz: b.z + b.hd, m: Gr.house, hx: b.x, hz: b.z, h: null, t: 0, z0: road ? (road.minz + road.maxz) / 2 : b.z, run: Math.abs(zf - zw), road: !!road, zw, sg: s };
+    const road = c.roads[0], s = road ? Math.sign(b.z - (road.minz + road.maxz) / 2) : 1, zw = road ? (s > 0 ? road.maxz + Gr.walk : road.minz - Gr.walk) : b.z;
+    // the pad takes in the garage beside the house and the porch before its door (S4); the front yard runs from there
+    const zf = b.z - s * (b.hd + PORCH), x0 = b.g ? Math.min(b.x - b.hw, b.g.x0) : b.x - b.hw, x1 = b.g ? Math.max(b.x + b.hw, b.g.x1) : b.x + b.hw;
+    const pad = { k: 5, minx: x0, maxx: x1, minz: Math.min(zf, b.z - b.hd), maxz: Math.max(zf, b.z + b.hd), m: Gr.house, hx: b.x, hz: b.z, h: null, t: 0, z0: road ? (road.minz + road.maxz) / 2 : b.z, run: Math.abs(zf - zw), road: !!road, zw, sg: s, xd: b.g ? (b.g.x0 + b.g.x1) / 2 : null };
     P.push(pad);
-    if (road) ramps.push(pad.ramp = { k: 6, minx: b.x - b.hw, maxx: b.x + b.hw, minz: Math.min(zw, zf), maxz: Math.max(zw, zf), m: Gr.house, zw, zf, sg: s, z0: pad.z0, pad, t: 0 });
+    if (road) ramps.push(pad.ramp = { k: 6, minx: x0, maxx: x1, minz: Math.min(zw, zf), maxz: Math.max(zw, zf), m: Gr.house, zw, zf, sg: s, z0: pad.z0, pad, t: 0 });
   }
   P.push(...ramps); // the front yards last; neither a pad nor a ramp reaches past the sidewalk, which stays level across
   pads.set(key, P);
@@ -435,13 +447,28 @@ function makePonds(seed, cx, cz, settings) {
 }
 // A chunk's paving and buildings, as generateChunk places them, without generating the rest (the ground's grading
 // reads this for chunks far out that nothing has generated; a test holds the two to the same numbers)
+// A house's garage and drive (GDD 21.2, S4): most houses have a one-car garage on one side, `gap` m clear of the house
+// (a passage a wasp can fly through, and a person walk), its door in line with the house's front, a drive from the
+// sidewalk to it, and a porch of PORCH m before the front door (a stoop and a step).
+// H: the chunk's hash; b: the lot's slot base (slots 7 and 8, unused by the house); s: the house's side of the street.
+export const GARAGE = { share: 0.8, w: 3.6, d: 6.5, h: 2.8, inset: 0.3, gap: 1.2 }, PORCH = 1.6;
+export function garageOf(H, b, x, z, hw, hd, s) {
+  if (unit(H(b + 7)) >= GARAGE.share) return null;
+  const side = unit(H(b + 8)) < 0.5 ? -1 : 1, x0 = side > 0 ? x + hw + GARAGE.gap : x - hw - GARAGE.gap - GARAGE.w, zf = z - s * hd, zb = zf + s * GARAGE.d;
+  return { x0, x1: x0 + GARAGE.w, z0: Math.min(zf, zb), z1: Math.max(zf, zb), zf, s, h: GARAGE.h, c: Math.abs(Math.floor(x * 7 + z * 3 + 0.5)) % 5 };
+}
+// the drive: from the sidewalk's outer edge (the street's middle at oz) to the garage's door, inset from its walls
+export function driveOf(g, oz) {
+  const zs = oz + g.s * (4 + T.terrain.grade.walk);
+  return { minx: g.x0 + GARAGE.inset, maxx: g.x1 - GARAGE.inset, minz: Math.min(zs, g.zf), maxz: Math.max(zs, g.zf) };
+}
 export function pavingOf(seed, cx, cz, settings) {
   const m = worldTables(seed, settings).paving, k = cellKey(cx, cz), v = m.get(k);
   return v !== undefined ? v : keep(m, k, makePaving(seed, cx, cz, settings));
 }
 function makePaving(seed, cx, cz, settings) {
   const H = (slot) => hash(seed, Domain.WorldGen, u64(cx), u64(cz), BigInt(slot)), ox = cx * CS, oz = cz * CS;
-  const out = { roads: [], loops: [], lots: [], plazas: [], malls: [], shops: [], houses: [], ponds: [] };
+  const out = { roads: [], loops: [], lots: [], plazas: [], malls: [], shops: [], houses: [], ponds: [], drives: [] };
   if (cx === 0 && cz === 0) return out;
   out.ponds = pondsOf(seed, cx, cz, settings);
   const use = landUse(seed, cx, cz, settings);
@@ -452,7 +479,11 @@ function makePaving(seed, cx, cz, settings) {
     if (endE) out.loops.push({ x: ox + 22, z: oz, r: 11 });
     for (let li = 0; li < 4; li++) {
       const s = li < 2 ? -1 : 1, lx = ox + (li % 2 ? 16 : -16), base = 3000 + li * 2000;
-      if (unit(H(base)) < 0.9) out.houses.push({ x: lx + range(H(base + 1), -3, 3), z: oz + s * 15.5, hw: range(H(base + 2), 5, 6.5), hd: range(H(base + 3), 4, 5) });
+      if (unit(H(base)) < 0.9) {
+        const x = lx + range(H(base + 1), -3, 3), z = oz + s * 15.5, hw = range(H(base + 2), 5, 6.5), hd = range(H(base + 3), 4, 5), g = garageOf(H, base, x, z, hw, hd, s);
+        out.houses.push({ x, z, hw, hd, g });
+        if (g) out.drives.push(driveOf(g, oz));
+      }
     }
   } else if (use === 'mall') {
     const side = mallSide(seed, cx, cz, settings), o = [[0, -1], [1, 0], [0, 1], [-1, 0]][side], al = o[0] ? [0, 1] : [1, 0];
@@ -515,9 +546,10 @@ function streetBank(seed, p, settings, terrain) {
 function housePad(seed, p, settings, terrain) {
   const Gr = T.terrain.grade;
   let h = naturalGround(seed, p.hx, p.hz, settings, terrain, Gr.oct), hw = h;
-  if (p.road) { // within the drive's grade of the sidewalk all across the front
+  if (p.road) { // within the drive's grade of the sidewalk all across the front; with a garage, at its walk and its drive
+    // (a pad that takes in a garage is too wide to hold the grade at both ends on a street at its own limit, S4)
     hw = streetAt(seed, p.hx, p.z0, settings, terrain);
-    const a = streetAt(seed, p.minx, p.z0, settings, terrain), b = streetAt(seed, p.maxx, p.z0, settings, terrain), lim = Gr.drive * p.run;
+    const a = streetAt(seed, p.xd ?? p.minx, p.z0, settings, terrain), b = streetAt(seed, p.xd ?? p.maxx, p.z0, settings, terrain), lim = Gr.drive * p.run;
     const lo = Math.max(a, b, hw) - lim, hi = Math.min(a, b, hw) + lim;
     h = lo <= hi ? Math.max(lo, Math.min(hi, h)) : (lo + hi) / 2;
   }
@@ -722,7 +754,7 @@ export function generateChunk(seed, cx, cz, settings) {
   const c = {
     cx, cz, tint: unit(H(0)), trees: [], tables: [], benches: [], cans: [], flowers: [], caterpillars: [], flies: [],
     humans: [], boxes: [], cylinders: [], sugar: [], hives: [], traps: [], nest: null,
-    webs: [], birds: [], rival: null, sheds: [], dragonflies: [],
+    webs: [], birds: [], rival: null, sheds: [], dragonflies: [], garages: [], drives: [], porches: [],
     use: 'park', roads: [], loops: [], lots: [], malls: [], // T1-12: land use, streets, cul-de-sacs, parking lots, mall buildings
     baths: [], // T2-1: birdbaths
     plazas: [], shops: [], gardens: [], // T2-5: a town centre's paving, its shop buildings, its beer garden
@@ -847,7 +879,20 @@ export function generateChunk(seed, cx, cz, settings) {
       // each lot draws from its own run of hash slots: house 0-6, patio 10-246, flowers 300-400, shed 500-506,
       // bee box 510-740, people on the front lawn 800-1300
       const s = li < 2 ? -1 : 1, lx = ox + (li % 2 ? 16 : -16), base = 3000 + li * 2000;
-      if (unit(H(base)) < 0.9) addShed(lx + range(H(base + 1), -3, 3), oz + s * 15.5, true, base + 2, true);
+      if (unit(H(base)) < 0.9) {
+        addShed(lx + range(H(base + 1), -3, 3), oz + s * 15.5, true, base + 2, true);
+        const sh = c.sheds[c.sheds.length - 1], g = garageOf(H, base, sh.x, sh.z, sh.hw, sh.hd, s), zf = sh.z - s * sh.hd;
+        if (g) { // a garage beside the house, a drive to it (S4)
+          const d = driveOf(g, oz);
+          c.garages.push(g); c.drives.push(d);
+          c.boxes.push({ minx: g.x0, maxx: g.x1, miny: 0, maxy: g.h, minz: g.z0, maxz: g.z1, wood: false, garage: true });
+          occupied.push({ x: (g.x0 + g.x1) / 2, z: (g.z0 + g.z1) / 2, r: 4 }, { x: (d.minx + d.maxx) / 2, z: (d.minz + d.maxz) / 2, r: 3 });
+        }
+        // the porch before the front door: a stoop at the door's sill and a step down to the walk
+        c.porches.push({ x: sh.x, z: zf, s });
+        c.boxes.push({ minx: sh.x - 0.9, maxx: sh.x + 0.9, miny: 0, maxy: 0.44, minz: Math.min(zf, zf - s * 1.2), maxz: Math.max(zf, zf - s * 1.2), wood: false, porch: true });
+        c.boxes.push({ minx: sh.x - 0.9, maxx: sh.x + 0.9, miny: 0, maxy: 0.22, minz: Math.min(zf - s * 1.2, zf - s * 1.5), maxz: Math.max(zf - s * 1.2, zf - s * 1.5), wood: false, porch: true });
+      }
       // the backyard fence: across the back, and the sides between lots and at the chunk edge
       addFence(lx - 15.6, oz + s * 20.5, lx - 15.6, oz + s * 31.6);
       addFence(lx - 15.6, oz + s * 31.6, lx + 15.6, oz + s * 31.6);

@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, humanParts, malesAbout, chunkOf, toLocal, dirToWorld, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, groundSlope, pavingOf, pondsOf, inPond, pondEdge, settledOf, wildHere, pickTarget, assistPilot, swoopPilot, hoverPilot, hoverSetting, HOVER, ROLES, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS,
+  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, groundSlope, pavingOf, buildList, pondsOf, inPond, pondEdge, settledOf, wildHere, pickTarget, assistPilot, swoopPilot, hoverPilot, hoverSetting, HOVER, ROLES, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS,
 } from '../sim/index.js';
 import { applyTuning, parseTuning, tuningHash, tuningLeaves, TUNE } from '../sim/tunefile.js';
 
@@ -94,10 +94,12 @@ function bot(plan) {
   };
 }
 {
-  const go = (plan, seed = 1234) => { const s = new Sim({ seed }); const ev = run(s, 15000, bot(plan)); return { s, ev, hash: s.stateHash() }; };
+  // seed 99: its first seated person is in reach and swats (on 1234 since GEN_VERSION 15 the first one stung raises
+  // the street's alert and nobody sits again within the run)
+  const go = (plan, seed = 99) => { const s = new Sim({ seed }); const ev = run(s, 15000, bot(plan)); return { s, ev, hash: s.stateHash() }; };
   const a = go('full'), b = go('full');
   ok(a.hash === b.hash, `two runs, same seed -> same state hash (${a.hash})`);
-  ok(Sim.replay({ seed: 1234 }, a.s.log, 15000) === a.hash, 'replay of recorded input reproduces the hash');
+  ok(Sim.replay({ seed: 99 }, a.s.log, 15000) === a.hash, 'replay of recorded input reproduces the hash');
   console.log('  full bot:', JSON.stringify(a.s.stats));
   ok(a.s.stats.stings > 0 && count(a.ev, 'swatHit') > 0, 'player stings land and swats hit lingering wasps');
   ok(count(a.ev, 'waspSpawn') > 3, `colony launches AI workers (${count(a.ev, 'waspSpawn')} spawns)`);
@@ -106,7 +108,7 @@ function bot(plan) {
   console.log('  jab bot:', JSON.stringify(j.s.stats));
   const playerDeaths = (ev) => ev.filter((e) => e.type === 'waspDied' && e.driven).length;
   ok(playerDeaths(j.ev) / Math.max(1, j.s.stats.stings) < playerDeaths(a.ev) / Math.max(1, a.s.stats.stings), 'jab-and-run dies less per sting than full-and-linger');
-  ok(go('full', 99).hash !== a.hash, 'different seed -> different world');
+  ok(go('full', 1234).hash !== a.hash, 'different seed -> different world');
 }
 
 // helper: a seated human in the origin chunk wearing a given top
@@ -1275,7 +1277,8 @@ function seated(sim, pred) {
   const s = new Sim({ seed: 1234, birds: false });
   run(s, 1, () => idle());
   const rec = s.records.get(chunkKey(yx, yz)), h = rec.content.sheds.find((q) => q.house);
-  ok(!s.canSee({ x: h.x, z: h.z - h.hd - 2 }, { x: h.x, z: h.z + h.hd + 2 }) && s.canSee({ x: h.x + h.hw + 3, z: h.z - h.hd - 2 }, { x: h.x + h.hw + 3, z: h.z + h.hd + 2 }), 'a house blocks the view across it; the gap beside it does not');
+  const gs = rec.content.garages.some((g) => Math.abs((g.x0 + g.x1) / 2 - h.x) < h.hw + 6 && Math.sign(g.zf - yz * 64) === Math.sign(h.z - yz * 64) && g.x0 > h.x) ? -1 : 1; // the side without a garage (S4)
+  ok(!s.canSee({ x: h.x, z: h.z - h.hd - 2 }, { x: h.x, z: h.z + h.hd + 2 }) && s.canSee({ x: h.x + gs * (h.hw + 3), z: h.z - h.hd - 2 }, { x: h.x + gs * (h.hw + 3), z: h.z + h.hd + 2 }), 'a house blocks the view across it; the gap beside it does not');
   // pitched roofs are solid as drawn: a wasp is pushed out onto the slope, can land on it, and keeps dry under the eaves
   {
     const f = shedRoof(h), R = T.wasp.radius, at = (u, y, v) => f.alongX ? { x: f.x + v, y: f.y0 + y, z: f.z + u } : { x: f.x + u, y: f.y0 + y, z: f.z + v };
@@ -2431,6 +2434,40 @@ function seated(sim, pred) {
   const above = s.wasp.y >= 0;
   ok(I.site.h >= 10 && I.site.h <= 90 && inside && beyond && step < 3 && wild > 400 && settledChunks > 30 && built === 0 && trees > 300 && wet === 0 && above && rulesHash(st) !== rulesHash({ terrain: 1 }) && worldTag(st).includes('wild beyond 400 m'),
     `the settled area sits on the wild land ${I.site.h.toFixed(1)} m above the sea at (${I.site.x.toFixed(0)}, ${I.site.z.toFixed(0)}): its own ground inside, the wild land beyond, no step over 3 m across the band (${step.toFixed(2)} per 2 m); ${settledChunks} settled chunks, ${wild} wild ones with nothing built and ${trees} trees, none in the water; a sim runs over it`);
+}
+
+// 65. Garages, drives and porch steps (GDD 21.2, S4, GEN_VERSION 15): most houses have a one-car garage beside them in
+// their own lot, its door in line with the house's front; a drive runs from the sidewalk to it within the drive grade;
+// the garage and the porch stand on the house's level pad; nothing else is set on a drive or in a garage
+{
+  const st = { terrain: 2 }, S = 1234n, g = (x, z) => groundAt(S, x, z, st);
+  let houses = 0, garages = 0, inLot = 0, level = 0, porchLevel = 0, drive = 0, clear = 0, drives = 0, doors = 0;
+  for (let cz = -6; cz <= 6; cz++) for (let cx = -6; cx <= 6; cx++) {
+    if (landUse(S, cx, cz, st) !== 'yards') continue;
+    const c = generateChunk(S, cx, cz, st), ox = cx * 64, oz = cz * 64;
+    for (const h of c.sheds.filter((q) => q.house)) {
+      houses++;
+      const gr = c.garages.find((q) => q.x1 >= h.x - h.hw - 1.3 && q.x0 <= h.x + h.hw + 1.3 && Math.sign(q.zf - oz) === Math.sign(h.z - oz)), s = Math.sign(h.z - oz), zf = h.z - s * h.hd, ph = g(h.x, h.z);
+      const p = c.porches.find((q) => Math.abs(q.x - h.x) < 1e-9 && Math.abs(q.z - zf) < 1e-9);
+      if (p && [[-0.9, -0.05], [0.9, -0.05], [-0.9, -1.5], [0.9, -1.5]].every(([dx, dz]) => Math.abs(g(h.x + dx, zf - s * -dz) - ph) < 1e-9)) porchLevel++;
+      if (buildList(c).some((q) => q.c === '#6b3b2a' && Math.abs(q.y - 1.49) < 1e-9 && Math.abs(q.x - h.x) < 1e-9)) doors++;
+      if (!gr) continue;
+      garages++;
+      const side = Math.sign(h.x - ox), apart = gr.x1 <= h.x - h.hw + 1e-9 || gr.x0 >= h.x + h.hw - 1e-9;
+      if (apart && Math.sign(gr.x0 - ox) === side && Math.sign(gr.x1 - ox) === side && Math.abs(gr.x0 - ox) <= 31.6 && Math.abs(gr.x1 - ox) <= 31.6 && Math.abs(gr.zf - zf) < 1e-9) inLot++;
+      if ([[gr.x0, gr.z0], [gr.x1, gr.z0], [gr.x1, gr.z1], [gr.x0, gr.z1]].every(([x, z]) => Math.abs(g(x, z) - ph) < 1e-9)) level++;
+      const d = c.drives.find((q) => q.minx >= gr.x0 && q.maxx <= gr.x1 && gr.zf >= q.minz - 1e-9 && gr.zf <= q.maxz + 1e-9);
+      if (!d) continue;
+      drives++;
+      const xm = (d.minx + d.maxx) / 2, zs = oz + s * 5.6;
+      for (let k = 0; k < 10; k++) { const z0 = zs + (gr.zf - zs) * k / 10, z1 = zs + (gr.zf - zs) * (k + 1) / 10; drive = Math.max(drive, Math.abs(g(xm, z1) - g(xm, z0)) / Math.abs(z1 - z0)); }
+      const inside = (o, r = 0) => (o.x + r > d.minx && o.x - r < d.maxx && o.z + r > d.minz && o.z - r < d.maxz) || (o.x + r > gr.x0 && o.x - r < gr.x1 && o.z + r > gr.z0 && o.z - r < gr.z1);
+      if (![...c.trees, ...c.tables, ...c.flowers, ...c.hives, ...c.humans].some((o) => inside(o, o.r || 0.3)) && Math.abs(d.minz - Math.min(zs, gr.zf)) < 1e-9 && Math.abs(d.maxz - Math.max(zs, gr.zf)) < 1e-9) clear++;
+    }
+  }
+  ok(houses > 40 && garages > houses * 0.6 && garages < houses * 0.95 && inLot === garages && level === garages, `${garages} of ${houses} houses have a garage beside them, every one in its own lot with its door in line with the house's front, on the house's level pad`);
+  ok(drives === garages && clear === drives && drive <= 0.15 + 1e-6, `(${drives} drives, ${clear} clear) each garage has a drive from the sidewalk to its door, at most ${(drive * 100).toFixed(1)}% (15% allowed), with nothing set on it or in the garage`);
+  ok(porchLevel === houses && doors === houses, `every front door has a level stoop and a step before it, the door at the stoop's height (${porchLevel} of ${houses})`);
 }
 
 // 64. Rough water (GDD 7.5): calm water bears a wasp; the wind whips a pond rough by its fetch and then the surface

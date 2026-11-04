@@ -2483,6 +2483,30 @@ On a jump the CPU path no longer blurs a level out to its parent: the window it 
 
 The game now asks for a square at least 16 m across (`causticsMin`), pushed 30% of its size ahead along the view (`causticsAhead`), on a 512 texture with a 384 grid. That is about the old detail (3 cm texels, 7 cm cells, against 2.3 and 5 cm) over 2.7 times the width. Water seen at a slant still clouds with distance: that is the water, not the caustics.
 
+### 18.88 Garages, drives and porch steps (S4, GEN_VERSION 15)
+
+**Garages.** Four houses in five have a one-car garage beside them (`GARAGE`):
+- 3.6 m wide, 6.5 m deep and 2.8 m high, with a flat roof;
+- in the house's siding, with an up-and-over door;
+- 1.2 m clear of the house, so a wasp can fly between and a person walk;
+- its door in line with the house's front, and always within the house's own lot.
+
+The side and whether there is one come from the lot's slots 7 and 8, which the house never used.
+
+**Drives.** A drive runs from the sidewalk's outer edge to the garage door, 3 m wide and paved in concrete. Every look draws it: a flat in the classic look on flat ground, the cover maps on hills, and the paving channel in World v3.
+
+**Porch.** Every front door has a stoop 44 cm high and 1.2 m deep, and a 22 cm step 30 cm deep before it, in concrete. The door now stands at the stoop's height.
+
+**Grading.** The house's pad takes in the garage, the gap and the porch, all at one level. The front yard ramps from the sidewalk to the porch line. With a garage, the pad is too wide to keep within the drive grade at both of its ends when the street runs at its own 10% limit. It is therefore held within the drive grade at the house's walk and at the drive, the two lines people and cars use. Across the lawn either side the ramp may run a little steeper.
+
+**Collisions.** Garages and the porch's stoop and step are boxes the sim collides with. They are not wood, a garage roof keeps the rain off, and they are drawn from the build list, not as wooden boxes. Nothing else is set on a drive or in a garage: the drive and the garage are marked taken before the lawn's people, tables and beds are placed.
+
+**Tests.** Behaviour block 65 (JS and C#) covers the share of houses with garages, the lot, the level pad, the drive grade (at most 15% along its middle), clear drives, and the porch. The chunk digest now covers garages, drives and porches. Two tests were adjusted:
+- The view test looks past the house on its side without a garage.
+- The sting-bot scenario runs on seed 99. On 1234 the first person it stings raises the street's alert, and nobody sits again within the run.
+
+An attached garage made a corner the assisted route planner could not get round, so the garage stands clear of the house, as many do.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -2904,7 +2928,7 @@ Each is built, tested in JS and both C# builds where the sim is touched, documen
 - **What.** The builder of 21.3, in the sim (JS and C#), run on today's layouts unchanged. The yards, mall and town become build lists of parts with their boxes. The sim reads its boxes from them, and the drawing reads the parts instead of making its own.
 - **Done when:** a generated chunk's content hash is unchanged on a flat world, and the parity digests match.
 
-**S4. Semi-urban to code. Grading built (18.78); garages, drives and porch steps to come.**
+**S4. Semi-urban to code. Built: grading (18.78); garages, drives and porch steps (18.88).**
 - **What.** Yards rebuilt with the template: lot sizes, setbacks, drives and garages, porch steps, banks between pads, streets within grade.
 - **Done when:**
   - every lot passes the template's rules on hilly worlds;

@@ -49,6 +49,7 @@ export function stingSource(sim) {
     }
     for (const l of p.loops) { const d = Math.hypot(x - l.x, z - l.z); if (d <= l.r) return 1; if (d <= l.r + walk) v = 0.5; }
     for (const l of p.lots) if (x >= l.minx && x <= l.maxx && z >= l.minz && z <= l.maxz) return 1;
+    for (const d of p.drives || []) if (x >= d.minx && x <= d.maxx && z >= d.minz && z <= d.maxz) return 0.9; // a drive to a garage (S4): concrete
     for (const l of p.plazas) if (x >= l.minx && x <= l.maxx && z >= l.minz && z <= l.maxz) return 0.9;
     for (const b of [...p.houses, ...p.shops, ...p.malls]) if (Math.abs(x - b.x) <= b.hw + 0.3 && Math.abs(z - b.z) <= b.hd + 0.3) v = Math.max(v, 0.5);
     // a walk from each house's door (the long side facing its street, as game.js puts the door) to the sidewalk

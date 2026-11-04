@@ -50,7 +50,7 @@ namespace Sting.Core
     {
         public const int TICK_RATE = 60;
         public static readonly Num DT = 1.0 / TICK_RATE;
-        public const int GEN_VERSION = 14; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11); 6: birdbaths (T2-1); 7: town centres (T2-5); 8: ponds; 9: a pond beside the home park; 10: lobed ponds with a path, benches and a walker; 11: footings under small things; 12: streets, house pads and front yards graded to code; 13: wild land round a settled area; 14: no hive near the first nest
+        public const int GEN_VERSION = 15; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11); 6: birdbaths (T2-1); 7: town centres (T2-5); 8: ponds; 9: a pond beside the home park; 10: lobed ponds with a path, benches and a walker; 11: footings under small things; 12: streets, house pads and front yards graded to code; 13: wild land round a settled area; 14: no hive near the first nest; 15: garages, drives and porch steps
 
         public static Num population = 8200000000;
         public static class chunk { public static Num size = 64; public static int activeRadius = 1, discoverRadius = 2; }

@@ -56,6 +56,11 @@ export function digestChunk(c, d) {
   f(c.plazas.length); for (const t of c.plazas) for (const k of ['minx', 'maxx', 'minz', 'maxz']) f(t[k]);
   f(c.shops.length); for (const t of c.shops) for (const k of ['x', 'z', 'hw', 'hd', 'h', 'color']) f(t[k]);
   f(c.gardens.length); for (const t of c.gardens) for (const k of ['x', 'z', 'hw', 'hd']) f(t[k]);
+  // garages, drives and porches (S4)
+  f(c.garages.length); for (const t of c.garages) for (const k of ['x0', 'x1', 'z0', 'z1', 'zf', 's', 'h', 'c']) f(t[k]);
+  f(c.drives.length); for (const t of c.drives) for (const k of ['minx', 'maxx', 'minz', 'maxz']) f(t[k]);
+  f(c.porches.length); for (const t of c.porches) for (const k of ['x', 'z', 's']) f(t[k]);
+  f(c.boxes.filter((b) => b.garage).length); f(c.boxes.filter((b) => b.porch).length);
 }
 
 const lines = [];

@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Sting.Core;
 
 namespace Sting.Core.Tests
@@ -54,6 +55,11 @@ namespace Sting.Core.Tests
             F(c.plazas.Count); foreach (var t in c.plazas) { F(t.minx); F(t.maxx); F(t.minz); F(t.maxz); }
             F(c.shops.Count); foreach (var t in c.shops) { F(t.x); F(t.z); F(t.hw); F(t.hd); F(t.h); F(t.color); }
             F(c.gardens.Count); foreach (var t in c.gardens) { F(t.x); F(t.z); F(t.hw); F(t.hd); }
+            // garages, drives and porches (S4)
+            F(c.garages.Count); foreach (var t in c.garages) { F(t.x0); F(t.x1); F(t.z0); F(t.z1); F(t.zf); F(t.s); F(t.h); F(t.c); }
+            F(c.drives.Count); foreach (var t in c.drives) { F(t.minx); F(t.maxx); F(t.minz); F(t.maxz); }
+            F(c.porches.Count); foreach (var t in c.porches) { F(t.x); F(t.z); F(t.s); }
+            F(c.boxes.Count(b => b.garage)); F(c.boxes.Count(b => b.porch));
         }
     }
 }

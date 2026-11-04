@@ -14,7 +14,11 @@ namespace Sting.Core
     public sealed class Caterpillar { public Num x, y, z; }
     public sealed class Fly { public Num x, y, z, r, w1, w2, w3, p1, p2, p3; }
     public sealed class HumanSlot { public int slot; public Num x, z, fx, fz, exit; public string posture; public string act; public Num[] path; public bool evening; }
-    public sealed class Box { public Num minx, maxx, miny, maxy, minz, maxz; public bool wood, hive, shed, fence, mall, shop, bench; }
+    public sealed class Box { public Num minx, maxx, miny, maxy, minz, maxz; public bool wood, hive, shed, fence, mall, shop, bench, garage, porch; }
+    /// a house's garage (S4, world.js garageOf): its walls' extent, the line of its door, its side of the street, its height and siding
+    public sealed class Garage { public Num x0, x1, z0, z1, zf, h; public int s, c; }
+    /// the porch before a house's front door: the door's middle on the wall, and the house's side of the street
+    public sealed class Porch { public Num x, z; public int s; }
     public sealed class Cyl { public Num x, z, r, h; public bool wood, grill, bath; }
     /// a birdbath (T2-1): a basin on a pedestal; h is the water's surface
     public sealed class Bath { public Num x, z, r, h; public bool fountain; }
@@ -29,7 +33,7 @@ namespace Sting.Core
     /// Birds and dragonflies: a patrol loop
     public sealed class Patrol { public Num x, y, z, r, dir; public int period, phase; }
     public sealed class Rival { public Num x, y, z, r, ex, ey, ez; public int workers; }
-    public sealed class Shed { public Num x, z, hw, hd, h; public int crack, eave; public bool house; }
+    public sealed class Shed { public Num x, z, hw, hd, h; public int crack, eave; public bool house; public Garage g; }
     /// a shed's or house's pitched roof (see World.ShedRoof)
     public sealed class Roof { public Num x, z, wall, wallHalf, half, S, y0, rise, L; public bool alongX; }
     /// streets and parking lots (T1-12): flat rectangles; cul-de-sacs; strip-mall buildings
@@ -60,6 +64,7 @@ namespace Sting.Core
         public List<Cyl> cylinders = new List<Cyl>(); public List<SugarNode> sugar = new List<SugarNode>(); public List<Hive> hives = new List<Hive>();
         public List<Trap> traps = new List<Trap>(); public bool hasNest; public List<Web> webs = new List<Web>(); public List<Patrol> birds = new List<Patrol>();
         public Rival rival; public List<Shed> sheds = new List<Shed>(); public List<Patrol> dragonflies = new List<Patrol>();
+        public List<Garage> garages = new List<Garage>(); public List<Rect> drives = new List<Rect>(); public List<Porch> porches = new List<Porch>();
         /// land use and the suburban layout (T1-12)
         public string use = "park"; public List<Rect> roads = new List<Rect>(), lots = new List<Rect>(); public List<Loop> loops = new List<Loop>(); public List<Mall> malls = new List<Mall>();
         /// birdbaths (T2-1)
@@ -269,7 +274,7 @@ namespace Sting.Core
                 {
                     int al0 = lng ? 1 : 0, al1 = lng ? 0 : 1, ac0 = lng ? 0 : 1, ac1 = lng ? 1 : 0; Num half = lng ? sh.hw : sh.hd, depth = lng ? sh.hd : sh.hw;
                     Num dv = lng ? c.cz * CS - sh.z : c.cx * CS - sh.x; int ds = dv > 0 ? 1 : dv < 0 ? -1 : 1;
-                    Add(0, 5, "#6b3b2a", sh.x + ac0 * ds * (depth + 0.02), 1.05, sh.z + ac1 * ds * (depth + 0.02), al0 != 0 ? 1.0 : 0.06, 2.1, al1 != 0 ? 1.0 : 0.06, false);
+                    Add(0, 5, "#6b3b2a", sh.x + ac0 * ds * (depth + 0.02), 1.49, sh.z + ac1 * ds * (depth + 0.02), al0 != 0 ? 1.0 : 0.06, 2.1, al1 != 0 ? 1.0 : 0.06, false); // at the stoop's height
                     foreach (int s in new[] { -1, 1 }) Add(2, 0, siding, sh.x + al0 * s * half, sh.h, sh.z + al1 * s * half, depth, rf.rise, 0, false, ry: lng ? 1.5707963267948966 : 0);
                 }
                 Num ang = DAtan2(rf.rise, rf.S), th = sh.house ? 0.12 : 0.05, cy = sh.h + rf.rise / 2 - rf.S / rf.L * th / 2, cu = rf.S / 2 - rf.rise / rf.L * th / 2;
@@ -282,6 +287,18 @@ namespace Sting.Core
                 var ss = ShedSites(sh);
                 Add(0, 5, "#0d0a07", ss.wall.x - ss.wall.nx * 0.008, ss.wall.y, ss.wall.z - ss.wall.nz * 0.008, ss.wall.nx != 0 ? 0.012 : 0.05, 0.12, ss.wall.nz != 0 ? 0.012 : 0.05, true);
                 Add(0, 5, "#0d0a07", ss.attic.x - ss.attic.nx * 0.008, ss.attic.y, ss.attic.z - ss.attic.nz * 0.008, ss.attic.nx != 0 ? 0.012 : 0.4, 0.03, ss.attic.nz != 0 ? 0.012 : 0.4, true);
+            }
+            foreach (var g in c.garages) // a garage (S4): the house's siding, a flat roof, an up-and-over door facing the drive
+            {
+                Num w = g.x1 - g.x0, d = g.z1 - g.z0, mx = (g.x0 + g.x1) / 2, mz = (g.z0 + g.z1) / 2;
+                Add(0, 0, Sidings[g.c], mx, g.h / 2, mz, w, g.h, d, false);
+                Add(0, 5, "#4e4b52", mx, g.h + 0.06, mz, w + 0.2, 0.12, d + 0.2, false);
+                Add(0, 5, "#d9d4c7", mx, 1.1, g.zf - g.s * 0.02, w - 0.8, 2.2, 0.06, false);
+            }
+            foreach (var p in c.porches) // the stoop and its step, concrete
+            {
+                Add(0, 5, "#b9b4a8", p.x, 0.22, p.z - p.s * 0.6, 1.8, 0.44, 1.2, true);
+                Add(0, 5, "#aea99c", p.x, 0.11, p.z - p.s * 1.35, 1.8, 0.22, 0.3, true);
             }
             foreach (var t in c.trees) Add(1, 5, "#5b4330", t.x, t.h / 2, t.z, t.r * 0.8, t.h, t.r, false, n: 9);
             foreach (var t in c.tables)
@@ -484,7 +501,20 @@ namespace Sting.Core
         {
             public List<Rect> roads = new List<Rect>(), lots = new List<Rect>(), plazas = new List<Rect>();
             public List<Loop> loops = new List<Loop>(); public List<Mall> malls = new List<Mall>(); public List<Shop> shops = new List<Shop>(); public List<Shed> houses = new List<Shed>();
-            public List<Pond> ponds = new List<Pond>();
+            public List<Pond> ponds = new List<Pond>(); public List<Rect> drives = new List<Rect>();
+        }
+        /// A house's garage and drive (world.js garageOf, driveOf; GDD 21.2, S4)
+        public static readonly Num GarageShare = 0.8, GarageW = 3.6, GarageD = 6.5, GarageH = 2.8, GarageInset = 0.3, GarageGap = 1.2, PorchRun = 1.6;
+        public static Garage GarageOf(System.Func<long, ulong> H, long b, Num x, Num z, Num hw, Num hd, int s)
+        {
+            if (Unit(H(b + 7)) >= GarageShare) return null;
+            int side = Unit(H(b + 8)) < 0.5 ? -1 : 1; Num x0 = side > 0 ? x + hw + GarageGap : x - hw - GarageGap - GarageW, zf = z - s * hd, zb = zf + s * GarageD;
+            return new Garage { x0 = x0, x1 = x0 + GarageW, z0 = Min(zf, zb), z1 = Max(zf, zb), zf = zf, s = s, h = GarageH, c = (int)Abs(Floor(x * 7 + z * 3 + 0.5)) % 5 };
+        }
+        public static Rect DriveOf(Garage g, Num oz)
+        {
+            Num zs = oz + g.s * (4 + T.terrain.grade.walk);
+            return new Rect { minx = g.x0 + GarageInset, maxx = g.x1 - GarageInset, minz = Min(zs, g.zf), maxz = Max(zs, g.zf) };
         }
         /// a chunk's pond (world.js pondsOf): some parks and woods, never the home park, clear of the picnic table, the walk
         /// round a park and a wood's path; a few spots tried, the first that fits taken
@@ -545,7 +575,12 @@ namespace Sting.Core
                 for (int li = 0; li < 4; li++)
                 {
                     int s = li < 2 ? -1 : 1; Num lx = ox + (li % 2 != 0 ? 16 : -16); long b = 3000 + li * 2000;
-                    if (Unit(H(b)) < 0.9) o.houses.Add(new Shed { x = lx + Range(H(b + 1), -3, 3), z = oz + s * 15.5, hw = Range(H(b + 2), 5, 6.5), hd = Range(H(b + 3), 4, 5), house = true });
+                    if (Unit(H(b)) < 0.9)
+                    {
+                        Num x = lx + Range(H(b + 1), -3, 3), z = oz + s * 15.5, hw = Range(H(b + 2), 5, 6.5), hd = Range(H(b + 3), 4, 5); var g = GarageOf(H, b, x, z, hw, hd, s);
+                        o.houses.Add(new Shed { x = x, z = z, hw = hw, hd = hd, house = true, g = g });
+                        if (g != null) o.drives.Add(DriveOf(g, oz));
+                    }
                 }
             }
             else if (use == "mall")
@@ -573,7 +608,7 @@ namespace Sting.Core
             public int k; public Num minx, maxx, minz, maxz, x, z, r, m, hx, hz, h; public bool hSet;
             // a house pad (5) and its front-yard ramp (6), a street (0) or cul-de-sac (2), a footing: worked out per step of the
             // modifier (GDD 21.2): height, shoulder, the ramp's start height
-            public Num z0, run, zw, zf, cap; public int sg; public bool road, @fixed; public Pad pad, ramp;
+            public Num z0, run, zw, zf, cap, xd; public int sg; public bool road, @fixed, drv; public Pad pad, ramp;
             public readonly Num[] hT = new Num[4], mT = new Num[4], hwT = new Num[4]; public readonly bool[] tSet = new bool[4];
         }
         static readonly Dictionary<long, List<Pad>> pads = new Dictionary<long, List<Pad>>(); static string padTag;
@@ -600,10 +635,12 @@ namespace Sting.Core
                 {
                     var road = c.roads.Count > 0 ? c.roads[0] : null; Num rz = road != null ? (road.minz + road.maxz) / 2 : b.z;
                     int sg = road == null ? 1 : b.z - rz > 0 ? 1 : b.z - rz < 0 ? -1 : 0;
-                    Num zw = road != null ? (sg > 0 ? road.maxz + T.terrain.grade.walk : road.minz - T.terrain.grade.walk) : b.z, zf = b.z - sg * b.hd;
-                    var pad = new Pad { k = 5, minx = b.x - b.hw, maxx = b.x + b.hw, minz = b.z - b.hd, maxz = b.z + b.hd, m = T.terrain.grade.house, hx = b.x, hz = b.z, z0 = rz, run = Abs(zf - zw), road = road != null, zw = zw, sg = sg };
+                    Num zw = road != null ? (sg > 0 ? road.maxz + T.terrain.grade.walk : road.minz - T.terrain.grade.walk) : b.z;
+                    // the pad takes in the garage beside the house and the porch before its door (S4); the front yard runs from there
+                    Num zf = b.z - sg * (b.hd + PorchRun), x0 = b.g != null ? Min(b.x - b.hw, b.g.x0) : b.x - b.hw, x1 = b.g != null ? Max(b.x + b.hw, b.g.x1) : b.x + b.hw;
+                    var pad = new Pad { k = 5, minx = x0, maxx = x1, minz = Min(zf, b.z - b.hd), maxz = Max(zf, b.z + b.hd), m = T.terrain.grade.house, hx = b.x, hz = b.z, z0 = rz, run = Abs(zf - zw), road = road != null, zw = zw, sg = sg, drv = b.g != null, xd = b.g != null ? (b.g.x0 + b.g.x1) / 2 : 0 };
                     P.Add(pad);
-                    if (road != null) ramps.Add(pad.ramp = new Pad { k = 6, minx = b.x - b.hw, maxx = b.x + b.hw, minz = Min(zw, zf), maxz = Max(zw, zf), m = T.terrain.grade.house, zw = zw, zf = zf, sg = sg, z0 = rz, pad = pad });
+                    if (road != null) ramps.Add(pad.ramp = new Pad { k = 6, minx = x0, maxx = x1, minz = Min(zw, zf), maxz = Max(zw, zf), m = T.terrain.grade.house, zw = zw, zf = zf, sg = sg, z0 = rz, pad = pad });
                 }
                 P.AddRange(ramps);
                 pads[key] = P;
@@ -780,7 +817,7 @@ namespace Sting.Core
                 if (p.road)
                 {
                     hw = StreetAt(seed, p.hx, p.z0, st, terrain);
-                    Num a = StreetAt(seed, p.minx, p.z0, st, terrain), b2 = StreetAt(seed, p.maxx, p.z0, st, terrain), lim = T.terrain.grade.drive * p.run;
+                    Num a = StreetAt(seed, p.drv ? p.xd : p.minx, p.z0, st, terrain), b2 = StreetAt(seed, p.drv ? p.xd : p.maxx, p.z0, st, terrain), lim = T.terrain.grade.drive * p.run; // with a garage: at its walk and its drive (world.js)
                     Num lo = Max(Max(a, b2), hw) - lim, hi = Min(Min(a, b2), hw) + lim;
                     h = lo <= hi ? Max(lo, Min(hi, h)) : (lo + hi) / 2;
                 }
@@ -992,7 +1029,22 @@ namespace Sting.Core
                 for (int li = 0; li < 4; li++)
                 {
                     int s = li < 2 ? -1 : 1; Num lx = ox + (li % 2 != 0 ? 16 : -16); long b = 3000 + li * 2000;
-                    if (Unit(H(b)) < 0.9) AddShed(lx + Range(H(b + 1), -3, 3), oz + s * 15.5, true, b + 2, true);
+                    if (Unit(H(b)) < 0.9)
+                    {
+                        AddShed(lx + Range(H(b + 1), -3, 3), oz + s * 15.5, true, b + 2, true);
+                        var sh = c.sheds[c.sheds.Count - 1]; var g = GarageOf(H, b, sh.x, sh.z, sh.hw, sh.hd, s); Num zf = sh.z - s * sh.hd;
+                        if (g != null) // a garage beside the house, a drive to it (S4)
+                        {
+                            var d = DriveOf(g, oz);
+                            c.garages.Add(g); c.drives.Add(d);
+                            c.boxes.Add(new Box { minx = g.x0, maxx = g.x1, miny = 0, maxy = g.h, minz = g.z0, maxz = g.z1, wood = false, garage = true });
+                            occupied.Add(new Occ { x = (g.x0 + g.x1) / 2, z = (g.z0 + g.z1) / 2, r = 4 }); occupied.Add(new Occ { x = (d.minx + d.maxx) / 2, z = (d.minz + d.maxz) / 2, r = 3 });
+                        }
+                        // the porch before the front door: a stoop at the door's sill and a step down to the walk
+                        c.porches.Add(new Porch { x = sh.x, z = zf, s = s });
+                        c.boxes.Add(new Box { minx = sh.x - 0.9, maxx = sh.x + 0.9, miny = 0, maxy = 0.44, minz = Min(zf, zf - s * 1.2), maxz = Max(zf, zf - s * 1.2), wood = false, porch = true });
+                        c.boxes.Add(new Box { minx = sh.x - 0.9, maxx = sh.x + 0.9, miny = 0, maxy = 0.22, minz = Min(zf - s * 1.2, zf - s * 1.5), maxz = Max(zf - s * 1.2, zf - s * 1.5), wood = false, porch = true });
+                    }
                     AddFence(lx - 15.6, oz + s * 20.5, lx - 15.6, oz + s * 31.6);
                     AddFence(lx - 15.6, oz + s * 31.6, lx + 15.6, oz + s * 31.6);
                     if (li % 2 != 0) AddFence(lx + 15.6, oz + s * 20.5, lx + 15.6, oz + s * 31.6);
