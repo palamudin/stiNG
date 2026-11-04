@@ -72,12 +72,11 @@ export class World {
     this.shore = wet && floatRT ? (this.shoreMode === 'live' ? null : new ShoreField(renderer, this.clip, source)) : null;
     this.uShoreWave = { value: new THREE.Vector4(0, 8, 0, 8) }; // the swell's and the wind sea's (Hs, Tp): set from the wave field each frame
     this.uShoreSea = { value: source.sea };
-    this.uSwellDir = { value: new THREE.Vector2(0.8, 0.6) }; // the swell's direction of travel where no shore is in the table's reach (from the wind)
 
     this.sky = new Sky(renderer);
     this.clouds = new Clouds(renderer, this.sky);
     if (wet && floatRT && this.shoreMode === 'live') this.shore = shoreLive(this.clouds);
-    this.terrain = makeTerrain(this.clip, { sea: wet ? source.sea : 0, paving: source.kind === 'sting', shore: wet ? 1 : 0, snowLine: wet ? 215 : 1e9, shoreField: this.shore, uShoreWave: this.uShoreWave, uShoreSea: this.uShoreSea, uSwellDir: this.uSwellDir });
+    this.terrain = makeTerrain(this.clip, { sea: wet ? source.sea : 0, paving: source.kind === 'sting', shore: wet ? 1 : 0, snowLine: wet ? 215 : 1e9, shoreField: this.shore, uShoreWave: this.uShoreWave, uShoreSea: this.uShoreSea });
     this.group = new THREE.Group(); this.group.name = 'world2';
     this.group.add(this.terrain.mesh);
     this.uniforms = this.terrain.uniforms;
@@ -100,7 +99,7 @@ export class World {
     this.group.add(this.grass.group);
     this.rain = new Rain(this); this.group.add(this.rain.mesh);
     this.post = new Post(renderer, this.sky, { msaa: this.q.msaa, scale: this.q.scale });
-    this.post.U.uSea.value = source.sea; this.post.U.uShoreWave = this.uShoreWave; this.post.U.uShoreSea = this.uShoreSea; this.post.U.uSwellDir = this.uSwellDir;
+    this.post.U.uSea.value = source.sea; this.post.U.uShoreWave = this.uShoreWave; this.post.U.uShoreSea = this.uShoreSea;
     if (opts.lens) { const L = opts.lens, U = this.post.U; if (L.fstop) U.uFstop.value = L.fstop; if (L.maxCoc) U.uMaxCoc.value = L.maxCoc; if (L.focal) U.uFocal.value = L.focal; if (L.sensor) U.uSensor.value = L.sensor; }
     if (source.sea < -1e5) this.post.U.uWaterOn.value = 0;
     this._water();
@@ -248,7 +247,6 @@ export class World {
         // the shore waves (shorefield.js): the sea's swell from the long fetch, a lake's from the local wind sea
         const sw = swellState(Math.max(st.U10, WAVES.swellMin), this.source.water.swellFetch || this.source.water.fetch);
         this.uShoreWave.value.set(Math.max(WAVES.swellHmin, sw.Hs), Math.max(WAVES.swellTmin, sw.Tp), this.waves.stats.Hs, Math.max(1.5, 2 * Math.PI / wp));
-        { const m = Math.hypot(w10[0], w10[1]); if (m > 1e-3) this.uSwellDir.value.set(w10[0] / m, w10[1] / m); } // the swell travels with the wind
       }
       U.uWLost.value = this.waves.lostSlope; U.uWPeak.value = Math.min(2 * Math.PI / WAVES.km, 2 * Math.PI / st.kp); // the ripples at the gravity-capillary minimum, or the peak if shorter
       if (this.caustics) {

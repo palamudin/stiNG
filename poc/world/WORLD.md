@@ -187,11 +187,13 @@ which is on.
 **The water never lies flat** (`waves.js`). The wind sea is raised by at least a 1.5 m/s wind (a residual chop) and
 the swell by at least 4.5 m/s over the 40 km fetch (weather elsewhere, 0.2 m at 4 s); the wind adds to these.
 
-**The swell and the shore waves** (`SHORE_WAVE_GLSL`, read by `water.js` and `terrain.js`). The swell is one train
-over all the water, and it is the wave that breaks: two trains (the peak period and 0.62 of it) of narrow-crested
-waves ride the table's travel time wherever it knows the point, and run as a plane wave from the wind's side where no
-shore is within the table's reach (blended over the last level's outer margin; near a body's spine, where the table's
-coherence falls, the plane wave stands in). Phase `w (t + tau)`, wavenumber `w / sqrt(g depth)`, so
+**The shore waves** (`SHORE_WAVE_GLSL`, read by `water.js` and `terrain.js`). Two trains (the peak period and 0.62
+of it) of narrow-crested waves ride the table's travel time, and only that: where the table stops being trustworthy
+— past 180–420 m from the coast, at its last level's margin, on a body's spine where fronts from two shores meet —
+their amplitude fades out and the open water's cascades carry the sea, as in Ultra-Water. A plane wave blended in by
+phase (tried) is wrong: two phases hundreds of radians apart, mixed by a weight that changes over metres, make a
+phase gradient of thousands of radians a metre, which drew swirls on the open water. Phase `w (t + tau)`,
+wavenumber `w / sqrt(g depth)`, so
 crests slow and bunch toward the line; Green's law raises them as the water shoals, a wave higher than 0.78 of the
 depth breaks (McCowan 1894) and runs on as a bore; whitewater on a broken crest's face, trailing off behind it, lace in
 the surf zone; sets by a slow noise, a phase that wanders along the coast so crests are not rings. The sea gets the

@@ -68,7 +68,7 @@ export function makeTerrain(clip, opts = {}) {
     uGrassTint: { value: new THREE.Vector3(1, 1, 1) }, uSnowOn: { value: 0 }, // the season's grass colour and snow (seasons.js)
   };
   const shore = opts.shoreField; // the shore table (shorefield.js), for the swash; without it the swash reads the waves
-  if (shore) Object.assign(U, shore.uniforms, { uShoreWave: opts.uShoreWave || { value: new THREE.Vector4(0, 8, 0, 8) }, uShoreSea: opts.uShoreSea || { value: opts.sea ?? 0 }, uSwellDir: opts.uSwellDir || { value: new THREE.Vector2(0.8, 0.6) } });
+  if (shore) Object.assign(U, shore.uniforms, { uShoreWave: opts.uShoreWave || { value: new THREE.Vector4(0, 8, 0, 8) }, uShoreSea: opts.uShoreSea || { value: opts.sea ?? 0 } });
   const CLIP = clip.glsl() + CLOUD_SHADOW_GLSL;
   const SHORE = shore ? shore.glsl() + '\n' + SHORE_WAVE_GLSL + '\n#define T_SHORE\n' : '';
   const VERT_HEAD = `${CLIP}\nattribute float aLevel;\nvarying vec3 vW;\n`;

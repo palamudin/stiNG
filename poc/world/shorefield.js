@@ -353,28 +353,26 @@ float shoreGroup(vec2 p, float t) { return 0.45 + 0.55 * (0.5 + 0.5 * w2noise(p 
 struct ShoreWave { float y; vec2 slope; float foam; float lace; float a; float ph; float breaking; };
 // p: the point (xz); sh: shoreAt(p); depth: the water's depth there (<= 0 on land); t: time; cell: the sampling
 // interval in metres (a train shorter than a few cells fades out instead of aliasing)
-// the swell's direction where no shore is within the table's reach: from the wind's side
-uniform vec2 uSwellDir;
 ShoreWave shoreWaves(vec2 p, vec4 sh, float depth, float t, float cell, vec2 st) {
   ShoreWave o = ShoreWave(0.0, vec2(0.0), 0.0, 0.0, 0.0, 0.0, 0.0);
   if (st.x <= 0.0 || depth <= -0.3) return o;
   float know = gShoreKnow, coh = know > 0.0 ? length(sh.yz) : 0.0;
-  vec2 dirT = coh > 1e-4 ? sh.yz / coh : vec2(0.0);
-  // the swell is one train everywhere on the water: on the table's travel time where it knows the point, as a plane
-  // wave from the wind's side where it does not, blended over the last level's outer margin; near a body's spine
-  // (coherence low) the table's train gives way to the plane wave
-  float wt = know * smoothstep(0.05, 0.6, coh);
-  vec2 dir = normalize(mix(uSwellDir, dirT, wt) + vec2(1e-5, 0.0));
-  float env = smoothstep(-0.3, 0.3, depth);
+  vec2 dir = coh > 1e-4 ? sh.yz / coh : vec2(0.0);
+  // the shore train runs on the table's travel time only, and where the table stops being trustworthy — past a few
+  // hundred metres from the coast, at its last level's margin, on a body's spine where fronts from two shores meet —
+  // its amplitude fades out and the open water's cascades carry the sea (as in Ultra-Water). Never a second phase
+  // blended in: two phases hundreds of radians apart, mixed by a weight that changes over metres, make a phase
+  // gradient of thousands of radians a metre — the swirls
+  float env = know * smoothstep(0.05, 0.6, coh) * (1.0 - smoothstep(180.0, 420.0, -sh.x)) * smoothstep(-0.3, 0.3, depth);
+  if (env <= 0.0) return o;
   float cel = shoreCelerity(depth);
   float shoal = clamp(pow(max(depth, 0.6) / ${SHORE.dMax.toFixed(1)}, -0.25), 1.0, 2.2);
   float group = shoreGroup(p, t), pn = shorePhaseNoise(p);
   for (int i = 0; i < 2; i++) {
-    float T = st.y * (i == 0 ? 1.0 : 0.62), w = 6.2831853 / T, k = w / cel, k0 = w * w / SW_G;
+    float T = st.y * (i == 0 ? 1.0 : 0.62), w = 6.2831853 / T, k = w / cel;
     float a0 = 0.5 * st.x * (i == 0 ? 1.0 : 0.3) * env * shoal * group;
     float a = min(a0, 0.39 * depth + 0.06), rel = a0 / max(depth, 0.05); // a bore keeps a few centimetres at the line
-    float phT = w * (t + sh.w), phP = w * t - k0 * dot(p, uSwellDir);
-    float ph = mix(phP, phT, wt) + pn * (i == 0 ? 1.0 : 1.37) + float(i) * 2.1;
+    float ph = w * (t + sh.w) + pn * (i == 0 ? 1.0 : 1.37) + float(i) * 2.1;
     float c = max(0.5 + 0.5 * cos(ph), 0.0), cp = pow(c, 0.6), s = sin(ph); // max: a GPU's cos can overshoot 1 by a bit at large phases, and pow of a negative is NaN
     float bl = 1.0 - smoothstep(0.1, 0.3, k * cell / 6.2831853);
     o.y += bl * a * (2.0 * cp * c - 0.78);
