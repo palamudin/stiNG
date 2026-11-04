@@ -168,13 +168,23 @@ void main() {
       const r = this.renderer, prev = r.getRenderTarget();
       if (this._msHaze !== haze) { this._msHaze = haze; this._q.material = this.msMat; r.setRenderTarget(this.msRT); r.render(this.scene, this.cam); this._q.material = this.mat; }
       r.setRenderTarget(this.rt); r.render(this.scene, this.cam); r.setRenderTarget(prev);
-      const got = this._day.get(key);
-      if (got) { this.sunColor.copy(got.sun); this.skyUp.copy(got.up); this.skyHorizon.copy(got.hz); this.irradiance = got.irr; this.uniforms.uSunColor.value.copy(this.sunColor); }
-      else {
+      let got = this._day.get(key);
+      if (!got) {
         this._cpu(sunDir, camH, haze);
         if (this._day.size > 8192) this._day.clear();
-        this._day.set(key, { sun: this.sunColor.clone(), up: this.skyUp.clone(), hz: this.skyHorizon.clone(), irr: this.irradiance });
+        got = { sun: this.sunColor.clone(), up: this.skyUp.clone(), hz: this.skyHorizon.clone(), irr: this.irradiance };
+        this._day.set(key, got);
       }
+      this._to = got;
+      if (!this._lit) { this._lit = true; this._cur = { sun: got.sun.clone(), up: got.up.clone(), hz: got.hz.clone() }; }
+    }
+    // the light eases from step to step (about a third of a second): a step of the sun, a change of altitude or haze
+    // reads a new entry, and taken at once the light on everything jumped, which showed as a flash
+    if (this._to) {
+      const C = this._cur, T = this._to, k = 0.12;
+      C.sun.lerp(T.sun, k); C.up.lerp(T.up, k); C.hz.lerp(T.hz, k);
+      this.sunColor.copy(C.sun); this.skyUp.copy(C.up); this.skyHorizon.copy(C.hz); this.irradiance = T.irr;
+      this.uniforms.uSunColor.value.copy(this.sunColor);
     }
   }
   // Sun colour from the transmittance toward it (CPU twin of the same air). Sky light: the table read back and
