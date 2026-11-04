@@ -235,9 +235,24 @@ vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, floa
   // ---- caustics: splatted for the sea, from the ripples' curvature for bodies
   float cz = 1.0;
   if (bodyK == 0.0) {
+    // the splat round the focus, faded out radially over its outer third; past it, the ripples' curvature stands in
+    // (the analytic caustic below, held to the first 1.5 m of depth), so the splat's region has no edge to see
     vec2 cu = (Pb.xz - uCaus.xy) / uCaus.z + 0.5;
-    float edge = min(min(cu.x, 1.0 - cu.x), min(cu.y, 1.0 - cu.y));
-    if (uCaus.w > 0.5 && edge > 0.0) cz = mix(1.0, min(texture(tCaus, cu).r, 400.0), smoothstep(0.0, 0.08, edge)); // a focus can sum past half-float range
+    float rr = length(cu - 0.5) * 2.0, inSplat = uCaus.w > 0.5 ? 1.0 - smoothstep(0.62, 0.95, rr) : 0.0;
+    float splat = inSplat > 0.0 ? min(texture(tCaus, clamp(cu, vec2(0.001), vec2(0.999))).r, 400.0) : 1.0; // a focus can sum past half-float range
+    float an = 1.0;
+    if (inSplat < 1.0 && D > 0.0005) {
+      vec2 q = Pb.xz; float e = 0.02;
+      vec2 s0 = wSlopeAt(q), sxp = wSlopeAt(q + vec2(e, 0.0)), szp = wSlopeAt(q + vec2(0.0, e));
+      mat2 H = mat2((sxp - s0) / e, (szp - s0) / e);
+      vec3 L0 = -uSun; float de = 0.01;
+      vec3 r0 = refract(L0, normalize(vec3(-s0.x, 1.0, -s0.y)), 1.0 / W_N), rx = refract(L0, normalize(vec3(-s0.x - de, 1.0, -s0.y)), 1.0 / W_N), rz = refract(L0, normalize(vec3(-s0.x, 1.0, -s0.y - de)), 1.0 / W_N);
+      vec2 o0 = r0.xz / -r0.y, ox = rx.xz / -rx.y, oz = rz.xz / -rz.y;
+      mat2 M = mat2((ox - o0) / de, (oz - o0) / de);
+      mat2 J = mat2(1.0) + min(D, 1.5) * M * H;
+      an = mix(1.0, clamp(1.0 / max(abs(determinant(J)), 0.35), 0.0, 2.5), exp(-tw * 0.02) * smoothstep(0.0, 0.3, D));
+    }
+    cz = mix(an, splat, inSplat);
   } else if (D > 0.0005) {
     // the sun's refracted offset on the floor as a function of slope, linearised; with the slope's derivative (the
     // curvature) this is the Jacobian of the map from the surface to the floor; brightness = 1 / |det J|

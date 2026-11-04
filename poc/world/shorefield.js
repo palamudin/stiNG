@@ -383,13 +383,17 @@ float shoreRunup(float tb, vec2 st) { float L0 = SW_G * st.y * st.y / 6.2831853,
 // into fingers by a fine one) and drains back from the top; wherever that level stands above the sand there is a sheet
 // of water a few centimetres thick. Returns (thickness m, lace foam at the leading edge 0..1, whitewater and bubbles
 // behind it 0..1); zero where the sand is dry
+// a tongue's reach up the beach: the set's size when it came (the group noise at its own time, so a tongue keeps one
+// reach while it climbs and drains), varied along the shore by a slow noise; and the fingers at its tip
+float shoreReach(vec2 p, float tk, float R2) { return R2 * (0.55 + 0.45 * shoreGroup(p, tk)) * (0.78 + 0.32 * w2noise(p / 2.6, 620)); }
+float shoreFingers(vec2 p, float tk) { return 0.03 * w2noise(p / 0.35 + vec2(tk * 0.2, 0.0), 621); }
 vec3 shoreSheet(vec2 p, vec4 sh, float hgt, vec3 nG, float t, vec2 st) {
   if (st.x <= 0.0 || dot(sh.yz, sh.yz) < 1e-6 || sh.x > 40.0) return vec3(0.0);
   float tb = sqrt(max(1.0 - nG.y * nG.y, 0.0)) / max(nG.y, 0.05), R2 = shoreRunup(tb, st);
-  float w = 6.2831853 / st.y, ph = w * (t + sh.w) + shorePhaseNoise(p), f = fract(ph / 6.2831853);
-  float reach = R2 * (0.55 + 0.45 * shoreGroup(p, t)) * (0.78 + 0.32 * w2noise(p / 2.6, 620));
+  float T = st.y, w = 6.2831853 / T, ph = w * (t + sh.w) + shorePhaseNoise(p), f = fract(ph / 6.2831853), t0 = t - f * T;
+  float reach = shoreReach(p, t0, R2);
   float tongue = f < 0.22 ? sqrt(f / 0.22) : 1.0 - smoothstep(0.22, 0.82, f);
-  float R = reach * tongue + 0.03 * tongue * w2noise(p / 0.35 + vec2(t * 0.2, 0.0), 621); // fingers at the tip
+  float R = reach * tongue + tongue * shoreFingers(p, t0); // fingers at the tip
   float over = R - hgt; if (over <= 0.0) return vec3(0.0);
   float film = min(over * 0.18, 0.05);
   float lace = smoothstep(0.42, 0.62, 0.5 + 0.5 * (w2noise(p / 0.7 + vec2(t * 0.12, 0.0), 622) * 0.6 + w2noise(p / 0.17, 623) * 0.4));
@@ -397,6 +401,28 @@ vec3 shoreSheet(vec2 p, vec4 sh, float hgt, vec3 nG, float t, vec2 st) {
   float bubbles = smoothstep(0.08, 0.2, over) * (1.0 - smoothstep(0.4, 0.9, over)) * smoothstep(0.62, 0.75, lace + 0.3 * w2noise(p / 0.07, 624)) * 0.5;
   float arriving = (1.0 - smoothstep(0.03, 0.28, f)) * smoothstep(0.35, 0.7, lace + 0.15) * 0.8; // the bore's white comes in with the tongue
   return vec3(film, edge, max(bubbles, arriving));
+}
+// The sand's memory of the water (W3.1): at a point hgt above the still water, the last four tongues are asked when
+// each left this height (a tongue drains from 0.22 to 0.82 of the period: the level is reach (1 - smoothstep), so it
+// left when that fell to hgt), and the wetness is the freshest one's age: the dark of wet sand dries over 45 s, its
+// mirror gloss in a second or two as the water draws back. So the wet sand is the shape of the last tongue, fingers and all, and dries from the top down
+// as the water draws back, until the next tongue writes over it. Returns (dark 0..1, gloss 0..1); 1, 1 under water
+vec2 shoreWet(vec2 p, vec4 sh, float hgt, vec3 nG, float t, vec2 st) {
+  if (st.x <= 0.0 || dot(sh.yz, sh.yz) < 1e-6 || sh.x > 40.0 || hgt < 0.0) return vec2(hgt < 0.0 ? 1.0 : 0.0);
+  float tb = sqrt(max(1.0 - nG.y * nG.y, 0.0)) / max(nG.y, 0.05), R2 = shoreRunup(tb, st);
+  float T = st.y, w = 6.2831853 / T, ph = w * (t + sh.w) + shorePhaseNoise(p), f = fract(ph / 6.2831853), t0 = t - f * T;
+  float dark = 0.0, gloss = 0.0;
+  for (int k = 0; k < 4; k++) {
+    float tk = t0 - float(k) * T;
+    float reach = shoreReach(p, tk, R2) + shoreFingers(p, tk);
+    if (reach <= hgt) continue;
+    float sdown = 1.0 - hgt / reach; // the drain's smoothstep value when the level reached hgt
+    float x = 0.5 - sin(asin(clamp(1.0 - 2.0 * sdown, -1.0, 1.0)) / 3.0); // the inverse of smoothstep
+    float age = (t - tk) - (0.22 + 0.6 * x) * T;
+    if (age < 0.0) return vec2(1.0); // still under this tongue (the sheet is drawn over it)
+    dark = max(dark, exp(-age / 45.0)); gloss = max(gloss, exp(-age / 1.5));
+  }
+  return vec2(dark, gloss);
 }
 // the swash on the beach: at a point with height hgt above the line (sh: shoreAt there), the film's presence (0..1),
 // its leading edge (0..1, a thin line) and how far up the run-up reaches this set (R2: the run-up limit for the beach)

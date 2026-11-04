@@ -256,7 +256,7 @@ export class World {
       }
       U.uWLost.value = this.waves.lostSlope; U.uWPeak.value = Math.min(2 * Math.PI / WAVES.km, 2 * Math.PI / st.kp); // the ripples at the gravity-capillary minimum, or the peak if shorter
       if (this.caustics) {
-        const fx2 = eye.x + TMPV.x * focusDist, fz2 = eye.z + TMPV.z * focusDist, size = THREE.MathUtils.clamp(focusDist * 2.2, 6, 96);
+        const fx2 = eye.x + TMPV.x * focusDist, fz2 = eye.z + TMPV.z * focusDist, size = THREE.MathUtils.clamp(focusDist * 2.2, 24, 96); // at least 24 m: a wasp near the water sees the floor for tens of metres
         this.caustics.update(fx2, fz2, size, this.source.sea, this.sunDir);
         U.uCaus.value.set(this.caustics.U.uCenter.value.x, this.caustics.U.uCenter.value.y, size, this.caustics.on ? 1 : 0);
       }

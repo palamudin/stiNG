@@ -162,18 +162,20 @@ float hfShadow(vec2 p, float h0, float dist) {
   col = mix(col, T_MUD, uShore * (1.0 - smoothstep(-0.3, -0.03, hgt)));
   // the swash: run-up limit R2 on this slope (Stockdon et al. 2006); the edge now follows the incident waves at this
   // stretch of shore, so it runs up when a crest arrives and drains back after it
-  float film = 0.0, wetB = 0.0, damp = 0.0, fl = 0.0;
-  if (uShore > 0.5 && uRun.x > 1e-5 && hgt > -0.1 && hgt < 0.6) {
+  float film = 0.0, wetB = 0.0, damp = 0.0, fl = 0.0, TROUGH_WET = 1.0;
+  if (uShore > 0.5 && uRun.x > 1e-5 && hgt > -0.1 && hgt < 3.0) {
     float tb = sqrt(max(1.0 - TN.y * TN.y, 0.0)) / max(TN.y, 0.05), HL = uRun.x;
     float R2 = 1.1 * (0.35 * tb * sqrt(HL) + 0.5 * sqrt(HL * (0.563 * tb * tb + 0.004)));
     float aa = max(fwidth(hgt), 0.002), above = smoothstep(-0.05, 0.0, hgt);
 #ifdef T_SHORE
     // the swash from the shore table (shorefield.js): the front that broke out there arrives at the line and climbs
     // the sand at the table's travel time, the same phase the water draws its breakers with
-    // the sheet itself is drawn as water by the composite (shoreSheet); the sand here only remembers it: wet to the
-    // run-up limit of the shore state, damp a little above
-    R2 = shoreRunup(tb, shoreState(TW));
-    film = 0.0; float edgeF = 0.0;
+    // the sheet itself is drawn as water by the composite (shoreSheet); the sand here only remembers it (shoreWet):
+    // the shape of the last tongue, drying from the top down
+    vec2 ws = shoreWet(P, shoreAt(P), hgt, TN, uTime, shoreState(TW));
+    R2 = -1.0; film = 0.0; float edgeF = 0.0; wetB = ws.x * above; damp = 0.0;
+    col *= 1.0 - 0.4 * wetB;
+    TROUGH_WET = mix(1.0, 0.3, ws.y);
 #else
     // no table: the edge follows the incident waves where this cross-shore line meets the water (downhill by hgt / slope)
     vec2 Ps = P + (length(TN.xz) > 1e-4 ? normalize(TN.xz) : vec2(0.0)) * clamp(hgt / max(tb, 0.01), 0.0, 20.0);
@@ -182,9 +184,11 @@ float hfShadow(vec2 p, float h0, float dist) {
     film = (1.0 - smoothstep(sEdge - aa, sEdge + aa, hgt)) * smoothstep(-0.03, 0.0, hgt);
     float edgeF = (1.0 - smoothstep(0.0, aa * 2.0 + 0.003, abs(hgt - sEdge))) * step(0.004, sEdge);
 #endif
-    wetB = (1.0 - smoothstep(R2, R2 + aa, hgt)) * above;
-    damp = (1.0 - smoothstep(R2, R2 + 0.04 + aa, hgt)) * (1.0 - wetB) * above;
-    col *= (1.0 - 0.4 * wetB) * (1.0 - 0.2 * damp) * (1.0 - 0.15 * film); // wet sand: water in the pores roughly halves what the grains send back
+    if (R2 >= 0.0) {
+      wetB = (1.0 - smoothstep(R2, R2 + aa, hgt)) * above;
+      damp = (1.0 - smoothstep(R2, R2 + 0.04 + aa, hgt)) * (1.0 - wetB) * above;
+      col *= (1.0 - 0.4 * wetB) * (1.0 - 0.2 * damp) * (1.0 - 0.15 * film); // wet sand: water in the pores roughly halves what the grains send back
+    }
     // foam at the swash's leading edge, broken into bubbles
     fl = edgeF * film * smoothstep(-0.1, 0.5, w2noise(P / 0.07 + uTime * 0.3, 214) * NF(0.07) + 0.2);
     col = mix(col, vec3(0.75), fl * 0.8);
@@ -200,7 +204,7 @@ float hfShadow(vec2 p, float h0, float dist) {
   col = mix(col, T_SNOW, snow);
   col *= 1.0 - 0.35 * uWet * (1.0 - snow);
   diffuseColor.rgb = col;
-  float TROUGH = mix(mix(mix(0.95, 0.75, rk) * (1.0 - 0.5 * uWet), 0.45, wetB), 0.16, film * (1.0 - fl)); // the film is rippled and bubbly, not a mirror
+  float TROUGH = mix(mix(mix(0.95, 0.75, rk) * (1.0 - 0.5 * uWet), 0.45, wetB), 0.16, film * (1.0 - fl)) * TROUGH_WET; // the film is rippled and bubbly, not a mirror; freshly left sand mirrors
 `)
       .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = TROUGH;')
       .replace('#include <normal_fragment_begin>', /* glsl */ `#include <normal_fragment_begin>
