@@ -194,9 +194,11 @@ void main() {
 #ifdef W3_COAST
   // the swash: over the sand near the line the surface is raised to the tongue the last bore sent up the beach, a few
   // centimetres over the sand (thinning to its tip), so its edge is where this mesh meets the terrain
-  if (coast && depth < 0.3) {
+  if (bed > -1e3 && depth < 0.3 && depth > -3.0 && level <= uSeaLevel + 0.5 && uShoreWave.x > 0.0) {
     float hgt = -depth, e = max(cell, 0.25);
-    float tb = length(vec2(clipHeight(xz + vec2(e, 0.0)) - bed, clipHeight(xz + vec2(0.0, e)) - bed)) / e;
+    vec2 grad = vec2(clipHeight(xz + vec2(e, 0.0)) - clipHeight(xz - vec2(e, 0.0)), clipHeight(xz + vec2(0.0, e)) - clipHeight(xz - vec2(0.0, e))) / (2.0 * e);
+    sw3Beach(xz, grad);
+    float tb = length(grad);
     float tp, Tr; float eta = sw3Tongue(xz, tb, uTime, tp, Tr);
     // one continuous surface: the tongue's level (level + eta), held to 5 cm over the sand. Past the tip it is under
     // the sand by the same amount the sand stands over the tongue, so the edge is where the sand's height crosses the

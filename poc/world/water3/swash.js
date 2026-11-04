@@ -38,12 +38,25 @@ float gNear = 0.0, gExpo = 1.0, gPn = 0.0, gTau = 0.0, gShoreD = 1e4; vec2 gDir 
 bool sw3Ctx(vec2 p) {
   gNear = 0.0;
   vec4 sh = shoreAt(p); float coh = gShoreKnow > 0.0 ? length(sh.yz) : 0.0;
-  if (coh < 0.05) return false;
-  gDir = sh.yz / coh; gTau = sh.w; gShoreD = sh.x;
-  gNear = gShoreKnow * smoothstep(0.05, 0.5, coh) * (1.0 - smoothstep(${SWASH.coast[0].toFixed(1)}, ${SWASH.coast[1].toFixed(1)}, -sh.x));
-  gExpo = mix(SW3_LEE, 1.0, smoothstep(-0.4, 0.6, dot(uSwDir, gDir)));
+  if (gShoreKnow <= 0.0 || abs(sh.x) > 9.0e3) return false;
+  // nothing here may switch on or off from one texel to the next (the coherence does, near the line): the trains'
+  // share fades with the distance only, the direction and the exposure are weighted by the coherence, so where it is
+  // weak they fade instead of stepping
+  gDir = coh > 1e-4 ? sh.yz / coh : vec2(0.0); gTau = sh.w; gShoreD = sh.x;
+  gNear = gShoreKnow * (1.0 - smoothstep(${SWASH.coast[0].toFixed(1)}, ${SWASH.coast[1].toFixed(1)}, -sh.x));
+  gExpo = mix(SW3_LEE, 1.0, smoothstep(-0.4, 0.6, dot(uSwDir, sh.yz)));
   gPn = w2noise(p / 240.0, 611) * 5.0 + w2noise(p / 70.0, 612) * 1.6;
   return gNear > 0.0;
+}
+// the beach here, for the swash and the sand: nothing from the shore table (its values jump from texel to texel on the
+// land side of the line, and a reach scaled by them comes out in teeth the size of a texel). The swell reaches every
+// sea beach; its exposure from the way the sand faces (grad: the ground's gradient, uphill), its clock's noise from
+// the point itself
+void sw3Beach(vec2 p, vec2 grad) {
+  gNear = 1.0;
+  float gl = length(grad); vec2 up = gl > 1e-4 ? grad / gl : vec2(0.0);
+  gExpo = mix(SW3_LEE, 1.0, smoothstep(-0.4, 0.6, dot(uSwDir, up)));
+  gPn = w2noise(p / 240.0, 611) * 5.0 + w2noise(p / 70.0, 612) * 1.6;
 }
 float sw3Period(int i) { return uShoreWave.y * (i == 0 ? ${SWASH.periods[0].toFixed(2)} : i == 1 ? ${SWASH.periods[1].toFixed(2)} : ${SWASH.periods[2].toFixed(2)}); }
 float sw3Phase(int i, float t, float tau, float pn) { return 6.2831853 / sw3Period(i) * (t + tau) + pn * (i == 0 ? ${SWASH.phaseMul[0].toFixed(2)} : i == 1 ? ${SWASH.phaseMul[1].toFixed(2)} : ${SWASH.phaseMul[2].toFixed(2)}) + float(i) * 2.1; }
