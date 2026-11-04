@@ -231,6 +231,11 @@ void main() {
           vec3 P = vec3(Pg.x, Wg + hgt + gSheet.x, Pg.z); vec2 gG = vec2(-nG.x, -nG.z) / max(nG.y, 0.2);
           gx = wPlaneHit(uv + vec2(1.0 / uRes.x, 0.0), P, gG).xz - P.xz; gy = wPlaneHit(uv + vec2(0.0, 1.0 / uRes.y), P, gG).xz - P.xz;
           wShallow(gSheet.x); gDampSea = wDamp;
+          // the sea's own foam carried onto the sheet: the shore train read at the nearest point of the water line, in
+          // the shallowest water, so the crest's white, the lace and the surf's standing foam run on up the sand with
+          // the tongue instead of stopping at the still-water line (laid with the same pattern, in the same coordinates)
+          { float cohg = length(shg.yz); vec2 pl = Pg.xz + (cohg > 1e-4 ? shg.yz / cohg : vec2(0.0)) * max(shg.x, 0.0);
+            vec4 shl = shoreAt(pl); gSW = shoreWaves(pl, shl, 0.05, uTime, length(gx), shoreState(Wg)); }
           col = waterShade(uv, v, P, P.xz, gG, gx, gy, dist, col, 3.0, 0.0, vec3(0.0), 0.0);
           outDist = dist; wet = true; layer = 2.0;
         }
