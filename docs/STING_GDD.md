@@ -40,7 +40,7 @@
 17. Open questions
 18. Findings from the proof of concept
 19. Feature tiers and the current stack
-20. Plan: terrain, far detail and the map, and the world view seam (20.4)
+20. Plan: terrain, far detail and the map, the world view seam (20.4), World v3 (20.6)
 21. Plan: settlements built to code (urban, semi-urban, rural), the feature builder, forests
 - Appendix A — Protocode
 - Appendix B — Glossary
@@ -2405,6 +2405,27 @@ Set 2026-11-03, after T2-14: graphics now belong to the world-building thread (2
 - **Q-06 setting**, settled: American suburbia. T1-11 and T1-12 build lawns, fenced backyards, cul-de-sacs, park strips and a strip-mall edge.
 - **Q-07 players**, settled: rivals by default, co-op opt-in. Guards (T1-13) attack other players' wasps; friends can share a colony in a personal world.
 - **Q-02 default day length**, settled: 2-minute days by default, chosen at world creation.
+
+### 20.6 World v3 (merged from the world thread, pull request 3)
+
+World v3 replaces v2 behind the same seam, in `poc/world/` only; `poc/world/WORLD.md` is its record:
+- **Terrain.** A fjord coast with lakes at their own levels; a fifth clipmap channel holds the water level.
+- **Trees.** Card trees (pixel-art leaf clusters) with three levels of detail, and impostors placed on the GPU out to 6 km.
+- **Sky.** Blocky volumetric clouds with a cloud shadow map; daily weather and seasons; rain and snow.
+- **The map.** A zoom that turns into a map, with places.
+- **GPU timings**, per pass.
+- **The composite source,** for urban, semi-urban or wild starts.
+
+**Plugged in.** The game's `w2Frame` now passes the sim's own weather and season, not the template's:
+- **Cloud cover** from the day's weather: about 0.3 normally, 0.55 on a day it will rain, 0.8 while it rains, 0.95 in a storm, 0.1 in a heat spell and 0.45 in a cold one.
+- **Rain and storm** while the sim's rain falls.
+- **The day of the year:** spring to autumn across the colony's year, then winter.
+- **The hour:** the game's clock, so the sun follows the real seasonal track.
+
+**Not plugged in yet.**
+- The composite's wild land: the sim's chunks go on to the horizon, so a wild ring round a town needs the wild height in the sim with a C# twin, and a rule for where the settled chunks end. This is the next step of GDD 21's settlement templates.
+- The map's places come from the template's scan until T3-2.
+- Card trees were chosen over the blocky crowns of 18.79 for World v3. The classic look keeps the blocks.
 
 ---
 
