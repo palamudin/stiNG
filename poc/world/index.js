@@ -64,7 +64,7 @@ export class World {
     // day: the day of the year (0 is the first of spring); auto: the weather and season follow the clock (seasons.js)
     this.env = { hour: 16.5, day: 100, auto: false, haze: 1, mist: 1, wet: 0, wind: [0.8, 0.3], cloud: 0.35, cloudDens: 1, rain: 0, snow: 0, flash: 0 }; // auto is the template's; the game keeps its own weather
     this.season = seasonAt(100); this.weather = null;
-    this.waterMode = opts.water === 3 ? 3 : 2; // 3: the rebuilt water (water3/), A/B against the post pass's
+    this.waterMode = 3; // the water (water3/): the surface as a mesh; the post pass draws only the game's still bodies
     this.clip = new Clipmap(renderer, source, { levels: this.q.levels, ...(opts.clip || {}) });
     const wet = source.sea > -1e5; // a source without water: no beaches, no mud, no snow line; heights count from 0
     // the shore table (shorefield.js): baked from the clipmap when its levels move; the water and the beach read it
@@ -128,7 +128,7 @@ export class World {
     }
     this.post.setWater(this.waves, this.caustics, this.source.sea > -1e5 ? this.clip : null, this.shore);
     this.drawsWater = !!(this.waves && this.source.waters); // the caller can stop drawing its own water bodies
-    // water 3 (opts.water === 3, the rebuild): the surface as a mesh in the scene; the post pass's sea is turned off
+    // the water: the surface as a mesh, drawn after the scene (post.js); the post pass's own sea is off
     if (this.surface) { this.surface.dispose(); this.surface = null; }
     if (this.waterMode === 3 && this.waves && this.source.sea > -1e5) {
       this.surface = new WaterSurface(this); // drawn by the post chain after the scene (it reads the scene under it)

@@ -224,13 +224,23 @@ vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, floa
   vec3 V = -v; float tw = length(P - uCamPos);
   float fp = sqrt(max(length(gx) * length(gy), 1e-12));
   wDamp = vec4(1.0); float swFoam = 0.0, swLace = 0.0, swSurf = 0.0, cloud = 1.0; vec2 swSlope = vec2(0.0);
+  // a puddle, a birdbath, a fountain's basin (the water's kinds: still water): glass. No waves of its own, only a
+  // faint shiver from the wind, more on a wider body; the rain marks it with sharp rings
+  float still = 0.0;
+#ifdef W_SHORE
+  if (bodyK > 0.5 && bodyK < 2.5) still = 1.0; // (3 is the sea's swash sheet here)
+#else
+  if (bodyK > 0.5) still = 1.0;
+#endif
+  float shiver = 0.04 + 0.12 * smoothstep(0.5, 6.0, bodyR) * clamp(length(uWind), 0.0, 1.5);
+  if (still > 0.5) wDamp = vec4(shiver);
 #ifdef W_SHORE
   if (bodyK == 0.0) { wDamp = gDampSea; swSlope = gSW.slope; swFoam = gSW.foam; swLace = gSW.lace; swSurf = gSW.surf; }
   if (bodyK == 3.0) { wDamp = gDampSea; float fade = smoothstep(0.0, 0.03, gSheet.x); swFoam = gSW.foam * fade; swLace = gSW.lace * fade; swSurf = gSW.surf * fade; } // the swash sheet: glassy, the chop damped for its thickness; the sea's foam on it, thinning with it
   cloud = shoreCloud(P.xz); // the clouds' shadow: the sun's share of the light here
 #endif
   vec2 m, sv; wSlope(x0, gx, gy, m, sv);
-  vec2 rs = wRain(P.xz, uTime, uRain) * (1.0 - smoothstep(0.02, 0.08, fp)); // rings while rain falls (uRain), not while the ground is still wet (uWet)
+  vec2 rs = wRain(P.xz, uTime, uRain) * (1.0 - smoothstep(0.02, 0.08, fp)) * (1.0 + 1.2 * still); // rings while rain falls (uRain), not while the ground is still wet (uWet); sharper on still water
   m += rs + g + swSlope; // the plane's own tilt and the shore wave's are part of the mean slope
   vec3 n = normalize(vec3(-m.x, 1.0, -m.y));
   float nv = max(dot(n, V), 1e-3);
@@ -272,7 +282,7 @@ vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, floa
     // the sun's refracted offset on the floor as a function of slope, linearised; with the slope's derivative (the
     // curvature) this is the Jacobian of the map from the surface to the floor; brightness = 1 / |det J|
     vec2 q = Pb.xz; float e = 0.004;
-    vec2 s0 = wSlopeAt(q), sxp = wSlopeAt(q + vec2(e, 0.0)), szp = wSlopeAt(q + vec2(0.0, e));
+    vec2 s0 = wSlopeAt(q) * shiver, sxp = wSlopeAt(q + vec2(e, 0.0)) * shiver, szp = wSlopeAt(q + vec2(0.0, e)) * shiver; // still water: its caustics from its shiver only
     mat2 H = mat2((sxp - s0) / e, (szp - s0) / e);
     vec3 L0 = -uSun; float de = 0.01;
     vec3 r0 = refract(L0, normalize(vec3(-s0.x, 1.0, -s0.y)), 1.0 / W_N), rx = refract(L0, normalize(vec3(-s0.x - de, 1.0, -s0.y)), 1.0 / W_N), rz = refract(L0, normalize(vec3(-s0.x, 1.0, -s0.y - de)), 1.0 / W_N);
@@ -325,7 +335,7 @@ vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, floa
   if (uIce > 0.0) { float ic = smoothstep(0.0, 0.6, uIce) * (1.0 - 0.5 * step(0.5, bodyK) * step(bodyK, 2.5)); vec3 iceCol = vec3(0.72, 0.8, 0.88) * (uSkyUp * 0.7 + uSunColor * max(uSun.y, 0.0) * 0.25) * (0.9 + 0.1 * w2noise(x0 / 1.5, 302)); col = mix(col, iceCol + skyAt(R) * 0.08, ic); }
   // ---- foam: where the surface folds, and at the very edge of the sea
   vec4 dsp = wDisp(x0, gx, gy);
-  float fold = 1.0 - smoothstep(0.15, 0.55, dsp.w);
+  float fold = (1.0 - smoothstep(0.15, 0.55, dsp.w)) * (1.0 - still); // still water never folds
   float sunUp = max(uSun.y, 0.0);
   vec3 amb = uSkyUp / 3.14159 * 0.8 + uSunColor * sunUp / 3.14159 * 0.6;
   float fm = fold * smoothstep(-0.2, 0.6, w2noise(x0 / 0.3, 99));

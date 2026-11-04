@@ -305,7 +305,7 @@ B-spline so the lines do not bead. `world/test/caustics.html`: the mean over the
 - The clouds' shadow reaches the sea through a copy of the shadow map (27 m texels): a cloud's edge on the water is
   as soft as on the ground, no softer.
 
-## Water 3: the rebuild (`water3/`, `?water=3` or V in the template)
+## Water 3: the water (`water3/`; the post pass's own sea is retired, it draws only the game's still bodies)
 
 The surface is a real mesh (`water3/surface.js`): a polar grid round the camera, displaced by the wave field's
 cascades, drawn by the post chain after the scene with the depth test. The waterline is where the mesh meets the
