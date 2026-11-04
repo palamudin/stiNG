@@ -14,6 +14,9 @@
 // the depth buffer's precision) so the surface never crosses the sand. Over land the surface is held at the level and
 // the terrain hides it.
 //
+// The world's depth buffer is logarithmic, so the shaders carry three.js's log-depth chunks (without them the mesh
+// writes ordinary depth and loses every depth test against the terrain).
+//
 // Step 1 shades for diagnosis only: the surface's slope lit by the sun and sky, tinted by the depth under it.
 import * as THREE from 'three';
 
@@ -70,6 +73,8 @@ ${damp}`;
     this.mat = new THREE.ShaderMaterial({
       glslVersion: THREE.GLSL3, uniforms: U, side: THREE.DoubleSide,
       vertexShader: /* glsl */ `precision highp float; precision highp int;
+#include <common>
+#include <logdepthbuf_pars_vertex>
 ${head}
 out vec3 vW; out vec2 vXZ; out float vDepth, vCell;
 void main() {
@@ -94,12 +99,15 @@ void main() {
   if (bed > -1e3) P.y = max(P.y, min(bed + ${S.clear.toFixed(3)} + 2e-7 * dc * dc, level));
   vW = P; vXZ = xz; vDepth = depth; vCell = cell;
   gl_Position = projectionMatrix * viewMatrix * vec4(P, 1.0);
+  #include <logdepthbuf_vertex>
 }`,
       fragmentShader: /* glsl */ `precision highp float; precision highp int;
+#include <logdepthbuf_pars_fragment>
 ${head}
 uniform vec3 uSun, uSunColor, uSkyUp;
 in vec3 vW; in vec2 vXZ; in float vDepth, vCell; out vec4 oColor;
 void main() {
+  #include <logdepthbuf_fragment>
   // the slope, filtered to the pixel's footprint, damped by the depth like the displacement
   float depth = vDepth < 1e3 ? clipWater(vXZ) - clipHeight(vXZ) : 1e4;
   vec4 k = w3Damp(depth);
