@@ -36,7 +36,7 @@ let world = null, src = null;
 // ------------------------------------------------------------ camera: orbit a focus point on the ground
 // zoom 0..1 maps the distance from the focus logarithmically from 6 cm to 9 km. Pitch flattens as you come down, so
 // the far view is a map and the near view looks along the grass.
-const cam = { fx: 0, fz: 0, yaw: 0.8, pitch: 0.5, dist: 120, target: null, tour: null, map: 0, yawMap: 0 };
+const cam = { fx: 0, fz: 0, yaw: 0.8, pitch: 0.5, dist: 120, target: null, tour: null, map: 0, yawMap: 0, look: 0, invert: false }; // look: the view tilted up (+) or down from the focus, radians
 // the map comes in with the distance (map.js): 0 below MAP.from, 1 past MAP.to
 const mapFor = (d) => THREE.MathUtils.smoothstep(Math.log(d), Math.log(MAP.from), Math.log(MAP.to));
 const zoomToDist = (z) => 0.06 * Math.pow(9000 / 0.06, z);
@@ -116,6 +116,7 @@ function step(dt) {
   cy = Math.max(cy, world.surfaceAt(cx, cz) + Math.min(0.02 + cam.dist * 0.15, 2));
   camera.position.set(cx, cy, cz);
   camera.lookAt(focus);
+  if (cam.look) camera.rotateX(cam.look); // the view tilted from the focus: up to the sky, down to the ground
   camera.near = THREE.MathUtils.clamp(cam.dist * 0.02, 0.003, 20);
   camera.far = 60000;
   camera.updateProjectionMatrix();
@@ -151,8 +152,8 @@ function showStats() {
 
 // ------------------------------------------------------------ input
 let drag = null;
-canvas.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY, yaw: cam.yaw, id: e.pointerId }; canvas.setPointerCapture(e.pointerId); });
-canvas.addEventListener('pointermove', (e) => { if (drag && drag.id === e.pointerId) { cam.yaw = drag.yaw - (e.clientX - drag.x) * 0.005; } });
+canvas.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY, yaw: cam.yaw, look: cam.look, id: e.pointerId }; canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener('pointermove', (e) => { if (drag && drag.id === e.pointerId) { cam.yaw = drag.yaw - (e.clientX - drag.x) * 0.005; cam.look = THREE.MathUtils.clamp(drag.look + (e.clientY - drag.y) * 0.005 * (cam.invert ? 1 : -1), -1.45, 1.45); } }); // across: round the focus; up and down: the view tilts (a wasp looks anywhere)
 canvas.addEventListener('pointerup', () => { drag = null; });
 canvas.addEventListener('wheel', (e) => { e.preventDefault(); setZoom(state.zoom + e.deltaY * 0.0006); }, { passive: false });
 addEventListener('keydown', (e) => keys.add(e.code));
@@ -248,6 +249,12 @@ const WCTL = {};
   note.textContent = 'Foam size and amount: the breakers\' puffs and streaks. Water: the colour preset, clarity (absorption divided by it), roughness, refraction, the glow through steep crests, whitecaps where the surface folds, the width of the shore\'s foam line, caustics, glitter. The sea state: fetch is the open water the wind has blown over (a lake uses its own width), the swell comes from weather far away, choppiness pinches the crests, time scale runs the water faster or slower. The surf: its first train, by its wavelength in deep water, its speed and its steepness; it follows the swell until a slider here is moved.';
   box.appendChild(note);
   $('segQ').before(box);
+  // the view: tilt it by dragging up and down; inverted at will; level again
+  const lk = document.createElement('div'); lk.className = 'seg';
+  lk.innerHTML = '<label style="display:flex;gap:6px;align-items:center;color:var(--muted);font-size:10px;letter-spacing:.08em;text-transform:uppercase"><input type="checkbox" id="wInvert"> Invert pitch</label><button id="wLevel">Level view</button>';
+  $('segQ').before(lk);
+  $('wInvert').addEventListener('change', (e) => { cam.invert = e.target.checked; });
+  $('wLevel').addEventListener('click', () => { cam.look = 0; });
   $('wWindAuto').addEventListener('click', () => { WCTL.windDir = null; });
   $('wShoreAuto').addEventListener('click', () => { WCTL.shoreAuto = true; });
   // the panel follows the values (the weather's and the swell's set some of them)

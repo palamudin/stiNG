@@ -16,6 +16,7 @@ import * as THREE from 'three';
 import { NOISE_GLSL } from '../noise.js';
 import { SHORE } from '../shorefield.js';
 import { SWASH_GLSL, SURF_GLSL } from './swash.js';
+import { SKY_GLSL } from '../sky.js';
 
 export const CURL = { stages: 32, samples: 32, lipWidth: 0.9 };
 
@@ -45,6 +46,7 @@ export class CurlMesh {
       uSurf: world.uSurf, uSurfX: world.uSurfX, uWTime: world.uWTime, uSwDir: world.uSwDir, uLook3: world.uLook3,
       uCam: S.uCam, uGridScale: S.uGridScale, uSeaLevel: S.uSeaLevel, tCurl: { value: this.table },
       uSun: world.sky.uniforms.uSun, uSunColor: world.sky.uniforms.uSunColor, uSkyUp: S.uSkyUp, tFoam: S.tFoam,
+      uSkyView: world.sky.uniforms.uSkyView, uMS: world.sky.uniforms.uMS, uHaze: world.sky.uniforms.uHaze, uAbs: world.uAbs, uSca: world.uSca, uLook: world.uLook, uLook2: world.uLook2,
     };
     this.U = U;
     const C = CURL;
@@ -104,25 +106,45 @@ void main() {
 }`,
       fragmentShader: /* glsl */ `precision highp float; precision highp int;
 #include <logdepthbuf_pars_fragment>
-uniform vec3 uSun, uSunColor, uSkyUp; uniform sampler2D tFoam;
+${SKY_GLSL}
+uniform vec3 uSun, uSunColor, uSkyUp, uAbs, uSca; uniform vec4 uLook, uLook2; uniform sampler2D tFoam, uSkyView;
 in vec3 vW; in vec3 vLip; out vec4 oColor;
+const float W_N = 1.333;
+float wFresnel(float ci) {
+  ci = clamp(ci, 0.0, 1.0); float st2 = (1.0 - ci * ci) / (W_N * W_N); if (st2 >= 1.0) return 1.0;
+  float ct = sqrt(1.0 - st2), rs = (ci - W_N * ct) / (ci + W_N * ct), rp = (W_N * ci - ct) / (W_N * ci + ct);
+  return 0.5 * (rs * rs + rp * rp);
+}
+// the water's own material (water3/surface.js): its absorption and scattering (the colour preset and clarity), the sky
+// by exact Fresnel, the sun's highlight, the light through a thin sheet; what lies behind the lip (the wave's face, the
+// water drawn before it) shows through it by how much the sheet lets through (its thickness: thick at the root, thin
+// at the tip), tinted as the water tints it
 void main() {
   #include <logdepthbuf_fragment>
   if (vLip.z < 0.002) discard;
   vec3 n = normalize(cross(dFdx(vW), dFdy(vW))); vec3 V = normalize(cameraPosition - vW); if (dot(n, V) < 0.0) n = -n;
   float sunUp = max(uSun.y, 0.0);
-  // a thin sheet of water: the sky in it by Fresnel, green where the light comes through it (thinner toward the tip),
-  // white where it tears into spray at the tip of a full curl
-  float F = 0.02 + 0.98 * pow(1.0 - max(dot(n, V), 0.0), 5.0);
-  vec3 body = vec3(0.03, 0.2, 0.18) * (uSkyUp * 0.8 + uSunColor * sunUp * 0.4);
-  float through = 0.4 + 0.6 * max(dot(-V, uSun), 0.0);
-  vec3 glow = vec3(0.05, 0.45, 0.32) * (uSunColor * sunUp * 0.6 + uSkyUp * 0.4) * through * (0.4 + 0.6 * vLip.x);
-  vec3 c = mix(body + glow, uSkyUp * 1.1, F);
+  vec3 ext = uAbs / max(uLook.x, 0.05) + uSca;
+  float thick = mix(0.35, 0.04, vLip.x) / max(abs(dot(n, V)), 0.25);  // metres of water the view crosses
+  vec3 Tw = exp(-ext * thick);
+  vec3 amb = uSkyUp / 3.14159 * 0.8 + uSunColor * sunUp / 3.14159 * 0.6;
+  vec3 body = uSca / ext * (1.0 - Tw) * amb;
+  // light through it from the sun's side (the crest glow, the panel's)
+  float through = pow(max(dot(-V, uSun), 0.0), 2.0);
+  body += vec3(0.04, 0.42, 0.3) * (uSunColor * sunUp * 0.5 + uSkyUp * 0.35) * (0.25 + 0.75 * through) * (uLook.w / 1.6) * (0.3 + 0.7 * vLip.x) * 0.6;
+  vec3 R = reflect(-V, n); R.y = abs(R.y);
+  float F = wFresnel(max(dot(n, V), 0.0));
+  vec3 refl = texture(uSkyView, skyUV(R, uSun)).rgb;
+  vec3 Hh = normalize(V + uSun); float rough = 0.04 + uLook.y;
+  float spec = pow(max(dot(n, Hh), 0.0), 2.0 / (rough * rough) - 2.0) * (1.0 / (3.14159 * rough * rough)) * 0.25 * wFresnel(dot(V, Hh)) * step(0.0, uSun.y);
+  vec3 c = body * (1.0 - F) + refl * F + uSunColor * spec;
+  float pass_ = dot(Tw, vec3(0.2126, 0.7152, 0.0722)) * (1.0 - F); // what of the background still shows through
+  // the tip tearing into white at a full curl
   float tear = smoothstep(0.55, 1.0, vLip.x) * smoothstep(0.35, 0.9, vLip.y);
   float lace = texture(tFoam, vW.xz / 1.3 + vec2(0.0, vW.y)).r;
   float white = smoothstep(1.0 - 0.8 * tear, 1.1 - 0.8 * tear, lace + 0.1) * tear;
   c = mix(c, (uSkyUp * 0.8 + uSunColor * sunUp * 0.5) * 0.95, white);
-  float a = (0.82 + 0.15 * white) * vLip.z * smoothstep(0.0, 0.08, vLip.x);
+  float a = (1.0 - pass_ * (1.0 - white)) * vLip.z * smoothstep(0.0, 0.08, vLip.x);
   oColor = vec4(c * a, a);
 }`,
       blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
