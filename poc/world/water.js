@@ -192,6 +192,7 @@ ShoreWave wShoreAt(vec2 x0, float fp) {
 #endif
   return sw;
 }
+float gClamped = 0.0; // debug 7: the surface held over the bed on the sea hit's last step
 ShoreWave gSW; vec4 gDampSea = vec4(1.0); // the sea hit's shore wave and damping, kept for the shading of the same pixel
 vec3 gSheet = vec3(0.0); // the swash sheet under a sand pixel (shoreSheet), set by the composite before it shades the sheet as water
 #endif
@@ -344,6 +345,11 @@ vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, floa
 #ifdef W_SHORE
   if (uDebug > 3.5 && uDebug < 5.5) { vec4 shd = shoreAt(x0); col = vec3(fract(-shd.x / 10.0) * 0.8, clamp(swFoam, 0.0, 1.0), 0.5 + 2.0 * swSlope.x); }
 #endif
+  // debug 7: red where the surface is held over the bed, green the water's depth over the first 25 cm, blue where
+  // the shore table knows the point
+#ifdef W_SHORE
+  if (uDebug > 6.5 && uDebug < 7.5) { vec4 shd = shoreAt(x0); col = vec3(gClamped, clamp(D * 4.0, 0.0, 1.0), gShoreKnow) * (0.25 + 0.75 * clamp(dot(sceneCol, vec3(0.33)) * 3.0, 0.0, 1.0)); }
+#endif
   if (uDebug > 2.5 && uDebug < 5.5) col = vec3(clamp(L / 5.0, 0.0, 1.0), sqrt(sv.x + sv.y) * 4.0, cz / 3.0) * 2.0;
   return col;
 }
@@ -371,7 +377,7 @@ float wSeaHit(vec2 uv, vec3 v, float yb, out vec2 x0, out vec2 gx, out vec2 gy) 
 #ifdef W_CLIP
       // the water never dips below the bed where the bed is under the still level: held 4 cm over it (as Ultra-Water
       // does); a trough under the sand showed the bare bed through no water, a band that moved with the waves
-      ys = max(ys, min(clipHeight(x0) + 0.04, yb));
+      float ysw = ys; ys = max(ys, min(clipHeight(x0) + 0.04, yb)); gClamped = ys > ysw + 1e-4 ? 1.0 : 0.0;
 #endif
       float f = q.y - ys;
       t += clamp(f / max(-v.y, 0.02), -2.0, 2.0) * 0.85;

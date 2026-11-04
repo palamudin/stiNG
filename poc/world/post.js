@@ -269,7 +269,7 @@ void main() {
     }
   }
   // debug 6: which path drew the pixel — ground untouched, sea tinted blue, the swash sheet red, a water body green
-  if (uDebug > 5.5) { vec3 tc = layer == 1.0 ? vec3(0.2, 0.4, 1.0) : layer == 2.0 ? vec3(1.0, 0.15, 0.1) : layer == 3.0 ? vec3(0.1, 1.0, 0.2) : vec3(1.0); col = layer > 0.5 ? mix(col, tc * dot(col, vec3(0.33)) * 2.0, 0.65) : col; }
+  if (uDebug > 5.5 && uDebug < 6.5) { vec3 tc = layer == 1.0 ? vec3(0.2, 0.4, 1.0) : layer == 2.0 ? vec3(1.0, 0.15, 0.1) : layer == 3.0 ? vec3(0.1, 1.0, 0.2) : vec3(1.0); col = layer > 0.5 ? mix(col, tc * dot(col, vec3(0.33)) * 2.0, 0.65) : col; }
   if (uDebug > 0.5 && uDebug < 1.5) { vec3 Pg = uCamPos + v * dist; col = vec3(wet ? 1.0 : 0.0, Pg.y < 0.0 ? 1.0 : 0.0, d0 >= 1.0 ? 1.0 : 0.0) * 2.0; }
   // half floats end at 65504: the sun's disc is brighter than that, and an infinity here turns into NaN in the passes after;
   // and a NaN from any pixel's shading would spread over the whole frame through the depth of field's kernel (a close
