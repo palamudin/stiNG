@@ -13,7 +13,7 @@ import { SHORE } from '../shorefield.js';
 import { SWASH_GLSL } from './swash.js';
 
 export const SURF_FOAM = {
-  billows: { n: 80, cell: 1.6, per: 2 }, // a grid n x n of cells this size round the camera, this many billows a cell
+  billows: { n: 80, cell: 1.6, per: 3 }, // a grid n x n of cells this size round the camera, this many billows a cell
   streaks: { n: 64, cell: 2.0, per: 1 },
 };
 
@@ -34,7 +34,7 @@ export class SurfFoam {
       uSurf: world.uSurf, uSurfX: world.uSurfX, uWTime: world.uWTime, uSwDir: world.uSwDir,
       uCam: surface.U.uCam, uSeaLevel: surface.U.uSeaLevel, uWL: surface.U.uWL,
       tWD1: { value: field.disp[1].texture }, tWD2: { value: field.disp[2].texture },
-      uSun: world.sky.uniforms.uSun, uSunColor: world.sky.uniforms.uSunColor, uSkyUp: surface.U.uSkyUp,
+      tFoam: surface.U.tFoam, uSun: world.sky.uniforms.uSun, uSunColor: world.sky.uniforms.uSunColor, uSkyUp: surface.U.uSkyUp,
     };
     const head = /* glsl */ `precision highp float; precision highp int;
 #include <common>
@@ -112,11 +112,12 @@ void main() {
   vAlpha = foamPop(o, seed) * fade * dry * (0.48 + 0.72 * o.breaking);
   vSand = clamp(smoothstep(0.0, 0.8, o.backAge) * (0.25 + 0.65 * o.breaking) * smoothstep(-1.8, 0.35, o.bed), 0.0, 0.85);
   vPlunge = crash;
-  float size = (0.38 + 0.85 * o.breaking) * mix(0.7, 1.8, seed.w) * (1.0 + 0.1 * o.age);
-  size *= mix(1.0, 0.65, smoothstep(1.0, 4.0, o.age)) * (1.0 + 1.2 * crash);
+  // small puffs, a wasp's scale: 10 to 60 cm, a little bigger in the crash
+  float size = (0.1 + 0.26 * o.breaking) * mix(0.7, 1.7, seed.w) * (1.0 + 0.1 * o.age);
+  size *= mix(1.0, 0.65, smoothstep(1.0, 4.0, o.age)) * (1.0 + 0.6 * crash);
   float waterY = foamWaterY(o.center, o.level, o.bed) + o.waveHeight * (1.0 - smoothstep(0.5, 3.0, o.age));
   vec3 C = vec3(o.center.x, o.bed > 0.0 ? o.level + o.bed + 0.045 : waterY + 0.065, o.center.y);
-  C.y += crash * (0.35 + 1.0 * seed.y);                                      // thrown up where it crashes
+  C.y += crash * (0.1 + 0.35 * seed.y);                                      // thrown up where it crashes
   C.y += exp(-o.backAge * 2.0) * smoothstep(0.0, 0.3, o.backAge) * 0.12;    // the bore's surge onto the sand
   // a puff faces the camera while it flies; grounded, it lies on the water or the sand, drawn out along the shore
   vec3 camR = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]), camU = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
@@ -129,7 +130,7 @@ void main() {
   gl_Position = projectionMatrix * viewMatrix * vec4(P, 1.0);
   #include <logdepthbuf_vertex>
 }`;
-    const lightGLSL = /* glsl */ `uniform vec3 uSun, uSunColor, uSkyUp;
+    const lightGLSL = /* glsl */ `uniform vec3 uSun, uSunColor, uSkyUp; uniform sampler2D tFoam;
 vec3 foamLight() { return uSkyUp * 0.8 + uSunColor * max(uSun.y, 0.0) * 0.5; }`;
     const billowFrag = /* glsl */ `precision highp float; precision highp int;
 #include <logdepthbuf_pars_fragment>
@@ -140,11 +141,11 @@ void main() {
   #include <logdepthbuf_fragment>
   vec2 p = (vUv - 0.5) * 2.0; float radial = max(0.0, 1.0 - dot(p, p));
   // the puff's texture: cauliflower lumps at two scales
-  float t = 0.5 + 0.5 * (0.65 * w2noise(vUv * 4.0 + vec2(vSeed, vSeed * 0.371), 831) + 0.35 * w2noise(vUv * 11.0 - vSeed, 832));
+  vec4 ft = texture(tFoam, vUv * 0.92 + vec2(vSeed, vSeed * 0.371)); float t = ft.r; // the baked lace; ft.g its billow height
   float a = min(0.88, vAlpha * radial * radial * (0.45 + 1.25 * t));
   if (a < 0.008) discard;
   vec3 white = mix(vec3(0.9, 0.96, 0.95), vec3(1.15, 1.13, 1.06), clamp(vPlunge * 2.0, 0.0, 1.0));
-  vec3 col = mix(white, vec3(0.58, 0.405, 0.22), vSand * vGrounded * (0.25 + 0.55 * t)) * foamLight() * (0.85 + 0.15 * t);
+  vec3 col = mix(white, vec3(0.58, 0.405, 0.22), vSand * vGrounded * (0.25 + 0.55 * t)) * foamLight() * (0.78 + 0.3 * ft.g); // the billow's lumps lit a little
   oColor = vec4(col * a, a);
 }`;
     const streakVert = /* glsl */ `${head}
@@ -162,7 +163,7 @@ void main() {
   vec2 tangent = vec2(-o.dir.y, o.dir.x);
   vec2 jitter = tangent * (seed.w - 0.5) * 5.0 + o.dir * (seed.z - 0.5) * 2.0;
   vec2 ctr = anchor + jitter + o.dir * (o.speed * o.hitT - age * (1.15 + 1.65 * o.breaking)) + tangent * sin(seed.x * 17.0 + age * 1.3) * age * 0.16;
-  float len = min(7.0, (0.7 + 3.8 * o.breaking) * (0.35 + age * 0.55)), wid = (0.055 + 0.2 * o.breaking) * mix(0.6, 1.5, seed.z);
+  float len = min(2.0, (0.25 + 1.1 * o.breaking) * (0.35 + age * 0.55)), wid = (0.03 + 0.08 * o.breaking) * mix(0.6, 1.5, seed.z);
   vec2 xz = ctr - o.dir * position.y * len + tangent * position.x * wid;
   float bed = clipHeight(xz) - o.level;
   float y = bed > 0.0 ? o.level + bed + 0.04 : foamWaterY(xz, o.level, bed) + 0.04;
@@ -177,8 +178,8 @@ in vec2 vUv; in float vAlpha, vSand, vSeed; out vec4 oColor;
 void main() {
   #include <logdepthbuf_fragment>
   float sides = smoothstep(0.5, 0.08, abs(vUv.x - 0.5)), ends = smoothstep(0.0, 0.18, vUv.y) * smoothstep(1.0, 0.72, vUv.y);
-  vec2 fuv = vec2(vUv.x * 2.2 + vSeed, vUv.y * 0.45 - vSeed * 0.31);
-  float lace = 0.5 + 0.5 * (0.7 * w2noise(fuv * 3.0, 833) + 0.3 * w2noise(fuv * vec2(6.9, 5.1) + 0.31, 834));
+  vec2 fuv = vec2(vUv.x * 0.22 + vSeed, vUv.y * 0.045 - vSeed * 0.31);
+  float lace = texture(tFoam, fuv).r * 0.7 + texture(tFoam, fuv * vec2(2.3, 1.7) + 0.31).r * 0.3;
   float a = vAlpha * sides * ends * smoothstep(0.22, 0.76, lace + sides * 0.3);
   if (a < 0.006) discard;
   vec3 col = mix(vec3(0.88, 0.95, 0.93), vec3(0.56, 0.39, 0.2), vSand * (0.4 + 0.6 * lace)) * foamLight() * 0.9;

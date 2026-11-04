@@ -39,6 +39,7 @@ import { SKY_GLSL } from '../sky.js';
 import { WATER, WATER_CAUSTIC_GLSL, POISSON } from '../water.js';
 import { SWASH_GLSL, SURF_GLSL } from './swash.js';
 import { SurfFoam } from './surffoam.js';
+import { bakeFoamTexture } from './foamtex.js';
 import { SHORE } from '../shorefield.js';
 
 export const SURFACE = {
@@ -90,7 +91,7 @@ export class WaterSurface {
       uSeaLevel: { value: world.source.sea }, uSkyUp: { value: new THREE.Color() }, uWLost: { value: 0 },
       uSurf: world.uSurf, uSurfX: world.uSurfX, uWTime: world.uWTime, uSwDir: world.uSwDir,
       uWave: world.uWave, // (the panel's wave scale, the sea's fetch m, -, -)
-      tScene: { value: null }, tDepth: { value: null }, uVP: { value: new THREE.Matrix4() },
+      tScene: { value: null }, tDepth: { value: null }, uVP: { value: new THREE.Matrix4() }, tFoam: { value: null },
       uLogF: world.post.U.uLogF, uDebug: world.post.U.uDebug, uRain: world.post.U.uRain, uIce: world.post.U.uIce, uGlint: world.post.U.uGlint, uWPeak: world.post.U.uWPeak,
       tCaus: { value: world.caustics ? world.caustics.rt.texture : null }, uCaus: world.post.U.uCaus,
     };
@@ -213,7 +214,7 @@ void main() {
 ${head}
 ${coast}
 ${SKY_GLSL}
-uniform vec3 uSun, uSunColor, uSkyUp; uniform sampler2D uSkyView, tScene; uniform mat4 uVP; uniform float uWLost, uRain, uIce, uGlint, uWPeak;
+uniform vec3 uSun, uSunColor, uSkyUp; uniform sampler2D uSkyView, tScene, tFoam; uniform mat4 uVP; uniform float uWLost, uRain, uIce, uGlint, uWPeak;
 in vec3 vW; in vec2 vXZ; in float vCell, vNear, vJ; in vec2 vCoastSlope; in vec3 vCoast, vFlow; in vec4 vRough; out vec4 oColor;
 uniform float uDebug;
 const float W_N = ${f(WATER.n)};
@@ -322,8 +323,8 @@ void main() {
     // a bubbly band behind the tip while it climbs; sparse remnants in the backwash, thinning as it drains; the
     // bore's white over the sheet, fresh as it arrives
     float aa = 0.004 + 4e-5 * length(cameraPosition - vW);
-    swLace = (s < 0.35 ? smoothstep(-aa, aa, th) * (1.0 - smoothstep(0.0, 0.06 + aa, th)) : 0.3 * smoothstep(0.0, 0.03, th) * (1.0 - smoothstep(0.35, 0.6, s))) * (1.0 - smoothstep(0.0, 0.3, depth));
-    swWhite = (s < SW3_UP ? 1.0 - 0.5 * s / SW3_UP : 0.5 * (1.0 - smoothstep(SW3_UP, 0.6, s))) * smoothstep(0.0, 0.08, th) * (1.0 - smoothstep(0.1, 0.3, depth));
+    swLace = smoothstep(0.0, 0.04, s) * (s < 0.35 ? smoothstep(-aa, aa, th) * (1.0 - smoothstep(0.0, 0.06 + aa, th)) : 0.3 * smoothstep(0.0, 0.03, th) * (1.0 - smoothstep(0.35, 0.6, s))) * (1.0 - smoothstep(0.0, 0.3, depth));
+    swWhite = (s < SW3_UP ? 1.0 - 0.5 * s / SW3_UP : 0.5 * (1.0 - smoothstep(SW3_UP, 0.6, s))) * smoothstep(0.0, 0.05, s) * smoothstep(0.0, 0.08, th) * (1.0 - smoothstep(0.1, 0.3, depth)); // grown in as the bore arrives
     if (depth < 0.0) thin = 0.015; // the sheet on the sand: thin, and still a mirror
   }
 #endif
@@ -407,11 +408,12 @@ void main() {
   // standing foam, and the swash's lace at its tip and white behind it; one pattern of three scales covered to a
   // share set by each foam's strength
   float fm = (1.0 - smoothstep(0.15, 0.55, vJ)) * smoothstep(-0.2, 0.6, w2noise(vXZ / 0.3, 99));
-  float pat = 0.5 + 0.5 * (w2noise(vXZ / 0.7, 615) * 0.45 + w2noise(vXZ / 3.0 + uTime * 0.03, 616) * 0.35 + w2noise(vXZ / 0.18 - uTime * 0.1, 619) * 0.2);
+  // the foam's pattern: the baked lace (water3/foamtex.js) at two scales, drifting apart slowly so it churns
+  float pat = 0.62 * texture(tFoam, vXZ / 3.1 + vec2(uTime * 0.011, -uTime * 0.007)).r + 0.38 * texture(tFoam, vXZ / 1.17 - vec2(uTime * 0.017, uTime * 0.005)).r + 0.12;
   float wf = clamp(vCoast.x, 0.0, 1.0), lc = clamp(vCoast.y, 0.0, 1.0);
   fm = max(fm, smoothstep(1.0 - 0.75 * wf, 1.15 - 0.75 * wf, pat) * (0.6 + 0.4 * wf));
   fm = max(fm, smoothstep(1.0 - 0.5 * lc, 1.1 - 0.5 * lc, pat) * 0.45);
-  float spf = 0.5 + 0.5 * (w2noise(vXZ / 2.4 + vec2(uTime * 0.03, -uTime * 0.02), 626) * 0.55 + w2noise(vXZ / 0.6 - vec2(uTime * 0.06, 0.0), 627) * 0.3 + w2noise(vXZ / 0.15, 628) * 0.15);
+  float spf = 0.55 * texture(tFoam, vXZ / 5.3 + vec2(uTime * 0.006, -uTime * 0.004)).r + 0.45 * texture(tFoam, vXZ / 1.9 - vec2(uTime * 0.012, 0.0)).r + 0.15;
   float sf = clamp(vCoast.z, 0.0, 1.0);
   // (patches over a fifth of the zone at most, broken into bubbles: a bed under the crests' own white, not a sheet)
   fm = max(fm, smoothstep(0.98 - 0.3 * sf, 1.08 - 0.3 * sf, spf) * smoothstep(-0.35, 0.45, w2noise(vXZ / 0.22 + uTime * 0.05, 629)) * (0.15 + 0.25 * sf));
@@ -444,6 +446,7 @@ void main() {
     // drawn on its own after the scene (post.js), reading the scene's colour under it
     this.scene = new THREE.Scene(); this.scene.add(this.mesh);
     // the breakers' whitewater over it (water3/surffoam.js): where there is a shore table to find the surf with
+    this.foamRT = bakeFoamTexture(world.renderer); U.tFoam.value = this.foamRT.texture; // baked once
     this.foam = shore ? new SurfFoam(world, this) : null;
     if (this.foam) this.scene.add(this.foam.streaks, this.foam.billows);
     this._t = null;
@@ -459,5 +462,5 @@ void main() {
     const dt = this._t === null ? 0 : Math.min(Math.max(time - this._t, 0), 0.25); this._t = time;
     if (wind) U.uDrift.value.x += wind[0] * 0.6 * dt, U.uDrift.value.y += wind[1] * 0.6 * dt; // gusts run at about the wind's pace
   }
-  dispose() { this.mesh.geometry.dispose(); this.mat.dispose(); if (this.foam) this.foam.dispose(); }
+  dispose() { this.mesh.geometry.dispose(); this.mat.dispose(); if (this.foam) this.foam.dispose(); this.foamRT.dispose(); }
 }
