@@ -843,7 +843,7 @@ function syncChunks() {
   for (const [k, g] of chunkViews) if (!want.has(k)) { scene.remove(g); chunkViews.delete(k); g.traverse((o) => { if (o.userData.own) o.geometry.dispose(); }); }
   for (const r of sim.activeChunks) {
     const k = chunkKey(r.cx, r.cz);
-    if (!chunkViews.has(k)) { const g = buildChunk(r); g.userData.key = k; chunkViews.set(k, g); scene.add(g); }
+    if (!chunkViews.has(k)) { const g = buildChunk(r); g.userData.key = k; g.visible = !ov.hidden; chunkViews.set(k, g); scene.add(g); }
   }
   const want2 = new Set(sim.active.map((h) => h.hex));
   for (const [k, v] of humanViews) if (!want2.has(k)) { scene.remove(v.group); humanViews.delete(k); }
@@ -3422,7 +3422,7 @@ function ovStart() {
   ov.on = true; ov.d = 3; ov.fx = w.x; ov.fz = w.z; ov.yaw = input.yaw + Math.PI; ov.m = 0;
   input.lmb = false; if (document.pointerLockElement === canvas) document.exitPointerLock?.();
 }
-function ovEnd() { ov.on = false; ov.m = 0; ov.drag = null; camera.fov = 70; camera.updateProjectionMatrix(); if (running && !paused && !ui.nest && !atlas.open) lock(); }
+function ovEnd() { ovHideGame(false); ov.on = false; ov.m = 0; ov.drag = null; camera.fov = 70; camera.updateProjectionMatrix(); if (running && !paused && !ui.nest && !atlas.open) lock(); }
 function ovZoom(f) {
   ov.d = Math.max(1.5, Math.min(W2on ? ov.max : ov.classicMax * 1.3, ov.d * f));
   if (ov.d < 2.2 && f < 1) { ovEnd(); return; }
@@ -3448,7 +3448,16 @@ canvas.addEventListener('pointermove', (e) => {
 });
 canvas.addEventListener('pointerup', () => { ov.drag = null; });
 addEventListener('keydown', (e) => { if (ov.on && (e.code === 'Escape' || e.code === 'KeyM')) { e.preventDefault(); ovEnd(); } });
+// zoomed well out, the game's own objects (buildings, people, wasps, furniture) are not drawn: World v3 draws the land
+// itself there, and the classic look hands over to the big map; drawn, they would sit on the far ground's coarse heights
+function ovHideGame(hide) {
+  if (ov.hidden === hide) return; ov.hidden = hide;
+  for (const g of chunkViews.values()) g.visible = !hide;
+  for (const v of humanViews.values()) if (v.group) v.group.visible = !hide;
+  for (const v of waspViews.values()) { const o = v.group || v.mesh || v; if (o && 'visible' in o) o.visible = !hide; }
+}
 function overviewCamera(dt) {
+  ovHideGame(ov.d > 120);
   const k = THREE.MathUtils.smoothstep(Math.log(ov.d), Math.log(2), Math.log(140)), m = ov.m = W2on ? ovMap(ov.d) : 0;
   ov.pitch = THREE.MathUtils.lerp(THREE.MathUtils.lerp(0.32, 1.05, k), 1.18, m);
   const fov = THREE.MathUtils.lerp(55, 22, m), back = Math.tan(55 / 2 * Math.PI / 180) / Math.tan(fov / 2 * Math.PI / 180);
