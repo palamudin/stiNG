@@ -181,7 +181,10 @@ and damp a little above. Without a table (a source without water) the swash read
 **The glints' Poisson draw** (`water.js`). The count of mirror facets a cell draws came from summing the Poisson
 series per cell per pixel (up to forty terms, twice); it is now a 128 x 256 table of the inverse distribution (rows by
 the mean on a square-root scale to 12, columns by the uniform draw), computed once; a pixel reads one texel. Row means
-are within 1.5% of their lambda (a node check). Means past 12 keep the normal approximation.
+are within 1.5% of their lambda (a node check). Means past 12 keep the normal approximation. The table rides in a spare
+layer of the shore table's array texture: the composite is at the fragment sampler limit of Chrome on Windows (16, ANGLE
+over D3D11; the eight wave textures take half), and a 17th sampler failed the pass there with a black frame. Anything
+new the composite reads must share a texture it already has.
 
 **Checks.** `node world/test/world.test.mjs`: the beach profile, the swell state, the Poisson table (35 checks pass).
 `world/test/shore-parity.html`: the GPU table's fine slot against a brute-force nearest crossing on the CPU over its
