@@ -1,6 +1,6 @@
 // Water 3: the breakers' whitewater as geometry over the water, after Ultra-Water's SurfFoam (MIT, Humpalumps).
 //   - billows: puffs of foam that burst up where a crest crashes, ride shoreward at the bore's speed, ground on the sand
-//     and drain back or strand there, eroding as they age;
+//     and ride the swash's sheet up the sand and back down to the line with it, until the next bore, eroding as they age;
 //   - streaks: the backwash's foam and stirred sand drawn out seaward over the beach and the shallows.
 // Fixed cost: a pool of instanced quads, each a deterministic function of the coast's clock (water3/swash.js); nothing
 // is allocated or simulated while it runs. The pack picks its sites once from its island's shore bake; our world has
@@ -53,7 +53,7 @@ vec2 foamAnchor(int n, float cell, int per, out vec4 seed) {
   return (vec2(c) + vec2(w2hash01(c.x, c.y, s + 4), w2hash01(c.x, c.y, s + 5))) * cell;
 }
 // the breaker over an anchor and the life of its foam (the pack's foamState, on our coast's clock)
-struct FoamState { bool ok; vec2 dir, center; float level, age, life, breaking, backAge, bed, speed, strand, waveHeight, hitT; };
+struct FoamState { bool ok; vec2 dir, center; float level, age, life, breaking, backAge, bed, speed, strand, waveHeight, hitT, swashS; };
 FoamState foamState(vec2 anchor, vec4 seed) {
   FoamState o; o.ok = false;
   o.level = clipWater(anchor);
@@ -78,15 +78,24 @@ FoamState foamState(vec2 anchor, vec4 seed) {
   float period = 6.2831853 / w;
   float generation = step(0.7, seed.y); // seven in ten from this breaker, the rest left by the one before
   o.age = mod(ph, 6.2831853) / w + generation * period + seed.x * 0.22;
-  o.life = mix(2.8, 8.5, o.breaking) * (0.78 + 0.44 * seed.z);
+  // a piece lives until the next bore has come (and the older generation one wave more): the foam the swash carries up
+  // the sand comes back down with it and is still there when the next one arrives, round and round
+  o.life = period * (1.0 + generation) + 0.4;
   o.speed = sqrt(9.81 * clamp(depth, 0.3, 14.0)) * (1.04 + 0.2 * o.breaking);
   o.hitT = clamp((sdf + 1.0) / o.speed, 0.25, 3.0);
   o.backAge = max(o.age - o.hitT, 0.0);
-  o.strand = step(0.58, seed.z);
+  o.strand = 0.0;
   vec2 tangent = vec2(-o.dir.y, o.dir.x);
   vec2 jitter = tangent * (seed.w - 0.5) * 5.0 + o.dir * (seed.z - 0.5) * 2.0;
-  float travel = o.speed * min(o.age, o.hitT) - (1.0 - o.strand) * o.backAge * (1.0 + 1.2 * o.breaking);
-  o.center = anchor + jitter + o.dir * travel + tangent * sin(seed.x * 17.0 + o.backAge * 1.7) * o.backAge * 0.18;
+  // in with the bore at its speed until it meets the swash; from there it rides the swash's sheet: up the sand as the
+  // shoreline climbs, back down to the line as it drains (water3/swash.js sw3Shore at the line in front of it), each
+  // piece at its own share of the sheet's width
+  vec2 lp = anchor + o.dir * sdf; vec3 ln = clipNormal(lp); vec2 lg = -ln.xz / max(ln.y, 0.05); float tb = max(length(lg), 0.012);
+  sw3Beach(lp, lg); float ss, zeta = sw3Shore(lp, tb, uWTime, ss);
+  o.swashS = ss;
+  float onSheet = sdf + min((0.3 + 0.7 * seed.w) * zeta / tb, 40.0);
+  float travel = min(o.speed * o.age, onSheet);
+  o.center = anchor + jitter + o.dir * travel + tangent * sin(seed.x * 17.0 + o.backAge * 1.7) * min(o.backAge, 3.0) * 0.12;
   o.bed = clipHeight(o.center) - o.level; // over the still water: > 0 on the sand
   o.ok = true;
   return o;
@@ -107,7 +116,7 @@ void main() {
   FoamState o = foamState(anchor, seed);
   vUv = uv; vAlpha = 0.0; vSand = 0.0; vSeed = seed.x * 17.0 + seed.w * 9.0; vPlunge = 0.0; vGrounded = 0.0;
   if (!o.ok || o.age >= o.life) { gl_Position = vec4(0.0, 0.0, -2.0, 1.0); return; }
-  float fade = smoothstep(0.0, 0.13, o.age) * (1.0 - smoothstep(o.life * 0.55, o.life, o.age));
+  float fade = smoothstep(0.0, 0.13, o.age) * (1.0 - smoothstep(o.life * 0.8, o.life, o.age)) * mix(1.0, 0.45, smoothstep(1.0, 6.0, o.age)); // eroding as it ages
   float crash = exp(-o.age * 1.5) * o.breaking;
   float dry = 1.0 - smoothstep(0.75, 1.3, o.bed);
   vAlpha = foamPop(o, seed) * fade * dry * (0.48 + 0.72 * o.breaking);
@@ -155,7 +164,7 @@ void main() {
   vec4 seed; vec2 anchor = foamAnchor(${S.n}, ${S.cell.toFixed(2)}, ${S.per}, seed);
   FoamState o = foamState(anchor, seed);
   vUv = uv; vAlpha = 0.0; vSand = 0.0; vSeed = seed.x * 19.0 + seed.z * 7.0;
-  float age = o.backAge, life = mix(2.4, 7.2, o.breaking) * (0.8 + 0.4 * seed.w);
+  float age = o.backAge, life = o.life - o.hitT;
   if (!o.ok || age <= 0.0 || age >= life) { gl_Position = vec4(0.0, 0.0, -2.0, 1.0); return; }
   float fade = smoothstep(0.0, 0.18, age) * (1.0 - smoothstep(life * 0.42, life, age));
   vAlpha = foamPop(o, seed) * fade * (0.22 + 0.58 * o.breaking) * (1.0 - smoothstep(0.9, 1.5, o.bed));
@@ -163,7 +172,7 @@ void main() {
   if (vAlpha <= 0.001) { gl_Position = vec4(0.0, 0.0, -2.0, 1.0); return; }
   vec2 tangent = vec2(-o.dir.y, o.dir.x);
   vec2 jitter = tangent * (seed.w - 0.5) * 5.0 + o.dir * (seed.z - 0.5) * 2.0;
-  vec2 ctr = anchor + jitter + o.dir * (o.speed * o.hitT - age * (1.15 + 1.65 * o.breaking)) + tangent * sin(seed.x * 17.0 + age * 1.3) * age * 0.16;
+  vec2 ctr = o.center; // on the swash's sheet with the billows: up with it, back down with it
   float len = min(2.0, (0.25 + 1.1 * o.breaking) * (0.35 + age * 0.55)) * uLook3.y, wid = (0.03 + 0.08 * o.breaking) * mix(0.6, 1.5, seed.z) * uLook3.y;
   vec2 xz = ctr - o.dir * position.y * len + tangent * position.x * wid;
   float bed = clipHeight(xz) - o.level;

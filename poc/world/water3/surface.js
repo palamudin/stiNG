@@ -329,8 +329,11 @@ void main() {
     // a bubbly band behind the tip while it climbs; sparse remnants in the backwash, thinning as it drains; the
     // bore's white over the sheet, fresh as it arrives
     float aa = 0.004 + 4e-5 * length(cameraPosition - vW);
-    swLace = smoothstep(0.0, 0.04, s) * (s < 0.35 ? smoothstep(-aa, aa, th) * (1.0 - smoothstep(0.0, 0.3 * uLook2.w + aa, th)) : 0.3 * smoothstep(0.0, 0.03, th) * (1.0 - smoothstep(0.35, 0.6, s))) * (1.0 - smoothstep(0.0, 0.3, depth));
-    swWhite = (s < SW3_UP ? 1.0 - 0.5 * s / SW3_UP : 0.5 * (1.0 - smoothstep(SW3_UP, 0.6, s))) * smoothstep(0.0, 0.05, s) * smoothstep(0.0, 0.08, th) * (1.0 - smoothstep(0.1, 0.3, depth)); // grown in as the bore arrives
+    // the lace along the sheet's edge, up with it and back down with it to the line (thinner as it drains); the bore's
+    // white over the sheet thinning as the water goes back, never gone before the next bore (the ebb and flow repeats)
+    float band = smoothstep(-aa, aa, th) * (1.0 - smoothstep(0.0, 0.3 * uLook2.w + aa, th));
+    swLace = smoothstep(0.0, 0.04, s) * band * (s < SW3_UP ? 1.0 : mix(0.75, 0.4, (s - SW3_UP) / (1.0 - SW3_UP))) * (1.0 - smoothstep(0.0, 0.3, depth));
+    swWhite = (s < SW3_UP ? 1.0 - 0.4 * s / SW3_UP : 0.6 - 0.35 * (s - SW3_UP) / (1.0 - SW3_UP)) * smoothstep(0.0, 0.05, s) * smoothstep(0.0, 0.08, th) * (1.0 - smoothstep(0.1, 0.3, depth)); // grown in as the bore arrives, thinning to a quarter as it drains
     if (depth < 0.0) thin = 0.015; // the sheet on the sand: thin, and still a mirror
   }
 #endif
