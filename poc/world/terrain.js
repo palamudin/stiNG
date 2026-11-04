@@ -175,7 +175,7 @@ float hfShadow(vec2 p, float h0, float dist) {
     // the sheet itself is drawn as water by the composite (shoreSheet); the sand here only remembers it (shoreWet):
     // the shape of the last tongue, drying from the top down
     vec2 ws = shoreWet(P, shoreAt(P), hgt, TN, uTime, shoreState(TW));
-    R2 = -1.0; film = 0.0; float edgeF = 0.0; wetB = ws.x * above; damp = 0.0;
+    R2 = -1.0; film = 0.0; float edgeF = 0.0; wetB = ws.x; damp = 0.0; // under the water too: the floor is wet sand, as dark as the sand the tongue just left
     col *= 1.0 - 0.4 * wetB;
     TROUGH_WET = mix(1.0, 0.5, ws.y); // damp sand is damp-shiny; the sheet of water over it is the mirror
 #else
