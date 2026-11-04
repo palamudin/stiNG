@@ -168,7 +168,14 @@ vec3 wPlaneHit(vec2 uv, vec3 c, vec2 g) {
 #ifdef W_SHORE
 // the shore wave at an undisplaced point of the open water (the table's travel time and direction, the clipmap's
 // depth), and the cascades' damping for that depth, set as a side effect
-ShoreWave wShoreAt(vec2 x0, float fp) { float lv = clipWater(x0), dep = lv - clipHeight(x0); wShallow(dep); return shoreWaves(x0, shoreAt(x0), dep, uTime, fp, shoreState(lv)); }
+ShoreWave wShoreAt(vec2 x0, float fp) {
+  float lv = clipWater(x0), dep = lv - clipHeight(x0); wShallow(dep); vec4 sh = shoreAt(x0); vec2 st = shoreState(lv);
+  ShoreWave sw = shoreWaves(x0, sh, dep, uTime, fp, st);
+  // the sea's edge is the tongue's foot: over the last decimetres of depth the surface takes the tongue's level at
+  // the line, so sea and sheet are one surface on one clock
+  if (dep < 0.35) { vec3 nG = clipNormal(x0); float tb = sqrt(max(1.0 - nG.y * nG.y, 0.0)) / max(nG.y, 0.05); float lift = shoreEdgeLift(x0, sh, uTime, st, tb); float k = 1.0 - smoothstep(0.0, 0.35, dep); sw.y = mix(sw.y, lift, k); }
+  return sw;
+}
 ShoreWave gSW; vec4 gDampSea = vec4(1.0); // the sea hit's shore wave and damping, kept for the shading of the same pixel
 vec3 gSheet = vec3(0.0); // the swash sheet under a sand pixel (shoreSheet), set by the composite before it shades the sheet as water
 #endif

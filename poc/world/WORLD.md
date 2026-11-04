@@ -206,7 +206,9 @@ of the line the composite asks whether the tongue's level stands above the sand 
 line's own clock (the phase of the wave arriving at the nearest shore point, so every height of the beach sees the
 same tongue), its level climbing over 0.35 of the period to this set's reach (the run-up limit of Stockdon et al. 2006
 for the beach's slope and the sea state, varied along the shore by a slow noise, its tip broken into fingers by a fine
-one), holding a moment, and falling back over 0.35 (the backwash as fast as the uprush) — and where it does, the pixel is a sheet
+one) and falling straight back (Shen and Meyer 1963: the water runs up at the bore's speed and decelerates at
+`g sin(beta)`, a parabola in time, the uprush `sqrt(2 reach / (g tan^2 beta))` long and the backwash as long, held under
+0.48 of the period) — and where it does, the pixel is a sheet
 of water a few centimetres thick, shaded by the water shader (the sand refracted through it, the sky mirrored at a
 grazing look, glints, the chop damped to glass), with a lace of foam at the leading edge, bubbles left behind it and
 the bore's white arriving with the tongue. The sand itself only remembers the water (`shoreWet`, `terrain.js`): it asks
@@ -224,6 +226,15 @@ the fragment sampler limit of Chrome on Windows (16, ANGLE over D3D11; the eight
 sampler failed the pass there with a black frame. `Post.samplerCheck` counts the active samplers of each pass from the
 linked program after the first frames and the template shows `samplers 16/16` in its stats line; anything new the
 composite reads must share a texture it already has.
+
+**The reference** (`scratchpad`, an aerial beach clip of 56 s, every frame's cross-shore column stacked into a
+space-time record): crests 4.4 s apart; bores at one steady speed across the surf zone; one tongue per crest on
+average (every 3.8 s, some crests two), uprush 1.8 s and backwash 1.9 s — equal, each ~0.45 of the interval, no hold at
+the top; the run-up a tenth of the surf zone's width; solid white on the crest, whitewater trailing a third of the
+spacing, lace in patches between, never all white; the sand wet to the last reach and darkening upward as it dries.
+The sea's edge takes the tongue's level over its last 0.35 m of depth, so sea and sheet are one surface on one clock;
+the main train alone breaks and foams, the short one is a ripple; the swell's period keeps the computed value (a 3.5 s
+floor).
 
 **What is not in the view is not drawn** (`grass.js`, `trees.js`). A grass clump outside the view, 5% wider than the
 frame plus a clump's reach, is dropped in the vertex shader before its blades are built; a near-forest tile outside

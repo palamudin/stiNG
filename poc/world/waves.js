@@ -41,6 +41,8 @@ export const WAVES = {
   // breeze and the air that is never quite still), and the swell by at least swellMin, weather elsewhere; the wind
   // adds to these, it does not switch them on
   residual: 1.5, swellMin: 4.5, // m/s
+  swellTmin: 3.5,               // s: the sea's swell is never shorter in period than this (the reference beach runs at 4.4 s)
+  swellHmin: 0.35,              // m: nor lower than this
 };
 
 const TAU = Math.PI * 2;

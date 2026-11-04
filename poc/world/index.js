@@ -253,7 +253,7 @@ export class World {
         const wp = Math.sqrt(9.81 * st.kp + WAVES.T * st.kp ** 3); this.terrain.uniforms.uRun.value.set(this.waves.stats.Hs * 2 * Math.PI * 9.81 / (wp * wp), this.waves.stats.Hs);
         // the shore waves (shorefield.js): the sea's swell from the long fetch, a lake's from the local wind sea
         const sw = swellState(Math.max(st.U10, WAVES.swellMin), this.source.water.swellFetch || this.source.water.fetch);
-        this.uShoreWave.value.set(sw.Hs, Math.max(1.5, sw.Tp), this.waves.stats.Hs, Math.max(1.5, 2 * Math.PI / wp));
+        this.uShoreWave.value.set(Math.max(WAVES.swellHmin, sw.Hs), Math.max(WAVES.swellTmin, sw.Tp), this.waves.stats.Hs, Math.max(1.5, 2 * Math.PI / wp));
         { const m = Math.hypot(w10[0], w10[1]); if (m > 1e-3) this.uSwellDir.value.set(w10[0] / m, w10[1] / m); } // the swell travels with the wind
       }
       U.uWLost.value = this.waves.lostSlope; U.uWPeak.value = Math.min(2 * Math.PI / WAVES.km, 2 * Math.PI / st.kp); // the ripples at the gravity-capillary minimum, or the peak if shorter
