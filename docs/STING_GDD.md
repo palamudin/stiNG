@@ -2307,12 +2307,17 @@ Houses, sheds, shops, malls, garden lights, birdbaths and fountains, trunks, tab
 
 ### 18.79 Crowns of blocky foliage (S7, the drawing)
 
-**What.** A crown is a loose cluster of leafy blocks, not two smooth blobs:
-- 6 to 12 blocks a tree by crown size, scattered in a squashed ball the size of the sim's crown;
-- each block turned, sized and shaded a little differently;
-- gaps between the blocks, so the sun reaches the ground under a tree in patches, in the shadow map.
+**Two kinds of tree,** chosen per tree by a hash in the drawing (more conifers in a wood):
+- **Conifers:** tiers of needle blocks, wide at the foot of the crown and narrowing to the tip, dark green all year (a shade darker in winter).
+- **Broadleaf trees:** a loose ball of 9 to 15 leaf blocks, each turned, sized and shaded a little differently. They follow the colony's year:
+  - fresh light green in spring;
+  - their own green in summer;
+  - yellow, orange or red by the tree in autumn, dropping block by block;
+  - bare in winter.
 
-**How.** The blocks are instanced, one draw a chunk, and sway in their vertex shader as the crowns did (18.76). The scatter is a hash in the drawing only: the sim's trees, and their trunks, shade and crowns, are unchanged.
+**Light through the crowns.** The blocks are smaller than the crown and leave gaps, so the sun reaches the ground under a tree in patches, in the ordinary shadow map. Seen against the sun, a crown glows a little where its leaves are thin (a hash on 20 cm cells) at no extra pass. A shadow pass with holes cut in it was tried and dropped: with this three.js setup the crown's shadow went astray.
+
+**How.** One instanced draw a chunk, swaying in the vertex shader (18.76). The season re-poses the blocks only when it has moved on a step. The sim's trees, trunks, shade and crowns are unchanged.
 
 **Still to come (S7).** Dense woods: 120 to 250 trees a forest chunk in the sim, with per-tree nest sites, webs and hollows thinned by tuning, and trunks found through a per-chunk grid.
 

@@ -425,14 +425,22 @@ function batchMeshes(B, mats, parent) {
 }
 // Crowns sway in their vertex shader (GDD 21.4): the wind and the time are uniforms, each crown its own phase; JS
 // touches nothing per frame. Drawn instanced, one draw call a chunk.
-const SWAY = { uWind: { value: new THREE.Vector2() }, uTime: { value: 0 } };
+const SWAY = { uWind: { value: new THREE.Vector2() }, uTime: { value: 0 }, uSunDir: { value: new THREE.Vector3(0, 1, 0) }, uSunCol: { value: new THREE.Color() } };
 const crownMat = new THREE.MeshLambertMaterial({ color: '#ffffff', flatShading: true });
 crownMat.onBeforeCompile = (sh) => {
   Object.assign(sh.uniforms, SWAY);
   sh.vertexShader = sh.vertexShader
-    .replace('#include <common>', '#include <common>\nattribute float aPh; uniform vec2 uWind; uniform float uTime;')
+    .replace('#include <common>', '#include <common>\nattribute float aPh; uniform vec2 uWind; uniform float uTime; varying vec3 vCW;')
     .replace('#include <begin_vertex>', `#include <begin_vertex>
-  { float sc = length(instanceMatrix[0].xyz), s = 0.035 * (1.0 + 0.45 * sin(uTime * 1.7 + aPh)); transformed.xz += uWind * s / sc; }`);
+  { float sc = length(instanceMatrix[0].xyz), s = 0.035 * (1.0 + 0.45 * sin(uTime * 1.7 + aPh)); transformed.xz += uWind * s / sc; }`)
+    .replace('#include <project_vertex>', '#include <project_vertex>\n  vCW = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;');
+  // light through the leaves (GDD 21.5): seen against the sun a crown glows a little where its leaves are thin (a
+  // hash on 20 cm cells of the block's surface), and its blocks' edges catch the light; cheap, no extra pass
+  sh.fragmentShader = sh.fragmentShader
+    .replace('#include <common>', '#include <common>\nuniform vec3 uSunDir; uniform vec3 uSunCol; varying vec3 vCW;\nfloat leafH(vec3 p) { return fract(sin(dot(floor(p * 5.0), vec3(12.9898, 78.233, 37.719))) * 43758.5453); }')
+    .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+  { vec3 V = normalize(cameraPosition - vCW); float back = pow(max(0.0, dot(-V, normalize(uSunDir))), 3.0), thin = 0.35 + 0.65 * leafH(vCW);
+    totalEmissiveRadiance += uSunCol * diffuseColor.rgb * back * thin * 0.9; }`);
 };
 crownMat.customProgramCacheKey = () => 'crown';
 // wooden boxes (fences, benches, table tops) drawn instanced per shape, each its own colour so it can pale as wasps
@@ -455,6 +463,22 @@ function cupPose(C, i, down, lid, lv) {
   C.lid.setColorAt(i, _cCol.set(lv >= 2 ? '#d9d4c7' : '#c99a7a'));
 }
 const NEAR_DRAW = 90;
+// a broadleaf crown through the colony's year (GDD 21.5): fresh light green in spring, its own green in summer, turning
+// yellow, orange or red in autumn and dropping block by block, bare in winter; conifers keep theirs, a shade darker
+// in winter. Re-posed only when the season has moved on a step.
+const _sm = new THREE.Matrix4(), _sc = new THREE.Color(), _sZero = new THREE.Matrix4().makeScale(0, 0, 0), SPRING = new THREE.Color('#9ccc5c');
+function crownSeason(C) {
+  const f = sim.winter ? 1.2 : sim.seasonFrac, key = Math.round(f * 100);
+  if (key === C.key) return; C.key = key;
+  const turn = THREE.MathUtils.smoothstep(f, 0.62, 0.82), drop = THREE.MathUtils.clamp((f - 0.8) / 0.18, 0, 1), fresh = 1 - THREE.MathUtils.smoothstep(f, 0.05, 0.2);
+  for (const tr of C.trees) for (let k = tr.start; k < tr.start + tr.n; k++) {
+    if (tr.conifer) { _sc.copy(tr.base).multiplyScalar(f > 1 ? 0.85 : 1); C.cm.setMatrixAt(k, _sm.fromArray(C.mats, k * 16)); C.cm.setColorAt(k, _sc); continue; }
+    const r = C.r[k];
+    _sc.copy(tr.base).lerp(SPRING, fresh * 0.6).lerp(tr.fall, turn * (0.7 + 0.3 * r)).offsetHSL(0, 0, (r - 0.5) * 0.08);
+    C.cm.setMatrixAt(k, r < drop ? _sZero : _sm.fromArray(C.mats, k * 16)); C.cm.setColorAt(k, _sc);
+  }
+  C.cm.instanceMatrix.needsUpdate = true; if (C.cm.instanceColor) C.cm.instanceColor.needsUpdate = true;
+}
 // a view-only hash in [0, 1) for scattering leaf blocks: the sim never sees them
 const vh = (x, z, j, k) => { const v = Math.sin(x * 12.9898 + z * 78.233 + j * 37.719 + k * 4.581) * 43758.5453; return v - Math.floor(v); };
 // shapes of the build list's parts, kept: a unit cylinder by its taper and sides, a gable by its size
@@ -668,23 +692,35 @@ function buildChunk(rec) {
     const material = q.m === 6 ? BULB_MAT : q.m === 5 ? amat(q.c) : surfMat(q.c, q.m < 4 ? [0, 1, 2, 3][q.m] : 4, q.s === 2 ? { side: THREE.DoubleSide } : {}, true);
     put(B, material, geo, M, q.m < 4 ? { aTop: [q.top], aBox: q.wb } : undefined);
   }
-  // crowns of blocky foliage (GDD 21.5): each a loose cluster of leafy blocks with gaps between, so sun comes through
-  // in patches; instanced, one draw a chunk, swaying in their vertex shader (World v2 draws its own crowns)
+  // crowns of blocky foliage (GDD 21.5), in two kinds: evergreen conifers (tiers of needle blocks narrowing upward,
+  // dark all year) and broadleaf trees (a loose ball of leaf blocks that greens in spring, turns and drops in autumn,
+  // bare in winter, crownSeason). Gaps between the blocks let the sun through in patches, in the ordinary shadow.
+  // Instanced, one draw a chunk, swaying in their vertex shader (World v2/v3 draws its own crowns).
   if (c.trees.length && !W2on) {
-    const per = (t) => 6 + Math.min(6, Math.floor(t.cr * 2)), n = c.trees.reduce((q, t) => q + per(t), 0);
-    const cg = geoBox.clone(), cm = new THREE.InstancedMesh(cg, crownMat, n), ph = new Float32Array(n), m4 = new THREE.Matrix4(), col = new THREE.Color(), base = new THREE.Color();
+    const plan = c.trees.map((t) => { const conifer = vh(t.x, t.z, 99, 9) < (c.use === 'forest' ? 0.45 : 0.22); return { t, conifer, n: conifer ? 5 + Math.min(3, Math.floor(t.cr)) : 9 + Math.min(6, Math.floor(t.cr * 2)) }; });
+    const n = plan.reduce((q, p) => q + p.n, 0), cg = geoBox.clone(), cm = new THREE.InstancedMesh(cg, crownMat, n), ph = new Float32Array(n);
+    const C = { cm, trees: [], mats: new Float32Array(n * 16), r: new Float32Array(n), key: -1 };
     let k = 0;
-    for (const t of c.trees) {
-      base.setHSL(0.27 + t.shade * 0.06, 0.45, 0.26 + t.shade * 0.08);
-      const cy = t.h + t.cr * 0.3, q = per(t);
+    for (const { t, conifer, n: q } of plan) {
+      const tr = { start: k, n: q, conifer, base: new THREE.Color(), fall: new THREE.Color() };
+      if (conifer) tr.base.setHSL(0.33 + t.shade * 0.04, 0.38, 0.17 + t.shade * 0.05);
+      else { tr.base.setHSL(0.27 + t.shade * 0.06, 0.45, 0.26 + t.shade * 0.08); tr.fall.setHSL([0.13, 0.08, 0.02][Math.floor(vh(t.x, t.z, 98, 9) * 3)], 0.7, 0.42); }
+      C.trees.push(tr);
       for (let j = 0; j < q; j++) {
-        const r1 = vh(t.x, t.z, j, 1), r2 = vh(t.x, t.z, j, 2), r3 = vh(t.x, t.z, j, 3), r4 = vh(t.x, t.z, j, 4);
-        const a = r1 * 6.2832, u = r2 * 2 - 1, rr = Math.cbrt(r3) * t.cr * 0.6, sx = Math.sqrt(1 - u * u), sz = t.cr * (0.45 + 0.3 * r4); // a point in a squashed ball, a block's size
-        m4.fromArray(place(t.x + Math.cos(a) * sx * rr, cy + u * rr * 0.7, t.z + Math.sin(a) * sx * rr, sz, sz * 0.8, sz, 0, a, 0));
-        cm.setMatrixAt(k, m4); cm.setColorAt(k, col.copy(base).offsetHSL(0, 0, (r4 - 0.5) * 0.08)); ph[k] = t.x * 0.7 + t.z * 0.3; k++;
+        const r1 = vh(t.x, t.z, j, 1), r2 = vh(t.x, t.z, j, 2), r3 = vh(t.x, t.z, j, 3), r4 = vh(t.x, t.z, j, 4), a = r1 * 6.2832;
+        let M;
+        if (conifer) { // a tier: wide and flat at the foot of the crown, narrowing to the tip
+          const f = j / (q - 1), w = t.cr * (1.25 - 1.0 * f), y0 = t.h * 0.45, y = y0 + (t.h + t.cr * 1.1 - y0) * f;
+          M = place(t.x + (r2 - 0.5) * 0.15, y, t.z + (r3 - 0.5) * 0.15, w, Math.max(0.35, t.cr * 0.38), w, 0, a, 0);
+        } else { // a leaf block in a squashed ball, smaller than the crown so the light finds its way between
+          const u = r2 * 2 - 1, rr = Math.cbrt(r3) * t.cr * 0.78, sx = Math.sqrt(1 - u * u), sz = t.cr * (0.32 + 0.22 * r4);
+          M = place(t.x + Math.cos(a) * sx * rr, t.h + t.cr * 0.3 + u * rr * 0.7, t.z + Math.sin(a) * sx * rr, sz, sz * 0.8, sz, 0, a, 0);
+        }
+        C.mats.set(M, k * 16); C.r[k] = r4; ph[k] = t.x * 0.7 + t.z * 0.3; k++;
       }
     }
-    cg.setAttribute('aPh', new THREE.InstancedBufferAttribute(ph, 1)); cm.userData.own = true; cm.castShadow = cm.receiveShadow = true; cm.computeBoundingSphere(); g.add(cm);
+    cg.setAttribute('aPh', new THREE.InstancedBufferAttribute(ph, 1)); cm.userData.own = true; cm.castShadow = cm.receiveShadow = true;
+    crownSeason(C); cm.computeBoundingSphere(); g.add(cm); dyn.crowns = C;
   }
   // fences in cedar, benches and table tops: instanced per shape, each box its own colour so it can pale as wasps strip
   // its pulp (T1-12); a long box (a run of fence) is cut every metre along its length, so on a hilly world each cut
@@ -810,6 +846,7 @@ function syncChunks() {
 // (in their vertex shader: here only the wind and the time are set, GDD 21.4); small things far off are not drawn
 function swayTrees(time) {
   SWAY.uWind.value.set(sim.wind.x, sim.wind.z); SWAY.uTime.value = time;
+  SWAY.uSunDir.value.copy(sun.position).sub(sun.target.position).normalize(); SWAY.uSunCol.value.copy(sun.color).multiplyScalar(Math.min(1, sun.intensity / 2.1));
   const fx = camera.position.x, fz = camera.position.z, R = NEAR_DRAW + 46; // a chunk's corner is 45 m from its middle
   for (const g of chunkViews.values()) { const d = g.userData.dyn, k = g.userData.key, cx = d.cx, cz = d.cz; d.near.visible = (cx - fx) * (cx - fx) + (cz - fz) * (cz - fz) < R * R; }
 }
@@ -827,6 +864,7 @@ function updateChunkDynamics() {
       if (ch) for (const im of [C.outer, C.inner, C.drink, C.pud, C.lid]) { im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true; }
     }
     for (const c of d.candles) c.visible = lv >= 2;
+    if (d.crowns) crownSeason(d.crowns);
     // puddles after rain (T2-1): laid down when the ground gets wet, taken up when it dries
     const pd = sim.puddleDay();
     if (pd !== d.rainDay) {
