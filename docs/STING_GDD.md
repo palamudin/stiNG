@@ -2435,6 +2435,14 @@ On seed 12346 a hive had stood beside the nest, so a game began in a fight. This
 
 **The flashing in World v3** (fixed in its sky, 10:15). World v3 scaled the sky's colours in place each frame for cloud cover, but refilled them only when its table key changed. Between keys the light sank, by ×0.91 a frame at the game's usual cover, and jumped back at the next key. The sky now rebuilds its colours every frame, eased toward the table's entry.
 
+### 18.86 Legs under the pond benches, shadows further out
+
+**Pond benches.** A park pond's two benches had a seat and a back but nothing under them, so in World v2 the seat hung in the air above the grass. Each seat now stands on four legs at its corners, 6 cm square, in the sim's build list (JS and C#), so the build digests changed.
+
+**Shadows further out.** The shadow box was 36 m across, centred on the wasp, so shadows came in only some 18 m ahead. It is now 96 m across on a 4096 map, so the texels stay about as fine as before (2.3 cm against 1.8 cm). The box is also pushed 26 m ahead along the view, so it covers from about 20 m behind the wasp to 75 m in front. This holds in both looks; World v2 takes `shadowAhead` and `shadowMap` options.
+
+**What it costs.** The shadow map is redrawn every other frame, not every frame, which halves the cost of drawing it. A map one frame old still puts its shadows in the right places, because its matrix is the one it was drawn with. Only a moving person's or wasp's shadow trails by a frame. Reading the map in the shaders costs the same as before: the sample count is unchanged, and only the map is bigger.
+
 ---
 
 ## 19. Feature tiers and the current stack

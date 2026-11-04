@@ -290,6 +290,11 @@ namespace Sting.Core
                 foreach (Num s in new Num[] { -0.8, 0.8 }) foreach (Num q in new Num[] { -0.3, 0.3 }) Add(0, 5, "#8a6440", t.x + al0 * s + ac0 * q, 0.355, t.z + al1 * s + ac1 * q, 0.05, 0.71, 0.05, true);
                 foreach (Num side in new Num[] { -0.67, 0.67 }) foreach (Num s in new Num[] { -0.75, 0.75 }) Add(0, 5, "#8a6440", t.x + al0 * s + ac0 * side, 0.2, t.z + al1 * s + ac1 * side, 0.05, 0.4, 0.05, true);
             }
+            foreach (var b in c.boxes) if (b.bench && b.miny < 0.45) // a pond bench's seat stands on four legs at its corners
+            {
+                Num ix = (b.maxx - b.minx) / 2 - 0.08, iz = (b.maxz - b.minz) / 2 - 0.06, mx = (b.minx + b.maxx) / 2, mz = (b.minz + b.maxz) / 2;
+                foreach (Num sx in new Num[] { -1, 1 }) foreach (Num sz in new Num[] { -1, 1 }) Add(0, 5, "#5b4330", mx + sx * ix, b.miny / 2, mz + sz * iz, 0.06, b.miny, 0.06, true);
+            }
             foreach (var hv in c.hives)
             {
                 Add(0, 5, "#5b4330", hv.x, 0.2, hv.z, 0.5, 0.4, 0.5, true);

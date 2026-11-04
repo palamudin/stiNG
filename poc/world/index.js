@@ -58,6 +58,8 @@ export class World {
     if (opts.grass) this.q.grass = opts.grass; // the caller's grass density, over the tier's
     if (opts.dof === false) this.q.dof = false; // a game camera that has to read the scene, not a macro lens
     this.shadowMin = opts.shadowBox ?? 3; // the shadow box's least half-width (the game wants the people round the wasp)
+    this.shadowAhead = opts.shadowAhead ?? 0; // the box's centre pushed this many half-widths ahead along the view (the game's: what is in front)
+    if (opts.shadowMap) this.q.shadow = opts.shadowMap; // the caller's shadow map size, over the tier's
     this.time = 0;
     // day: the day of the year (0 is the first of spring); auto: the weather and season follow the clock (seasons.js)
     this.env = { hour: 16.5, day: 100, auto: false, haze: 1, mist: 1, wet: 0, wind: [0.8, 0.3], cloud: 0.35, cloudDens: 1, rain: 0, snow: 0, flash: 0 }; // auto is the template's; the game keeps its own weather
@@ -210,13 +212,13 @@ export class World {
     const SC = this.sun.shadow.camera;
     Object.assign(SC, { left: -box, right: box, top: box, bottom: -box, near: 0.05, far: box * 8 });
     SC.updateProjectionMatrix();
-    const fx = eye.x + (this.camera.getWorldDirection(TMPV).x) * focusDist, fz = eye.z + TMPV.z * focusDist;
+    const ahead = Math.max(focusDist, box * this.shadowAhead), fx = eye.x + (this.camera.getWorldDirection(TMPV).x) * ahead, fz = eye.z + TMPV.z * ahead;
     const fy = this.heightAt(fx, fz);
     // snap the shadow box to its texels so shadows do not crawl as the camera moves
     const texel = (2 * box) / this.q.shadow;
     this.sun.target.position.set(Math.round(fx / texel) * texel, fy, Math.round(fz / texel) * texel);
     this.sun.position.copy(this.sun.target.position).addScaledVector(this.sunDir, box * 4);
-    this.uniforms.uShadowFar.value = box;
+    this.uniforms.uShadowFar.value = box * (1 + this.shadowAhead); // the map reaches this far ahead
     this.uniforms.uWet.value = E.wet;
     this.uniforms.uTime.value = this.time; // the grass and the trees sway on this clock (the post chain has its own)
     this.forest.update(eye, dt);

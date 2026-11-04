@@ -61,11 +61,25 @@ const hemi = new THREE.HemisphereLight('#dceefa', '#4d5b2c', 1.15);
 scene.add(hemi);
 const sun = new THREE.DirectionalLight('#fff3dc', 2.1);
 sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
-Object.assign(sun.shadow.camera, { left: -18, right: 18, top: 18, bottom: -18, near: 1, far: 80 });
-sun.shadow.bias = -0.0004;
-sun.shadow.normalBias = 0.01;
+// Shadows (GDD 21.4): one 4096 map over a box 96 m across, set ahead of the wasp along the view so it covers what is
+// in front (about 20 m behind to 75 m ahead) at the old box's texel size (2.3 cm); the map is redrawn every other
+// frame (SHADOW.every), which halves its cost: a stale map still lands its shadows in the right places, only a
+// moving caster's shadow is a frame behind
+const SHADOW = { half: 48, ahead: 0.55, map: 4096, every: 2, frame: 0 };
+sun.shadow.mapSize.set(SHADOW.map, SHADOW.map);
+Object.assign(sun.shadow.camera, { left: -SHADOW.half, right: SHADOW.half, top: SHADOW.half, bottom: -SHADOW.half, near: 1, far: 260 });
+sun.shadow.bias = -0.00015;
+sun.shadow.normalBias = 0.015;
 scene.add(sun, sun.target);
+renderer.shadowMap.autoUpdate = false;
+// the classic look's sun: the shadow box round (fx, fz), pushed ahead along the view (ax, az), snapped to its texels
+const _sd = new THREE.Vector3();
+function placeSun(fx, fz, ax, az) {
+  const texel = 2 * SHADOW.half / SHADOW.map, h = Math.hypot(ax, az) || 1, push = SHADOW.half * SHADOW.ahead;
+  const tx = Math.round((fx + ax / h * push * Math.min(1, h)) / texel) * texel, tz = Math.round((fz + az / h * push * Math.min(1, h)) / texel) * texel;
+  sun.target.position.set(tx, terrAt(tx, tz), tz);
+  sun.position.copy(sun.target.position).addScaledVector(sunDir, 120);
+}
 const sunDir = new THREE.Vector3(0.45, 1, 0.3).normalize();
 
 // Quality (GDD 20 G5): the render resolution is the display's (up to 2 pixels a CSS pixel; 1 on the low setting) times
@@ -3521,7 +3535,7 @@ function overviewCamera(dt) {
   camera.near = THREE.MathUtils.clamp(ov.d * 0.01, 0.01, 20); camera.far = W2on ? 60000 : 400; camera.updateProjectionMatrix();
   camPos.set(cx, cy - gy, cz);
   const focus = new THREE.Vector3(ov.fx, 0, ov.fz);
-  sun.position.copy(focus).addScaledVector(sunDir, 40); sun.position.y += gy; sun.target.position.set(ov.fx, gy, ov.fz);
+  placeSun(ov.fx, ov.fz, 0, 0);
   ground.position.set(Math.round(ov.fx / GROUND_TILE) * GROUND_TILE, 0, Math.round(ov.fz / GROUND_TILE) * GROUND_TILE);
   return focus;
 }
@@ -3643,9 +3657,7 @@ function updateCamera(p, dt) {
   }
   camera.position.copy(pos);
   camera.lookAt(look);
-  const fy = terrAt(focus.x, focus.z);
-  sun.position.copy(focus).addScaledVector(sunDir, 40); sun.position.y += fy;
-  sun.target.position.copy(focus); sun.target.position.y += fy;
+  camera.getWorldDirection(_sd); placeSun(focus.x, focus.z, _sd.x, _sd.z);
   ground.position.set(Math.round(focus.x / GROUND_TILE) * GROUND_TILE, 0, Math.round(focus.z / GROUND_TILE) * GROUND_TILE);
   return focus;
 }
@@ -3720,6 +3732,7 @@ function frame(now) {
     if (tm) { tm('panels', t0); t0 = performance.now(); }
   }
   const r0 = performance.now();
+  renderer.shadowMap.needsUpdate = SHADOW.frame++ % SHADOW.every === 0;
   if (world2 && sim) world2.render(); else renderer.render(scene, camera);
   if (window.__prof) window.__prof.render = (window.__prof.render || 0) + performance.now() - r0;
   requestAnimationFrame(frame);
@@ -3740,7 +3753,7 @@ function w2Attach() {
     src = W2M[4].compositeSource(src, wild, { radius: I.R0, band: I.R1 - I.R0, site: I.site, simHeight: true });
   }
   if (world2) { world2.setSource(src, w.x, w.z); return; }
-  world2 = new W2M[0].World(renderer, scene, camera, src, { quality: $('gfx').value === 'low' || touch.on ? 'low' : 'medium', clip: { levels: W2_LEVELS }, sun, hemi, shadowBox: 18, dof: false, grass: $('gfx').value === 'low' || touch.on ? undefined : 0.75 }); // depth of field at a wasp's distance blurs the whole world away
+  world2 = new W2M[0].World(renderer, scene, camera, src, { quality: $('gfx').value === 'low' || touch.on ? 'low' : 'medium', clip: { levels: W2_LEVELS }, sun, hemi, shadowBox: SHADOW.half, shadowAhead: SHADOW.ahead, shadowMap: SHADOW.map, dof: false, grass: $('gfx').value === 'low' || touch.on ? undefined : 0.75 }); // depth of field at a wasp's distance blurs the whole world away
   Object.assign(LIFT, world2.clip.uniforms);
   world2.build(w.x, w.z);
   WATER_MAT.visible = !world2.drawsWater; // World v2 draws the birdbaths', fountains' and puddles' water (WORLD.md, W2)

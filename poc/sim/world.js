@@ -213,6 +213,10 @@ export function buildList(c) {
     for (const s of [-0.8, 0.8]) for (const q of [-0.3, 0.3]) part(0, 5, '#8a6440', t.x + along[0] * s + across[0] * q, 0.355, t.z + along[1] * s + across[1] * q, 0.05, 0.71, 0.05, true);
     for (const side of [-0.67, 0.67]) for (const s of [-0.75, 0.75]) part(0, 5, '#8a6440', t.x + along[0] * s + across[0] * side, 0.2, t.z + along[1] * s + across[1] * side, 0.05, 0.4, 0.05, true);
   }
+  for (const b of c.boxes) if (b.bench && b.miny < 0.45) { // a pond bench's seat stands on four legs at its corners
+    const ix = (b.maxx - b.minx) / 2 - 0.08, iz = (b.maxz - b.minz) / 2 - 0.06, mx = (b.minx + b.maxx) / 2, mz = (b.minz + b.maxz) / 2;
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) part(0, 5, '#5b4330', mx + sx * ix, b.miny / 2, mz + sz * iz, 0.06, b.miny, 0.06, true);
+  }
   for (const hv of c.hives) { // a bee box: stand, two supers, lid, the entrance slot
     part(0, 5, '#5b4330', hv.x, 0.2, hv.z, 0.5, 0.4, 0.5, true);
     part(0, 5, '#ece8dc', hv.x, 0.53, hv.z, 0.45, 0.25, 0.45, true);
