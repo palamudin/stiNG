@@ -6,8 +6,8 @@ applyTuning(T, readFileSync(new URL('../../tuning/sting.tune', import.meta.url),
 let failures = 0;
 const ok = (cond, msg) => { console.log((cond ? 'PASS ' : 'FAIL ') + msg); if (!cond) failures++; };
 
-function run(linkName, ticks) {
-  const lab = new NetLab({ seed: 1234 }, linkName);
+function run(linkName, ticks, seed = 1234) {
+  const lab = new NetLab({ seed }, linkName);
   const botA = stingBot({ plan: 'jab', rest: 200 });
   let errSum = 0, errN = 0, errMax = 0;
   for (let i = 0; i < ticks; i++) {
@@ -39,12 +39,13 @@ for (const name of ['lan', 'good', 'bad', 'awful']) {
 }
 
 // Over the window: late events every so often. The chunk authority's corrections set the humans right on both peers;
-// without them the peers drift apart for good.
+// without them the peers drift apart for good. Seed 7 puts the wasp among humans early (seed 1234's first late event
+// comes after the window since the hives keep clear of the nest).
 {
-  const r = run('over', 18000), A = r.lab.a, B = r.lab.b, late = A.netStats.late + B.netStats.late;
+  const r = run('over', 18000, 7), A = r.lab.a, B = r.lab.b, late = A.netStats.late + B.netStats.late;
   ok(late > 0 && A.netStats.fixes + B.netStats.fixes > 0 && A.netStats.fixed > 0 && B.netStats.fixed > 0 && r.c.last && r.c.agreed >= r.c.compared * 0.97,
     `over the window: ${late} late events, ${A.netStats.fixes + B.netStats.fixes} corrections; the peers agree again after each (${r.c.agreed}/${r.c.compared}, last difference at ${r.c.lastDiverge || '-'})`);
-  const off = new NetLab({ seed: 1234 }, 'over'); off.a._applyFix = off.b._applyFix = () => {};
+  const off = new NetLab({ seed: 7 }, 'over'); off.a._applyFix = off.b._applyFix = () => {};
   const bot = stingBot({ plan: 'jab', rest: 200 });
   for (let i = 0; i < 18000; i++) { off.step(bot(off.a)); off.a.drainEvents(); if (i % 60 === 0) off.check(); }
   ok(off.checks.agreed < r.c.agreed, `without the corrections they drift apart (${off.checks.agreed}/${off.checks.compared} agree)`);
