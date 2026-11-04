@@ -47,7 +47,7 @@ export function digestChunk(c, d) {
   f(c.sheds.length); for (const t of c.sheds) { for (const k of ['x', 'z', 'hw', 'hd', 'h', 'crack', 'eave']) f(t[k]); f(!!t.house); }
   f(!!c.nest);
   // regions (T1-12)
-  f(['park', 'yards', 'mall', 'forest', 'town'].indexOf(c.use));
+  f(['park', 'yards', 'mall', 'forest', 'town', 'wild'].indexOf(c.use));
   for (const list of [c.roads, c.lots]) { f(list.length); for (const t of list) for (const k of ['minx', 'maxx', 'minz', 'maxz']) f(t[k]); }
   f(c.loops.length); for (const t of c.loops) { f(t.x); f(t.z); f(t.r); }
   f(c.malls.length); for (const t of c.malls) for (const k of ['x', 'z', 'hw', 'hd', 'h']) f(t[k]);

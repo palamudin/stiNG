@@ -13,7 +13,7 @@ export function placeTile(src, ti, tj, kinds, cfg, design) {
   const push = (k, x, z, rot, vr, sxz, sy, noTrunk = 0) => { const v = Math.floor(hash01(Math.floor(x * 7), Math.floor(z * 7), 11) * cfg.variants); items[k][v].push(x, z, rot, vr, sxz, sy, noTrunk, 0); };
   // the game's world: the sim's own trees, one for one, in the tiles the settled area covers (all of them, or those
   // within wildFrom in a composite source); the wild rule plants the rest
-  const T0 = cfg.tile, settled = src.objects && (!src.wildFrom || Math.hypot((ti + 0.5) * T0, (tj + 0.5) * T0) < src.wildFrom + T0);
+  const T0 = cfg.tile, settled = src.objects && (src.simTrees || !src.wildFrom || Math.hypot((ti + 0.5) * T0, (tj + 0.5) * T0) < src.wildFrom + T0);
   if (settled) {
     const cx = ti, cz = tj; // tiles are chunks here
     const c = src.objects(cx, cz);
@@ -23,7 +23,7 @@ export function placeTile(src, ti, tj, kinds, cfg, design) {
       // the sim's trunk height h is the design's crown height, its crown radius cr the design's (GDD 20.4 point 2)
       push(k, t.x, t.z, rot, t.shade, t.cr / Math.max(0.5, d.crownR), t.h / Math.max(1, d.crownY), src.trunks === false ? 1 : 0);
     }
-    if (!src.wildFrom) return items;
+    if (!src.wildFrom || src.simTrees) return items; // simTrees: the sim plants every near tree (the game's settled worlds, GDD 21.6)
   }
   const G = cfg.grid, o = [0, 0, 0, 0, 0], x0 = ti * T, z0 = tj * T;
   for (let gz = 0; gz < T / G; gz++) for (let gx = 0; gx < T / G; gx++) {

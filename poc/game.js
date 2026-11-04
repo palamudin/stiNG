@@ -5,14 +5,14 @@ import {
   Sim, Act, T, DT, ZONES, ZoneName, SwatKind, SwatKindName, StyleName, TopName, BottomName, Top, Bottom,
   toWorld, toLocal, dirToWorld, chunkKey, chunkOf, hash, Domain, rangeInt, resolveSting, zoneCover, segClosest, classify, predictedKind,
   NEST, NEST_ENTRANCE, flyPos, beePos, fmtClock, minuteOfDay, isLowerZone, broodTotal, sugarCap, proteinCap, waterCap, garmentGraph, dayWeather,
-  NetLab, LINKS, pondsOf, pondEdge, POND_PATH, buildList, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetVel, CHASE, targetLabel, assistPilot, swoopPilot, hoverPilot, hoverSetting, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE, SKILLS, SKILL_UNLOCKS, SKILL_RANKED, SKILL_HIVE, skillCost, ROLES,
+  NetLab, LINKS, pondsOf, pondEdge, POND_PATH, buildList, settledOf, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetVel, CHASE, targetLabel, assistPilot, swoopPilot, hoverPilot, hoverSetting, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE, SKILLS, SKILL_UNLOCKS, SKILL_RANKED, SKILL_HIVE, skillCost, ROLES,
 } from './sim/index.js';
 import { Rings, RING, ringGrid, ringGLSL } from './view/rings.js';
 import { Batch, place } from './view/merge.js';
 // World v2 (GDD 20.4): the ground, forests, grass, sky and post chain of world/, drawing the sim's own world. Chosen on
 // the menu (Look) or with ?world2, read once at load: every lifted material is compiled against one ground or the other.
 const W2_ASKED = (() => { try { return new URLSearchParams(location.search).has('world2') || localStorage.getItem('sting.world2') === '1'; } catch { return false; } })();
-const W2M = W2_ASKED ? await Promise.all([import('./world/index.js'), import('./world/clipmap.js'), import('./world/sources/sting.js')]).catch((e) => { console.warn('World v2 did not load', e); return null; }) : null;
+const W2M = W2_ASKED ? await Promise.all([import('./world/index.js'), import('./world/clipmap.js'), import('./world/sources/sting.js'), import('./world/sources/wild.js'), import('./world/sources/composite.js')]).catch((e) => { console.warn('World v2 did not load', e); return null; }) : null;
 const W2_LEVELS = 11; // the clipmap's levels, fixed for the page (the lift GLSL is built from it)
 
 // Boot (GDD 12.1): the page's loading screen takes this module's stages; without it (tests) they go nowhere
@@ -308,7 +308,7 @@ function terrFrame(focus) {
     if (TERR.frame++ % 30 === 0) terrApply(scene);
     return;
   }
-  TERR.on = !!(sim && sim.settings.terrain);
+  TERR.on = !!(sim && (sim.settings.terrain || sim.settings.settled));
   if (!TERR.on) { // a flat world after a hilly one: materials already patched read flat rings
     if (TERR.filled) { for (const L of rings.lv) L.data.fill(0); for (const t of ringTex) t.needsUpdate = true; rings.reset(); TERR.filled = false; }
     for (const m of ringMeshes) m.visible = false;
@@ -316,6 +316,10 @@ function terrFrame(focus) {
     return;
   }
   TERR.filled = true;
+  if (sim.settings.settled) { // the sea round a settled world's wild land (GDD 21.6), at its level; never lifted (userData.ring)
+    if (!TERR.sea) { TERR.sea = new THREE.Mesh(new THREE.PlaneGeometry(1600, 1600), WATER_MAT); TERR.sea.rotation.x = -Math.PI / 2; TERR.sea.userData.ring = true; TERR.sea.receiveShadow = true; scene.add(TERR.sea); }
+    TERR.sea.visible = true; TERR.sea.position.set(Math.round(focus.x / 64) * 64, 0, Math.round(focus.z / 64) * 64);
+  } else if (TERR.sea) TERR.sea.visible = false;
   for (const l of rings.update(focus.x, focus.z)) ringTex[l].needsUpdate = true;
   coverFrame(focus.x, focus.z);
   rings.lv.forEach((L, l) => ringUniforms.ringLv.value[l].set(L.cx, L.cz, L.s, L.H));
@@ -661,7 +665,7 @@ function buildChunk(rec) {
   // garden sheds: plank walls, a pitched roof, a crack in one wall and a gap under one eave (nest sites)
   // land use (T1-12): the ground of a yard is a mown lawn, a forest floor is dark; streets, cul-de-sacs, parking lots
   // on a hilly world the ground rings paint all of this into the ground itself (cover maps, GDD 20 G2)
-  const painted = W2on || !!(sim && sim.settings.terrain); // World v2 shades paving and land use into its ground
+  const painted = W2on || !!(sim && (sim.settings.terrain || sim.settings.settled)); // World v2 shades paving and land use into its ground
   if (!painted && (c.use === 'yards' || c.use === 'forest' || c.use === 'mall')) {
     const tint = new THREE.Mesh(new THREE.PlaneGeometry(64, 64, 16, 16), new THREE.MeshLambertMaterial({ color: c.use === 'yards' ? '#7fbf4a' : c.use === 'forest' ? '#3d4a22' : '#8f9a6a', transparent: true, opacity: c.use === 'yards' ? 0.28 : 0.45, depthWrite: false }));
     tint.rotation.x = -Math.PI / 2; tint.position.set(rec.cx * 64, 0.002, rec.cz * 64); tint.receiveShadow = true; g.add(tint);
@@ -1148,7 +1152,7 @@ function renderCritters(t) {
   }
   lampMesh.count = glowMesh.count = nl; mothMesh.count = nmo;
   { let best = null, bd = 30 * 30; if (nl) for (const rec of sim.activeChunks) for (const l of sim.lightsIn(rec)) { const d = (l.x - camera.position.x) ** 2 + (l.z - camera.position.z) ** 2; if (d < bd) { bd = d; best = l; } }
-    porchLight.intensity = best ? 2.2 : 0; if (best) porchLight.position.set(best.x + best.nx * 0.3, best.y + (sim.settings.terrain ? sim.ground(best.x, best.z) : 0), best.z + best.nz * 0.3); }
+    porchLight.intensity = best ? 2.2 : 0; if (best) porchLight.position.set(best.x + best.nx * 0.3, best.y + (sim.hilly ? sim.ground(best.x, best.z) : 0), best.z + best.nz * 0.3); }
   for (const m of [lampMesh, glowMesh, mothMesh]) m.instanceMatrix.needsUpdate = true;
   { // swarms, mating flights and drones (T2-11)
     const mf = T.time.startMinute + (t + sim.clockOffset) / sim.tpm, secs = performance.now() / 1000, H = T.hive;
@@ -3513,7 +3517,13 @@ let loadSnap = null; // the snapshot a restored world started from, for the repl
 // game world is a new source for it
 function w2Attach() {
   if (!W2on) return;
-  const src = W2M[2].stingSource(sim), w = sim.wasp;
+  // a settled world (GDD 21.6): the sim's ground everywhere (its own inside, the wild land beyond), World v3's wild
+  // channels (moisture, forest, the sea and lakes) beyond the settled area, on the sim's site for it
+  let src = W2M[2].stingSource(sim); const w = sim.wasp;
+  if (sim.settings.settled) {
+    const I = settledOf(sim.seed, sim.settings), wild = W2M[3].wildSource({ seed: I.S });
+    src = W2M[4].compositeSource(src, wild, { radius: I.R0, band: I.R1 - I.R0, site: I.site, simHeight: true });
+  }
   if (world2) { world2.setSource(src, w.x, w.z); return; }
   world2 = new W2M[0].World(renderer, scene, camera, src, { quality: $('gfx').value === 'low' || touch.on ? 'low' : 'medium', clip: { levels: W2_LEVELS }, sun, hemi, shadowBox: 18, dof: false, grass: $('gfx').value === 'low' || touch.on ? undefined : 0.75 }); // depth of field at a wasp's distance blurs the whole world away
   Object.assign(LIFT, world2.clip.uniforms);
@@ -3582,7 +3592,7 @@ function readSettings() {
   return {
     seed, dayMinutes: +$('dayLen').value, humanDensity: +$('density').value, beeAggression: +$('bees').value, seasonDays: +$('seasonLen').value, net: $('netMode').value,
     reaction: +$('reaction').value, escalation: +$('escRate').value,
-    woods: +$('woods').value, towns: +$('towns').value, water: +$('water').value, hives: +$('hives').value, terrain: +$('terrain').value, // T2-6
+    woods: +$('woods').value, towns: +$('towns').value, water: +$('water').value, hives: +$('hives').value, terrain: +$('terrain').value, settled: +$('settled').value, // T2-6, GDD 21.6
     species: $('species').value, progression: 'open', skills: $('skillsSet').value, // GDD 6.8: test builds open all three species
     exterminator: $('sysExt').checked, pestControl: $('sysMuni').checked, birds: $('sysBirds').checked, rivals: $('sysRivals').checked,
   };

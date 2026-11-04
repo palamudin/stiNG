@@ -35,16 +35,18 @@ export function findSite(wild, opts = {}) {
 // band: the blend's width; site: { x, z, h } on the wild map (findSite)
 export function compositeSource(sting, wild, opts = {}) {
   const R0 = opts.radius ?? 400, B = opts.band ?? 160, R1 = R0 + B, site = opts.site || findSite(wild, { radius: R0 });
-  const ox = site.x, oz = site.z, lift = site.h, P = wild.params;
+  // simHeight (the game, GDD 21.6): the sim's ground is already the settled area on the wild land and the wild land
+  // beyond (sim/wild.js), so the height is the sim's everywhere and only the other channels blend here
+  const ox = site.x, oz = site.z, lift = opts.simHeight ? 0 : site.h, P = wild.params, simH = !!opts.simHeight;
   const ws = [0, 0, 0, 0, 0], ss = [0, 0, 0, 0, 0];
   function sample(x, z, out = [0, 0, 0, 0, 0], texel) {
     const r = Math.hypot(x, z);
-    if (r >= R1) { wildSample(P, x + ox, z + oz, out); return out; }
+    if (r >= R1) { wildSample(P, x + ox, z + oz, out); if (simH) out[0] = sting.height(x, z); return out; }
     sting.sample(x, z, ss, texel); ss[0] += lift;
     if (r <= R0) { out[0] = ss[0]; out[1] = ss[1]; out[2] = ss[2]; out[3] = ss[3]; out[4] = -1e6; return out; }
     const k = smoothstep(R0, R1, r);
     wildSample(P, x + ox, z + oz, ws);
-    out[0] = ss[0] + (ws[0] - ss[0]) * k; out[1] = ss[1] + (ws[1] - ss[1]) * k; out[2] = ss[2] + (ws[2] - ss[2]) * k; out[3] = ss[3] * (1 - k) + ws[3] * k;
+    out[0] = simH ? ss[0] : ss[0] + (ws[0] - ss[0]) * k; out[1] = ss[1] + (ws[1] - ss[1]) * k; out[2] = ss[2] + (ws[2] - ss[2]) * k; out[3] = ss[3] * (1 - k) + ws[3] * k;
     out[4] = k > 0.5 ? ws[4] : -1e6; // the wild water level only where the wild ground has the say
     return out;
   }
@@ -62,6 +64,7 @@ export function compositeSource(sting, wild, opts = {}) {
     objects: (cx, cz) => sting.objects(cx, cz), // the sim's chunks; the scatter plants the wild forest beyond wildFrom
     trunks: false,
     wildFrom: R1,
+    simTrees: simH, // the game: the sim plants the near wild trees, the ones a wasp hits (GDD 21.6); the far cards follow the forest channel
     waters: (cx, cz) => sting.waters(cx, cz),
     grassHeight: sting.grassHeight, grassWood: sting.grassWood,
     wildGrass: wild.grassHeight,

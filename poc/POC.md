@@ -20,7 +20,7 @@ The tier-0 slice of the GDD, built in the browser so it can move to Unity. Same 
 | `test/sim.test.mjs` | 214 headless sim checks | `Sting.Core.Tests` |
 | `test/net.test.mjs` | 43 network checks | `Sting.Net.Tests` |
 | `test/view.test.mjs` | ground-ring checks (GDD 20) | presentation, Unity side |
-| `test/parity.mjs` | Writes `core/fixtures/parity.txt`: 32 digests the C# core must reproduce bit for bit | `core/Sting.Core.Tests` |
+| `test/parity.mjs` | Writes `core/fixtures/parity.txt`: 33 digests the C# core must reproduce bit for bit | `core/Sting.Core.Tests` |
 
 Run the tests from this folder with `node test/sim.test.mjs`, `node test/net.test.mjs` and `node test/view.test.mjs` (Node 18+, no packages). Play locally with `node serve.mjs`. Any change to `sim/` that changes behaviour must be made in `core/` too: rerun `node test/parity.mjs`, then `dotnet run -c Release` in `core/Sting.Core.Tests`. To retune, edit `../tuning/sting.tune`: the game, the tests, parity and the core all read it, and a different file gives a different tuning hash, so old saves and peers on the old file are refused.
 
@@ -163,6 +163,7 @@ Run the tests from this folder with `node test/sim.test.mjs`, `node test/net.tes
 | 133 | The build list: the sim lists what each chunk's buildings and furniture are made of (shape, surface, colour, size, turns), JS and C# held to one digest; the drawing makes its meshes from it | 18.77 | 25 |
 | 134 | Yards graded to code on hills: streets within 10% and smooth, drives within 15% from the sidewalk to a level house pad, banks no steeper than 2:1 | 18.78 | 25 |
 | 135 | Crowns of blocky foliage in two kinds: evergreen conifers in tiers, broadleaf trees that green, turn, drop and stand bare through the year; gaps that let the sun through in patches and a glow against the sun; instanced and swaying on the GPU | 18.79 | 25 |
+| 136 | Wild land round a settled area: a town, a village or a park set on a site of the wild fjord land (coast, lakes, mountains), the sim's ground blended into the wild, wild chunks with trees and nothing built; JS and C# agree | 18.80 | 25 |
 
 ## Verified
 
