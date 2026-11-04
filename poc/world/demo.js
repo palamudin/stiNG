@@ -30,7 +30,7 @@ const camera = new THREE.PerspectiveCamera(55, 1, 0.005, 60000);
 // the shore by table (the default) or by live calculation per pixel, for the comparison: ?shore=live, or a page that
 // sets window.__SHORE_MODE before this script
 // the water: ?water=3 the rebuild (water3/, a mesh), else the post pass's (A/B)
-const WATER_MODE = new URLSearchParams(location.search).get('water') === '3' ? 3 : 2;
+let WATER_MODE = new URLSearchParams(location.search).get('water') === '3' ? 3 : 2; // V switches it (the artifact page may not pass the URL's query)
 const SHORE_MODE = ((m) => (m === 'live' || m === 'none' ? m : 'table'))(new URLSearchParams(location.search).get('shore') || window.__SHORE_MODE || 'table');
 const state = { source: 'wild', seed: 7, tod: 16.6, day: 100, weather: 'auto', zoom: 0.42, blocky: 0.6, fog: 1, wet: 0, wind: 5, fstop: 2.8, quality: 'high', ui: true };
 let world = null, src = null;
@@ -158,6 +158,8 @@ canvas.addEventListener('pointermove', (e) => { if (drag && drag.id === e.pointe
 canvas.addEventListener('pointerup', () => { drag = null; });
 canvas.addEventListener('wheel', (e) => { e.preventDefault(); setZoom(state.zoom + e.deltaY * 0.0006); }, { passive: false });
 addEventListener('keydown', (e) => keys.add(e.code));
+// V switches the water between the post pass's (2) and the rebuild's mesh (3), and rebuilds the world
+addEventListener('keydown', (e) => { if (e.code === 'KeyV' && world) { WATER_MODE = WATER_MODE === 3 ? 2 : 3; makeWorld(); } });
 // L cycles the water's debug views: off, layers (which path drew a pixel), diagnosis (held over bed, depth, table)
 addEventListener('keydown', (e) => { if (e.code === 'KeyL' && world) { const U = world.post.U.uDebug; U.value = U.value === 0 ? 6 : U.value === 6 ? 7 : 0; } });
 addEventListener('keyup', (e) => keys.delete(e.code));
