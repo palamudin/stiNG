@@ -155,9 +155,14 @@ depth. The scaling keeps the sign, so the water line is exactly where it was and
 **The shore table** (`shorefield.js`). The water line is world data (the ground does not move), so everything the
 water and the beach need to know about it is baked once per world chunk and kept, like a chunk of the map: three
 levels of fixed chunks (128 m at 0.5 m texels, 1 km at 4 m, 4 km at 16 m), each chunk 256 texels a side, holding the
-signed distance to the water line, the direction to its nearest point scaled by the front's coherence, and a shallow
-water front's travel time from the line (the straight line to the nearest shore point at `sqrt(g depth)`, depth
-clamped to 0.3..14 m, 16 steps; positive on the water, negative up the beach at the swash's speed). Baked on the GPU
+signed distance to the water line, the direction of the front scaled by its coherence, and a shallow-water front's
+travel time from the line: the eikonal `|grad tau| = 1 / sqrt(g depth)` (depth clamped to 0.3..14 m) solved from
+the line outward by 110 Jacobi passes of the Godunov update (Zhao 2005) on the GPU, so fronts slow in the shallows and
+bend round headlands and the time field is continuous everywhere — a straight line to the nearest shore point is
+not: its time jumps where the nearest point jumps, and that drew lines on the water and broke the shading from the
+height. Positive on the water, negative up the beach at the swash's speed. The direction is the gradient of the time
+over an 8 m stencil, which is also what the wave's slope term assumes, so height, slope and reflection are one
+surface; a read across a chunk's border interpolates the neighbour's texels, so no border shows. Baked on the GPU
 from the source's own GLSL twin (exact at any point, no view in it; the clipmap for a source without one) by jump
 flooding over the chunk plus a margin (32 m, 256 m, 1 km by level), so a point by a chunk's edge finds the same
 nearest shore point its neighbour across the edge finds: one continuous field, no seams. A level answers where the
@@ -225,8 +230,8 @@ zone and a storm. Not verified: the timings of the bake on a real GPU (`shore` i
 when a window moves), the swash in motion.
 
 **Known limits (W3.1).**
-- The travel time is along the straight line to the nearest shore point: fronts do not refract round headlands or
-  bars as a solved eikonal would (Ultra-Water sweeps one); on a straight beach it is the same.
+- The eikonal is first order on the grid and the Jacobi passes reach 110 texels from the line: past that a level
+  does not know the time (its margin is 64 texels, so it never asks).
 - A source filled on the CPU (the composite) has only the sea's water line in its table: its lakes' levels are not
   in the clipmap's water channel there.
 - The shore waves lift the water's surface but do not move it sideways (no Gerstner lean): a plunging lip is not

@@ -5,9 +5,11 @@
 //   yz the direction to the nearest point of the water line (from the water: the way waves travel in), scaled by the
 //      front's coherence: 1 where the travel time runs cleanly from one shore, falling to 0 along the spine of a body
 //      where fronts from two shores meet (so the trains fade there instead of folding);
-//   w  the travel time of a shallow-water front from the line, in seconds, along the straight line to the nearest
-//      shore point at speed sqrt(g depth) (depth clamped to 0.3..14 m): positive on the water, negative up the beach
-//      at the swash's speed, so one phase runs from the breakers to the run-up.
+//   w  the travel time of a shallow-water front from the line, in seconds: the eikonal |grad tau| = 1 / sqrt(g depth)
+//      (depth clamped to 0.3..14 m) solved from the line outward, so fronts slow in the shallows and bend round
+//      headlands and the field is continuous everywhere (a straight line to the nearest shore point is not: its time
+//      jumps where the nearest point jumps, and that drew lines on the water); positive on the water, negative up the
+//      beach at the swash's speed, so one phase runs from the breakers to the run-up.
 // Baked on the GPU from the source's own GLSL twin where it has one (exact at any point, no view in it; the clipmap
 // otherwise) by jump flooding (Rong and Tan 2006) over the chunk plus a margin, so a point by a chunk's edge finds the
 // same nearest shore point its neighbour across the edge finds: no seams between chunks. A chunk is baked when it
@@ -26,7 +28,9 @@ export const SHORE = {
   levels: [{ s: 0.5, slots: 32, margin: 32 }, { s: 4, slots: 12, margin: 256 }, { s: 16, slots: 6, margin: 1024 }], // texel size, slots kept, metres the bake looks past the chunk
   near: 1,                        // chunks round the eye's wanted at each level (1: the 3 x 3)
   dirN: 16,                       // the directory: chunks a side the reader can address at each level, round the eye
-  march: 16, dMin: 0.3, dMax: 14,
+  sweeps: 110,                    // Jacobi passes of the eikonal solve: the travel time reaches that many texels from the line
+  gradM: 8,                       // metres of the stencil the direction and coherence are taken over
+  dMin: 0.3, dMax: 14,
   perFrame: 2,                    // bakes a frame at most once running
 };
 
@@ -45,7 +49,7 @@ export class ShoreField {
     this.rt = new THREE.WebGLArrayRenderTarget(T, T, nSlots + 2, { depthBuffer: false });
     Object.assign(this.rt.texture, { type: THREE.FloatType, format: THREE.RGBAFormat, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, generateMipmaps: false });
     const o = { type: THREE.FloatType, format: THREE.RGBAFormat, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: false, generateMipmaps: false };
-    this.rtH = new THREE.WebGLRenderTarget(W, W, o); this.ping = new THREE.WebGLRenderTarget(W, W, o); this.pong = new THREE.WebGLRenderTarget(W, W, o); this.rtT = new THREE.WebGLRenderTarget(W, W, o);
+    this.rtH = new THREE.WebGLRenderTarget(W, W, o); this.rtS = new THREE.WebGLRenderTarget(W, W, o); this.ping = new THREE.WebGLRenderTarget(W, W, o); this.pong = new THREE.WebGLRenderTarget(W, W, o); this.rtT = new THREE.WebGLRenderTarget(W, W, o);
     const D = C.dirN * C.dirN / 4;
     this.uniforms = {
       uShoreTab: { value: this.rt.texture },
@@ -93,25 +97,32 @@ void main() {
   }
   o = best;
 }`);
-    // distance and travel time (uSrc: the flood's result; uSrc2: the heights), marched on the heights
+    // the eikonal: seeds at the crossings (uSrc: the seed pass; uSrc2: the heights) start the time at their distance
+    // to the line over the local speed, everything else at infinity
+    const slow = `float slowAt(ivec2 v) { float e = texelFetch(uSrc2, clamp(v, ivec2(0), ivec2(${W - 1})), 0).x; float dep = clamp(e < 0.0 ? -e : ${C.dMin.toFixed(2)}, ${C.dMin.toFixed(2)}, ${C.dMax.toFixed(1)}); return uCell / sqrt(${G.toFixed(2)} * dep); }`;
+    this._eikInit = mat(`${slow}
+void main() { ivec2 u = ivec2(gl_FragCoord.xy); vec4 sd = texelFetch(uSrc, u, 0);
+  o = vec4(sd.z > 0.5 ? distance(sd.xy, shoreP(u)) / uCell * slowAt(u) : 1.0e9, 0.0, 0.0, 1.0); }`);
+    // one Jacobi pass of the Godunov update (Zhao 2005): a texel's time is the least its four neighbours offer at the
+    // local slowness; the seeds only ever keep their own
+    this._eik = mat(`${slow}
+float tAt(ivec2 v) { return texelFetch(uSrc, clamp(v, ivec2(0), ivec2(${W - 1})), 0).x; }
+void main() { ivec2 u = ivec2(gl_FragCoord.xy); float t0 = tAt(u), f = slowAt(u);
+  float a = min(tAt(u - ivec2(1, 0)), tAt(u + ivec2(1, 0))), b = min(tAt(u - ivec2(0, 1)), tAt(u + ivec2(0, 1)));
+  float lo = min(a, b), hi = max(a, b), t;
+  if (lo > 1.0e8) { o = vec4(t0, 0.0, 0.0, 1.0); return; }
+  if (hi - lo >= f) t = lo + f; else { float d = hi - lo; t = 0.5 * (a + b + sqrt(max(2.0 * f * f - d * d, 0.0))); }
+  o = vec4(min(t0, t), 0.0, 0.0, 1.0); }`);
+    // distance (uSrc: the flood's result) and travel time (uSrc2: the eikonal), signed
     this._final = mat(`
-float eAt(vec2 q) { vec2 g = (q - uOrg) / uCell - 0.5; vec2 g0 = floor(g); vec2 f = g - g0; ivec2 i = ivec2(g0);
-  float a = texelFetch(uSrc2, clamp(i, ivec2(0), ivec2(${W - 1})), 0).x, b = texelFetch(uSrc2, clamp(i + ivec2(1, 0), ivec2(0), ivec2(${W - 1})), 0).x;
-  float c = texelFetch(uSrc2, clamp(i + ivec2(0, 1), ivec2(0), ivec2(${W - 1})), 0).x, d = texelFetch(uSrc2, clamp(i + ivec2(1, 1), ivec2(0), ivec2(${W - 1})), 0).x;
-  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y); }
 void main() {
   ivec2 u = ivec2(gl_FragCoord.xy); vec2 p = shoreP(u);
   vec4 s = texelFetch(uSrc, u, 0); float e = s.w; bool water = e < 0.0;
-  if (s.z < 0.5 || distance(s.xy, p) > uMargin) { o = vec4(water ? -1.0e4 : 1.0e4, 0.0, 0.0, water ? 1.0e4 : -1.0e4); return; } // the line is past the margin: this level does not know
-  vec2 d = s.xy - p; float dist = length(d);
-  float tau = 0.0, ds = dist / ${C.march.toFixed(1)};
-  for (int k = 0; k < ${C.march}; k++) {
-    vec2 q = p + d * ((float(k) + 0.5) / ${C.march.toFixed(1)});
-    float dep = clamp(water ? -eAt(q) : ${C.dMin.toFixed(2)}, ${C.dMin.toFixed(2)}, ${C.dMax.toFixed(1)});
-    tau += ds / sqrt(${G.toFixed(2)} * dep);
-  }
-  float dep0 = clamp(water ? -eAt(p) : ${C.dMin.toFixed(2)}, ${C.dMin.toFixed(2)}, ${C.dMax.toFixed(1)});
-  o = vec4(water ? -dist : dist, dep0, 0.0, water ? tau : -tau);
+  float T = texelFetch(uSrc2, u, 0).x;
+  if (s.z < 0.5 || distance(s.xy, p) > uMargin || T > 1.0e8) { o = vec4(water ? -1.0e4 : 1.0e4, 0.0, 0.0, water ? 1.0e4 : -1.0e4); return; } // the line is past the margin: this level does not know
+  float dist = distance(s.xy, p);
+  float dep0 = clamp(water ? -e : ${C.dMin.toFixed(2)}, ${C.dMin.toFixed(2)}, ${C.dMax.toFixed(1)});
+  o = vec4(water ? -dist : dist, dep0, 0.0, water ? T : -T);
 }`);
     // the direction and coherence from the travel time's gradient over a wide stencil (uSrc: the final), and the
     // chunk's texels (the window less the margin) into the slot. A clean front has |grad tau| = 1 / c; along the spine
@@ -122,7 +133,7 @@ float tauAt(ivec2 v, float e) { vec4 t = texelFetch(uSrc, clamp(v, ivec2(0), ive
 void main() {
   ivec2 u = ivec2(gl_FragCoord.xy) + ivec2(int(uMargin)); vec4 v = texelFetch(uSrc, u, 0);
   if (abs(v.x) > 9.0e3) { o = v; return; }
-  float e = v.w; bool water = v.x < 0.0; const int R = 3;
+  float e = v.w; bool water = v.x < 0.0; int R = max(2, int(${C.gradM.toFixed(1)} / uCell + 0.5));
   vec2 g = vec2(tauAt(u + ivec2(R, 0), e) - tauAt(u - ivec2(R, 0), e), tauAt(u + ivec2(0, R), e) - tauAt(u - ivec2(0, R), e)) / (2.0 * float(R) * uCell);
   if (!water) g = -g; // up the beach tau falls away from the line
   float gl = length(g); vec2 dir = gl > 1e-7 ? -g / gl : vec2(0.0);
@@ -196,11 +207,18 @@ void main() {
     U.uOrg.value.set(cx * L.chunk - M * L.s, cz * L.chunk - M * L.s); U.uCell.value = L.s; U.uMargin.value = M;
     const draw = (mat, rt, layer) => { this._quad.material = mat; if (layer === undefined) r.setRenderTarget(rt); else r.setRenderTarget(rt, layer); r.render(this._scene, this._cam); };
     draw(this._height, this.rtH);
-    U.uSrc.value = this.rtH.texture; draw(this._seed, this.ping);
-    let src = this.ping, dst = this.pong;
-    for (let s = 1 << Math.ceil(Math.log2(W)) - 1; s >= 1; s >>= 1) { U.uStep.value = s; U.uSrc.value = src.texture; draw(this._flood, dst); [src, dst] = [dst, src]; }
-    U.uSrc.value = src.texture; U.uSrc2.value = this.rtH.texture; U.uMargin.value = mt * L.s; draw(this._final, this.rtT);
-    U.uSrc.value = this.rtT.texture; U.uMargin.value = M; draw(this._pack, this.rt, L.slotBase + L.slots.indexOf(slot));
+    U.uSrc.value = this.rtH.texture; draw(this._seed, this.rtS); this.seedTex = this.rtS.texture;
+    // the flood, from the seeds, between ping and pong
+    let src = this.rtS, dst = this.ping;
+    for (let s = 1 << Math.ceil(Math.log2(W)) - 1; s >= 1; s >>= 1) { U.uStep.value = s; U.uSrc.value = src.texture; draw(this._flood, dst); src = dst; dst = src === this.ping ? this.pong : this.ping; }
+    const flood = src, free = dst; // the flood's result, kept for the final; the other of the pair is free
+    // the eikonal on rtT and the free one: init from the seeds, then the sweeps
+    U.uSrc.value = this.seedTex; U.uSrc2.value = this.rtH.texture; draw(this._eikInit, this.rtT);
+    let ea = this.rtT, eb = free;
+    for (let i = 0; i < this.cfg.sweeps; i++) { U.uSrc.value = ea.texture; draw(this._eik, eb); [ea, eb] = [eb, ea]; }
+    U.uSrc.value = flood.texture; U.uSrc2.value = ea.texture; U.uMargin.value = mt * L.s; draw(this._final, eb);
+    const fin = eb;
+    U.uSrc.value = fin.texture; U.uMargin.value = M; draw(this._pack, this.rt, L.slotBase + L.slots.indexOf(slot));
     r.setRenderTarget(prev);
     this.stats.bakes++;
   }
@@ -217,17 +235,23 @@ void main() {
 uniform highp sampler2DArray uShoreTab; uniform vec4 uShoreLv[SHORE_LEVELS]; uniform vec4 uShoreDir[${n * D * D / 4}]; uniform float uShoreOn;
 const vec4 SHORE_FAR = vec4(1.0e4, 0.0, 0.0, 1.0e4);
 const float SHORE_HAND[SHORE_LEVELS] = float[SHORE_LEVELS](${C.levels.map((L) => L.margin.toFixed(1)).join(', ')});
-int shoreSlot(int l, vec2 p) {
-  vec4 L = uShoreLv[l]; ivec2 c = ivec2(floor(p / L.y)) - ivec2(L.zw);
+int shoreSlotC(int l, ivec2 c) { // the slot holding chunk c of level l, -1 for none
+  vec4 L = uShoreLv[l]; c -= ivec2(L.zw);
   if (any(lessThan(c, ivec2(0))) || any(greaterThanEqual(c, ivec2(${D})))) return -1;
   int i = c.y * ${D} + c.x; vec4 v = uShoreDir[l * ${D * D / 4} + (i >> 2)]; int q = i & 3;
   return int(q == 0 ? v.x : q == 1 ? v.y : q == 2 ? v.z : v.w);
 }
+int shoreSlot(int l, vec2 p) { return shoreSlotC(l, ivec2(floor(p / uShoreLv[l].y))); }
+// a texel of chunk c, index i which may step over the chunk's edge into the neighbour's slot (so a read across a
+// chunk border interpolates the same texels from either side)
+vec4 shoreTap(int l, int slot, ivec2 c, ivec2 i) {
+  ivec2 step = ivec2(i.x < 0 ? -1 : i.x >= ${T} ? 1 : 0, i.y < 0 ? -1 : i.y >= ${T} ? 1 : 0);
+  if (step != ivec2(0)) { slot = shoreSlotC(l, c + step); if (slot < 0) return SHORE_FAR; i -= step * ${T}; }
+  return texelFetch(uShoreTab, ivec3(i, slot), 0);
+}
 vec4 shoreRead(int l, int slot, vec2 p) {
-  vec4 L = uShoreLv[l]; vec2 o = floor(p / L.y) * L.y; vec2 g = (p - o) / L.x - 0.5; vec2 g0 = floor(g); vec2 f = g - g0; ivec2 i = ivec2(g0);
-  ivec2 lo = ivec2(0), hi = ivec2(${T - 1});
-  vec4 a = texelFetch(uShoreTab, ivec3(clamp(i, lo, hi), slot), 0), b = texelFetch(uShoreTab, ivec3(clamp(i + ivec2(1, 0), lo, hi), slot), 0);
-  vec4 c = texelFetch(uShoreTab, ivec3(clamp(i + ivec2(0, 1), lo, hi), slot), 0), d = texelFetch(uShoreTab, ivec3(clamp(i + ivec2(1, 1), lo, hi), slot), 0);
+  vec4 L = uShoreLv[l]; ivec2 cc = ivec2(floor(p / L.y)); vec2 o = vec2(cc) * L.y; vec2 g = (p - o) / L.x - 0.5; vec2 g0 = floor(g); vec2 f = g - g0; ivec2 i = ivec2(g0);
+  vec4 a = shoreTap(l, slot, cc, i), b = shoreTap(l, slot, cc, i + ivec2(1, 0)), c = shoreTap(l, slot, cc, i + ivec2(0, 1)), d = shoreTap(l, slot, cc, i + ivec2(1, 1));
   // a texel the level does not know is left out of the blend
   vec4 s = vec4(0.0); float w = 0.0;
   if (abs(a.x) < 9.0e3) { s += a * (1.0 - f.x) * (1.0 - f.y); w += (1.0 - f.x) * (1.0 - f.y); }
@@ -257,7 +281,7 @@ float shoreCloud(vec2 xz) {
 }
 `;
   }
-  dispose() { this.rt.dispose(); this.rtH.dispose(); this.rtT.dispose(); this.ping.dispose(); this.pong.dispose(); for (const m of [this._height, this._seed, this._flood, this._final, this._pack, this._copy]) m.dispose(); }
+  dispose() { for (const t of [this.rt, this.rtH, this.rtS, this.rtT, this.ping, this.pong]) t.dispose(); for (const m of [this._height, this._seed, this._flood, this._eikInit, this._eik, this._final, this._pack, this._copy]) m.dispose(); }
 }
 
 // The same four readers by live calculation (W3.1, for the comparison in the template: ?shore=live): no table, every

@@ -59,7 +59,7 @@ function nearest(x, z) {
   }
   return [bd, bx, bz];
 }
-let n = 0, within = 0, maxErr = 0, dirOk = 0, dirN = 0, tauErr = 0, tauN = 0, signOk = 0, tauSign = 0; const tauErrs = [], errs = [];
+let n = 0, within = 0, maxErr = 0, dirOk = 0, dirN = 0, tauErr = 0, tauN = 0, signOk = 0, tauSign = 0; const tauErrs = [], errs = []; let tauBound = 0;
 const step = 4; // every fourth texel each way (a 128 x 128 sample of the 512 x 512)
 for (let j = 1; j < W - 1; j += step) for (let i = 1; i < W - 1; i += step) {
   const k = j * W + i, [x, z] = P(i, j), g = k * 4;
@@ -73,11 +73,14 @@ for (let j = 1; j < W - 1; j += step) for (let i = 1; i < W - 1; i += step) {
   if (e[k] < 0 && bd > s && bd < 200) {
     let tau = 0; const M = 64;
     for (let m = 0; m < M; m++) { const t = (m + 0.5) / M; src.sample(x + (bx - x) * t, z + (bz - z) * t, o); const dep = Math.min(SHORE.dMax, Math.max(SHORE.dMin, o[4] - o[0])); tau += bd / M / Math.sqrt(9.81 * dep); }
-    const te = Math.abs(px[g + 3] - tau) / tau; tauErrs.push(te); tauErr = Math.max(tauErr, te); tauN++;
+    // the eikonal's time is the fastest path's: never slower than the straight line (within the grid's error), never
+    // faster than the straight line at the greatest speed
+    const te = (px[g + 3] - tau) / tau; tauErrs.push(te); tauErr = Math.max(tauErr, te); tauN++;
+    if (px[g + 3] >= bd / Math.sqrt(9.81 * SHORE.dMax) * 0.98) tauBound++;
   }
 }
 renderer.render(scene, camera); renderer.render(scene, camera); // (the composite is not run here: the sampler count is for the world's post, below)
 const pct = (a, q) => { const b = a.slice().sort((x, y) => x - y); return b[Math.min(b.length - 1, Math.floor(q * b.length))]; };
-window.__result = { texelsKnown: n, errP50: pct(errs, 0.5), errP90: pct(errs, 0.9), tauRelErrP50: pct(tauErrs, 0.5), tauRelErrP90: pct(tauErrs, 0.9), texel: s, span: W * s, texelsChecked: n, seeds: seeds.length, withinHalfTexel: within / n, maxErrM: maxErr, signAgree: signOk / n, tauSignAgree: tauSign / n, dirAgree: dirOk / Math.max(1, dirN), tauRelErrMax: tauErr, tauChecked: tauN, bakes: world.shore.stats.bakes, held: world.shore.stats.held, chunk: [cx, cz, L.chunk] };
+window.__result = { texelsKnown: n, errP50: pct(errs, 0.5), errP90: pct(errs, 0.9), tauVsStraightP50: pct(tauErrs, 0.5), tauVsStraightP90: pct(tauErrs, 0.9), tauNotFasterThanLight: tauN ? tauBound / tauN : 1, texel: s, span: W * s, texelsChecked: n, seeds: seeds.length, withinHalfTexel: within / n, maxErrM: maxErr, signAgree: signOk / n, tauSignAgree: tauSign / n, dirAgree: dirOk / Math.max(1, dirN), tauVsStraightMax: tauErr, tauChecked: tauN, bakes: world.shore.stats.bakes, held: world.shore.stats.held, chunk: [cx, cz, L.chunk] };
 document.getElementById('out').textContent = JSON.stringify(window.__result, null, 1);
 </script>
