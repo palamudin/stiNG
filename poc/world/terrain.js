@@ -10,11 +10,9 @@
 //     km scale);
 //   - far forests drawn into the ground as a lumpy canopy past the trees' draw distance;
 //   - a little close-range detail (stone cells, soil speckle) that fades with distance;
-//   - the shore (W2): the swash runs up and down the beach with the waves, a thin film of water with a line of foam at
-//     its edge, to a run-up limit from the sea state and the beach's own slope (Stockdon et al. 2006, the height the top
-//     2% of run-ups reach); the sand is wet up to that limit and damp a little above it (capillary rise in the sand; the
-//     4 cm is our estimate), darker because water fills the pores, and glossy under the film. A small lake's waves run
-//     up a few centimetres, so its wet band is narrow.
+//   - the shore (W3.1): the sand is wet where the last tongue of the swash reached (the shore table's clock,
+//     shorefield.js shoreWet), darker because water fills the pores, drying from the top down; the water itself on
+//     the sand is drawn by the composite (shoreSheet). With the beach layer off, wet only at the line.
 import * as THREE from 'three';
 import { clipGrid } from './clipmap.js';
 import { NOISE_GLSL } from './noise.js';
@@ -42,7 +40,6 @@ const vec3 T_THATCH = L(0.30, 0.44, 0.13); // under the blades of a lawn: more b
 const vec3 T_EARTH = L(0.47, 0.40, 0.31);  // trodden earth, dry and packed
 `;
 
-const ZERO = new THREE.DataTexture(new Float32Array(4), 1, 1, THREE.RGBAFormat, THREE.FloatType); ZERO.needsUpdate = true;
 
 export function makeTerrain(clip, opts = {}) {
   const C = clip.cfg, g = clipGrid(C.cells);
@@ -69,10 +66,6 @@ export function makeTerrain(clip, opts = {}) {
     uGrassR: { value: 0 },  // how far the grass blades reach round the camera (grass.js); the lawn's thatch lies under them
     tCloudShadow: { value: null }, uCloudRect: { value: new THREE.Vector4(0, 0, 1, 0) }, // the clouds' shadow map round the camera (clouds.js)
     uGrassTint: { value: new THREE.Vector3(1, 1, 1) }, uSnowOn: { value: 0 }, // the season's grass colour and snow (seasons.js)
-    // the waves at the shore (World._water fills these from the wave field): the first two cascades' displacement, their
-    // tile sizes, and the sea state for the run-up: (H0 L0, Hs) with H0 the significant height, L0 the deep-water
-    // wavelength of the peak period
-    tWave0: { value: ZERO }, tWave1: { value: ZERO }, uWaveL: { value: new THREE.Vector2(1, 1) }, uRun: { value: new THREE.Vector2(0, 0) },
   };
   const shore = opts.shoreField; // the shore table (shorefield.js), for the swash; without it the swash reads the waves
   if (shore) Object.assign(U, shore.uniforms, { uShoreWave: opts.uShoreWave || { value: new THREE.Vector4(0, 8, 0, 8) }, uShoreSea: opts.uShoreSea || { value: opts.sea ?? 0 }, uSwellDir: opts.uSwellDir || { value: new THREE.Vector2(0.8, 0.6) } });
@@ -95,7 +88,6 @@ export function makeTerrain(clip, opts = {}) {
     sh.vertexShader = VERT_HEAD + sh.vertexShader.replace('#include <begin_vertex>', VERT_BODY);
     sh.fragmentShader = `${CLIP}\n${NOISE_GLSL}\n${SHORE}\n${WEAR_GLSL}\n${TERRAIN_SHADE_GLSL}
 uniform float uSea, uShadowFar, uTreeFar, uPaving, uTime, uWet, uShore, uSnowLine, uGrassR, uSnowOn; uniform vec3 uSunDir, uGrassTint;
-uniform sampler2D tWave0, tWave1; uniform vec2 uWaveL, uRun;
 varying vec3 vW;
 float hfShadow(vec2 p, float h0, float dist) {
   // march toward the sun through the clipmap; soft by the closest miss (Quilez's penumbra trick)
@@ -164,35 +156,17 @@ float hfShadow(vec2 p, float h0, float dist) {
   col = mix(col, T_MUD, uShore * (1.0 - smoothstep(-0.3, -0.03, hgt)) * (1.0 - sandy));
   // the swash: run-up limit R2 on this slope (Stockdon et al. 2006); the edge now follows the incident waves at this
   // stretch of shore, so it runs up when a crest arrives and drains back after it
-  float film = 0.0, wetB = 0.0, damp = 0.0, fl = 0.0, TROUGH_WET = 1.0;
-  if (uShore > 0.5 && uRun.x > 1e-5 && hgt > -0.1 && hgt < 3.0) {
-    float tb = sqrt(max(1.0 - TN.y * TN.y, 0.0)) / max(TN.y, 0.05), HL = uRun.x;
-    float R2 = 1.1 * (0.35 * tb * sqrt(HL) + 0.5 * sqrt(HL * (0.563 * tb * tb + 0.004)));
-    float aa = max(fwidth(hgt), 0.002), above = smoothstep(-0.05, 0.0, hgt);
+  float wetB = 0.0, TROUGH_WET = 1.0;
 #ifdef T_SHORE
-    // the sheet itself is drawn as water by the composite (shoreSheet); the sand here only remembers it (shoreWet):
-    // the shape of the last tongue, drying from the top down. With the beach layer off: plain sand, wet only under water
-    vec2 ws = SHORE_BEACH == 1 ? shoreWet(P, shoreAt(P), hgt, TN, uTime, shoreState(TW)) : vec2(hgt < 0.0 ? 1.0 : 0.0, 0.0);
-    R2 = -1.0; film = 0.0; float edgeF = 0.0; wetB = ws.x; damp = 0.0; // under the water too: the floor is wet sand, as dark as the sand the tongue just left
-    col *= 1.0 - 0.4 * wetB;
-    TROUGH_WET = mix(1.0, 0.5, ws.y); // damp sand is damp-shiny; the sheet of water over it is the mirror
-#else
-    // no table: the edge follows the incident waves where this cross-shore line meets the water (downhill by hgt / slope)
-    vec2 Ps = P + (length(TN.xz) > 1e-4 ? normalize(TN.xz) : vec2(0.0)) * clamp(hgt / max(tb, 0.01), 0.0, 20.0);
-    float hw = texture(tWave0, Ps / uWaveL.x).y + texture(tWave1, Ps / uWaveL.y).y;
-    float sEdge = R2 * clamp(0.45 + 0.55 * hw / max(0.5 * uRun.y, 1e-4), 0.0, 1.0);
-    film = (1.0 - smoothstep(sEdge - aa, sEdge + aa, hgt)) * smoothstep(-0.03, 0.0, hgt);
-    float edgeF = (1.0 - smoothstep(0.0, aa * 2.0 + 0.003, abs(hgt - sEdge))) * step(0.004, sEdge);
-#endif
-    if (R2 >= 0.0) {
-      wetB = (1.0 - smoothstep(R2, R2 + aa, hgt)) * above;
-      damp = (1.0 - smoothstep(R2, R2 + 0.04 + aa, hgt)) * (1.0 - wetB) * above;
-      col *= (1.0 - 0.4 * wetB) * (1.0 - 0.2 * damp) * (1.0 - 0.15 * film); // wet sand: water in the pores roughly halves what the grains send back
-    }
-    // foam at the swash's leading edge, broken into bubbles
-    fl = edgeF * film * smoothstep(-0.1, 0.5, w2noise(P / 0.07 + uTime * 0.3, 214) * NF(0.07) + 0.2);
-    col = mix(col, vec3(0.75), fl * 0.8);
+  // the sand and the water (W3.1): the swash sheet is drawn as water by the composite (shoreSheet), the sand here only
+  // remembers it (shoreWet): the shape of the last tongue, drying from the top down. With the beach layer off, the
+  // wetness only fades over the first centimetres above the line, no step
+  if (uShore > 0.5 && hgt > -0.5 && hgt < 3.0) {
+    vec2 ws = SHORE_BEACH == 1 ? shoreWet(P, shoreAt(P), hgt, TN, uTime, shoreState(TW)) : vec2(1.0 - smoothstep(-0.01, 0.03, hgt), 0.0);
+    wetB = ws.x; col *= 1.0 - 0.4 * wetB; // wet sand: water in the pores roughly halves what the grains send back
+    TROUGH_WET = mix(1.0, 0.5, ws.y);     // damp sand is damp-shiny; the sheet of water over it is the mirror
   }
+#endif
   // stone on steep ground, in soft blocks
   vec2 bc = floor(P / 0.75);
   float block = w2hash01(int(bc.x), int(bc.y), 78);
@@ -204,7 +178,7 @@ float hfShadow(vec2 p, float h0, float dist) {
   col = mix(col, T_SNOW, snow);
   col *= 1.0 - 0.35 * uWet * (1.0 - snow);
   diffuseColor.rgb = col;
-  float TROUGH = mix(mix(mix(0.95, 0.75, rk) * (1.0 - 0.5 * uWet), 0.45, wetB), 0.16, film * (1.0 - fl)) * TROUGH_WET; // the film is rippled and bubbly, not a mirror; freshly left sand mirrors
+  float TROUGH = mix(mix(0.95, 0.75, rk) * (1.0 - 0.5 * uWet), 0.45, wetB) * TROUGH_WET; // wet sand is smoother; freshly left sand shines
 `)
       .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = TROUGH;')
       .replace('#include <normal_fragment_begin>', /* glsl */ `#include <normal_fragment_begin>

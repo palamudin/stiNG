@@ -327,13 +327,6 @@ vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, floa
   if (bodyK == 3.0) { fm = max(fm, max(gSheet.y, gSheet.z)); } // the swash sheet: its lace edge, the white behind it
 #endif
   if (bodyK == 0.0) {
-    // the thin water at the very edge: foam in patches as a bore arrives (it pulses with the waves; with no shore
-    // table, or no waves, a faint rim)
-    float fz = 1.0 - smoothstep(0.0, 0.05 + 0.04 * w2noise(P.xz / 0.4 + uTime * 0.1, 97), D);
-#ifdef W_SHORE
-    fz *= 0.08 + 0.92 * clamp(swFoam * 1.5, 0.0, 1.0);
-#endif
-    fm = max(fm, fz * smoothstep(-0.2, 0.6, w2noise(P.xz / 0.12 - uTime * 0.05, 98)));
     // whitewater on the breakers' faces and the lace they leave behind: one pattern of three scales, covered to a
     // share set by the foam's strength (a crest nearly solid, the surf zone behind it in patches, the lace sparse)
     float pat = 0.5 + 0.5 * (w2noise(x0 / 0.7, 615) * 0.45 + w2noise(x0 / 3.0 + uTime * 0.03, 616) * 0.35 + w2noise(x0 / 0.18 - uTime * 0.1, 619) * 0.2);
