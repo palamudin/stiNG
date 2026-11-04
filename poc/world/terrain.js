@@ -15,7 +15,6 @@
 //     the sand is drawn by the composite (shoreSheet). With the beach layer off, wet only at the line.
 import * as THREE from 'three';
 import { clipGrid } from './clipmap.js';
-import { SWASH_GLSL } from './water3/swash.js';
 import { NOISE_GLSL } from './noise.js';
 import { WEAR_GLSL } from './grass.js';
 import { CLOUD_SHADOW_GLSL } from './clouds.js';
@@ -72,9 +71,8 @@ export function makeTerrain(clip, opts = {}) {
   const shore = opts.shoreField; // the shore table (shorefield.js), for the swash; without it the swash reads the waves
   if (shore) Object.assign(U, shore.uniforms, { uShoreWave: opts.uShoreWave || { value: new THREE.Vector4(0, 8, 0, 8) }, uShoreSea: opts.uShoreSea || { value: opts.sea ?? 0 } });
   const CLIP = clip.glsl() + CLOUD_SHADOW_GLSL;
-  if (shore && opts.swash3) U.uSwDir = opts.uSwDir;
-  // water 3: the sand's wetness on the water's own swash clock (water3/swash.js)
-  const SHORE = shore ? shore.glsl() + '\n' + SHORE_WAVE_GLSL + '\n#define T_SHORE\n' + (opts.swash3 ? SWASH_GLSL + '\n#define T_SWASH3\n' : '') : '';
+  // water 3: no wet sand drawn here (it must come from where the water's own movement was, not be painted beside it)
+  const SHORE = shore ? shore.glsl() + '\n' + SHORE_WAVE_GLSL + '\n#define T_SHORE\n' + (opts.swash3 ? '#define T_NOWET\n' : '') : '';
   const VERT_HEAD = `${CLIP}\nattribute float aLevel;\nvarying vec3 vW;\n`;
   const VERT_BODY = /* glsl */ `
   int lvl = int(aLevel);
@@ -167,11 +165,8 @@ float hfShadow(vec2 p, float h0, float dist) {
   // remembers it (shoreWet): the shape of the last tongue, drying from the top down. With the beach layer off, the
   // wetness only fades over the first centimetres above the line, no step
   if (uShore > 0.5 && hgt > -0.5 && hgt < 3.0) {
-#ifdef T_SWASH3
-    // water 3: wet where the swash reached in the last waves, from when its water got there; the gloss gone in a
-    // second and a half after it left, the darkness in about 45 s (the highest sand, left first, dries first)
-    vec2 ws = vec2(1.0 - smoothstep(-0.01, 0.03, hgt), 0.0);
-    if (TW <= uShoreSea + 0.5 && uShoreWave.x > 0.0) { vec2 grad = -TN.xz / max(TN.y, 0.05); sw3Beach(P, grad); vec3 sw = sw3Wet(P, hgt, length(grad), uTime); ws = vec2(max(ws.x, sw.x), sw.y * (1.0 - sw.z)); }
+#ifdef T_NOWET
+    vec2 ws = vec2(0.0);
 #else
     vec2 ws = SHORE_BEACH == 1 ? shoreWet(P, shoreAt(P), hgt, TN, uTime, shoreState(TW)) : vec2(1.0 - smoothstep(-0.01, 0.03, hgt), 0.0);
 #endif

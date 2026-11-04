@@ -23,10 +23,8 @@
 // Step 4 (the port): the old water's effects on this surface. Foam on the breakers' faces, the lace they leave, the
 // surf zone's standing foam and whitecaps where the surface folds (the cascades' Jacobian); the scene's reflection by
 // screen-space marching (with MSAA, where the scene's depth can be read); glints (Poisson-counted facets); rain rings;
-// ice in deep winter; the surf zone's churned water. The swash is this mesh itself: over the sand near the line it is
-// raised to the tongue the bore sends up the beach (water3/swash.js), a few centimetres over the sand, so the swash's
-// edge is where the mesh meets the terrain, cut by the hardware like the waterline, with lace at its tip and white
-// behind; the terrain darkens and glosses the sand it leaves on the same clock.
+// ice in deep winter; the surf zone's churned water. No swash and no wet sand: those must come from the water's own
+// movement over the shallows (a solver), not be drawn beside it.
 //
 // Step 2, the optics: drawn after the scene, the surface reads the scene's colour under it (a copy when the scene has
 // no MSAA resolve to read) along the refracted ray, attenuates it per channel over the path through the water
@@ -158,7 +156,7 @@ vec3 w3Coast(vec2 p, float depth, float cell) {
 #include <logdepthbuf_pars_vertex>
 ${head}
 ${coast}
-out vec3 vW; out vec2 vXZ; out float vCell, vNear, vJ; out vec2 vCoastSlope; out vec3 vCoast, vSwash;
+out vec3 vW; out vec2 vXZ; out float vCell, vNear, vJ; out vec2 vCoastSlope; out vec3 vCoast;
 void main() {
   bool skirt = position.y > 0.5;
   float r = length(position.xz);
@@ -170,7 +168,7 @@ void main() {
   if (dc < ${S.floorReach.toFixed(1)}) { bed = clipHeight(xz); depth = level - bed; }
   vec4 k = w3Damp(depth, level);
   float cell = max(r, 1.0) * ${grid.cellStep.toFixed(5)} * uGridScale;
-  vec4 d = vec4(0.0); vNear = 0.0; vCoastSlope = vec2(0.0); vCoast = vec3(0.0); vSwash = vec3(0.0);
+  vec4 d = vec4(0.0); vNear = 0.0; vCoastSlope = vec2(0.0); vCoast = vec3(0.0);
   bool coast = false;
   if (!skirt) {
 #ifdef W3_COAST
@@ -191,26 +189,6 @@ void main() {
   // the trough held over the floor (the clearance grows with distance for the depth buffer's precision); over land the
   // surface stays at the level and the terrain hides it
   if (bed > -1e3) P.y = max(P.y, min(bed + ${S.clear.toFixed(3)} + 2e-7 * dc * dc, level));
-#ifdef W3_COAST
-  // the swash: over the sand near the line the surface is raised to the tongue the last bore sent up the beach, a few
-  // centimetres over the sand (thinning to its tip), so its edge is where this mesh meets the terrain
-  if (bed > -1e3 && depth < 0.3 && depth > -3.0 && level <= uSeaLevel + 0.5 && uShoreWave.x > 0.0) {
-    float hgt = -depth, e = max(cell, 0.25);
-    vec2 grad = vec2(clipHeight(xz + vec2(e, 0.0)) - clipHeight(xz - vec2(e, 0.0)), clipHeight(xz + vec2(0.0, e)) - clipHeight(xz - vec2(0.0, e))) / (2.0 * e);
-    sw3Beach(xz, grad);
-    float tb = length(grad);
-    float tp, Tr; float eta = sw3Tongue(xz, tb, uTime, tp, Tr);
-    // one continuous surface: the tongue's level (level + eta), held to 5 cm over the sand. Past the tip it is under
-    // the sand by the same amount the sand stands over the tongue, so the edge is where the sand's height crosses the
-    // tongue's (a contour), interpolated smoothly across the grid's triangles; never a vertex raised beside one left
-    // at the sea's level (the triangles' sawtooth)
-    if (eta > 0.0) P.y = max(P.y, min(level + eta, bed + 0.05));
-    if (eta > hgt) {
-      float up = step(tp, Tr);
-      vSwash = vec3((1.0 - smoothstep(0.0, 0.025, eta - hgt)) * mix(0.35, 1.0, up), exp(-tp / (0.9 * Tr)) * smoothstep(0.0, 0.08, eta - hgt), 1.0);
-    }
-  }
-#endif
   vW = P; vXZ = xz; vCell = cell;
   gl_Position = projectionMatrix * viewMatrix * vec4(P, 1.0);
   #include <logdepthbuf_vertex>
@@ -220,7 +198,7 @@ void main() {
 ${head}
 ${SKY_GLSL}
 uniform vec3 uSun, uSunColor, uSkyUp; uniform sampler2D uSkyView, tScene; uniform mat4 uVP; uniform float uWLost, uRain, uIce, uGlint, uWPeak;
-in vec3 vW; in vec2 vXZ; in float vCell, vNear, vJ; in vec2 vCoastSlope; in vec3 vCoast, vSwash; out vec4 oColor;
+in vec3 vW; in vec2 vXZ; in float vCell, vNear, vJ; in vec2 vCoastSlope; in vec3 vCoast; out vec4 oColor;
 const float W_N = ${f(WATER.n)};
 const vec3 W_ABS = vec3(${WATER.absorb.map(f).join(', ')}), W_SCA = vec3(${WATER.scatter.map(f).join(', ')});
 ${WATER_CAUSTIC_GLSL}
@@ -305,7 +283,7 @@ void main() {
   vec3 n = normalize(vec3(-m.x, 1.0, -m.y));
   vec3 V = normalize(cameraPosition - vW); float tw = length(cameraPosition - vW);
   vec2 suv = gl_FragCoord.xy / vec2(textureSize(tScene, 0));
-  float edge = smoothstep(0.0, mix(0.06, 0.015, clamp(vSwash.z, 0.0, 1.0)), D); // the water thinning to nothing at its edge (the swash's sheet is thin and still a mirror)
+  float edge = smoothstep(0.0, 0.06, D); // the water thinning to nothing at its edge
   bool under = cameraPosition.y < vW.y;
   if (under) n = -n;
   vec3 ext = W_ABS + W_SCA;
@@ -386,9 +364,6 @@ void main() {
   float sf = clamp(vCoast.z, 0.0, 1.0);
   // (patches over a fifth of the zone at most, broken into bubbles: a bed under the crests' own white, not a sheet)
   fm = max(fm, smoothstep(0.98 - 0.3 * sf, 1.08 - 0.3 * sf, sp) * smoothstep(-0.35, 0.45, w2noise(vXZ / 0.22 + uTime * 0.05, 629)) * (0.15 + 0.25 * sf));
-  float sl = clamp(vSwash.x, 0.0, 1.0), swh = clamp(vSwash.y, 0.0, 1.0);
-  fm = max(fm, smoothstep(1.0 - 0.7 * sl, 1.12 - 0.7 * sl, pat) * 0.8 * sl);
-  fm = max(fm, smoothstep(1.0 - 0.6 * swh, 1.12 - 0.6 * swh, sp) * 0.6 * swh);
   c = mix(c, amb * 0.9 + uSunColor * sunUp * 0.25 * cloud, fm * 0.7);
   oColor = vec4(c, 1.0);
 }`,
