@@ -282,8 +282,24 @@ void main() {
   setSize(w, h) { w = Math.max(1, Math.round(w * this.scaleRes)); h = Math.max(1, Math.round(h * this.scaleRes)); if (w !== this.w || h !== this.h) this._alloc(w, h); }
   _run(mat, out) { this.quad.material = mat; this.renderer.setRenderTarget(out); this.renderer.render(this.scene, this.cam); }
 
+  // The samplers a pass's program actually uses, against the card's limit (16 in Chrome on Windows): counted from the
+  // linked program, so a pass that silently fails on a real card for one sampler too many is caught and said. The
+  // composite is the one at the limit (eight wave textures, the clipmap's two, the shore table, the sky, the clouds,
+  // the caustics, colour and depth); anything new it reads must ride in a layer of a texture it already has.
+  samplerCheck() {
+    const r = this.renderer, gl = r.getContext(), out = {}, max = gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS);
+    for (const [name, m] of [['composite', this.composite], ['dof', this.dofPass], ['final', this.final], ['map', this.mapPass]]) {
+      const p = m && r.properties.get(m).currentProgram; if (!p || !p.program) continue;
+      const prog = p.program, n = gl.getProgramParameter(prog, gl.ACTIVE_UNIFORMS); let count = 0;
+      for (let i = 0; i < n; i++) { const u = gl.getActiveUniform(prog, i); if (u && (u.type === gl.SAMPLER_2D || u.type === gl.SAMPLER_2D_ARRAY || u.type === gl.SAMPLER_3D || u.type === gl.SAMPLER_CUBE || u.type === gl.SAMPLER_2D_SHADOW)) count += u.size; }
+      out[name] = count;
+      if (count > max) console.error(`world: the ${name} pass uses ${count} samplers; this card allows ${max} per shader, so the pass fails`);
+    }
+    out.max = max; this.samplers = out; return out;
+  }
   render(scene, camera, opts = {}) {
     const r = this.renderer, U = this.U, size = r.getDrawingBufferSize(this.size), T = opts.timer || NOTIMER;
+    if (!this.samplers && this._frames > 1) this.samplerCheck(); this._frames = (this._frames || 0) + 1;
     this.setSize(size.x, size.y);
     camera.updateMatrixWorld();
     U.uInvProj.value.copy(camera.projectionMatrixInverse);

@@ -19,7 +19,7 @@ import { Post } from './post.js';
 import { Forest } from './trees.js';
 import { Grass } from './grass.js';
 import { WaveField } from './wavegpu.js';
-import { ShoreField, SHORE } from './shorefield.js';
+import { ShoreField } from './shorefield.js';
 import { Caustics } from './caustics.js';
 import { WATER } from './water.js';
 import { WAVES, swellState } from './waves.js';
@@ -67,7 +67,7 @@ export class World {
     const wet = source.sea > -1e5; // a source without water: no beaches, no mud, no snow line; heights count from 0
     // the shore table (shorefield.js): baked from the clipmap when its levels move; the water and the beach read it
     const floatRT = renderer.capabilities.isWebGL2 && !!renderer.extensions.get('EXT_color_buffer_float');
-    this.shore = wet && floatRT ? new ShoreField(renderer, this.clip, { levels: SHORE.levels.filter((l) => l < this.q.levels) }) : null;
+    this.shore = wet && floatRT ? new ShoreField(renderer, this.clip) : null;
     this.uShoreWave = { value: new THREE.Vector4(0, 8, 0, 8) }; // the swell's and the wind sea's (Hs, Tp): set from the wave field each frame
     this.uShoreSea = { value: source.sea };
     this.terrain = makeTerrain(this.clip, { sea: wet ? source.sea : 0, paving: source.kind === 'sting', shore: wet ? 1 : 0, snowLine: wet ? 215 : 1e9, shoreField: this.shore, uShoreWave: this.uShoreWave, uShoreSea: this.uShoreSea });
@@ -86,6 +86,7 @@ export class World {
     this.sky = new Sky(renderer);
     this.clouds = new Clouds(renderer, this.sky);
     this.uniforms.tCloudShadow.value = this.clouds.rtShadow.texture; this.uniforms.uCloudRect = this.clouds.U.uShadowRect;
+    if (this.shore) { this.shore.uniforms.uShoreCloudRect = this.clouds.U.uShadowRect; this.clouds.onShadow = (tex) => this.shore.copyInto(tex, this.shore.cloud); }
     this.forest = new Forest(this, { range: this.q.trees, far: this.q.far });
     this.group.add(this.forest.group);
     this.uniforms.uTreeFar.value = this.forest.farOn ? this.forest.cfg.far[1] : this.forest.bands[3];
@@ -174,13 +175,13 @@ export class World {
   // twice; userData.ring is the flag game.js already skips
   _mark() { this.group.traverse((o) => { o.userData.ring = true; o.userData.world2 = true; }); }
   set(o) { Object.assign(this.env, o); }
-  build(x, z) { this.clip.build(x, z); if (this.shore) this.shore.update(); }
+  build(x, z) { this.clip.build(x, z); if (this.shore) { this.shore.rebake(); this.shore.update(TMPV.set(x, 0, z)); } }
   update(dt, eye, focusDist = 10) {
     const E = this.env, U = this.post.U;
     this.time += dt;
     this.eye.copy(eye); this.focusDist = focusDist;
     this.clip.update(eye.x, eye.z, dt, this.source.glsl ? 0 : 3);
-    if (this.shore) { this.timer.begin('shore'); this.shore.update(); this.timer.end(); }
+    if (this.shore) { this.timer.begin('shore'); this.shore.update(eye); this.timer.end(); }
     // the weather and the season from the clock (the template); the game sets these fields itself (auto: false)
     const S = this.season = seasonAt(E.day ?? 100);
     if (E.auto) {

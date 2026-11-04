@@ -1,0 +1,114 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>World v3.1: tables against live calculation — time and precision</title>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
+<style>body{font:13px/1.5 ui-monospace,Menlo,Consolas,monospace;margin:20px;max-width:900px}pre{background:#f4f4f4;padding:10px;white-space:pre-wrap}</style>
+<h1>Tables against live calculation</h1>
+<p>Two of the things a water pixel needs, done both ways over a full 1024 x 1024 pass, 20 passes each, timed on the GPU
+(EXT_disjoint_timer_query_webgl2; desktop Chrome and Edge give it, Firefox and Safari do not). Precision is measured
+against an exact reference computed on the CPU.</p>
+<ul>
+<li><b>Glint count</b> (water.js wPoisson): the Poisson draw by summing the series per pixel (up to 40 terms), against one
+texel read of the 512 x 512 table (rows: the mean on a square-root scale; columns: the uniform draw).</li>
+<li><b>Shore distance</b>: the distance to the water line by a live search (the clipmap's height against its water level
+on 48 taps along 16 directions at two radii), against one bilinear read of the shore table (shorefield.js, baked
+once by jump flooding).</li>
+</ul>
+<pre id="out">running…</pre>
+<script type="module">
+import * as THREE from 'three';
+import { World } from '../index.js';
+import { wildSource } from '../sources/wild.js';
+import { NOISE_GLSL } from '../noise.js';
+import { POISSON, poissonTableData } from '../water.js';
+import { SHORE } from '../shorefield.js';
+const out = document.getElementById('out'), log = (t) => { out.textContent += '\n' + t; };
+out.textContent = '';
+const renderer = new THREE.WebGLRenderer();
+const gl = renderer.getContext(), ext = gl.getExtension('EXT_disjoint_timer_query_webgl2');
+log(`renderer: ${gl.getParameter(gl.RENDERER)}; timer queries: ${ext ? 'yes' : 'no (times will be blank)'}; max samplers per shader: ${gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS)}`);
+const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(55, 1, 0.1, 60000);
+const src = wildSource({ seed: 7 });
+const world = new World(renderer, scene, camera, src, { quality: 'low', clip: { levels: 12 } });
+let X0 = 0, Z0 = 0;
+outer: for (let r = 0; r < 12000; r += 60) for (let a = 0; a < 6.283; a += 0.3) {
+  const x = Math.cos(a) * r, z = Math.sin(a) * r, o = src.sample(x, z);
+  if (o[0] > 2 && o[0] < 7 && o[2] < 0.3 && o[4] <= src.sea) { X0 = x; Z0 = z; break outer; }
+}
+world.build(X0, Z0);
+const N = 1024, PASSES = 20;
+const rt = new THREE.WebGLRenderTarget(N, N, { type: THREE.FloatType, depthBuffer: false, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
+const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2)); quad.frustumCulled = false; const qs = new THREE.Scene(); qs.add(quad); const qc = new THREE.Camera();
+const VS = 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }';
+const pass = (frag, uniforms) => new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, uniforms, vertexShader: VS, fragmentShader: `precision highp float; precision highp int;\n${frag}`, depthTest: false, depthWrite: false });
+// GPU time of n renders of a material, in ms per pass (null without the extension)
+async function timeIt(mat, n) {
+  quad.material = mat; renderer.setRenderTarget(rt);
+  renderer.render(qs, qc); // warm (compile)
+  if (!ext) { for (let i = 0; i < n; i++) renderer.render(qs, qc); renderer.setRenderTarget(null); return null; }
+  const q = gl.createQuery(); gl.beginQuery(ext.TIME_ELAPSED_EXT, q);
+  for (let i = 0; i < n; i++) renderer.render(qs, qc);
+  gl.endQuery(ext.TIME_ELAPSED_EXT); renderer.setRenderTarget(null);
+  for (let w = 0; w < 400; w++) { await new Promise((r) => setTimeout(r, 10)); if (gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE)) break; }
+  const ns = gl.getQueryParameter(q, gl.QUERY_RESULT); gl.deleteQuery(q);
+  return ns / 1e6 / n;
+}
+const read = () => { const px = new Float32Array(N * N * 4); renderer.setRenderTarget(rt); renderer.readRenderTargetPixels(rt, 0, 0, N, N, px); renderer.setRenderTarget(null); return px; };
+
+// ---- 1. the glint count: series against table. Each pixel draws for a mean lam (0..12, by its row) and a uniform u
+// (by its column); the output is the count. The reference: the exact inverse distribution on the CPU.
+const tab = poissonTableData();
+const tabTex = new THREE.DataTexture(tab, POISSON.cols, POISSON.rows, THREE.RedFormat, THREE.FloatType); tabTex.minFilter = tabTex.magFilter = THREE.NearestFilter; tabTex.needsUpdate = true;
+const lamOf = 'float lam = 12.0 * pow(gl_FragCoord.y / 1024.0, 2.0); float u = (gl_FragCoord.x + 0.5) / 1024.0;';
+const series = pass(`out vec4 o; void main() { ${lamOf}
+  float p = exp(-lam), c = p, n = 0.0; for (int i = 0; i < 40; i++) { if (u <= c) break; n += 1.0; p *= lam / n; c += p; } o = vec4(n); }`, {});
+const table = pass(`uniform highp sampler2D tP; out vec4 o; void main() { ${lamOf}
+  int r = int(sqrt(lam / 12.0) * ${(POISSON.rows - 1).toFixed(1)} + 0.5), c = min(int(u * ${POISSON.cols.toFixed(1)}), ${POISSON.cols - 1}); o = vec4(texelFetch(tP, ivec2(c, r), 0).r); }`, { tP: { value: tabTex } });
+const tSeries = await timeIt(series, PASSES), pxS = read();
+const tTable = await timeIt(table, PASSES), pxT = read();
+// precision: against the exact inverse distribution at each pixel's own lam and u; and the mean per row (what the
+// highlight's brightness depends on) against lam
+let dS = 0, dT = 0, nAll = 0, rowBiasS = 0, rowBiasT = 0, rows = 0;
+for (let j = 0; j < N; j += 8) {
+  const lam = 12 * (j / N) ** 2; let mS = 0, mT = 0;
+  for (let i = 0; i < N; i++) {
+    const u = (i + 0.5) / N; let p = Math.exp(-lam), c = p, n = 0; while (u > c && n < 80) { n++; p *= lam / n; c += p; }
+    const k = (j * N + i) * 4; dS = Math.max(dS, Math.abs(pxS[k] - n)); dT = Math.max(dT, Math.abs(pxT[k] - n)); mS += pxS[k]; mT += pxT[k]; nAll++;
+  }
+  if (lam > 0.2) { rowBiasS = Math.max(rowBiasS, Math.abs(mS / N - lam) / lam); rowBiasT = Math.max(rowBiasT, Math.abs(mT / N - lam) / lam); rows++; }
+}
+log(`\nGLINT COUNT, ${N} x ${N} pixels, ${PASSES} passes each`);
+log(`  series (live): ${tSeries === null ? '—' : tSeries.toFixed(3) + ' ms/pass'}   worst count error ${dS}   worst row-mean bias ${(rowBiasS * 100).toFixed(2)}%`);
+log(`  table (read):  ${tTable === null ? '—' : tTable.toFixed(3) + ' ms/pass'}   worst count error ${dT}   worst row-mean bias ${(rowBiasT * 100).toFixed(2)}%   (${rows} rows, means past 0.2)`);
+if (tSeries && tTable) log(`  table is ${(tSeries / tTable).toFixed(1)}x the speed of the series`);
+
+// ---- 2. the shore distance: a live search on the clipmap against the table. Over the fine window (256 m round the
+// eye), each pixel is a point; the live search tests the water line along 16 directions at radii 0.5..64 m (48 taps)
+// and takes the nearest crossing; the table is one bilinear read. The reference is the parity page's brute force
+// (test/shore-parity.html); here the two are compared with each other and with a 2,048-tap search.
+const S0 = world.shore.slots[0], span = SHORE.N * S0.s;
+const clipU = { ...world.clip.uniforms }, shoreU = { ...world.shore.uniforms };
+const org = `vec2 p = vec2(${S0.ox.toFixed(2)}, ${S0.oz.toFixed(2)}) + gl_FragCoord.xy / 1024.0 * ${span.toFixed(1)};`;
+const liveSearch = (taps, dirs) => pass(`${world.clip.glsl()}\nout vec4 o;
+float e(vec2 q) { return clipAt(q).x - clipWater(q); }
+void main() { ${org} float e0 = e(p); float best = 1e4;
+  for (int d = 0; d < ${dirs}; d++) { float a = 6.2831853 * float(d) / ${dirs}.0; vec2 v = vec2(cos(a), sin(a)); float r0 = 0.0, ep = e0;
+    for (int t = 1; t <= ${taps}; t++) { float r = 0.5 * pow(${Math.pow(128, 1 / taps).toFixed(5)}, float(t - 1)); float et = e(p + v * r);
+      if ((et < 0.0) != (ep < 0.0)) { float f = ep / (ep - et); best = min(best, r0 + (r - r0) * f); break; } r0 = r; ep = et; } }
+  o = vec4(e0 < 0.0 ? -best : best); }`, clipU);
+const live48 = liveSearch(3, 16), live2k = liveSearch(128, 16);
+const tableRead = pass(`${world.shore.glsl()}\nout vec4 o; void main() { ${org} o = vec4(shoreAt(p).x); }`, shoreU);
+const tLive = await timeIt(live48, PASSES), pxL = read();
+const tTab = await timeIt(tableRead, PASSES), pxR = read();
+const tRef = await timeIt(live2k, 2), pxRef = read();
+let eL = [], eT = [], m = 0;
+for (let j = 8; j < N - 8; j += 4) for (let i = 8; i < N - 8; i += 4) { const k = (j * N + i) * 4; if (Math.abs(pxRef[k]) > 100) continue; eL.push(Math.abs(pxL[k] - pxRef[k])); eT.push(Math.abs(pxR[k] - pxRef[k])); m++; }
+const pct = (a, q) => { const b = a.slice().sort((x, y) => x - y); return b.length ? b[Math.min(b.length - 1, Math.floor(q * b.length))] : NaN; };
+log(`\nSHORE DISTANCE, ${N} x ${N} points over the fine window (${span} m, ${S0.s} m texels), ${PASSES} passes each; ${m} points within 100 m of the line checked against a 2,048-tap search`);
+log(`  live search, 48 taps: ${tLive === null ? '—' : tLive.toFixed(3) + ' ms/pass'}   error p50 ${pct(eL, 0.5).toFixed(3)} m, p90 ${pct(eL, 0.9).toFixed(3)} m, max ${pct(eL, 1).toFixed(2)} m`);
+log(`  table, one read:      ${tTab === null ? '—' : tTab.toFixed(3) + ' ms/pass'}   error p50 ${pct(eT, 0.5).toFixed(3)} m, p90 ${pct(eT, 0.9).toFixed(3)} m, max ${pct(eT, 1).toFixed(2)} m`);
+log(`  (the 2,048-tap reference itself: ${tRef === null ? '—' : tRef.toFixed(1) + ' ms/pass'}; the table's bake: ${world.shore.stats.bakes} windows, done once)`);
+if (tLive && tTab) log(`  table is ${(tLive / tTab).toFixed(1)}x the speed of the 48-tap search`);
+log('\nNote: on a software renderer (SwiftShader) both columns are CPU times and the ratios do not transfer to a card; run this on the card itself.');
+window.__result = { timer: !!ext, glint: { series: tSeries, table: tTable, errSeries: dS, errTable: dT, rowBiasSeries: rowBiasS, rowBiasTable: rowBiasT }, shore: { live48: tLive, table: tTab, ref2k: tRef, liveP50: pct(eL, 0.5), liveP90: pct(eL, 0.9), liveMax: pct(eL, 1), tableP50: pct(eT, 0.5), tableP90: pct(eT, 0.9), tableMax: pct(eT, 1), points: m } };
+</script>

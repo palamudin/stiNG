@@ -140,9 +140,10 @@ function showStats() {
   if (!world) return;
   const i = world.frameInfo || { calls: 0, tris: 0 }; i.triangles = i.tris;
   const d = cam.dist, ds = d < 1 ? (d * 100).toFixed(0) + ' cm' : d < 1000 ? d.toFixed(d < 10 ? 1 : 0) + ' m' : (d / 1000).toFixed(2) + ' km';
-  const g = world.timer.ms, gpu = world.timer.on ? (g.total ? `gpu ${g.total.toFixed(1)} ms: ` + ['scene', 'clouds', 'composite', 'rays', 'dof', 'bloom', 'final', 'waves'].filter((k) => g[k] !== undefined).map((k) => `${k} ${g[k].toFixed(1)}`).join(' · ') : 'gpu timing…') : 'gpu timing: not given by this browser';
+  const g = world.timer.ms, gpu = world.timer.on ? (g.total ? `gpu ${g.total.toFixed(1)} ms: ` + ['scene', 'shore', 'clouds', 'composite', 'rays', 'dof', 'bloom', 'final', 'waves'].filter((k) => g[k] !== undefined).map((k) => `${k} ${g[k].toFixed(1)}`).join(' · ') : 'gpu timing…') : 'gpu timing: not given by this browser';
   const w = world.weather, wx = w ? `${w.kind}, ${w.temp.toFixed(0)} °C, wind ${Math.hypot(...w.wind).toFixed(0)} m/s` : state.weather;
-  $('stats').textContent = `${fps.toFixed(0)} fps · ${i.calls} draws · ${(i.triangles / 1000).toFixed(0)}k tris · ${(world.forest.stats.far / 1000).toFixed(0)}k far cells\n${gpu}\nview ${ds} · ${seasonName(state.day)} day ${state.day} · ${wx} · ${world.forest.stats.trees} near trees`;
+  const sm = world.post.samplers, smt = sm ? ` · samplers ${sm.composite}/${sm.max}` : '';
+  $('stats').textContent = `${fps.toFixed(0)} fps · ${i.calls} draws · ${(i.triangles / 1000).toFixed(0)}k tris · ${(world.forest.stats.far / 1000).toFixed(0)}k far cells${smt}\n${gpu}\nview ${ds} · ${seasonName(state.day)} day ${state.day} · ${wx} · ${world.forest.stats.trees} near trees`;
 }
 
 // ------------------------------------------------------------ input
@@ -295,5 +296,5 @@ window.__w2 = {
     renderer.setRenderTarget(rt); renderer.render(sc, new THREE.Camera()); const px = new Float32Array(n * 4); renderer.readRenderTargetPixels(rt, 0, 0, n, 1, px); renderer.setRenderTarget(null);
     return pts.map((p, i) => ({ x: p[0], z: p[1], src: +src.height(p[0], p[1]).toFixed(3), drawn: +px[i * 4].toFixed(3), level: px[i * 4 + 1], lvlH: +px[i * 4 + 2].toFixed(3), l0: +px[i * 4 + 3].toFixed(3) }));
   },
-  stats() { const i = world ? world.frameInfo || {} : {}; return { calls: i.calls, tris: i.tris, fps, sharp: world && world.clip.sharpness(), clipMs: world && world.clip.stats.ms, forest: world && world.forest.stats }; },
+  stats() { const i = world ? world.frameInfo || {} : {}; return { calls: i.calls, tris: i.tris, fps, sharp: world && world.clip.sharpness(), clipMs: world && world.clip.stats.ms, forest: world && world.forest.stats, samplers: world && world.post.samplers, shore: world && world.shore && world.shore.stats }; },
 };

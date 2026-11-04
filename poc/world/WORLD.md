@@ -153,14 +153,18 @@ depth. The scaling keeps the sign, so the water line is exactly where it was and
 0.98 m at 10 m (a node check).
 
 **The shore table** (`shorefield.js`). Everything the water and the beach need to know about the water line is baked
-once and read as a table, per texel of three clipmap levels (2 m texels round the eye, 16 m to 500 m, 64 m to 2 km):
-the signed distance to the water line in metres, the unit direction to the nearest point of the line, and a shallow
-water front's travel time from the line (the straight line to the nearest shore point at `sqrt(g depth)`, depth clamped
-to 0.3..14 m; negative up the beach at the swash's speed). Baked on the GPU by jump flooding from the clipmap's own
-texels: a seed pass finds the crossings between neighbouring texels at sub-texel accuracy, seven flood passes spread
-the nearest seed over the 128² window, a last pass writes the table at the clipmap's own toroidal address. A level is
-baked again only when its window moves (every few texels of travel); nothing per frame computes a shoreline. The
-precision is the texel count: the fine slot puts the line within a few decimetres where the swash is drawn.
+once and read as a table: three square windows round the eye, 512 texels a side (0.5 m texels over 256 m, 4 m over
+2 km, 16 m over 8 km), each holding the signed distance to the water line in metres, the unit direction to the nearest
+point of the line, and a shallow-water front's travel time from the line (the straight line to the nearest shore point
+at `sqrt(g depth)`, depth clamped to 0.3..14 m, 32 steps; positive on the water, negative up the beach at the swash's
+speed). Baked on the GPU by jump flooding from the clipmap (height and water level read from the finest level at each
+texel's point): a seed pass finds the crossings between neighbouring texels at sub-texel accuracy, nine flood passes
+spread the nearest seed, a last pass writes the table. A window is baked again only when the eye has moved an eighth of
+its span (32 m for the fine one); nothing per frame computes a shoreline. The precision is the row count: the reader
+addresses a texel, so finer texels cost a few megabytes and bake time, nothing per pixel. Readers blend the windows
+over the outer tenth of each span, so no seam shows where one hands over to the next. The array texture carries two
+more layers read through the same sampler: the glints' Poisson table and a copy of the clouds' shadow map each frame,
+so the sea darkens under a cloud as the ground does.
 
 **The shore waves** (`SHORE_WAVE_GLSL`, read by `water.js` and `terrain.js`). Two trains (the peak period and 0.62
 of it) of narrow-crested shallow-water waves ride the table: phase `w (t + tau)`, wavenumber `w / sqrt(g depth)`, so
@@ -179,18 +183,26 @@ top down, its leading edge a line of bubbles; the sand is wet to the run-up limi
 and damp a little above. Without a table (a source without water) the swash reads the waves as in W2.
 
 **The glints' Poisson draw** (`water.js`). The count of mirror facets a cell draws came from summing the Poisson
-series per cell per pixel (up to forty terms, twice); it is now a 128 x 256 table of the inverse distribution (rows by
-the mean on a square-root scale to 12, columns by the uniform draw), computed once; a pixel reads one texel. Row means
-are within 1.5% of their lambda (a node check). Means past 12 keep the normal approximation. The table rides in a spare
-layer of the shore table's array texture: the composite is at the fragment sampler limit of Chrome on Windows (16, ANGLE
-over D3D11; the eight wave textures take half), and a 17th sampler failed the pass there with a black frame. Anything
-new the composite reads must share a texture it already has.
+series per cell per pixel (up to forty terms, twice); it is now a 512 x 512 table of the inverse distribution (rows by
+the mean on a square-root scale to 12, columns by the uniform draw), computed once; a pixel reads one texel. Means past
+12 keep the normal approximation. The table rides in a layer of the shore table's array texture: the composite is at
+the fragment sampler limit of Chrome on Windows (16, ANGLE over D3D11; the eight wave textures take half), and a 17th
+sampler failed the pass there with a black frame. `Post.samplerCheck` counts the active samplers of each pass from the
+linked program after the first frames and the template shows `samplers 16/16` in its stats line; anything new the
+composite reads must share a texture it already has.
+
+**Tables against live calculation** (`world/test/tables-bench.html`). The same two things done both ways over a
+1024² pass, timed with GPU timer queries and checked against an exact reference: the glint count by series against
+the table, and the shore distance by a 48-tap live search on the clipmap against one table read. Run it on the card
+in question; on a software renderer the times are CPU times and the ratios do not carry.
 
 **Checks.** `node world/test/world.test.mjs`: the beach profile, the swell state, the Poisson table (35 checks pass).
-`world/test/shore-parity.html`: the GPU table's fine slot against a brute-force nearest crossing on the CPU over its
-16,384 texels (176 crossings): every texel within half a texel (max 0.30 m), signs agree everywhere, the direction
-agrees at 98.3% of texels a texel or more from the line (the rest sit on ties between two shore points), the travel
-time within 13% of a 32-step integral (the bake marches 8). `world/test/gpu-parity.html` with the new profile: height
+`world/test/shore-parity.html`: the fine window against a brute-force nearest crossing on the CPU from the source at
+the texels' points (16,384 of its 262,144 texels, 707 crossings): the distance within 8 cm at the median and 0.63 m at
+the 90th percentile (the window's edge, 128 m out, where the clipmap's finest level has 4 m texels and its water line
+differs from the source's by up to a texel; max 1.27 m); the signs of distance and travel time agree at 99.9%, the
+direction at 99.8% of texels a texel or more from the line; the travel time within 0.9% of a 64-step integral at the
+median, 4.2% at the 90th percentile (a few per cent of a wave period). `world/test/gpu-parity.html` with the new profile: height
 within 1.3 cm (seed 7), 0.1 cm (99), 2.9 cm (1234: one point of 4,096 over 2 cm, the lake trigonometry in float32).
 Renders: the beach from the sand, from above, the surf
 zone and a storm. Not verified: the timings of the bake on a real GPU (`shore` in the per-pass stats; it runs only
@@ -203,8 +215,12 @@ when a window moves), the swash in motion.
   in the clipmap's water channel there.
 - The shore waves lift the water's surface but do not move it sideways (no Gerstner lean): a plunging lip is not
   drawn, the bore is.
-- The far slots (16 m and 64 m texels) place the line to a few metres: foam lines on a far coast sit within that.
+- The far windows (4 m and 16 m texels) place the line to a few metres: foam lines on a far coast sit within that.
+- The table is as good as the clipmap where it is baked: at a window's edge the clipmap's level there is coarser than
+  the table's texels, and the line follows the clipmap's (which is what the water is drawn from anyway).
 - The caustics are splatted from the open water's cascades, undamped in the shallows.
+- The clouds' shadow reaches the sea through a copy of the shadow map (27 m texels): a cloud's edge on the water is
+  as soft as on the ground, no softer.
 
 ## Water (W2)
 

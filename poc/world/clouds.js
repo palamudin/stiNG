@@ -130,6 +130,7 @@ void main() {
     U.uShadowRect.value.set(Math.round(eye.x / texel) * texel, Math.round(eye.z / texel) * texel, CLOUDS.shadowSpan / 2, 0);
     this.quad.material = this.shadow; r.setRenderTarget(this.rtShadow); r.render(this.scene, this.cam);
     r.setRenderTarget(prev);
+    if (this.onShadow) this.onShadow(this.rtShadow.texture); // the water reads a copy (shorefield.js)
   }
   // the weather sets these each frame
   set(cover, dens, time, wind) { const U = this.U; U.uCover.value = cover; U.uCloudDens.value = dens; U.uCloudT.value = time; U.uCloudDrift.value.set(wind[0] * time * 2.5, wind[1] * time * 2.5); }

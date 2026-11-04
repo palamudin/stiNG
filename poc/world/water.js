@@ -38,8 +38,9 @@ const f = (v) => (Number.isInteger(v) ? v.toFixed(1) : String(v));
 
 // The glints' Poisson table (W3.1): count = the inverse distribution function at u for the mean of the row, rows on a
 // square-root scale of the mean (small means, where a cell draws none or one, get the fine rows), columns over u.
-// One float texture, built once; the GPU reads a texel instead of summing the series per cell per pixel.
-export const POISSON = { rows: 128, cols: 256, lamMax: 12 };
+// Built once; the GPU reads a texel instead of summing the series per cell per pixel. 512 rows: the row's mean is
+// within 0.1% of the pixel's past a mean of 1, columns of u at 1/512.
+export const POISSON = { rows: 512, cols: 512, lamMax: 12 };
 export function poissonTableData() {
   const { rows, cols, lamMax } = POISSON, data = new Float32Array(rows * cols);
   for (let r = 0; r < rows; r++) {
@@ -192,9 +193,10 @@ vec3 wUnder(vec3 floorCol, float D, float L, float cz) {
 vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, float dist, vec3 sceneCol, float bodyK, float bodyD, vec3 bodyC, float bodyR) {
   vec3 V = -v; float tw = length(P - uCamPos);
   float fp = sqrt(max(length(gx) * length(gy), 1e-12));
-  wDamp = vec4(1.0); float swFoam = 0.0, swLace = 0.0; vec2 swSlope = vec2(0.0);
+  wDamp = vec4(1.0); float swFoam = 0.0, swLace = 0.0, cloud = 1.0; vec2 swSlope = vec2(0.0);
 #ifdef W_SHORE
   if (bodyK == 0.0) { wDamp = gDampSea; swSlope = gSW.slope; swFoam = gSW.foam; swLace = gSW.lace; }
+  cloud = shoreCloud(P.xz); // the clouds' shadow: the sun's share of the light here
 #endif
   vec2 m, sv; wSlope(x0, gx, gy, m, sv);
   vec2 rs = wRain(P.xz, uTime, uWet) * (1.0 - smoothstep(0.02, 0.08, fp));
@@ -249,7 +251,7 @@ vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, floa
     mat2 J = mat2(1.0) + min(D, 0.12) * M * H;
     cz = mix(1.0, clamp(1.0 / max(abs(determinant(J)), 0.35), 0.0, 2.5), exp(-tw * 0.2));
   }
-  vec3 under = wUnder(floorCol, D, L, cz);
+  vec3 under = wUnder(floorCol, D, L, cz * cloud);
   // ---- reflection: the scene where SSR finds it, else the sky
   vec3 R = reflect(v, n); R.y = abs(R.y);
   vec4 ss = wSSR(P, R, P.y);
@@ -264,7 +266,7 @@ vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, floa
   float sav = 0.5 * (s2.x + s2.y);
   float G = 1.0 / (1.0 + wLambda(max(V.y, 1e-3), sav) + wLambda(max(Lsun.y, 1e-3), sav));
   float Fh = wFresnel(dot(V, Hh));
-  vec3 spec = uSunColor * Fh * Dm * G / (4.0 * max(V.y, 1e-3)) * sunOn;
+  vec3 spec = uSunColor * Fh * Dm * G / (4.0 * max(V.y, 1e-3)) * sunOn * cloud;
   // glints: facets of size l (the short ripples that carry most of the curvature) in square cells anchored to the
   // world, at the two power-of-two sizes round the footprint, blended by the fraction between them; each cell redraws
   // its Poisson count about three times a second from its own start, fading between draws, so it twinkles; uGlint
@@ -303,7 +305,7 @@ vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, floa
     fm = max(fm, smoothstep(1.0 - 0.75 * wf, 1.15 - 0.75 * wf, pat) * (0.6 + 0.4 * wf));
     fm = max(fm, smoothstep(1.0 - 0.5 * lf, 1.1 - 0.5 * lf, pat) * 0.45);
   }
-  col = mix(col, amb * 0.9 + uSunColor * sunUp * 0.25, fm * 0.7);
+  col = mix(col, amb * 0.9 + uSunColor * sunUp * 0.25 * cloud, fm * 0.7);
   if (uDebug > 1.5) col = vec3(D / 3.0, F, ss.a) * 2.0;
 #ifdef W_SHORE
   if (uDebug > 3.5) { vec4 shd = shoreAt(x0); col = vec3(fract(-shd.x / 10.0) * 0.8, clamp(swFoam, 0.0, 1.0), 0.5 + 2.0 * swSlope.x); }
