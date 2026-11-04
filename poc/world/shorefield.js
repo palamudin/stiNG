@@ -448,8 +448,9 @@ vec3 shoreSheet(vec2 p, vec4 sh, float hgt, vec3 nG, float t, vec2 st) {
   float arriving = (1.0 - smoothstep(0.05, 0.45, tau / tup)) * smoothstep(0.35, 0.7, lace + 0.15) * (0.5 + 0.6 * back);
   return vec3(film, edge, max(bubbles, arriving));
 }
-// The sand's memory of the water (W3.1): the last four tongues are asked when each left this height (the parabola
-// above, falling: tau = tup (1 + sqrt(1 - hgt / reach))), and the wetness
+// The sand's memory of the water (W3.1): the last four tongues are asked when each reached this height and when it
+// left (the parabola's rising and falling branches: tup (1 -+ sqrt(1 - hgt / reach))); a tongue that has not arrived
+// leaves no mark, so the wet line is drawn by the tip itself as it climbs, and the wetness
 // is the freshest one's age: the dark of wet sand dries over 45 s, its mirror gloss in a second or two behind the
 // retreating water. So the wet sand is the shape of the last tongue, fingers and all, and dries from the top edge
 // down toward the water at the water's own pace, until the next tongue writes over it. Returns (dark, gloss); 1 under
@@ -464,9 +465,11 @@ vec2 shoreWet(vec2 p, vec4 sh, float hgt, vec3 nG, float t, vec2 st) {
     float tk = t0 - float(k) * T;
     float reach = shoreReach(pl, tk, R2) + shoreFingers(p, tk);
     if (reach <= hgt) continue;
-    float tup = shoreTongueUp(reach, tb, T);
-    float age = (t - tk) - tup * (1.0 + sqrt(max(1.0 - hgt / reach, 0.0))); // the level fell back to hgt then
-    if (age < 0.0) return vec2(1.0); // still under this tongue (the sheet is drawn over it)
+    float tup = shoreTongueUp(reach, tb, T), q = sqrt(max(1.0 - hgt / reach, 0.0)), since = t - tk;
+    float tArrive = tup * (1.0 - q), tLeave = tup * (1.0 + q); // the parabola's rising and falling branches reach hgt then
+    if (since < tArrive) continue;              // this tongue has not reached here yet: it leaves no mark
+    if (since < tLeave) return vec2(1.0);        // under it now (the sheet is drawn over it)
+    float age = since - tLeave;
     dark = max(dark, exp(-age / 45.0)); gloss = max(gloss, exp(-age / 1.5));
   }
   return vec2(dark, gloss);
