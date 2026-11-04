@@ -189,6 +189,19 @@ void main() {
   // the trough held over the floor (the clearance grows with distance for the depth buffer's precision); over land the
   // surface stays at the level and the terrain hides it
   if (bed > -1e3) P.y = max(P.y, min(bed + ${S.clear.toFixed(3)} + 2e-7 * dc * dc, level));
+#ifdef W3_COAST
+  // the shoreline: over the sand the surface is a sheet at the shoreline's height, thin at its tip (1 cm) and
+  // thickening behind it, and under the sand past the tip by as much as the sand stands over the shoreline; in the
+  // last centimetres of water it is lifted to the same sheet. One height for this, the pixels' edge test and the sand
+  if (bed > -1e3 && depth < 0.5 && depth > -3.0 && level <= uSeaLevel + 0.5 && uShoreWave.x > 0.0) {
+    float e = max(cell, 0.25);
+    vec2 grad = vec2(clipHeight(xz + vec2(e, 0.0)) - clipHeight(xz - vec2(e, 0.0)), clipHeight(xz + vec2(0.0, e)) - clipHeight(xz - vec2(0.0, e))) / (2.0 * e);
+    sw3Beach(xz, grad);
+    float s, th = level + sw3Shore(xz, length(grad), uTime, s) - bed;
+    float sheet = bed + (th > 0.0 ? min(0.12, 0.012 + 0.3 * th) : max(th, -0.15));
+    P.y = depth < 0.0 ? sheet : max(P.y, sheet);
+  }
+#endif
   vW = P; vXZ = xz; vCell = cell;
   gl_Position = projectionMatrix * viewMatrix * vec4(P, 1.0);
   #include <logdepthbuf_vertex>
@@ -196,6 +209,7 @@ void main() {
       fragmentShader: /* glsl */ `precision highp float; precision highp int;
 #include <logdepthbuf_pars_fragment>
 ${head}
+${coast}
 ${SKY_GLSL}
 uniform vec3 uSun, uSunColor, uSkyUp; uniform sampler2D uSkyView, tScene; uniform mat4 uVP; uniform float uWLost, uRain, uIce, uGlint, uWPeak;
 in vec3 vW; in vec2 vXZ; in float vCell, vNear, vJ; in vec2 vCoastSlope; in vec3 vCoast; out vec4 oColor;
@@ -283,7 +297,24 @@ void main() {
   vec3 n = normalize(vec3(-m.x, 1.0, -m.y));
   vec3 V = normalize(cameraPosition - vW); float tw = length(cameraPosition - vW);
   vec2 suv = gl_FragCoord.xy / vec2(textureSize(tScene, 0));
-  float edge = smoothstep(0.0, 0.06, D); // the water thinning to nothing at its edge
+  // the shoreline, per pixel: no water where its height is under this pixel's sand (the triangles cannot put water on
+  // the sand at the wrong moment); its sheet's foam
+  float swLace = 0.0, swWhite = 0.0, thin = 0.06;
+#ifdef W3_COAST
+  if (depth < 0.3 && depth > -3.0 && lv <= uSeaLevel + 0.5 && uShoreWave.x > 0.0) {
+    vec3 cn = clipNormal(vW.xz); vec2 grad = -cn.xz / max(cn.y, 0.05);
+    sw3Beach(vW.xz, grad);
+    float s, th = lv + sw3Shore(vW.xz, length(grad), uTime, s) - bed;
+    if (depth < 0.0 && th <= 0.0) discard;
+    // a bubbly band behind the tip while it climbs; sparse remnants in the backwash, thinning as it drains; the
+    // bore's white over the sheet, fresh as it arrives
+    float aa = 0.004 + 4e-5 * length(cameraPosition - vW);
+    swLace = (s < 0.35 ? smoothstep(-aa, aa, th) * (1.0 - smoothstep(0.0, 0.06 + aa, th)) : 0.3 * smoothstep(0.0, 0.03, th) * (1.0 - smoothstep(0.35, 0.6, s))) * (1.0 - smoothstep(0.0, 0.3, depth));
+    swWhite = (s < SW3_UP ? 1.0 - 0.5 * s / SW3_UP : 0.5 * (1.0 - smoothstep(SW3_UP, 0.6, s))) * smoothstep(0.0, 0.08, th) * (1.0 - smoothstep(0.1, 0.3, depth));
+    if (depth < 0.0) thin = 0.015; // the sheet on the sand: thin, and still a mirror
+  }
+#endif
+  float edge = smoothstep(0.0, thin, D); // the water thinning to nothing at its edge
   bool under = cameraPosition.y < vW.y;
   if (under) n = -n;
   vec3 ext = W_ABS + W_SCA;
@@ -364,6 +395,8 @@ void main() {
   float sf = clamp(vCoast.z, 0.0, 1.0);
   // (patches over a fifth of the zone at most, broken into bubbles: a bed under the crests' own white, not a sheet)
   fm = max(fm, smoothstep(0.98 - 0.3 * sf, 1.08 - 0.3 * sf, sp) * smoothstep(-0.35, 0.45, w2noise(vXZ / 0.22 + uTime * 0.05, 629)) * (0.15 + 0.25 * sf));
+  fm = max(fm, smoothstep(1.0 - 0.7 * swLace, 1.12 - 0.7 * swLace, pat) * 0.85 * swLace);
+  fm = max(fm, smoothstep(1.0 - 0.6 * swWhite, 1.12 - 0.6 * swWhite, sp) * 0.6 * swWhite);
   c = mix(c, amb * 0.9 + uSunColor * sunUp * 0.25 * cloud, fm * 0.7);
   oColor = vec4(c, 1.0);
 }`,

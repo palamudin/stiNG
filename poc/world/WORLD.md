@@ -326,8 +326,17 @@ terrain, cut by the hardware and smoothed by MSAA; the trough is held 4 cm over 
   the sun through the slopes' distribution (LEAN). The thickness comes from the clipmap's floor under the point;
   the refraction's offset, the reflection and the highlight fade out over the last 6 cm of depth, so the edge is the
   floor seen through no water.
-- **Not yet:** the scene's own reflection (sky only), foam, the swash and wet sand (the beach layer is off), rocks as
-  obstacles, partly submerged objects' thickness (the floor's depth is used, not the depth buffer's).
+- **The shoreline (4).** One height per point and moment (`water3/swash.js` sw3Shore): the main train's crest
+  reaching the line starts a climb over 0.3 of the period to the run-up limit (Stockdon, for the sand's slope and the
+  swell, the set, fingers along the shore), then a drain over the rest, back at the line as the next crest arrives. The
+  mesh over the sand is a sheet at that height (1 cm at the tip, thickening behind it) and under the sand past it; each
+  pixel tests the same height and discards water where it is under the sand, so no triangle puts water on the sand at
+  the wrong moment; the sand is wet from when that height rose past it to when it fell back, drying from then (gloss
+  ~1.5 s, darkness ~45 s). Nothing on or above the line reads the shore table's per-texel values (they step on the
+  land side: the teeth). The old water's effects are on the new surface: breaker whitewater, lace, surf-zone foam,
+  whitecaps (the Jacobian), the scene's reflection (MSAA paths), glints, rain rings, ice.
+- **Not yet:** rocks as obstacles (channelling, splitting), partly submerged objects' thickness (the floor's depth is
+  used, not the depth buffer's).
 
 ## Water (W2)
 
