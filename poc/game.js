@@ -496,9 +496,9 @@ function gableGeo(w, h) { const k = 'g' + w.toFixed(3) + ':' + h.toFixed(3); let
 // asphalt grain and patches, sidewalk slabs, square pavers. Nothing is loaded and no window is a mesh: one material per
 // kind of surface, whatever the building's size, and the pattern is the same at any distance it is seen from.
 // aTop (per geometry): the wall's height above the ground, so windows stop below the eaves. uNight: 0 by day, 1 at night.
-const SURF = { uNight: { value: 0 } };
+const SURF = { uNight: { value: 0 }, uLit: { value: 0 }, uClock: { value: 0 } }; // uLit: the share of rooms lit now; uClock: game minutes
 const SURF_GLSL = `
-uniform float uNight; varying vec3 vSP; varying vec3 vSN; flat varying float vTop; flat varying vec4 vBox;
+uniform float uNight, uLit, uClock; varying vec3 vSP; varying vec3 vSN; flat varying float vTop; flat varying vec4 vBox;
 float sHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float sNoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(sHash(i), sHash(i + vec2(1, 0)), f.x), mix(sHash(i + vec2(0, 1)), sHash(i + vec2(1, 1)), f.x), f.y); }
@@ -552,7 +552,11 @@ const SURF_FRAG = `
     vec3 gl = mix(vec3(0.07, 0.09, 0.12), vec3(0.42, 0.5, 0.58), smoothstep(-0.5, 0.6, (fy - WC) / WH)) * (0.8 + 0.4 * id);
     gl = mix(gl, vec3(0.75, 0.68, 0.55), step(0.82, id) * 0.6); // a drawn curtain now and then
     col = mix(col, gl, glass);
-    glow += vec3(1.0, 0.78, 0.48) * 0.7 * uNight * step(0.55, id) * glass; // some rooms lit at night
+    // rooms in use come and go through the evening: each window's light is on or off for a spell of its own (15 to 75
+    // game minutes), drawn afresh each spell, more of them early in the evening than late in the night
+    float spell = 15.0 + 60.0 * fract(id * 7.31), turn = floor(uClock / spell + id * 13.7);
+    float on = step(1.0 - uLit, sHash(vec2(id * 91.7 + floor(vBox.x * 0.37), turn)));
+    glow += mix(vec3(1.0, 0.78, 0.48), vec3(0.75, 0.82, 1.0), step(0.85, fract(id * 5.3))) * 0.7 * uNight * on * glass; // the odd blue of a screen
   } else col *= 0.9; // a flat top
 #elif SURF_KIND == 4
   // roof shingles: courses across the slope, each tab its own shade, a shadow line under each course
@@ -1873,17 +1877,19 @@ const NIGHT_SKY = (() => {
   g.add(stars, disc); g.userData = { stars, disc }; scene.add(g);
   return g;
 })();
+const NIGHT = { full: 0, cloud: 0 };
 function nightSky(f, dayAmt) {
   const phase = (((sim.day + 4) % 29.53) + 29.53) % 29.53 / 29.53, full = (1 - Math.cos(phase * Math.PI * 2)) / 2, night = 1 - dayAmt;
   const cloud = sim.raining ? 0.85 : sim.weatherToday.rain ? 0.4 : 0.1;
+  NIGHT.full = full; NIGHT.cloud = cloud;
   // the moon rises in the east as the sun sets when full, later as it wanes: across the night by its phase
   const t = ((f - 1) * 15 / 9 + phase) % 1, a = Math.PI * Math.min(1, Math.max(0, t));
   const mdir = new THREE.Vector3(-Math.cos(a) * 0.85, Math.max(0.12, Math.sin(a)), -0.4).normalize();
   moon.intensity = 0.38 * full * night * (1 - cloud) * (Math.sin(a) > 0.05 ? 1 : 0);
   moon.position.copy(camera.position).addScaledVector(mdir, 40); moon.target.position.copy(camera.position);
   hemi.intensity += (0.07 * (1 - cloud) + 0.12 * full * (1 - cloud)) * night; // starlight and the moon's sky glow
-  const G = NIGHT_SKY.userData, show = !W2on;
-  NIGHT_SKY.visible = show; NIGHT_SKY.position.copy(camera.position);
+  const G = NIGHT_SKY.userData, show = true; // World v3's sky has no stars or moon of its own: the game's go over it
+  NIGHT_SKY.visible = show; NIGHT_SKY.position.copy(camera.position); NIGHT_SKY.scale.setScalar(W2on ? 14 : 1); // in World v3 past its clouds, so they hide the stars
   G.stars.material.opacity = show ? night * night * (1 - cloud) : 0;
   G.disc.material.opacity = show ? night * (0.25 + 0.75 * full) * (1 - cloud * 0.8) * (Math.sin(a) > 0.02 ? 1 : 0) : 0;
   G.disc.position.copy(mdir).multiplyScalar(330); G.disc.lookAt(0, 0, 0);
@@ -1906,6 +1912,9 @@ function lighting() {
   sun.intensity = (sim.raining ? (storm ? 0.25 : 0.5) : 2.1) * dayAmt;
   hemi.intensity = 0.18 + 0.97 * dayAmt * (storm ? 0.6 : 1) + flash * 1.5;
   SURF.uNight.value = 1 - dayAmt; // lit windows after dark
+  // the share of rooms lit: most in the evening, fewer as the night goes on, a few again before dawn
+  const hr = md / 60, eve = THREE.MathUtils.smoothstep(hr, 17.5, 20) * (1 - THREE.MathUtils.smoothstep(hr, 22.5, 25.5)), late = hr >= 22.5 || hr < 5 ? 0.18 : 0, dawn = THREE.MathUtils.smoothstep(hr, 5, 6.5) * (1 - THREE.MathUtils.smoothstep(hr, 7, 8.5));
+  SURF.uLit.value = Math.max(0.6 * eve, late, 0.35 * dawn); SURF.uClock.value = md;
   nightSky(f, dayAmt);
 }
 
@@ -3699,7 +3708,16 @@ function w2Frame(dt, focus) {
   world2.set({ map: ov.m, hour: md / 60, day, cloud, rain, storm, snow: 0, haze: 1 + rain, mist: 1 + 3 * rain, wet: rain, wind: w2Breeze(wd), wind10: [wd.x * 1.26, wd.z * 1.26] });
   const fy = focus ? terrAt(focus.x, focus.z) : 0;
   const fd = focus ? Math.max(0.05, Math.hypot(camera.position.x - focus.x, camera.position.y - focus.y - fy, camera.position.z - focus.z)) : 10;
-  world2.update(dt, camera.position, fd);
+  world2.update(dt, camera.position, 2 ** (Math.round(Math.log2(fd) * 3) / 3)); // in steps: a shadow box that breathes with the camera's ease made the walls shimmer
+  // the night in World v3 (GDD 18.82): its sky's light falls to nothing after dusk and the exposure opens to its limit, so
+  // the moon and the stars give the night its floor: the sky light no darker than the moon and stars make it, and the
+  // exposure no wider than a moonlit night needs (one frame behind, as the light changes slowly)
+  { const W = world2, sy = W.sunDir.y, night = 1 - THREE.MathUtils.smoothstep(sy, -0.1, 0.08), clear = 1 - NIGHT.cloud;
+    const fl = (0.018 + 0.07 * NIGHT.full * clear) * night;
+    if (fl > 0) { hemi.color.r = Math.max(hemi.color.r, fl * 0.75); hemi.color.g = Math.max(hemi.color.g, fl * 0.85); hemi.color.b = Math.max(hemi.color.b, fl * 1.25); }
+    const g2 = Math.max(0, sy), S = W.sky, lum = 0.2126 * (S.sunColor.r * g2 + S.skyUp.r) + 0.7152 * (S.sunColor.g * g2 + S.skyUp.g) + 0.0722 * (S.sunColor.b * g2 + S.skyUp.b);
+    const auto = THREE.MathUtils.clamp(Math.PI / Math.max(lum, 0.05), 0.02, 40), want = THREE.MathUtils.clamp(Math.PI / Math.max(lum, 0.32 - 0.12 * NIGHT.full * clear), 0.02, 40);
+    W.env.exposure = want / auto; }
   // the fireflies' sparks: a fixed brightness on the post chain's exposure (it opens up at night), so they glint, not glare
   ffGlow.material.color.setScalar(Math.min(1, 2.2 / Math.max(1, world2.post.U.uExposure.value)));
 }
