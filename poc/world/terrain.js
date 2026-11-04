@@ -171,7 +171,7 @@ float hfShadow(vec2 p, float h0, float dist) {
     // water 3: wet where and since the water's shoreline was over the sand; the gloss gone a second and a half after
     // it left, the darkness in about 45 s (the highest sand, left first, dries first); under the water, wet
     vec2 ws = vec2(1.0 - smoothstep(-0.01, 0.0, hgt), 0.0);
-    if (TW <= uShoreSea + 0.5 && uShoreWave.x > 0.0) { vec2 grad = -TN.xz / max(TN.y, 0.05); sw3Beach(P, grad); vec3 sw = sw3Wet(P, hgt, length(grad), uTime); ws = vec2(max(ws.x, sw.x), sw.y * (1.0 - sw.z)); }
+    if (TW <= uShoreSea + 0.5 && uShoreWave.x > 0.0) { vec2 grad = -TN.xz / max(TN.y, 0.05); sw3Beach(P, grad); gExpo *= 1.0 - clamp(clipFlow(P).x, 0.0, 1.0); vec3 sw = sw3Wet(P, hgt, length(grad), uTime); ws = vec2(max(ws.x, sw.x), sw.y * (1.0 - sw.z)); }
 #else
     vec2 ws = SHORE_BEACH == 1 ? shoreWet(P, shoreAt(P), hgt, TN, uTime, shoreState(TW)) : vec2(1.0 - smoothstep(-0.01, 0.03, hgt), 0.0);
 #endif

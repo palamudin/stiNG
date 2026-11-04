@@ -246,6 +246,9 @@ bool wLake(vec2 xz, out vec4 L, out float depth, out float d) {
   L = vec4(c, R, level);
   return true;
 }
+// the water's kind and flow (W3, the clipmap's water layer): (the river's share of the water here, its velocity x, z),
+// worked out only when asked (wildWaterFlow), as it reads the broad shape twice more
+bool wWantFlow = false; vec3 wFlow = vec3(0.0);
 void wildSampleW(vec2 xz, out vec4 S, out float wlOut) {
   float x = xz.x, z = xz.y;
   float cn; vec4 B = wBroad(xz, cn);
@@ -289,6 +292,20 @@ void wildSampleW(vec2 xz, out vec4 S, out float wlOut) {
   float rd = abs(rn.x) / max(length(rn.yz), 0.08) * ${f(W.riverCell)};
   float low = 1.0 - wsmooth(18.0, 55.0, h);
   float river = (1.0 - wsmooth(${f(W.riverW)}, ${f(W.riverW + W.riverBank)}, rd)) * low * wRivers * (1.0 - inLake) * (1.0 - band);
+  wFlow = vec3(0.0);
+  if (wWantFlow && river > 0.0) {
+    // flowing water: the channel's share (fading where the land round it drops into the sea), its direction along the
+    // channel (the noise's zero line), downhill on the broad land over 80 m, faster for a steeper fall, fastest
+    // mid-channel and slow at the banks; where the land is level along it the flow slows to nothing (no flip)
+    float share = river * wsmooth(-0.5, 1.5, h - wl);
+    vec2 g = rn.yz; float gl = length(g);
+    if (share > 0.0 && gl > 1e-6) {
+      vec2 t = vec2(-g.y, g.x) / gl; float cc2;
+      float dh = wBroad(xz + t * 40.0, cc2).y - wBroad(xz - t * 40.0, cc2).y; // the rise along t over 80 m
+      float v = (0.3 * clamp(dh / 0.4, -1.0, 1.0) + clamp(dh * 0.75, -1.5, 1.5)) * (0.3 + 0.7 * (1.0 - wsmooth(0.0, ${f(W.riverW + W.riverBank * 0.5)}, rd)));
+      wFlow = vec3(share, -t * v * share); // the jet slows as it spreads into the sea
+    }
+  }
   h += (min(h, wSea - ${f(W.riverDepth)} * (1.0 - wsmooth(0.0, ${f(W.riverW)}, rd) * 0.4)) - h) * river;
   if (inLake > 0.0) { float q = d / L.z; float bowl = L.w - depth * (1.0 - q * q) * (1.0 - q * q) * (0.85 + 0.15 * w2noise(xz / 90.0, wss(76))); h += (bowl - h) * inLake; }
   float moist = clamp(0.5 + 0.45 * w2noise(vec2(x / ${f(W.moistCell)} + 9.1, z / ${f(W.moistCell)} - 2.3), wss(5)) + 0.4 * (1.0 - wsmooth(wl, wl + 14.0, h)) - 0.3 * wsmooth(300.0, 600.0, h - wSea), 0.0, 1.0);
@@ -306,6 +323,7 @@ void wildSampleW(vec2 xz, out vec4 S, out float wlOut) {
 }
 vec4 wildSample(vec2 xz) { vec4 S; float wl; wildSampleW(xz, S, wl); return S; }
 float wildWater(vec2 xz) { vec4 S; float wl; wildSampleW(xz, S, wl); return wl; }
+vec4 wildWaterFlow(vec2 xz) { wWantFlow = true; vec4 S; float wl; wildSampleW(xz, S, wl); wWantFlow = false; return vec4(wl, wFlow); }
 `;
 }
 

@@ -89,7 +89,7 @@ export class WaterSurface {
       uSeaLevel: { value: world.source.sea }, uSkyUp: { value: new THREE.Color() }, uWLost: { value: 0 },
       uShoreWave: world.uShoreWave, uSwDir: world.uSwDir,
       tScene: { value: null }, tDepth: { value: null }, uVP: { value: new THREE.Matrix4() },
-      uLogF: world.post.U.uLogF, uRain: world.post.U.uRain, uIce: world.post.U.uIce, uGlint: world.post.U.uGlint, uWPeak: world.post.U.uWPeak,
+      uLogF: world.post.U.uLogF, uDebug: world.post.U.uDebug, uRain: world.post.U.uRain, uIce: world.post.U.uIce, uGlint: world.post.U.uGlint, uWPeak: world.post.U.uWPeak,
       tCaus: { value: world.caustics ? world.caustics.rt.texture : null }, uCaus: world.post.U.uCaus,
     };
     cs.forEach((c) => { U['tWD' + c] = { value: field.disp[c].texture }; U['tWS' + c] = { value: field.slope[c].texture }; });
@@ -109,6 +109,12 @@ vec4 w3Damp(float depth, float level) { float sw = smoothstep(1.5, 8.0, depth) *
 // the detiling blend's weight for cascade c at p (0: the plain read, 1: the rotated one)
 float w3Blend(vec2 p, float L, int c) { return smoothstep(-0.4, 0.4, w2noise(p / (L * ${f(S.blendTiles)}), 700 + c)); }
 // the chop's gusts: patches of rougher and calmer water drifting with the wind (cascade 1 a little, 2 and 3 more)
+// flowing water (the water's kinds: the clipmap's water layer holds the river's share and velocity): its ripples carried
+// downstream by two phases of a flow map, each restarting while its weight is nothing (Vlachos 2010), the crests
+// stretched across the flow; the phase's start offset by a slow noise, so the river does not pulse as one
+const float W3_FT = 1.6;
+vec3 w3FlowPh(vec2 p) { float f1 = fract(uTime / W3_FT + 0.5 + 0.5 * w2noise(p / 9.0, 720)); return vec3(f1 * W3_FT, fract(f1 + 0.5) * W3_FT, 1.0 - abs(1.0 - 2.0 * f1)); }
+mat2 w3FlowM(vec2 v) { float sp = length(v); if (sp < 1e-4) return mat2(1.0); vec2 a = v / sp; vec2 n = vec2(-a.y, a.x); return outerProduct(a, a) + 0.5 * outerProduct(n, n); }
 vec2 w3Gust(vec2 p) { float n = w2noise((p - uDrift) / ${f(S.gust)}, 710) + 0.5 * w2noise((p - uDrift * 1.3) / ${f(S.gust * 0.37)}, 711); return vec2(1.0 + 0.25 * n, 1.0 + 0.55 * n); }`;
 
     // ---- the coast's swell (vertex): displacement and slope of the three trains, their foam; sw3Ctx has been run
@@ -156,7 +162,7 @@ vec3 w3Coast(vec2 p, float depth, float cell) {
 #include <logdepthbuf_pars_vertex>
 ${head}
 ${coast}
-out vec3 vW; out vec2 vXZ; out float vCell, vNear, vJ; out vec2 vCoastSlope; out vec3 vCoast;
+out vec3 vW; out vec2 vXZ; out float vCell, vNear, vJ; out vec2 vCoastSlope; out vec3 vCoast, vFlow;
 void main() {
   bool skirt = position.y > 0.5;
   float r = length(position.xz);
@@ -169,19 +175,28 @@ void main() {
   vec4 k = w3Damp(depth, level);
   float cell = max(r, 1.0) * ${grid.cellStep.toFixed(5)} * uGridScale;
   vec4 d = vec4(0.0); vNear = 0.0; vCoastSlope = vec2(0.0); vCoast = vec3(0.0);
+  // the water's kind here: a river's share and velocity (none past the floor's reach)
+  vec3 fw = dc < ${S.floorReach.toFixed(1)} ? clipFlow(xz) : vec3(0.0); float fl = clamp(fw.x, 0.0, 1.0); vec2 fv = fw.yz; float sp = length(fv);
+  vFlow = vec3(fl, fv);
   bool coast = false;
   if (!skirt) {
 #ifdef W3_COAST
     // the coast here (the sea's only: a lake has no swell), read once for the trains and the swash
     if (bed > -1e3 && depth > -3.0 && level <= uSeaLevel + 0.5 && uShoreWave.x > 0.0) coast = sw3Ctx(xz);
-    if (coast && depth > 0.0) { d.xyz += w3Coast(xz, depth, cell); vNear = gNear; vCoastSlope = gCoastSlope; vCoast = gCoastFoam; k.x *= 1.0 - gNear; }
+    if (coast && depth > 0.0) { d.xyz += w3Coast(xz, depth, cell) * (1.0 - fl); vNear = gNear; vCoastSlope = gCoastSlope * (1.0 - fl); vCoast = gCoastFoam * (1.0 - fl); k.x *= 1.0 - gNear; }
 #endif
+    k.x *= 1.0 - fl; // a river carries no swell
+    vec3 fph = w3FlowPh(xz); mat2 fM = w3FlowM(fv);
     vec2 gu = w3Gust(xz);
     // each cascade at the mip its vertex spacing can carry (+1: a little blurrier than the spacing, so it never shimmers)
     ${cs.map((c) => `{ float lod = max(0.0, log2(cell * ${N}.0 / uWL[${c}]) + 1.0); if (lod < ${Math.log2(N).toFixed(1)}) {
       vec2 u = xz / uWL[${c}]; vec4 a = textureLod(tWD${c}, u, lod) - vec4(0.0, 0.0, 0.0, 1.0);${c > 0 ? `
       vec4 b = textureLod(tWD${c}, w3Rot(u, ${rot(c, 1)}) + vec2(${S.shift[c].map(f).join(', ')}), lod) - vec4(0.0, 0.0, 0.0, 1.0); b.xz = w3Rot(b.xz, ${rot(c, -1)});
-      float w = w3Blend(xz, uWL[${c}], ${c}); a = (a * (1.0 - w) + b * w) * inversesqrt((1.0 - w) * (1.0 - w) + w * w);` : ''}
+      float w = w3Blend(xz, uWL[${c}], ${c}); a = (a * (1.0 - w) + b * w) * inversesqrt((1.0 - w) * (1.0 - w) + w * w);
+      if (fl > 0.01) {
+        vec4 fa = textureLod(tWD${c}, fM * (xz - fv * fph.x) / uWL[${c}], lod) - vec4(0.0, 0.0, 0.0, 1.0), fb = textureLod(tWD${c}, fM * (xz - fv * fph.y) / uWL[${c}], lod) - vec4(0.0, 0.0, 0.0, 1.0);
+        a = mix(a, (fa * fph.z + fb * (1.0 - fph.z)) * inversesqrt(fph.z * fph.z + (1.0 - fph.z) * (1.0 - fph.z)) * ${c === 1 ? '0.35' : '(0.6 + 0.6 * min(sp / 1.5, 1.0))'}, fl);
+      }` : ''}
       d += a * k[${Math.min(c, 3)}]${c === 1 ? ' * gu.x' : c > 1 ? ' * gu.y' : ''}; } }`).join('\n    ')}
   }
   vJ = 1.0 + d.w; // the surface's Jacobian: below about a half it has folded (whitecaps)
@@ -196,7 +211,7 @@ void main() {
   if (bed > -1e3 && depth < 0.5 && depth > -3.0 && level <= uSeaLevel + 0.5 && uShoreWave.x > 0.0) {
     float e = max(cell, 0.25);
     vec2 grad = vec2(clipHeight(xz + vec2(e, 0.0)) - clipHeight(xz - vec2(e, 0.0)), clipHeight(xz + vec2(0.0, e)) - clipHeight(xz - vec2(0.0, e))) / (2.0 * e);
-    sw3Beach(xz, grad);
+    sw3Beach(xz, grad); gExpo *= 1.0 - fl; // no swash up a river's banks
     float s, th = level + sw3Shore(xz, length(grad), uTime, s) - bed;
     float sheet = bed + (th > 0.0 ? min(0.12, 0.012 + 0.3 * th) : max(th, -0.15));
     P.y = depth < 0.0 ? sheet : max(P.y, sheet);
@@ -212,7 +227,8 @@ ${head}
 ${coast}
 ${SKY_GLSL}
 uniform vec3 uSun, uSunColor, uSkyUp; uniform sampler2D uSkyView, tScene; uniform mat4 uVP; uniform float uWLost, uRain, uIce, uGlint, uWPeak;
-in vec3 vW; in vec2 vXZ; in float vCell, vNear, vJ; in vec2 vCoastSlope; in vec3 vCoast; out vec4 oColor;
+in vec3 vW; in vec2 vXZ; in float vCell, vNear, vJ; in vec2 vCoastSlope; in vec3 vCoast, vFlow; out vec4 oColor;
+uniform float uDebug;
 const float W_N = ${f(WATER.n)};
 const vec3 W_ABS = vec3(${WATER.absorb.map(f).join(', ')}), W_SCA = vec3(${WATER.scatter.map(f).join(', ')});
 ${WATER_CAUSTIC_GLSL}
@@ -282,6 +298,9 @@ void main() {
   float lv = clipWater(vW.xz), bed = clipHeight(vW.xz), depth = lv - bed;
   float D = max(vW.y - bed, 0.0); // the water's thickness under the point
   vec4 k = w3Damp(depth, lv); k.x *= 1.0 - vNear;
+  float fl = clamp(vFlow.x, 0.0, 1.0); vec2 fv = vFlow.yz; float sp = length(fv);
+  k.x *= 1.0 - fl;
+  vec3 fph = w3FlowPh(vXZ); mat2 fM = w3FlowM(fv);
   vec2 gu = w3Gust(vXZ);
   // ---- the slope: mean and variance over the pixel's footprint (LEAN), each short cascade detiled as the vertices are
   vec2 m = vCoastSlope, sv = vec2(uWLost * 0.5); vec2 gx = dFdx(vXZ), gy = dFdy(vXZ);
@@ -290,7 +309,14 @@ void main() {
     vec2 R = ${rot(c, 1)}, Ri = ${rot(c, -1)};
     vec4 b = textureGrad(tWS${c}, w3Rot(u, R) + vec2(${S.shift[c].map(f).join(', ')}), w3Rot(gx / L, R), w3Rot(gy / L, R)); b.xy = w3Rot(b.xy, Ri); b.zw = vec2(0.5 * (b.z + b.w));
     float w = w3Blend(vXZ, L, ${c}), n2 = (1.0 - w) * (1.0 - w) + w * w;
-    a = vec4((a.xy * (1.0 - w) + b.xy * w) * inversesqrt(n2), (a.zw * (1.0 - w) * (1.0 - w) + b.zw * w * w) / n2);` : ''}
+    a = vec4((a.xy * (1.0 - w) + b.xy * w) * inversesqrt(n2), (a.zw * (1.0 - w) * (1.0 - w) + b.zw * w * w) / n2);
+    if (fl > 0.01) { // the river's ripples carried downstream (two phases), stretched across the flow: the slope back through fM
+      vec2 g1 = fM * gx / L, g2 = fM * gy / L;
+      vec4 fa = textureGrad(tWS${c}, fM * (vXZ - fv * fph.x) / L, g1, g2), fb = textureGrad(tWS${c}, fM * (vXZ - fv * fph.y) / L, g1, g2);
+      float q = fph.z, nq = q * q + (1.0 - q) * (1.0 - q), am = ${c === 1 ? '0.35' : '(0.6 + 0.6 * min(sp / 1.5, 1.0))'};
+      vec4 fs = vec4(fM * ((fa.xy * q + fb.xy * (1.0 - q)) * inversesqrt(nq)), (fa.zw * q * q + fb.zw * (1.0 - q) * (1.0 - q)) / nq) * vec4(am, am, am * am, am * am);
+      a = mix(a, fs, fl);
+    }` : ''}
     m += a.xy * kc; sv += max(a.zw - a.xy * a.xy, 0.0) * kc * kc; }`).join('\n  ')}
   float fp = sqrt(max(length(gx) * length(gy), 1e-12));
   m += wRain(vXZ, uTime, uRain) * (1.0 - smoothstep(0.02, 0.08, fp)); // rings while rain falls
@@ -303,7 +329,7 @@ void main() {
 #ifdef W3_COAST
   if (depth < 0.3 && depth > -3.0 && lv <= uSeaLevel + 0.5 && uShoreWave.x > 0.0) {
     vec3 cn = clipNormal(vW.xz); vec2 grad = -cn.xz / max(cn.y, 0.05);
-    sw3Beach(vW.xz, grad);
+    sw3Beach(vW.xz, grad); gExpo *= 1.0 - fl; // no swash up a river's banks
     float s, th = lv + sw3Shore(vW.xz, length(grad), uTime, s) - bed;
     if (depth < 0.0 && th <= 0.0) discard;
     // a bubbly band behind the tip while it climbs; sparse remnants in the backwash, thinning as it drains; the
@@ -391,13 +417,30 @@ void main() {
   float wf = clamp(vCoast.x, 0.0, 1.0), lc = clamp(vCoast.y, 0.0, 1.0);
   fm = max(fm, smoothstep(1.0 - 0.75 * wf, 1.15 - 0.75 * wf, pat) * (0.6 + 0.4 * wf));
   fm = max(fm, smoothstep(1.0 - 0.5 * lc, 1.1 - 0.5 * lc, pat) * 0.45);
-  float sp = 0.5 + 0.5 * (w2noise(vXZ / 2.4 + vec2(uTime * 0.03, -uTime * 0.02), 626) * 0.55 + w2noise(vXZ / 0.6 - vec2(uTime * 0.06, 0.0), 627) * 0.3 + w2noise(vXZ / 0.15, 628) * 0.15);
+  float spf = 0.5 + 0.5 * (w2noise(vXZ / 2.4 + vec2(uTime * 0.03, -uTime * 0.02), 626) * 0.55 + w2noise(vXZ / 0.6 - vec2(uTime * 0.06, 0.0), 627) * 0.3 + w2noise(vXZ / 0.15, 628) * 0.15);
   float sf = clamp(vCoast.z, 0.0, 1.0);
   // (patches over a fifth of the zone at most, broken into bubbles: a bed under the crests' own white, not a sheet)
-  fm = max(fm, smoothstep(0.98 - 0.3 * sf, 1.08 - 0.3 * sf, sp) * smoothstep(-0.35, 0.45, w2noise(vXZ / 0.22 + uTime * 0.05, 629)) * (0.15 + 0.25 * sf));
+  fm = max(fm, smoothstep(0.98 - 0.3 * sf, 1.08 - 0.3 * sf, spf) * smoothstep(-0.35, 0.45, w2noise(vXZ / 0.22 + uTime * 0.05, 629)) * (0.15 + 0.25 * sf));
   fm = max(fm, smoothstep(1.0 - 0.7 * swLace, 1.12 - 0.7 * swLace, pat) * 0.85 * swLace);
-  fm = max(fm, smoothstep(1.0 - 0.6 * swWhite, 1.12 - 0.6 * swWhite, sp) * 0.6 * swWhite);
+  // a river's foam: where it runs fast over shallows (the Froude number toward 1: rapids) white water, and faint streaks
+  // of scum wherever it flows, both carried downstream by the same two phases as its ripples, drawn out along the flow
+  if (fl > 0.01 && sp > 0.02) {
+    float fr = sp / sqrt(9.81 * max(depth, 0.05)), rap = fl * smoothstep(0.4, 0.9, fr), scum = fl * smoothstep(0.2, 1.2, sp) * 0.3;
+    vec2 fa2 = fv / sp, fn2 = vec2(-fa2.y, fa2.x); mat2 sM = 0.5 * outerProduct(fa2, fa2) + outerProduct(fn2, fn2); // the streaks: twice as long along the flow
+    float q = fph.z, pf = (w2noise(sM * (vXZ - fv * fph.x) / 0.5, 721) * q + w2noise(sM * (vXZ - fv * fph.y) / 0.5, 721) * (1.0 - q)) * inversesqrt(q * q + (1.0 - q) * (1.0 - q));
+    float pf2 = 0.5 + 0.5 * (0.7 * pf + 0.3 * w2noise(vXZ / 0.15 - fv * uTime, 722));
+    fm = max(fm, smoothstep(1.0 - 0.7 * rap, 1.12 - 0.7 * rap, pf2) * 0.85 * rap);
+    fm = max(fm, smoothstep(0.62, 0.7, pf2) * scum);
+  }
+  fm = max(fm, smoothstep(1.0 - 0.6 * swWhite, 1.12 - 0.6 * swWhite, spf) * 0.6 * swWhite);
   c = mix(c, amb * 0.9 + uSunColor * sunUp * 0.25 * cloud, fm * 0.7);
+  // debug 8 (L in water 3): the water's kinds, blue the large water, green a river (by its share), its flow as bands
+  // across it moving downstream at its speed
+  if (uDebug > 7.5 && uDebug < 8.5) {
+    vec3 kc = mix(vec3(0.15, 0.35, 0.95), vec3(0.1, 0.9, 0.3), fl);
+    if (sp > 0.01) { vec2 a = fv / sp; float st = fract(dot(vXZ, a) / 3.0 - uTime * sp / 3.0); kc *= 0.45 + 0.55 * smoothstep(0.0, 0.2, st) * (1.0 - smoothstep(0.8, 1.0, st)) + 0.6 * smoothstep(1.5, 2.5, sp); }
+    c = kc * (uSkyUp * 0.6 + uSunColor * sunUp * 0.4);
+  }
   oColor = vec4(c, 1.0);
 }`,
     });
