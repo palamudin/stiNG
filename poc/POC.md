@@ -164,6 +164,7 @@ Run the tests from this folder with `node test/sim.test.mjs`, `node test/net.tes
 | 134 | Yards graded to code on hills: streets within 10% and smooth, drives within 15% from the sidewalk to a level house pad, banks no steeper than 2:1 | 18.78 | 25 |
 | 135 | Crowns of blocky foliage in two kinds: evergreen conifers in tiers, broadleaf trees that green, turn, drop and stand bare through the year; gaps that let the sun through in patches and a glow against the sun; instanced and swaying on the GPU | 18.79 | 25 |
 | 136 | Wild land round a settled area: a town, a village or a park set on a site of the wild fjord land (coast, lakes, mountains), the sim's ground blended into the wild, wild chunks with trees and nothing built; JS and C# agree | 18.80 | 25 |
+| 137 | Zooming out into the map (north-up, drag pans), pins for the nest, sister and rival nests, water and hives, the nest's pin at the screen edge to find home in the dark; moonlight in phases, starlight, the moon and stars | 18.81 | 25 |
 
 ## Verified
 
