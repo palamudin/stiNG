@@ -214,17 +214,21 @@ void main() {
     vec3 q = uCamPos + v * t; if (length(q.xz - c.xz) > wBodyR(b, uBodyC[i], q.xz - c.xz)) continue;
     tw = t; kind = c2.w; bA = b; bB = c2; bC = uBodyC[i];
   }
-#ifdef W_SHORE
+#if defined(W_SHORE) && SHORE_BEACH
   // the swash sheet (shorefield.js shoreSheet): a sand pixel the run-up stands over is water a few centimetres deep
   if (kind < 0.0 && d0 < 1.0 && uWaterOn > 0.5) {
-    vec3 Pg = uCamPos + v * dist; float Wg = clipWater(Pg.xz), hgt = Pg.y - Wg;
-    if (hgt >= -0.002 && hgt < 5.0) {
+    vec3 Pg = uCamPos + v * dist; float Wg = clipWater(Pg.xz);
+    // the sand's height from the clipmap (exact and smooth), not from the depth buffer's reconstruction, whose steps
+    // of a fraction of a millimetre would draw contour lines in a sheet a few centimetres thick
+    float hgt = clipHeight(Pg.xz) - Wg;
+    // only the ground itself takes a sheet: a pixel standing above the clipmap's ground is a rock, a tree, a person
+    if (hgt >= -0.002 && hgt < 5.0 && abs(Pg.y - Wg - hgt) < 0.04) {
       vec4 shg = shoreAt(Pg.xz);
       if (shg.x < 40.0) {
         vec3 nG = clipNormal(Pg.xz);
         gSheet = shoreSheet(Pg.xz, shg, hgt, nG, uTime, shoreState(Wg));
         if (gSheet.x > 0.0005) {
-          vec3 P = Pg + vec3(0.0, gSheet.x, 0.0); vec2 gG = vec2(-nG.x, -nG.z) / max(nG.y, 0.2);
+          vec3 P = vec3(Pg.x, Wg + hgt + gSheet.x, Pg.z); vec2 gG = vec2(-nG.x, -nG.z) / max(nG.y, 0.2);
           gx = wPlaneHit(uv + vec2(1.0 / uRes.x, 0.0), P, gG).xz - P.xz; gy = wPlaneHit(uv + vec2(0.0, 1.0 / uRes.y), P, gG).xz - P.xz;
           wShallow(gSheet.x); gDampSea = wDamp;
           col = waterShade(uv, v, P, P.xz, gG, gx, gy, dist, col, 3.0, 0.0, vec3(0.0), 0.0);

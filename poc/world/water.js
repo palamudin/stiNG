@@ -173,7 +173,9 @@ ShoreWave wShoreAt(vec2 x0, float fp) {
   ShoreWave sw = shoreWaves(x0, sh, dep, uTime, fp, st);
   // the sea's edge is the tongue's foot: over the last decimetres of depth the surface takes the tongue's level at
   // the line, so sea and sheet are one surface on one clock
+#if SHORE_BEACH
   if (dep < 0.35) { vec3 nG = clipNormal(x0); float tb = sqrt(max(1.0 - nG.y * nG.y, 0.0)) / max(nG.y, 0.05); float lift = shoreEdgeLift(x0, sh, uTime, st, tb); float k = 1.0 - smoothstep(0.0, 0.35, dep); sw.y = mix(sw.y, lift, k); }
+#endif
   return sw;
 }
 ShoreWave gSW; vec4 gDampSea = vec4(1.0); // the sea hit's shore wave and damping, kept for the shading of the same pixel
@@ -238,6 +240,9 @@ vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, floa
     if (Pb.y > yAt - 0.0005) { ruv = uv; Pb = uCamPos + v * min(dist, tw + 400.0); }
     floorCol = texture(tColor, ruv).rgb;
     D = max(P.y + dot(g, Pb.xz - P.xz) - Pb.y, 0.0); L = D / max(-T.y, 0.05);
+#ifdef W_SHORE
+    if (bodyK == 3.0) { D = gSheet.x; L = D / max(-T.y, 0.05); } // the sheet's thickness is known exactly; the depth buffer's would step
+#endif
   }
   // ---- caustics: splatted for the sea, from the ripples' curvature for bodies
   float cz = 1.0;

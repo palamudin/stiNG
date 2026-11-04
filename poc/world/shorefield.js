@@ -24,6 +24,7 @@ import * as THREE from 'three';
 import { POISSON, poissonTableData } from './water.js';
 
 export const SHORE = {
+  beach: false,                   // the beach layer (the swash sheet, the wet sand, the sea's edge lifted by the tongue); off: the water ends at the still-water line with the breakers alone
   tex: 256,                       // texels a chunk side
   levels: [{ s: 0.5, slots: 32, margin: 32 }, { s: 4, slots: 12, margin: 256 }, { s: 16, slots: 6, margin: 1024 }], // texel size, slots kept, metres the bake looks past the chunk
   near: 1,                        // chunks round the eye's wanted at each level (1: the 3 x 3)
@@ -342,6 +343,7 @@ export function shoreLive(clouds) {
 // 0.78 of the depth breaks (McCowan 1894), and what is left of it runs on as a bore with whitewater on its face and
 // lace behind. Sets come and go by a slow noise; the phase wanders a little along the coast so crests are not rings.
 export const SHORE_WAVE_GLSL = /* glsl */ `
+#define SHORE_BEACH ${SHORE.beach ? 1 : 0}
 uniform vec4 uShoreWave; uniform float uShoreSea; // uShoreSea: the sea's level, so a lake is told from the sea
 const float SW_G = 9.81;
 vec2 shoreState(float level) { return level > uShoreSea + 0.5 ? uShoreWave.zw : uShoreWave.xy; }
@@ -407,6 +409,9 @@ float shoreRunup(float tb, vec2 st) { float L0 = SW_G * st.y * st.y / 6.2831853,
 // reach is the run-up limit for the beach's slope and the sea state, varied along the shore by a slow noise, the tip
 // broken into fingers by a fine one.
 float shoreReach(vec2 pl, float tk, float R2) { return R2 * (0.55 + 0.45 * shoreGroup(pl, tk)) * (0.78 + 0.32 * w2noise(pl / 2.6, 620)); }
+// the run-up limit, held to the crest's own height above the still water: the water goes no higher than the wave
+// that threw it (Stockdon's limit grows with the slope and would climb a steep bank by a metre)
+float shoreRunupCapped(float tb, vec2 st) { return min(shoreRunup(tb, st), 0.5 * st.x * 1.15); }
 float shoreFingers(vec2 p, float tk) { return 0.03 * w2noise(p / 0.35 + vec2(tk * 0.2, 0.0), 621); }
 // the tongue's level above the still water, tau seconds after the bore reached the line, on a beach of slope tb: the
 // water runs up at the bore's speed and decelerates at g sin(beta), so the level is a parabola in time to its reach
@@ -428,26 +433,27 @@ vec2 shoreLineClock(vec2 p, vec4 sh, float t, vec2 st, out vec2 pl) {
 // water is one surface across the line
 float shoreEdgeLift(vec2 p, vec4 sh, float t, vec2 st, float tb) {
   if (st.x <= 0.0 || dot(sh.yz, sh.yz) < 1e-6) return 0.0;
-  float R2 = shoreRunup(tb, st); vec2 pl; vec2 ck = shoreLineClock(p, sh, t, st, pl);
+  float R2 = shoreRunupCapped(tb, st); vec2 pl; vec2 ck = shoreLineClock(p, sh, t, st, pl);
   float reach = shoreReach(pl, ck.y, R2), tup = shoreTongueUp(reach, tb, st.y);
   return 0.18 * shoreTongueLevel(ck.x * st.y, reach, tup);
 }
 vec3 shoreSheet(vec2 p, vec4 sh, float hgt, vec3 nG, float t, vec2 st) {
   if (st.x <= 0.0 || dot(sh.yz, sh.yz) < 1e-6 || sh.x > 40.0) return vec3(0.0);
-  float tb = sqrt(max(1.0 - nG.y * nG.y, 0.0)) / max(nG.y, 0.05), R2 = shoreRunup(tb, st);
+  float tb = sqrt(max(1.0 - nG.y * nG.y, 0.0)) / max(nG.y, 0.05), R2 = shoreRunupCapped(tb, st);
   vec2 pl; vec2 ck = shoreLineClock(p, sh, t, st, pl); float f = ck.x, t0 = ck.y;
   float reach = shoreReach(pl, t0, R2), tup = shoreTongueUp(reach, tb, st.y), tau = f * st.y;
   float R = shoreTongueLevel(tau, reach, tup); R += (R / max(reach, 1e-3)) * shoreFingers(p, t0); // fingers at the tip
   float over = R - hgt; if (over <= 0.0) return vec3(0.0);
   float film = min(over * 0.18, 0.05);
-  float lace = smoothstep(0.42, 0.62, 0.5 + 0.5 * (w2noise(p / 0.7 + vec2(t * 0.12, 0.0), 622) * 0.6 + w2noise(p / 0.17, 623) * 0.4));
-  float edge = smoothstep(0.0, 0.006, over) * (1.0 - smoothstep(0.03, 0.09, over)) * (0.2 + 0.8 * lace);
-  float bubbles = smoothstep(0.08, 0.2, over) * (1.0 - smoothstep(0.4, 0.9, over)) * smoothstep(0.62, 0.75, lace + 0.3 * w2noise(p / 0.07, 624)) * 0.5;
-  // the crash: the bore's white comes in with the tongue, and the more water the last tongue sent back, the more it
-  // throws up meeting it
+  // the foam at the water's scale: the lip's white travels with the tip and fades over a second and a half behind
+  // it, leaving lace in patches of a metre or two and clusters of bubbles a hand wide
+  float q = sqrt(max(1.0 - hgt / max(reach, 1e-3), 0.0)), sinceTip = tau - tup * (1.0 - q); // seconds since the tip passed this height
+  float lace = smoothstep(0.42, 0.62, 0.5 + 0.5 * (w2noise(p / 1.6 + vec2(t * 0.05, 0.0), 622) * 0.6 + w2noise(p / 0.5, 623) * 0.4));
+  float edge = smoothstep(0.0, 0.006, over) * (1.0 - smoothstep(0.03, 0.09, over)) * (0.3 + 0.7 * lace);
+  float bubbles = smoothstep(0.08, 0.2, over) * (1.0 - smoothstep(0.4, 0.9, over)) * smoothstep(0.62, 0.75, lace + 0.3 * w2noise(p / 0.2, 624)) * 0.5;
   float back = clamp(shoreReach(pl, t0 - st.y, R2) / max(R2, 1e-3), 0.0, 1.5);
-  float arriving = (1.0 - smoothstep(0.05, 0.45, tau / tup)) * smoothstep(0.35, 0.7, lace + 0.15) * (0.5 + 0.6 * back);
-  return vec3(film, edge, max(bubbles, arriving));
+  float white = exp(-max(sinceTip, 0.0) / 1.5) * smoothstep(0.3, 0.7, lace + 0.2) * (0.5 + 0.6 * back); // the crash's white, where the tip has just passed
+  return vec3(film, edge, max(bubbles, white));
 }
 // The sand's memory of the water (W3.1): the last four tongues are asked when each reached this height and when it
 // left (the parabola's rising and falling branches: tup (1 -+ sqrt(1 - hgt / reach))); a tongue that has not arrived
@@ -459,7 +465,7 @@ vec3 shoreSheet(vec2 p, vec4 sh, float hgt, vec3 nG, float t, vec2 st) {
 vec2 shoreWet(vec2 p, vec4 sh, float hgt, vec3 nG, float t, vec2 st) {
   if (hgt < 0.0) return vec2(1.0);
   if (st.x <= 0.0 || dot(sh.yz, sh.yz) < 1e-6 || sh.x > 40.0) return vec2(0.0);
-  float tb = sqrt(max(1.0 - nG.y * nG.y, 0.0)) / max(nG.y, 0.05), R2 = shoreRunup(tb, st), T = st.y;
+  float tb = sqrt(max(1.0 - nG.y * nG.y, 0.0)) / max(nG.y, 0.05), R2 = shoreRunupCapped(tb, st), T = st.y;
   vec2 pl; vec2 ck = shoreLineClock(p, sh, t, st, pl); float t0 = ck.y;
   float dark = 0.0, gloss = 0.0;
   for (int k = 0; k < 4; k++) {

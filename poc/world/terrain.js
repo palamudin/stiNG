@@ -170,11 +170,9 @@ float hfShadow(vec2 p, float h0, float dist) {
     float R2 = 1.1 * (0.35 * tb * sqrt(HL) + 0.5 * sqrt(HL * (0.563 * tb * tb + 0.004)));
     float aa = max(fwidth(hgt), 0.002), above = smoothstep(-0.05, 0.0, hgt);
 #ifdef T_SHORE
-    // the swash from the shore table (shorefield.js): the front that broke out there arrives at the line and climbs
-    // the sand at the table's travel time, the same phase the water draws its breakers with
     // the sheet itself is drawn as water by the composite (shoreSheet); the sand here only remembers it (shoreWet):
-    // the shape of the last tongue, drying from the top down
-    vec2 ws = shoreWet(P, shoreAt(P), hgt, TN, uTime, shoreState(TW));
+    // the shape of the last tongue, drying from the top down. With the beach layer off: plain sand, wet only under water
+    vec2 ws = SHORE_BEACH == 1 ? shoreWet(P, shoreAt(P), hgt, TN, uTime, shoreState(TW)) : vec2(hgt < 0.0 ? 1.0 : 0.0, 0.0);
     R2 = -1.0; film = 0.0; float edgeF = 0.0; wetB = ws.x; damp = 0.0; // under the water too: the floor is wet sand, as dark as the sand the tongue just left
     col *= 1.0 - 0.4 * wetB;
     TROUGH_WET = mix(1.0, 0.5, ws.y); // damp sand is damp-shiny; the sheet of water over it is the mirror
