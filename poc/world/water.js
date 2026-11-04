@@ -170,6 +170,7 @@ vec3 wPlaneHit(vec2 uv, vec3 c, vec2 g) {
 // depth), and the cascades' damping for that depth, set as a side effect
 ShoreWave wShoreAt(vec2 x0, float fp) { float lv = clipWater(x0), dep = lv - clipHeight(x0); wShallow(dep); return shoreWaves(x0, shoreAt(x0), dep, uTime, fp, shoreState(lv)); }
 ShoreWave gSW; vec4 gDampSea = vec4(1.0); // the sea hit's shore wave and damping, kept for the shading of the same pixel
+vec3 gSheet = vec3(0.0); // the swash sheet under a sand pixel (shoreSheet), set by the composite before it shades the sheet as water
 #endif
 // light under the water: what the floor sends back through it, plus the water's own scattering; D = depth of the
 // floor below the surface where the refracted ray meets it, L = the path's length through the water
@@ -196,6 +197,7 @@ vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, floa
   wDamp = vec4(1.0); float swFoam = 0.0, swLace = 0.0, cloud = 1.0; vec2 swSlope = vec2(0.0);
 #ifdef W_SHORE
   if (bodyK == 0.0) { wDamp = gDampSea; swSlope = gSW.slope; swFoam = gSW.foam; swLace = gSW.lace; }
+  if (bodyK == 3.0) wDamp = gDampSea; // the swash sheet: glassy, the chop damped for its thickness
   cloud = shoreCloud(P.xz); // the clouds' shadow: the sun's share of the light here
 #endif
   vec2 m, sv; wSlope(x0, gx, gy, m, sv);
@@ -294,6 +296,9 @@ vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, floa
   float sunUp = max(uSun.y, 0.0);
   vec3 amb = uSkyUp / 3.14159 * 0.8 + uSunColor * sunUp / 3.14159 * 0.6;
   float fm = fold * smoothstep(-0.2, 0.6, w2noise(x0 / 0.3, 99));
+#ifdef W_SHORE
+  if (bodyK == 3.0) { fm = max(fm, max(gSheet.y, gSheet.z)); } // the swash sheet: its lace edge, the white behind it
+#endif
   if (bodyK == 0.0) {
     // the thin water at the very edge: foam in patches as a bore arrives (it pulses with the waves; with no shore
     // table, or no waves, a faint rim)

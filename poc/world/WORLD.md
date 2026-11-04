@@ -198,10 +198,17 @@ water's cascades fade as the floor comes up (the long waves first; the chop reac
 three scales, covered to a share set by the foam's strength, so a crest is nearly solid and the lace sparse; the thin
 water at the very edge foams in patches, more where the waves work.
 
-**The swash** (`terrain.js`). The beach reads the same table and phase: the front that broke out there arrives at the
-line and climbs the sand at the table's travel time (1.7 m/s up the beach), sits for half a period and drains from the
-top down, its leading edge a line of bubbles; the sand is wet to the run-up limit (Stockdon et al. 2006, as before)
-and damp a little above. Without a table (a source without water) the swash reads the waves as in W2.
+**The swash sheet** (`post.js`, `shoreSheet`). The water washes the sand as water: on every sand pixel within reach
+of the line the composite asks whether the bore's run-up level stands above the sand — the front that broke out there
+arrives at the table's travel time and sends a tongue up the beach, its level climbing fast to this set's reach (the
+run-up limit of Stockdon et al. 2006 for the beach's slope and the sea state, varied along the shore by a slow noise,
+its tip broken into fingers by a fine one) and draining back from the top — and where it does, the pixel is a sheet
+of water a few centimetres thick, shaded by the water shader (the sand refracted through it, the sky mirrored at a
+grazing look, glints, the chop damped to glass), with a lace of foam at the leading edge, bubbles left behind it and
+the bore's white arriving with the tongue. The sand itself only remembers the water: wet to the run-up limit, damp a
+little above (`terrain.js`). Without a table (a source without water) the sand's swash reads the waves as in W2. The
+same arrangement is in tekano/shoreline (a lifted water plane drawn where it stands above the sand, a run-up term, a
+lace edge) and Ultra-Water (a film that dries over seconds); ours takes the arrival from the table.
 
 **The glints' Poisson draw** (`water.js`). The count of mirror facets a cell draws came from summing the Poisson
 series per cell per pixel (up to forty terms, twice); it is now a 512 x 512 table of the inverse distribution (rows by

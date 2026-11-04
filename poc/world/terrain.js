@@ -170,9 +170,10 @@ float hfShadow(vec2 p, float h0, float dist) {
 #ifdef T_SHORE
     // the swash from the shore table (shorefield.js): the front that broke out there arrives at the line and climbs
     // the sand at the table's travel time, the same phase the water draws its breakers with
-    vec3 sw = shoreSwash(P, shoreAt(P), hgt, R2, uTime, shoreState(TW));
-    film = sw.x * smoothstep(-0.03, 0.0, hgt);
-    float edgeF = sw.y;
+    // the sheet itself is drawn as water by the composite (shoreSheet); the sand here only remembers it: wet to the
+    // run-up limit of the shore state, damp a little above
+    R2 = shoreRunup(tb, shoreState(TW));
+    film = 0.0; float edgeF = 0.0;
 #else
     // no table: the edge follows the incident waves where this cross-shore line meets the water (downhill by hgt / slope)
     vec2 Ps = P + (length(TN.xz) > 1e-4 ? normalize(TN.xz) : vec2(0.0)) * clamp(hgt / max(tb, 0.01), 0.0, 20.0);

@@ -374,6 +374,30 @@ ShoreWave shoreWaves(vec2 p, vec4 sh, float depth, float t, float cell, vec2 st)
   }
   return o;
 }
+// the run-up limit on a beach of slope tb (rise over run) for the sea state st (Stockdon et al. 2006, the height the
+// top 2% of run-ups reach), H0 the significant height and L0 the deep-water wavelength of the peak period
+float shoreRunup(float tb, vec2 st) { float L0 = SW_G * st.y * st.y / 6.2831853, HL = st.x * L0; return 1.1 * (0.35 * tb * sqrt(HL) + 0.5 * sqrt(HL * (0.563 * tb * tb + 0.004))); }
+// The swash sheet (W3.1): the water itself on the sand. At a point of the beach hgt above the still water (nG: the
+// ground's normal), the bore that broke out there arrives at the table's travel time and sends a tongue up the sand:
+// its level climbs fast to this set's reach (the run-up limit, varied along the shore by a slow noise, its tip broken
+// into fingers by a fine one) and drains back from the top; wherever that level stands above the sand there is a sheet
+// of water a few centimetres thick. Returns (thickness m, lace foam at the leading edge 0..1, whitewater and bubbles
+// behind it 0..1); zero where the sand is dry
+vec3 shoreSheet(vec2 p, vec4 sh, float hgt, vec3 nG, float t, vec2 st) {
+  if (st.x <= 0.0 || dot(sh.yz, sh.yz) < 1e-6 || sh.x > 40.0) return vec3(0.0);
+  float tb = sqrt(max(1.0 - nG.y * nG.y, 0.0)) / max(nG.y, 0.05), R2 = shoreRunup(tb, st);
+  float w = 6.2831853 / st.y, ph = w * (t + sh.w) + shorePhaseNoise(p), f = fract(ph / 6.2831853);
+  float reach = R2 * (0.55 + 0.45 * shoreGroup(p, t)) * (0.78 + 0.32 * w2noise(p / 2.6, 620));
+  float tongue = f < 0.22 ? sqrt(f / 0.22) : 1.0 - smoothstep(0.22, 0.82, f);
+  float R = reach * tongue + 0.03 * tongue * w2noise(p / 0.35 + vec2(t * 0.2, 0.0), 621); // fingers at the tip
+  float over = R - hgt; if (over <= 0.0) return vec3(0.0);
+  float film = min(over * 0.18, 0.05);
+  float lace = smoothstep(0.42, 0.62, 0.5 + 0.5 * (w2noise(p / 0.7 + vec2(t * 0.12, 0.0), 622) * 0.6 + w2noise(p / 0.17, 623) * 0.4));
+  float edge = smoothstep(0.0, 0.006, over) * (1.0 - smoothstep(0.03, 0.09, over)) * (0.2 + 0.8 * lace);
+  float bubbles = smoothstep(0.08, 0.2, over) * (1.0 - smoothstep(0.4, 0.9, over)) * smoothstep(0.62, 0.75, lace + 0.3 * w2noise(p / 0.07, 624)) * 0.5;
+  float arriving = (1.0 - smoothstep(0.03, 0.28, f)) * smoothstep(0.35, 0.7, lace + 0.15) * 0.8; // the bore's white comes in with the tongue
+  return vec3(film, edge, max(bubbles, arriving));
+}
 // the swash on the beach: at a point with height hgt above the line (sh: shoreAt there), the film's presence (0..1),
 // its leading edge (0..1, a thin line) and how far up the run-up reaches this set (R2: the run-up limit for the beach)
 // The front's phase up the beach comes from the table's travel time (negative on land, at the swash's own speed), so
