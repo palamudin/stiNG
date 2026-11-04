@@ -2473,7 +2473,11 @@ Then the curtain lifts. Over a wild lake or the sea the wasp is set 3 m over the
 - after a teleport;
 - while flying, until a zoom out and back in forced a whole refill.
 
-The finest levels are the slowest to fill, since they sample the footings, so the mismatch lasted seconds. A level is now drawn round the window its texture actually holds until the new one lands; its ring of the mesh moves with it, so the rings still nest.
+The finest levels are the slowest to fill, since they sample the footings, so the mismatch lasted seconds. A level is now drawn round the window its texture actually holds until the new one lands, and its ring of the mesh moves with it.
+
+On a jump the CPU path no longer blurs a level out to its parent: the window it holds is true ground there. A parent is read for the morph only where its own window holds data, since during a refill a level and its parent need not nest.
+
+**Back from the map.** Zoomed out, the camera's near plane is pushed metres out. Leaving the map other than by scrolling back in left it there, which cut away the ground round the wasp and showed the land's insides as walls. The ways out that did this were Esc or M, a dev click-teleport, and the atlas's teleport. Leaving the map now restores the camera's planes. When the view jumps back from afar, the ground round the wasp is rebuilt whole behind the curtain first.
 
 ---
 

@@ -107,7 +107,9 @@ void main() {
       if (drift > C.margin && !L.job) {
         const ni = L.ci - half, nj = L.cj - half;
         const overlap = L.wi === null ? 0 : Math.max(0, C.win - Math.abs(ni - L.wi)) * Math.max(0, C.win - Math.abs(nj - L.wj)) / (C.win * C.win);
-        if (overlap < 0.5) { L.fade = 0; L.ready = false; } // a jump: draw this level as its parent until it sharpens
+        // a jump: on the GPU the new window is there at once and blurs in from its parent; on the CPU the level goes on
+        // drawing the window it holds (true ground there) until the new one lands, so it never shows what it lacks
+        if (overlap < 0.5 && this.gpu) { L.fade = 0; L.ready = false; }
         if (this.gpu) { this._gpuFill(l, ni, nj); L.wi = ni; L.wj = nj; L.ready = true; }
         else L.job = { ni, nj, oi: overlap < 0.5 ? null : L.wi, oj: overlap < 0.5 ? null : L.wj, j: nj, i: ni };
       }
@@ -205,9 +207,11 @@ float clipMorph(int l, vec2 p) {
   float e = clamp((m - (uClipLv[l].w - ${C.band0.toFixed(1)} * s)) / (${(C.band0 - C.band1).toFixed(1)} * s), 0.0, 1.0);
   return max(e, 1.0 - uClipFade[l]);
 }
+// the parent is read only where its window holds data (while a refill is under way a level and its parent need not nest)
+bool clipHolds(int l, vec2 p) { vec2 q = abs(p - uClipLv[l].xy); return max(q.x, q.y) < 2.0 * uClipLv[l].w - uClipLv[l].z; }
 vec4 clipSurface(int l, vec2 p) {
   vec4 v = clipLevel(l, p);
-  if (l < ${last}) { float k = clipMorph(l, p); if (k > 0.0) v = mix(v, clipLevel(l + 1, p), k); }
+  if (l < ${last}) { float k = clipMorph(l, p); if (k > 0.0 && clipHolds(l + 1, p)) v = mix(v, clipLevel(l + 1, p), k); }
   return v;
 }
 int clipFinest(vec2 p) {

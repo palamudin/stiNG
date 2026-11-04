@@ -56,7 +56,8 @@ const scene = new THREE.Scene();
 scene.background = sky;
 scene.fog = W2on ? null : new THREE.Fog(sky, 30, 115); // World v2 draws the air itself (post chain)
 
-const camera = new THREE.PerspectiveCamera(70, 1, 0.002, W2on ? 20000 : 400); // World v2 draws to the horizon
+const CAM_NEAR = 0.002, CAM_FAR = W2on ? 20000 : 400; // World v2 draws to the horizon
+const camera = new THREE.PerspectiveCamera(70, 1, CAM_NEAR, CAM_FAR);
 const hemi = new THREE.HemisphereLight('#dceefa', '#4d5b2c', 1.15);
 scene.add(hemi);
 const sun = new THREE.DirectionalLight('#fff3dc', 2.1);
@@ -3044,14 +3045,18 @@ function devTeleport(x, z) {
   const w = sim && sim._driven(); if (!w || !devOpts.dev) return;
   let y = 3;
   if (sim.settings.settled && landUse(sim.seed, chunkOf(x), chunkOf(z), sim.settings) === 'wild') { const o = wildHere(sim.seed, x, z, sim.settings); if (o[4] > o[0]) y += o[4] - o[0]; }
-  if (!TP.el) { TP.el = document.createElement('div'); TP.el.style.cssText = 'position:fixed;inset:0;z-index:50;background:#0d0f0c;color:#cfc9b8;display:flex;align-items:center;justify-content:center;font:600 15px/1 system-ui,sans-serif;letter-spacing:.08em;transition:opacity .35s;pointer-events:none'; document.body.appendChild(TP.el); }
-  TP.el.textContent = `TELEPORTING TO ${Math.round(x)}, ${Math.round(z)}`; TP.el.style.opacity = '1'; TP.el.hidden = false;
   Object.assign(w, { x, z, y, vx: 0, vy: 0, vz: 0, state: 'fly', energy: 1 }); w.land = null;
   const e = pos.get(w.id); if (e) { e.p.set(x, y, z); e.c.set(x, y, z); }
   if (ov.on) { ov.fx = x; ov.fz = z; }
-  sim._updateChunks(true); syncChunks(); // the new place's chunks now, not after the next step
+  makeReady(x, z, `TELEPORTING TO ${Math.round(x)}, ${Math.round(z)}`, true);
+}
+// the view made ready at (x, z) behind a curtain: chunks, the ground whole round it, a few frames drawn unseen
+function makeReady(x, z, label, tp = false) {
+  if (!TP.el) { TP.el = document.createElement('div'); TP.el.style.cssText = 'position:fixed;inset:0;z-index:50;background:#0d0f0c;color:#cfc9b8;display:flex;align-items:center;justify-content:center;font:600 15px/1 system-ui,sans-serif;letter-spacing:.08em;transition:opacity .35s;pointer-events:none'; document.body.appendChild(TP.el); }
+  TP.el.textContent = label; TP.el.style.opacity = '1'; TP.el.hidden = false; TP.tp = tp;
+  sim._updateChunks(true); syncChunks(); // the place's chunks now, not after the next step
   if (TERR.on && !world2) { rings.reset(); terrFrame(new THREE.Vector3(x, 0, z)); }
-  if (world2) world2.build(x, z); // the ground whole at the new place, not streamed in from the old one
+  if (world2) world2.build(x, z); // the ground whole there, not streamed in from where the view was
   terrApply(scene); // its new things lifted now, not at the next sweep
   TP.hold = 12; // frames drawn behind the curtain before it lifts
 }
@@ -3060,7 +3065,7 @@ function teleportFrame() {
   if (!TP.hold) return false;
   const busy = world2 ? world2.clip.busy || world2.clip.sharpness() < 0.999 : false;
   if (!busy) TP.hold--;
-  if (!TP.hold) { TP.el.style.opacity = '0'; setTimeout(() => { if (!TP.hold) TP.el.hidden = true; }, 400); toast(`Teleported to ${Math.round(sim.wasp.x)}, ${Math.round(sim.wasp.z)}`, 'var(--muted)', 1.5); }
+  if (!TP.hold) { TP.el.style.opacity = '0'; setTimeout(() => { if (!TP.hold) TP.el.hidden = true; }, 400); if (TP.tp) toast(`Teleported to ${Math.round(sim.wasp.x)}, ${Math.round(sim.wasp.z)}`, 'var(--muted)', 1.5); }
   return true;
 }
 function closeAtlas() { atlas.open = false; $('atlas').hidden = true; atlas.pts.clear(); if (running && !paused && !ui.nest) lock(); }
@@ -3108,7 +3113,7 @@ function atlasCard(key, px, py, card = $('atlasCard'), box = $('atlas').getBound
     atlas.tp = { x, z }; html += `<div class="here"><button id="devTp" style="pointer-events:auto">Teleport here (${Math.round(x)}, ${Math.round(z)})</button></div>`;
   }
   card.innerHTML = html; card.hidden = false;
-  const tb = card.querySelector('#devTp'); if (tb) tb.onclick = () => { const t = atlas.tp; closeAtlas(); devTeleport(t.x, t.z); };
+  const tb = card.querySelector('#devTp'); if (tb) tb.onclick = () => { const t = atlas.tp; closeAtlas(); if (ov.on) ovEnd(true); devTeleport(t.x, t.z); };
   const cw = card.offsetWidth, ch = card.offsetHeight;
   card.style.left = Math.max(6, Math.min(box.width - cw - 6, px + 14)) + 'px';
   card.style.top = Math.max(top, Math.min(box.height - ch - 6, py + 14)) + 'px';
@@ -3518,7 +3523,16 @@ function ovStart() {
   ov.on = true; ov.d = 3; ov.fx = w.x; ov.fz = w.z; ov.yaw = input.yaw + Math.PI; ov.m = 0;
   input.lmb = false; if (document.pointerLockElement === canvas) document.exitPointerLock?.();
 }
-function ovEnd() { ovHideGame(false); ov.on = false; ov.m = 0; ov.drag = null; camera.fov = 70; camera.updateProjectionMatrix(); if (running && !paused && !ui.nest && !atlas.open) lock(); }
+// back from the map: the camera's own planes again (zoomed out, its near plane is metres off, and left there it cut away
+// the ground round the wasp, showing the land's insides as walls), and when the view jumps back from afar, the ground
+// round the wasp made ready behind the curtain first (a teleport makes its own)
+function ovEnd(teleporting = false) {
+  const far = ov.d > 30;
+  ovHideGame(false); ov.on = false; ov.m = 0; ov.drag = null;
+  camera.fov = 70; camera.near = CAM_NEAR; camera.far = CAM_FAR; camera.updateProjectionMatrix();
+  if (far && !teleporting && world2 && sim) { const w = sim._driven() || sim.wasp; if (w) makeReady(w.x, w.z, 'BACK TO THE WASP'); }
+  if (running && !paused && !ui.nest && !atlas.open) lock();
+}
 function ovZoom(f) {
   ov.d = Math.max(1.5, Math.min(W2on ? ov.max : ov.classicMax * 1.3, ov.d * f));
   if (ov.d < 2.2 && f < 1) { ovEnd(); return; }
@@ -3549,7 +3563,7 @@ canvas.addEventListener('pointerup', (e) => {
   const r = canvas.getBoundingClientRect(), ndc = new THREE.Vector2((e.clientX - r.left) / r.width * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
   const ray = new THREE.Raycaster(); ray.setFromCamera(ndc, camera);
   const gy = terrAt(ov.fx, ov.fz), t = (gy - ray.ray.origin.y) / ray.ray.direction.y;
-  if (t > 0) { const p = ray.ray.origin.clone().addScaledVector(ray.ray.direction, t); ovEnd(); devTeleport(p.x, p.z); }
+  if (t > 0) { const p = ray.ray.origin.clone().addScaledVector(ray.ray.direction, t); ovEnd(true); devTeleport(p.x, p.z); }
 });
 addEventListener('keydown', (e) => { if (ov.on && (e.code === 'Escape' || e.code === 'KeyM')) { e.preventDefault(); ovEnd(); } });
 // zoomed well out, the game's own objects (buildings, people, wasps, furniture) are not drawn: World v3 draws the land
