@@ -260,14 +260,16 @@ vec4 shoreRead(int l, int slot, vec2 p) {
   if (abs(d.x) < 9.0e3) { s += d * f.x * f.y; w += f.x * f.y; }
   return w > 1e-4 ? s / w : SHORE_FAR;
 }
+float gShoreKnow = 1.0; // after a shoreAt: 1 where a level knows the point, falling to 0 over the last level's outer margin, 0 beyond
 vec4 shoreAt(vec2 p) {
+  gShoreKnow = 0.0;
   if (uShoreOn < 0.5) return SHORE_FAR;
   vec4 v = SHORE_FAR; float wv = 0.0;
   for (int l = 0; l < SHORE_LEVELS; l++) {
     int slot = shoreSlot(l, p); if (slot < 0) continue;
     vec4 u = shoreRead(l, slot, p); if (abs(u.x) > 9.0e3) continue;
-    if (wv <= 0.0) { v = u; wv = 1.0 - smoothstep(0.75 * SHORE_HAND[l], SHORE_HAND[l], abs(u.x)); if (wv >= 1.0) return v; }
-    else { return mix(u, v, wv); } // the coarser level takes over past the finer one's margin
+    if (wv <= 0.0) { v = u; wv = 1.0 - smoothstep(0.75 * SHORE_HAND[l], SHORE_HAND[l], abs(u.x)); gShoreKnow = l == SHORE_LEVELS - 1 ? wv : 1.0; if (wv >= 1.0) return v; }
+    else { gShoreKnow = 1.0; return mix(u, v, wv); } // the coarser level takes over past the finer one's margin
   }
   return v;
 }
@@ -293,7 +295,9 @@ export const SHORE_LIVE_GLSL = /* glsl */ `
 uniform float uShoreOn;
 const vec4 SHORE_FAR = vec4(1.0e4, 0.0, 0.0, 1.0e4);
 float shoreLiveE(vec2 q) { return clipAt(q).x - clipWater(q); }
+float gShoreKnow = 1.0;
 vec4 shoreAt(vec2 p) {
+  gShoreKnow = 0.0;
   if (uShoreOn < 0.5) return SHORE_FAR;
   float e0 = shoreLiveE(p); bool water = e0 < 0.0; float best = 1e4; vec2 bdir = vec2(0.0);
   for (int d = 0; d < 16; d++) {
@@ -305,6 +309,7 @@ vec4 shoreAt(vec2 p) {
     }
   }
   if (best >= 1e4) return vec4(water ? -1.0e4 : 1.0e4, 0.0, 0.0, water ? 1.0e4 : -1.0e4);
+  gShoreKnow = 1.0 - smoothstep(90.0, 128.0, best);
   float dep = clamp(water ? -e0 : ${SHORE.dMin.toFixed(2)}, ${SHORE.dMin.toFixed(2)}, ${SHORE.dMax.toFixed(1)});
   float tau = best / sqrt(9.81 * dep);
   return vec4(water ? -best : best, bdir, water ? tau : -tau);
@@ -346,19 +351,28 @@ float shoreGroup(vec2 p, float t) { return 0.45 + 0.55 * (0.5 + 0.5 * w2noise(p 
 struct ShoreWave { float y; vec2 slope; float foam; float lace; float a; float ph; float breaking; };
 // p: the point (xz); sh: shoreAt(p); depth: the water's depth there (<= 0 on land); t: time; cell: the sampling
 // interval in metres (a train shorter than a few cells fades out instead of aliasing)
+// the swell's direction where no shore is within the table's reach: from the wind's side
+uniform vec2 uSwellDir;
 ShoreWave shoreWaves(vec2 p, vec4 sh, float depth, float t, float cell, vec2 st) {
   ShoreWave o = ShoreWave(0.0, vec2(0.0), 0.0, 0.0, 0.0, 0.0, 0.0);
-  float sdf = sh.x, coh = length(sh.yz); vec2 dir = coh > 1e-4 ? sh.yz / coh : vec2(0.0);
-  float env = (1.0 - smoothstep(60.0, 220.0, -sdf)) * smoothstep(0.05, 0.6, coh) * smoothstep(-0.3, 0.3, depth);
-  if (env <= 0.0 || st.x <= 0.0) return o;
+  if (st.x <= 0.0 || depth <= -0.3) return o;
+  float know = gShoreKnow, coh = know > 0.0 ? length(sh.yz) : 0.0;
+  vec2 dirT = coh > 1e-4 ? sh.yz / coh : vec2(0.0);
+  // the swell is one train everywhere on the water: on the table's travel time where it knows the point, as a plane
+  // wave from the wind's side where it does not, blended over the last level's outer margin; near a body's spine
+  // (coherence low) the table's train gives way to the plane wave
+  float wt = know * smoothstep(0.05, 0.6, coh);
+  vec2 dir = normalize(mix(uSwellDir, dirT, wt) + vec2(1e-5, 0.0));
+  float env = smoothstep(-0.3, 0.3, depth);
   float cel = shoreCelerity(depth);
   float shoal = clamp(pow(max(depth, 0.6) / ${SHORE.dMax.toFixed(1)}, -0.25), 1.0, 2.2);
   float group = shoreGroup(p, t), pn = shorePhaseNoise(p);
   for (int i = 0; i < 2; i++) {
-    float T = st.y * (i == 0 ? 1.0 : 0.62), w = 6.2831853 / T, k = w / cel;
+    float T = st.y * (i == 0 ? 1.0 : 0.62), w = 6.2831853 / T, k = w / cel, k0 = w * w / SW_G;
     float a0 = 0.5 * st.x * (i == 0 ? 1.0 : 0.45) * env * shoal * group;
     float a = min(a0, 0.39 * depth), rel = a0 / max(depth, 0.05);
-    float ph = w * (t + sh.w) + pn * (i == 0 ? 1.0 : 1.37) + float(i) * 2.1;
+    float phT = w * (t + sh.w), phP = w * t - k0 * dot(p, uSwellDir);
+    float ph = mix(phP, phT, wt) + pn * (i == 0 ? 1.0 : 1.37) + float(i) * 2.1;
     float c = max(0.5 + 0.5 * cos(ph), 0.0), cp = pow(c, 0.6), s = sin(ph); // max: a GPU's cos can overshoot 1 by a bit at large phases, and pow of a negative is NaN
     float bl = 1.0 - smoothstep(0.1, 0.3, k * cell / 6.2831853);
     o.y += bl * a * (2.0 * cp * c - 0.78);
@@ -383,16 +397,28 @@ float shoreRunup(float tb, vec2 st) { float L0 = SW_G * st.y * st.y / 6.2831853,
 // into fingers by a fine one) and drains back from the top; wherever that level stands above the sand there is a sheet
 // of water a few centimetres thick. Returns (thickness m, lace foam at the leading edge 0..1, whitewater and bubbles
 // behind it 0..1); zero where the sand is dry
-// a tongue's reach up the beach: the set's size when it came (the group noise at its own time, so a tongue keeps one
-// reach while it climbs and drains), varied along the shore by a slow noise; and the fingers at its tip
-float shoreReach(vec2 p, float tk, float R2) { return R2 * (0.55 + 0.45 * shoreGroup(p, tk)) * (0.78 + 0.32 * w2noise(p / 2.6, 620)); }
+// The tongue (W3.1): one object for the sheet and the sand's memory. Its clock is the water line's: the phase of the
+// wave arriving at the nearest shore point (the along-shore noise is read at that point), so every height of the
+// beach sees the same tongue. The level climbs over 0.35 of the period to this set's reach, holds a moment, and falls
+// back over 0.35: the backwash of a big set is as fast as its uprush, the water that came is the water that goes. The
+// reach is the run-up limit for the beach's slope and the sea state, varied along the shore by a slow noise, the tip
+// broken into fingers by a fine one.
+float shoreReach(vec2 pl, float tk, float R2) { return R2 * (0.55 + 0.45 * shoreGroup(pl, tk)) * (0.78 + 0.32 * w2noise(pl / 2.6, 620)); }
 float shoreFingers(vec2 p, float tk) { return 0.03 * w2noise(p / 0.35 + vec2(tk * 0.2, 0.0), 621); }
+float shoreTongueShape(float f) { return f < 0.35 ? smoothstep(0.0, 0.35, f) : f < 0.45 ? 1.0 : 1.0 - smoothstep(0.45, 0.8, f); }
+// the line's clock at p (land, sh = shoreAt(p)): the nearest shore point pl and (f, t0): the fraction of the period
+// since the last front arrived at the line, and that arrival's time
+vec2 shoreLineClock(vec2 p, vec4 sh, float t, vec2 st, out vec2 pl) {
+  float coh = length(sh.yz); vec2 dir = coh > 1e-4 ? sh.yz / coh : vec2(0.0);
+  pl = p + dir * max(sh.x, 0.0);
+  float T = st.y, w = 6.2831853 / T, ph = w * t + shorePhaseNoise(pl), f = fract(ph / 6.2831853);
+  return vec2(f, t - f * T);
+}
 vec3 shoreSheet(vec2 p, vec4 sh, float hgt, vec3 nG, float t, vec2 st) {
   if (st.x <= 0.0 || dot(sh.yz, sh.yz) < 1e-6 || sh.x > 40.0) return vec3(0.0);
   float tb = sqrt(max(1.0 - nG.y * nG.y, 0.0)) / max(nG.y, 0.05), R2 = shoreRunup(tb, st);
-  float T = st.y, w = 6.2831853 / T, ph = w * (t + sh.w) + shorePhaseNoise(p), f = fract(ph / 6.2831853), t0 = t - f * T;
-  float reach = shoreReach(p, t0, R2);
-  float tongue = f < 0.22 ? sqrt(f / 0.22) : 1.0 - smoothstep(0.22, 0.82, f);
+  vec2 pl; vec2 ck = shoreLineClock(p, sh, t, st, pl); float f = ck.x, t0 = ck.y;
+  float reach = shoreReach(pl, t0, R2), tongue = shoreTongueShape(f);
   float R = reach * tongue + tongue * shoreFingers(p, t0); // fingers at the tip
   float over = R - hgt; if (over <= 0.0) return vec3(0.0);
   float film = min(over * 0.18, 0.05);
@@ -402,41 +428,28 @@ vec3 shoreSheet(vec2 p, vec4 sh, float hgt, vec3 nG, float t, vec2 st) {
   float arriving = (1.0 - smoothstep(0.03, 0.28, f)) * smoothstep(0.35, 0.7, lace + 0.15) * 0.8; // the bore's white comes in with the tongue
   return vec3(film, edge, max(bubbles, arriving));
 }
-// The sand's memory of the water (W3.1): at a point hgt above the still water, the last four tongues are asked when
-// each left this height (a tongue drains from 0.22 to 0.82 of the period: the level is reach (1 - smoothstep), so it
-// left when that fell to hgt), and the wetness is the freshest one's age: the dark of wet sand dries over 45 s, its
-// mirror gloss in a second or two as the water draws back. So the wet sand is the shape of the last tongue, fingers and all, and dries from the top down
-// as the water draws back, until the next tongue writes over it. Returns (dark 0..1, gloss 0..1); 1, 1 under water
+// The sand's memory of the water (W3.1): the last four tongues are asked when each left this height (the fall from
+// 0.45 to 0.8 of the period: the level is reach (1 - smoothstep), so it left when that fell to hgt), and the wetness
+// is the freshest one's age: the dark of wet sand dries over 45 s, its mirror gloss in a second or two behind the
+// retreating water. So the wet sand is the shape of the last tongue, fingers and all, and dries from the top edge
+// down toward the water at the water's own pace, until the next tongue writes over it. Returns (dark, gloss); 1 under
+// water
 vec2 shoreWet(vec2 p, vec4 sh, float hgt, vec3 nG, float t, vec2 st) {
-  if (st.x <= 0.0 || dot(sh.yz, sh.yz) < 1e-6 || sh.x > 40.0 || hgt < 0.0) return vec2(hgt < 0.0 ? 1.0 : 0.0);
-  float tb = sqrt(max(1.0 - nG.y * nG.y, 0.0)) / max(nG.y, 0.05), R2 = shoreRunup(tb, st);
-  float T = st.y, w = 6.2831853 / T, ph = w * (t + sh.w) + shorePhaseNoise(p), f = fract(ph / 6.2831853), t0 = t - f * T;
+  if (hgt < 0.0) return vec2(1.0);
+  if (st.x <= 0.0 || dot(sh.yz, sh.yz) < 1e-6 || sh.x > 40.0) return vec2(0.0);
+  float tb = sqrt(max(1.0 - nG.y * nG.y, 0.0)) / max(nG.y, 0.05), R2 = shoreRunup(tb, st), T = st.y;
+  vec2 pl; vec2 ck = shoreLineClock(p, sh, t, st, pl); float t0 = ck.y;
   float dark = 0.0, gloss = 0.0;
   for (int k = 0; k < 4; k++) {
     float tk = t0 - float(k) * T;
-    float reach = shoreReach(p, tk, R2) + shoreFingers(p, tk);
+    float reach = shoreReach(pl, tk, R2) + shoreFingers(p, tk);
     if (reach <= hgt) continue;
-    float sdown = 1.0 - hgt / reach; // the drain's smoothstep value when the level reached hgt
+    float sdown = 1.0 - hgt / reach; // the fall's smoothstep value when the level reached hgt
     float x = 0.5 - sin(asin(clamp(1.0 - 2.0 * sdown, -1.0, 1.0)) / 3.0); // the inverse of smoothstep
-    float age = (t - tk) - (0.22 + 0.6 * x) * T;
+    float age = (t - tk) - (0.45 + 0.35 * x) * T;
     if (age < 0.0) return vec2(1.0); // still under this tongue (the sheet is drawn over it)
     dark = max(dark, exp(-age / 45.0)); gloss = max(gloss, exp(-age / 1.5));
   }
   return vec2(dark, gloss);
-}
-// the swash on the beach: at a point with height hgt above the line (sh: shoreAt there), the film's presence (0..1),
-// its leading edge (0..1, a thin line) and how far up the run-up reaches this set (R2: the run-up limit for the beach)
-// The front's phase up the beach comes from the table's travel time (negative on land, at the swash's own speed), so
-// the tongue climbs the sand after the wave that sent it, sits, and drains back before the next
-vec3 shoreSwash(vec2 p, vec4 sh, float hgt, float R2, float t, vec2 st) {
-  if (st.x <= 0.0 || R2 <= 1e-4 || dot(sh.yz, sh.yz) < 1e-6) return vec3(0.0);
-  float w = 6.2831853 / st.y;
-  float ph = w * (t + sh.w) + shorePhaseNoise(p);
-  float f = fract(ph / 6.2831853);              // 0 as the front passes, climbing to 1 before the next
-  float reach = R2 * (0.55 + 0.45 * shoreGroup(p, t)); // this set's run-up
-  float up = 1.0 - smoothstep(reach - 0.03, reach, hgt);
-  float film = up * (1.0 - smoothstep(0.42, 0.6, f + 0.2 * hgt / max(reach, 1e-3)));   // the film sits, then drains from the top down
-  float edge = up * (1.0 - smoothstep(0.0, 0.06, f)) * smoothstep(-0.02, 0.0, hgt);
-  return vec3(film, edge, reach);
 }
 `;

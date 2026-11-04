@@ -107,7 +107,12 @@ const GRASS_BUILD = /* glsl */ `
   vKill = 1.0; vFade = 0.0; vDith = 0.0; vT = 0.0; vCol = 0.0; vRootK = 0.0; vTint = vec3(0.0); vPetal = vec3(-1.0);
   gPos = vec3(0.0); gNor = vec3(0.0, 1.0, 0.0); vGW = gPos;
   if (de >= uRin && de < uRout) {
-  vec4 gd = clipAt(base); vec3 gn = clipNormal(base);
+  vec4 gd = clipAt(base);
+  // outside the view (5% wider than the frame, plus a clump's reach) the clump is dropped here, before its blades
+  vec4 cc = projectionMatrix * modelViewMatrix * vec4(base.x, gd.x, base.y, 1.0);
+  float mx = 1.05 * cc.w + 1.6 * projectionMatrix[0][0], my = 1.05 * cc.w + 1.6 * projectionMatrix[1][1];
+  if (abs(cc.x) <= mx && abs(cc.y) <= my && cc.w > -2.0) {
+  vec3 gn = clipNormal(base);
   float hgt = gd.x - clipWater(base), slope = 1.0 - gn.y; // above the water line here (the sea, or a lake's level)
   // what grows here: meadow full, under trees thin, nothing on stone, sand, water, trails or paving (by place: fixed)
   float dens = (1.0 - smoothstep(0.32, 0.45, slope)) * mix(1.0, smoothstep(1.3, 2.2, hgt), uShore) * (1.0 - smoothstep(0.3, 0.45, gd.w)) * mix(1.0, 0.35, smoothstep(0.4, 0.8, gd.z));
@@ -179,6 +184,7 @@ const GRASS_BUILD = /* glsl */ `
   if (uFlower > 0.5) {
     float k = floor(w2hash01(int(floor(base.x / 9.0)), int(floor(base.y / 9.0)), 212) * 5.0);
     vPetal = k < 1.0 ? vec3(0.9, 0.7, 0.05) : k < 2.0 ? vec3(0.85, 0.85, 0.8) : k < 3.0 ? vec3(0.45, 0.15, 0.6) : k < 4.0 ? vec3(0.8, 0.12, 0.08) : vec3(0.18, 0.3, 0.8);
+  }
   }
   }
 `;

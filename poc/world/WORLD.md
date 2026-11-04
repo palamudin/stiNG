@@ -187,8 +187,11 @@ which is on.
 **The water never lies flat** (`waves.js`). The wind sea is raised by at least a 1.5 m/s wind (a residual chop) and
 the swell by at least 4.5 m/s over the 40 km fetch (weather elsewhere, 0.2 m at 4 s); the wind adds to these.
 
-**The shore waves** (`SHORE_WAVE_GLSL`, read by `water.js` and `terrain.js`). Two trains (the peak period and 0.62
-of it) of narrow-crested shallow-water waves ride the table: phase `w (t + tau)`, wavenumber `w / sqrt(g depth)`, so
+**The swell and the shore waves** (`SHORE_WAVE_GLSL`, read by `water.js` and `terrain.js`). The swell is one train
+over all the water, and it is the wave that breaks: two trains (the peak period and 0.62 of it) of narrow-crested
+waves ride the table's travel time wherever it knows the point, and run as a plane wave from the wind's side where no
+shore is within the table's reach (blended over the last level's outer margin; near a body's spine, where the table's
+coherence falls, the plane wave stands in). Phase `w (t + tau)`, wavenumber `w / sqrt(g depth)`, so
 crests slow and bunch toward the line; Green's law raises them as the water shoals, a wave higher than 0.78 of the
 depth breaks (McCowan 1894) and runs on as a bore; whitewater on a broken crest's face, trailing off behind it, lace in
 the surf zone; sets by a slow noise, a phase that wanders along the coast so crests are not rings. The sea gets the
@@ -199,14 +202,17 @@ three scales, covered to a share set by the foam's strength, so a crest is nearl
 water at the very edge foams in patches, more where the waves work.
 
 **The swash sheet** (`post.js`, `shoreSheet`). The water washes the sand as water: on every sand pixel within reach
-of the line the composite asks whether the bore's run-up level stands above the sand — the front that broke out there
-arrives at the table's travel time and sends a tongue up the beach, its level climbing fast to this set's reach (the
-run-up limit of Stockdon et al. 2006 for the beach's slope and the sea state, varied along the shore by a slow noise,
-its tip broken into fingers by a fine one) and draining back from the top — and where it does, the pixel is a sheet
+of the line the composite asks whether the tongue's level stands above the sand — one tongue per wave, on the water
+line's own clock (the phase of the wave arriving at the nearest shore point, so every height of the beach sees the
+same tongue), its level climbing over 0.35 of the period to this set's reach (the run-up limit of Stockdon et al. 2006
+for the beach's slope and the sea state, varied along the shore by a slow noise, its tip broken into fingers by a fine
+one), holding a moment, and falling back over 0.35 (the backwash as fast as the uprush) — and where it does, the pixel is a sheet
 of water a few centimetres thick, shaded by the water shader (the sand refracted through it, the sky mirrored at a
 grazing look, glints, the chop damped to glass), with a lace of foam at the leading edge, bubbles left behind it and
-the bore's white arriving with the tongue. The sand itself only remembers the water: wet to the run-up limit, damp a
-little above (`terrain.js`). Without a table (a source without water) the sand's swash reads the waves as in W2. The
+the bore's white arriving with the tongue. The sand itself only remembers the water (`shoreWet`, `terrain.js`): it asks
+the last four tongues when each left its height, and its wetness is the freshest one's age — the mirror gloss gone
+within a second or two behind the retreating water, the dark drying over 45 s — so the wet sand is the last tongue's
+shape, fingers and all, drying from the top edge down toward the water at the water's own pace. Without a table (a source without water) the sand's swash reads the waves as in W2. The
 same arrangement is in tekano/shoreline (a lifted water plane drawn where it stands above the sand, a run-up term, a
 lace edge) and Ultra-Water (a film that dries over seconds); ours takes the arrival from the table.
 
@@ -218,6 +224,12 @@ the fragment sampler limit of Chrome on Windows (16, ANGLE over D3D11; the eight
 sampler failed the pass there with a black frame. `Post.samplerCheck` counts the active samplers of each pass from the
 linked program after the first frames and the template shows `samplers 16/16` in its stats line; anything new the
 composite reads must share a texture it already has.
+
+**What is not in the view is not drawn** (`grass.js`, `trees.js`). A grass clump outside the view, 5% wider than the
+frame plus a clump's reach, is dropped in the vertex shader before its blades are built; a near-forest tile outside
+that view is left out of the instance buffers (rebinned when the camera turns past a few degrees) unless it lies
+within the sun's shadow box, so its trees keep casting into the frame. The terrain is one draw per level and the
+water is per pixel, so neither has anything outside the view to drop.
 
 **Tables against live calculation** (`world/test/tables-bench.html`). The same two things done both ways over a
 1024² pass, timed with GPU timer queries and checked against an exact reference: the glint count by series against

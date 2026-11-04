@@ -39,7 +39,7 @@ export class Post {
       tColor: { value: null }, tDepth: { value: null }, tPrev: { value: null }, tBlur: { value: null }, tRays: { value: null }, tBloom: { value: null },
       uInvProj: { value: new THREE.Matrix4() }, uCamWorld: { value: new THREE.Matrix4() }, uViewProj: { value: new THREE.Matrix4() }, uCamPos: { value: new THREE.Vector3() },
       uLogF: { value: 1 }, uRes: { value: new THREE.Vector2(1, 1) }, uTime: { value: 0 },
-      uSea: { value: 0 }, uDebug: { value: 0 }, uMist: { value: 0.0025 }, uMistH: { value: 45 }, uWet: { value: 0 }, uWaterOn: { value: 1 }, uShoreWave: { value: new THREE.Vector4(0, 8, 0, 8) }, uShoreSea: { value: 0 },
+      uSea: { value: 0 }, uDebug: { value: 0 }, uMist: { value: 0.0025 }, uMistH: { value: 45 }, uWet: { value: 0 }, uWaterOn: { value: 1 }, uShoreWave: { value: new THREE.Vector4(0, 8, 0, 8) }, uShoreSea: { value: 0 }, uSwellDir: { value: new THREE.Vector2(0.8, 0.6) },
       uSkyUp: { value: new THREE.Color() }, uSkyHz: { value: new THREE.Color() },
       uSunUV: { value: new THREE.Vector2() }, uSunVis: { value: 0 }, uRays: { value: 0.6 },
       uFocus: { value: 10 }, uFocal: { value: 0.045 }, uFstop: { value: 2.8 }, uSensor: { value: 0.024 }, uMaxCoc: { value: 14 }, uBlurIn: { value: 0 },
