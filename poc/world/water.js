@@ -118,14 +118,20 @@ float wLambda(float cosT, float s2) {
   float a = cosT / max(sqrt(max(1.0 - cosT * cosT, 1e-6)) * sqrt(2.0 * s2), 1e-6);
   return a < 1.6 ? (1.0 - 1.259 * a + 0.396 * a * a) / (3.535 * a + 2.181 * a * a) : 0.0;
 }
-// a Poisson count with mean lam from a uniform number u: a table (poissonTable below: the inverse of the
+// a Poisson count with mean lam from a uniform number u: a table (poissonTableData below: the inverse of the
 // distribution, rows by the mean on a square-root scale, columns by u) up to a mean of ${POISSON.lamMax}, the normal
-// approximation past it. The table is computed once; a pixel reads one texel where it summed a series
-uniform highp sampler2D tPoisson;
+// approximation past it. The table is computed once and rides in a layer of the shore table (shorefield.js); a pixel
+// reads one texel where it summed a series. Without the shore table (W_SHORE undefined) the series is summed
 float wPoisson(float lam, float u, float u2) {
   if (lam > ${POISSON.lamMax.toFixed(1)}) { float g = sqrt(-2.0 * log(max(u, 1e-7))) * cos(6.2831853 * u2); return max(0.0, floor(lam + sqrt(lam) * g + 0.5)); }
+#ifdef W_SHORE
   int r = int(sqrt(lam / ${POISSON.lamMax.toFixed(1)}) * ${(POISSON.rows - 1).toFixed(1)} + 0.5), c = min(int(u * ${POISSON.cols.toFixed(1)}), ${POISSON.cols - 1});
-  return texelFetch(tPoisson, ivec2(c, r), 0).r;
+  return shorePoisson(r, c);
+#else
+  float p = exp(-lam), c = p, n = 0.0;
+  for (int i = 0; i < 40; i++) { if (u <= c) break; n += 1.0; p *= lam / n; c += p; }
+  return n;
+#endif
 }
 `;
 }

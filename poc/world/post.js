@@ -13,7 +13,7 @@
 //   -> final: exposure, AgX, a light grade, vignette, grain, sRGB out.
 import * as THREE from 'three';
 import { SKY_GLSL } from './sky.js';
-import { waterGLSL, WATER_SHADE_GLSL, WATER, POISSON, poissonTableData } from './water.js';
+import { waterGLSL, WATER_SHADE_GLSL, WATER } from './water.js';
 import { SHORE_WAVE_GLSL } from './shorefield.js';
 import { NOISE_GLSL } from './noise.js';
 import { MAP_GLSL } from './map.js';
@@ -22,11 +22,6 @@ const VS = 'out vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy
 
 function pass(frag, uniforms) {
   return new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, uniforms, vertexShader: VS, fragmentShader: 'precision highp float; precision highp int;\nin vec2 vUv; out vec4 oColor;\n' + frag, depthTest: false, depthWrite: false });
-}
-function poissonTexture() { // the glints' table (water.js), once
-  const tex = new THREE.DataTexture(poissonTableData(), POISSON.cols, POISSON.rows, THREE.RedFormat, THREE.FloatType);
-  tex.minFilter = tex.magFilter = THREE.NearestFilter; tex.generateMipmaps = false; tex.needsUpdate = true;
-  return tex;
 }
 function target(w, h, o = {}) {
   return new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, depthBuffer: false, magFilter: THREE.LinearFilter, minFilter: THREE.LinearFilter, ...o });
@@ -44,7 +39,7 @@ export class Post {
       tColor: { value: null }, tDepth: { value: null }, tPrev: { value: null }, tBlur: { value: null }, tRays: { value: null }, tBloom: { value: null },
       uInvProj: { value: new THREE.Matrix4() }, uCamWorld: { value: new THREE.Matrix4() }, uViewProj: { value: new THREE.Matrix4() }, uCamPos: { value: new THREE.Vector3() },
       uLogF: { value: 1 }, uRes: { value: new THREE.Vector2(1, 1) }, uTime: { value: 0 },
-      uSea: { value: 0 }, uDebug: { value: 0 }, uMist: { value: 0.0025 }, uMistH: { value: 45 }, uWet: { value: 0 }, uWaterOn: { value: 1 }, uShoreWave: { value: new THREE.Vector4(0, 8, 0, 8) }, uShoreSea: { value: 0 }, tPoisson: { value: poissonTexture() },
+      uSea: { value: 0 }, uDebug: { value: 0 }, uMist: { value: 0.0025 }, uMistH: { value: 45 }, uWet: { value: 0 }, uWaterOn: { value: 1 }, uShoreWave: { value: new THREE.Vector4(0, 8, 0, 8) }, uShoreSea: { value: 0 },
       uSkyUp: { value: new THREE.Color() }, uSkyHz: { value: new THREE.Color() },
       uSunUV: { value: new THREE.Vector2() }, uSunVis: { value: 0 }, uRays: { value: 0.6 },
       uFocus: { value: 10 }, uFocal: { value: 0.045 }, uFstop: { value: 2.8 }, uSensor: { value: 0.024 }, uMaxCoc: { value: 14 }, uBlurIn: { value: 0 },

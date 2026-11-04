@@ -13,8 +13,12 @@
 // Precision is a matter of texels: the fine slot's 2 m texels put the line within a few decimetres where the swash
 // is drawn, the coarse slots serve the foam lines on far coasts.
 import * as THREE from 'three';
+import { POISSON, poissonTableData } from './water.js';
 
 export const SHORE = { levels: [3, 6, 8], win: 128, march: 8, dMin: 0.3, dMax: 14 };
+// The array texture's last layer holds the glints' Poisson table (water.js), written once: the composite is at the
+// GPU's sampler limit (16 on most cards; the eight wave textures take half), so the table rides in a layer of this
+// one rather than in a sampler of its own. 128 rows x 256 columns, packed two columns per texel (x, y).
 
 const VS = 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }';
 const G = 9.81;
@@ -25,7 +29,8 @@ export class ShoreField {
     const C = this.cfg, W = C.win;
     this.renderer = renderer; this.clip = clip;
     this.slots = C.levels.map((l) => ({ l, wi: null, wj: null }));
-    this.rt = new THREE.WebGLArrayRenderTarget(W, W, C.levels.length, { depthBuffer: false });
+    this.tables = C.levels.length; // the layer of the tables
+    this.rt = new THREE.WebGLArrayRenderTarget(W, W, C.levels.length + 1, { depthBuffer: false });
     Object.assign(this.rt.texture, { type: THREE.FloatType, format: THREE.RGBAFormat, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, generateMipmaps: false });
     const o = { type: THREE.FloatType, format: THREE.RGBAFormat, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: false, generateMipmaps: false };
     this.ping = new THREE.WebGLRenderTarget(W, W, o); this.pong = new THREE.WebGLRenderTarget(W, W, o);
@@ -91,6 +96,19 @@ void main() {
     this._scene = new THREE.Scene(); this._scene.add(this._quad);
     this.U = U;
     this.stats = { bakes: 0 };
+    this._writeTables();
+  }
+  // the Poisson table into the last layer, once
+  _writeTables() {
+    const W = this.cfg.win, data = poissonTableData(), packed = new Float32Array(W * W * 4);
+    if (POISSON.rows !== W || POISSON.cols !== 2 * W) throw new Error('shorefield: the Poisson table must be 128 x 256 to ride in a layer');
+    for (let r = 0; r < W; r++) for (let i = 0; i < W; i++) { const o = (r * W + i) * 4; packed[o] = data[r * POISSON.cols + 2 * i]; packed[o + 1] = data[r * POISSON.cols + 2 * i + 1]; }
+    const tex = new THREE.DataTexture(packed, W, W, THREE.RGBAFormat, THREE.FloatType); tex.needsUpdate = true;
+    const copy = new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, uniforms: { uSrc: { value: tex } }, vertexShader: VS,
+      fragmentShader: 'precision highp float; uniform highp sampler2D uSrc; out vec4 o; void main() { o = texelFetch(uSrc, ivec2(gl_FragCoord.xy), 0); }', depthTest: false, depthWrite: false });
+    const r = this.renderer, prev = r.getRenderTarget();
+    this._quad.material = copy; r.setRenderTarget(this.rt, this.tables); r.render(this._scene, this._cam); r.setRenderTarget(prev);
+    copy.dispose(); tex.dispose();
   }
   // once a frame, after the clipmap's update: a slot whose level's window moved is baked again
   update() {
@@ -126,6 +144,9 @@ void main() {
 #define SHORE_SLOTS ${n}
 uniform highp sampler2DArray uShoreTab; uniform vec4 uShoreLv[SHORE_SLOTS]; uniform float uShoreOn;
 vec4 shoreTexel(int k, int i, int j) { return texelFetch(uShoreTab, ivec3(i & 127, j & 127, k), 0); }
+#define SHORE_TABLES ${n}
+// the glints' Poisson table (water.js wPoisson): row r, column c
+float shorePoisson(int r, int c) { vec4 t = texelFetch(uShoreTab, ivec3(c >> 1, r, SHORE_TABLES), 0); return (c & 1) == 0 ? t.x : t.y; }
 vec4 shoreAt(vec2 p) {
   if (uShoreOn < 0.5) return vec4(1.0e4, 0.0, 0.0, 1.0e4);
   for (int k = 0; k < SHORE_SLOTS; k++) {
