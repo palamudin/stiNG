@@ -117,7 +117,11 @@ void main() {
     for (let l = C.levels - 1; l >= 0; l--) {
       const L = this.lv[l], parentReady = l === C.levels - 1 || this.lv[l + 1].ready;
       if (L.ready && parentReady) L.fade = Math.min(1, L.fade + k); else if (!L.ready) L.fade = 0;
-      this.uniforms.uClipLv.value[l].set(L.ci * L.s, L.cj * L.s, L.s, L.H);
+      // the window the texture holds, not the one being filled: while a CPU fill is under way the GPU still has the old
+      // window, and read round the new centre its wrapped texels are ground from 128 texels off (walls and pits round
+      // the eye until the fill lands); the level's ring of the mesh goes with it, so the rings still nest
+      if (L.wi === null) this.uniforms.uClipLv.value[l].set(L.ci * L.s, L.cj * L.s, L.s, L.H);
+      else this.uniforms.uClipLv.value[l].set((L.wi + half) * L.s, (L.wj + half) * L.s, L.s, L.H);
       this.uniforms.uClipFade.value[l] = L.fade;
     }
     this.stats.ms = performance.now() - t0;

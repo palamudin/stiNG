@@ -2468,6 +2468,13 @@ The sim's wind is the day's at the hour (`windAt`). This is in the sim with its 
 
 Then the curtain lifts. Over a wild lake or the sea the wasp is set 3 m over the water, not over its bed.
 
+**Pits and walls round the wasp in World v3** (`world/clipmap.js`). Each clipmap level is a 128-texel window, addressed by world texel and wrapped. When the eye drifted, a level's centre moved to the new place at once, but on the CPU path (the game's ground has no GLSL twin) the texture kept the old window until the whole refill landed. The texture holds ground for 128 texels round the old window, so read round the new centre the wrapped texels were ground from 128 texels away. The coarser ring is pushed down under the finer one, so that showed as a pit walled by stretched ground round the wasp. It showed:
+- on loading;
+- after a teleport;
+- while flying, until a zoom out and back in forced a whole refill.
+
+The finest levels are the slowest to fill, since they sample the footings, so the mismatch lasted seconds. A level is now drawn round the window its texture actually holds until the new one lands; its ring of the mesh moves with it, so the rings still nest.
+
 ---
 
 ## 19. Feature tiers and the current stack
