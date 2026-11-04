@@ -1855,6 +1855,40 @@ function renderRain(center, dt) {
   flash = Math.max(0, flash - dt * 5);
 }
 
+// The night (GDD 5): the moon in its phases (a 29.5-day month from the seed's first day) and the stars. Moonlight is a
+// cool, soft light from the moon's side of the sky, full at full moon and none at new; starlight lifts the darkest
+// night a little. Cloud and rain dim both. The classic look draws the moon's disc and the stars; World v3 its own sky.
+const moon = new THREE.DirectionalLight('#a9bde0', 0); moon.castShadow = false; scene.add(moon, moon.target);
+const NIGHT_SKY = (() => {
+  const g = new THREE.Group(), n = 1400, pos = new Float32Array(n * 3), col = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) { // a fixed hash, not the sim's: the stars are scenery
+    const a = vh(i, 1, 7, 1) * Math.PI * 2, y = 0.08 + 0.92 * vh(i, 2, 7, 2), r = Math.sqrt(1 - y * y), b = 0.45 + 0.55 * vh(i, 3, 7, 3) ** 3;
+    pos.set([Math.cos(a) * r * 350, y * 350, Math.sin(a) * r * 350], i * 3); col.set([b, b, b * (0.9 + 0.2 * vh(i, 4, 7, 4))], i * 3);
+  }
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const stars = new THREE.Points(geo, new THREE.PointsMaterial({ size: 1.6, sizeAttenuation: false, vertexColors: true, transparent: true, opacity: 0, depthWrite: false, fog: false }));
+  const disc = new THREE.Mesh(new THREE.CircleGeometry(9, 32), new THREE.MeshBasicMaterial({ color: '#f4f1e4', transparent: true, opacity: 0, depthWrite: false, fog: false }));
+  stars.userData.ring = disc.userData.ring = true; stars.frustumCulled = disc.frustumCulled = false; stars.renderOrder = disc.renderOrder = -1;
+  g.add(stars, disc); g.userData = { stars, disc }; scene.add(g);
+  return g;
+})();
+function nightSky(f, dayAmt) {
+  const phase = (((sim.day + 4) % 29.53) + 29.53) % 29.53 / 29.53, full = (1 - Math.cos(phase * Math.PI * 2)) / 2, night = 1 - dayAmt;
+  const cloud = sim.raining ? 0.85 : sim.weatherToday.rain ? 0.4 : 0.1;
+  // the moon rises in the east as the sun sets when full, later as it wanes: across the night by its phase
+  const t = ((f - 1) * 15 / 9 + phase) % 1, a = Math.PI * Math.min(1, Math.max(0, t));
+  const mdir = new THREE.Vector3(-Math.cos(a) * 0.85, Math.max(0.12, Math.sin(a)), -0.4).normalize();
+  moon.intensity = 0.38 * full * night * (1 - cloud) * (Math.sin(a) > 0.05 ? 1 : 0);
+  moon.position.copy(camera.position).addScaledVector(mdir, 40); moon.target.position.copy(camera.position);
+  hemi.intensity += (0.07 * (1 - cloud) + 0.12 * full * (1 - cloud)) * night; // starlight and the moon's sky glow
+  const G = NIGHT_SKY.userData, show = !W2on;
+  NIGHT_SKY.visible = show; NIGHT_SKY.position.copy(camera.position);
+  G.stars.material.opacity = show ? night * night * (1 - cloud) : 0;
+  G.disc.material.opacity = show ? night * (0.25 + 0.75 * full) * (1 - cloud * 0.8) * (Math.sin(a) > 0.02 ? 1 : 0) : 0;
+  G.disc.position.copy(mdir).multiplyScalar(330); G.disc.lookAt(0, 0, 0);
+  sky.lerp(MOON_SKY, 0.35 * full * night * (1 - cloud)); if (scene.fog) scene.fog.color.copy(sky);
+}
+const MOON_SKY = new THREE.Color('#1d2a45');
 function lighting() {
   const md = minuteOfDay(sim.minute) + (sim.tick % sim.tpm) / sim.tpm;
   const f = (md - 360) / 900; // 06:00 .. 21:00
@@ -1871,6 +1905,7 @@ function lighting() {
   sun.intensity = (sim.raining ? (storm ? 0.25 : 0.5) : 2.1) * dayAmt;
   hemi.intensity = 0.18 + 0.97 * dayAmt * (storm ? 0.6 : 1) + flash * 1.5;
   SURF.uNight.value = 1 - dayAmt; // lit windows after dark
+  nightSky(f, dayAmt);
 }
 
 // ------------------------------------------------------------------ sound (procedural, presentation only)
@@ -2112,7 +2147,7 @@ addEventListener('keydown', (e) => {
 
 function buildCmd() {
   if (input.autopilot) return input.autopilot(sim); // test hook: scripted pilots use the same input path
-  if (atlas.open) { readPad(); return { mx: 0, my: 0, mz: 0, burst: 0, sting: 0, yawQ: Math.round(input.yaw * 1e4), pitchQ: Math.round(input.pitch * 1e4), act: 0, alloc: input.alloc, pick: 0 }; } // the big map has the controls: the wasp holds
+  if (atlas.open || ov.on) { readPad(); return { mx: 0, my: 0, mz: 0, burst: 0, sting: 0, yawQ: Math.round(input.yaw * 1e4), pitchQ: Math.round(input.pitch * 1e4), act: 0, alloc: input.alloc, pick: 0 }; } // the big map has the controls: the wasp holds
   const gp = readPad();
   if (gp) {
     input.yaw -= gp.rx * 2.4 * opts.sens * DT;
@@ -2338,7 +2373,7 @@ let lockFailed = false, pointerLockWorked = false;
 document.addEventListener('pointerlockerror', () => { lockFailed = true; if (!padNav.used && !touch.on) toast('Mouse capture unavailable · drag with right button to look', 'var(--muted)', 3); });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('mousedown', (e) => {
-  if (!running || paused) return;
+  if (!running || paused || ov.on) return; // zoomed out, the mouse drags the map
   if (ui.nest && document.pointerLockElement !== canvas) return; // clicking about in the colony view does not sting
   if (document.pointerLockElement !== canvas && !lockFailed) { lock(); return; } // a click takes the mouse back (after the colony view, say)
   if (e.button === 0) input.lmb = true;
@@ -2347,6 +2382,7 @@ canvas.addEventListener('mousedown', (e) => {
 });
 addEventListener('mouseup', (e) => { if (e.button === 0) input.lmb = false; if (e.button === 2) input.free.held = false; });
 addEventListener('mousemove', (e) => {
+  if (ov.on) return;
   if (document.pointerLockElement !== canvas && !(e.buttons & 2)) return;
   if (paused) return;
   const k = 0.0022 * opts.sens;
@@ -2365,7 +2401,7 @@ function lock() { if (touch.on) return; try { const p = canvas.requestPointerLoc
 document.addEventListener('pointerlockchange', () => {
   if (!running) return;
   const locked = document.pointerLockElement === canvas;
-  if (!locked && pointerLockWorked && !ui.nest && !atlas.open && $('winterScreen').hidden && $('extinctScreen').hidden) setPaused(true); // the colony view and the atlas free the mouse on purpose
+  if (!locked && pointerLockWorked && !ui.nest && !atlas.open && !ov.on && $('winterScreen').hidden && $('extinctScreen').hidden) setPaused(true); // the colony view and the atlas free the mouse on purpose
   if (locked) { pointerLockWorked = true; setPaused(false); }
 });
 function setPaused(p) { paused = p; if (p) showOpts(); if (p && sim) $('pauseTag').textContent = `${tagText(sim.settings)} · rules ${rulesHash(sim.settings)} · tuning ${TUNE.hash}`; input.free.held = false; $('pauseScreen').hidden = !p; input.lmb = false; input.keys.clear(); if (p) { $('saveNote').textContent = ''; saveWorld(false); } }
@@ -2979,6 +3015,9 @@ function atlasKeyAt(px, py) {
 }
 function atlasZoom(f, px, py) {
   const cv = $('atlasMap'), W = cv.clientWidth, H = cv.clientHeight, CSZ = T.chunk.size, c0 = atlas.cell;
+  if (!W2on && f > 1 && c0 >= 219 && running) { // zoomed all the way in on the big map: back down into the view (GDD 10)
+    const fx = atlas.ox, fz = atlas.oz; closeAtlas(); ovStart(); ov.fx = fx; ov.fz = fz; ov.yaw = 0; ov.d = ov.classicMax * 0.9; return;
+  }
   const c1 = Math.max(6, Math.min(220, c0 * f));
   if (px !== undefined) { // keep the point under the cursor where it is
     const x = atlas.ox - (px - W / 2) / c0 * CSZ, z = atlas.oz - (py - H / 2) / c0 * CSZ;
@@ -3361,8 +3400,113 @@ function updateScents(dt) {
   }
 }
 
+// ------------------------------------------------------------------ zooming out into the map (GDD 10, 20.6)
+// The mouse wheel draws the camera back from the wasp and up, the view tipping toward straight down as it goes and
+// turning north-up; in World v3 past 350 m the picture becomes its map (its own pass), in the classic look past 140 m
+// the big map takes over at the same scale. Dragging pans, it never turns the view. The wasp holds meanwhile. Pins
+// mark the nest, the wasp, sister nests, rivals, water and bee hives; the nest's pin stays on screen at the edge.
+const ov = { on: false, d: 3, fx: 0, fz: 0, yaw: 0, m: 0, drag: null, max: 2600, classicMax: 140 };
+const ovMap = (d) => THREE.MathUtils.smoothstep(Math.log(d), Math.log(350), Math.log(2600));
+function ovStart() {
+  const w = sim && (sim._driven() || sim.wasp); if (!w) return;
+  ov.on = true; ov.d = 3; ov.fx = w.x; ov.fz = w.z; ov.yaw = input.yaw + Math.PI; ov.m = 0;
+  input.lmb = false; if (document.pointerLockElement === canvas) document.exitPointerLock?.();
+}
+function ovEnd() { ov.on = false; ov.m = 0; ov.drag = null; camera.fov = 70; camera.updateProjectionMatrix(); if (running && !paused && !ui.nest && !atlas.open) lock(); }
+function ovZoom(f) {
+  ov.d = Math.max(1.5, Math.min(W2on ? ov.max : ov.classicMax * 1.3, ov.d * f));
+  if (ov.d < 2.2 && f < 1) { ovEnd(); return; }
+  if (!W2on && ov.d > ov.classicMax) { // the classic look hands over to the big map at the same scale
+    const w = sim.wasp || sim.nest; openAtlas(); atlas.ox = ov.fx; atlas.oz = ov.fz;
+    const cv = $('atlasMap'); atlas.cell = Math.max(6, Math.min(220, cv.clientHeight / (2 * ov.d * Math.tan(35 * Math.PI / 180)) * T.chunk.size)); atlas.fromOv = true;
+    ov.on = false; drawAtlas(); void w;
+  }
+}
+addEventListener('wheel', (e) => {
+  if (!sim || !running || paused || atlas.open || ui.nest || (input.pilot && input.pilotMode === 'hover')) return;
+  if (e.target && e.target.closest && e.target.closest('#map, .panel, #startScreen')) return;
+  if (!ov.on) { if (e.deltaY > 0) ovStart(); else return; }
+  ovZoom(e.deltaY > 0 ? 1.22 : 1 / 1.22);
+}, { passive: true });
+canvas.addEventListener('pointerdown', (e) => { if (ov.on) { ov.drag = { x: e.clientX, y: e.clientY }; try { canvas.setPointerCapture(e.pointerId); } catch { /* optional */ } } });
+canvas.addEventListener('pointermove', (e) => {
+  if (!ov.on || !ov.drag) return;
+  const dx = e.clientX - ov.drag.x, dy = e.clientY - ov.drag.y; ov.drag.x = e.clientX; ov.drag.y = e.clientY;
+  const mpp = 2 * ov.dist * Math.tan(camera.fov * Math.PI / 360) / Math.max(1, canvas.clientHeight); // metres a pixel at the focus
+  const rx = Math.cos(ov.yaw), rz = -Math.sin(ov.yaw), fx = -Math.sin(ov.yaw), fz = -Math.cos(ov.yaw);
+  ov.fx += (-dx * rx + dy * fx * (1 / Math.max(0.3, Math.sin(ov.pitch || 1)))) * mpp; ov.fz += (-dx * rz + dy * fz * (1 / Math.max(0.3, Math.sin(ov.pitch || 1)))) * mpp;
+});
+canvas.addEventListener('pointerup', () => { ov.drag = null; });
+addEventListener('keydown', (e) => { if (ov.on && (e.code === 'Escape' || e.code === 'KeyM')) { e.preventDefault(); ovEnd(); } });
+function overviewCamera(dt) {
+  const k = THREE.MathUtils.smoothstep(Math.log(ov.d), Math.log(2), Math.log(140)), m = ov.m = W2on ? ovMap(ov.d) : 0;
+  ov.pitch = THREE.MathUtils.lerp(THREE.MathUtils.lerp(0.32, 1.05, k), 1.18, m);
+  const fov = THREE.MathUtils.lerp(55, 22, m), back = Math.tan(55 / 2 * Math.PI / 180) / Math.tan(fov / 2 * Math.PI / 180);
+  if (k > 0.5 && !ov.drag) { let dy = ((0 - ov.yaw) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI; ov.yaw += dy * Math.min(1, dt * 1.5 * (k - 0.5) * 2); } // north-up
+  camera.fov = fov;
+  const D = ov.dist = ov.d * THREE.MathUtils.lerp(1, back, m), gy = terrAt(ov.fx, ov.fz);
+  const cx = ov.fx + Math.sin(ov.yaw) * Math.cos(ov.pitch) * D, cz = ov.fz + Math.cos(ov.yaw) * Math.cos(ov.pitch) * D;
+  let cy = gy + Math.sin(ov.pitch) * D; cy = Math.max(cy, terrAt(cx, cz) + 0.3);
+  camera.up.set(0, 1, 0); camera.position.set(cx, cy, cz); camera.lookAt(ov.fx, gy, ov.fz);
+  camera.near = THREE.MathUtils.clamp(ov.d * 0.01, 0.01, 20); camera.far = W2on ? 60000 : 400; camera.updateProjectionMatrix();
+  camPos.set(cx, cy - gy, cz);
+  const focus = new THREE.Vector3(ov.fx, 0, ov.fz);
+  sun.position.copy(focus).addScaledVector(sunDir, 40); sun.position.y += gy; sun.target.position.set(ov.fx, gy, ov.fz);
+  ground.position.set(Math.round(ov.fx / GROUND_TILE) * GROUND_TILE, 0, Math.round(ov.fz / GROUND_TILE) * GROUND_TILE);
+  return focus;
+}
+// the pins: plain HTML over the view, projected each frame
+const pinLayer = document.createElement('div');
+pinLayer.id = 'ovPins'; pinLayer.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:6;font:600 11px/1.2 system-ui,sans-serif';
+document.body.appendChild(pinLayer);
+const pinPool = [], _pv = new THREE.Vector3();
+function pinEl(i) {
+  let el = pinPool[i];
+  if (!el) { el = document.createElement('div'); el.style.cssText = 'position:absolute;left:0;top:0;white-space:nowrap;padding:2px 6px 2px 4px;border-radius:9px;color:#fff;text-shadow:0 1px 2px #000;transform-origin:0 0'; pinLayer.appendChild(el); pinPool[i] = el; }
+  return el;
+}
+function drawPins() {
+  const W = innerWidth, H = innerHeight, list = [];
+  if (sim && running) {
+    const nest = sim.nest, w = sim._driven() || sim.wasp, night = sunDir.y < 0.08;
+    const dn = w ? Math.hypot(w.x - nest.x, w.z - nest.z) : 0;
+    if (ov.on || dn > 8) list.push({ x: nest.x, y: nest.y || 0.5, z: nest.z, t: `◆ Nest${ov.on ? '' : ' ' + Math.round(dn) + ' m'}`, c: '#f2b33d', edge: true, a: ov.on || night ? 1 : 0.7 });
+    if (ov.on) {
+      if (w) list.push({ x: w.x, y: w.y, z: w.z, t: '▲ You', c: '#ffe14a' });
+      for (const x of sim.line || []) list.push({ x: x.nest.x, y: 1, z: x.nest.z, t: `◇ ${SPECIES_NAME[x.colony.species || 'wasp']}`, c: '#e0a43a' });
+      const far = ov.d > 900;
+      for (const rec of sim.activeChunks) {
+        const c = rec.content;
+        if (c.rival) list.push({ x: c.rival.x, y: c.rival.y, z: c.rival.z, t: '✕ Rival nest', c: '#d9534f' });
+        if (far) continue;
+        for (const p of c.ponds || []) list.push({ x: p.x, y: 0.2, z: p.z, t: '≈ Pond', c: '#4aa3df' });
+        for (const b of c.baths || []) list.push({ x: b.x, y: b.h, z: b.z, t: b.fountain ? '≈ Fountain' : '≈ Birdbath', c: '#4aa3df' });
+        for (const h of c.hives || []) list.push({ x: h.x, y: 1, z: h.z, t: '⬢ Bees', c: '#c98a2a' });
+      }
+    }
+  }
+  let n = 0;
+  for (const q of list) {
+    _pv.set(q.x, q.y + terrAt(q.x, q.z), q.z).project(camera);
+    let x = (_pv.x * 0.5 + 0.5) * W, y = (-_pv.y * 0.5 + 0.5) * H; const behind = _pv.z > 1;
+    const off = behind || x < 8 || y < 8 || x > W - 8 || y > H - 8;
+    if (off && !q.edge) continue;
+    const el = pinEl(n++);
+    if (off) { // the nest off screen: at the edge, pointing the way
+      let ex = x - W / 2, ey = y - H / 2; if (behind) { ex = -ex; ey = -ey; }
+      const s = Math.min((W / 2 - 40) / Math.max(1e-3, Math.abs(ex)), (H / 2 - 24) / Math.max(1e-3, Math.abs(ey)));
+      x = W / 2 + ex * s; y = H / 2 + ey * s;
+      el.textContent = `${'➤'} ${q.t.replace('◆ ', '')}`; el.style.transform = `translate(${x.toFixed(0)}px, ${y.toFixed(0)}px) translate(-50%, -50%)`;
+      el.firstChild && (el.style.rotate = '0deg');
+    } else { el.textContent = q.t; el.style.transform = `translate(${x.toFixed(0)}px, ${y.toFixed(0)}px) translate(-8px, -50%)`; }
+    el.style.background = q.c + 'cc'; el.style.opacity = q.a ?? 1; el.style.display = '';
+  }
+  for (let i = n; i < pinPool.length; i++) pinPool[i].style.display = 'none';
+}
+
 const camUp = new THREE.Vector3(0, 1, 0);
 function updateCamera(p, dt) {
+  if (ov.on) return overviewCamera(dt);
   const w = sim.wasp;
   const dead = !sim._driven();
   const fl = input.free;
@@ -3470,9 +3614,10 @@ function frame(now) {
     for (const v of humanViews.values()) poseHuman(v, t, dt);
     if (tm) { tm('humans', t0); t0 = performance.now(); }
     const p = renderWasps(alpha, t, dt);
-    if (sim) terrFrame(p || V(sim.nest.spawn));
+    if (sim) terrFrame(ov.on ? new THREE.Vector3(ov.fx, 0, ov.fz) : p || V(sim.nest.spawn));
     const focus = updateCamera(p, dt);
     drawLock();
+    drawPins();
     updateStare(dt);
     updateScents(dt);
     if (tm) { tm('wasps+cam', t0); t0 = performance.now(); }
@@ -3548,7 +3693,7 @@ function w2Frame(dt, focus) {
   const W = sim.weatherToday, storm = W.kind === 'storm' && sim.raining ? 1 : 0;
   const cloud = sim.raining ? 0.8 + 0.15 * storm : W.rain ? 0.55 : W.kind === 'heat' ? 0.1 : W.kind === 'cold' ? 0.45 : 0.3;
   const day = sim.winter ? 300 : Math.min(269, Math.max(0, sim.seasonFrac * 270));
-  world2.set({ hour: md / 60, day, cloud, rain, storm, snow: 0, haze: 1 + rain, mist: 1 + 3 * rain, wet: rain, wind: w2Breeze(wd), wind10: [wd.x * 1.26, wd.z * 1.26] });
+  world2.set({ map: ov.m, hour: md / 60, day, cloud, rain, storm, snow: 0, haze: 1 + rain, mist: 1 + 3 * rain, wet: rain, wind: w2Breeze(wd), wind10: [wd.x * 1.26, wd.z * 1.26] });
   const fy = focus ? terrAt(focus.x, focus.z) : 0;
   const fd = focus ? Math.max(0.05, Math.hypot(camera.position.x - focus.x, camera.position.y - focus.y - fy, camera.position.z - focus.z)) : 10;
   world2.update(dt, camera.position, fd);
