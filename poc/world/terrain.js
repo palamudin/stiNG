@@ -20,6 +20,7 @@ import { clipGrid } from './clipmap.js';
 import { NOISE_GLSL } from './noise.js';
 import { WEAR_GLSL } from './grass.js';
 import { CLOUD_SHADOW_GLSL } from './clouds.js';
+import { SHORE_WAVE_GLSL } from './shorefield.js';
 
 export const TERRAIN_SHADE_GLSL = /* glsl */ `
 // the palette: sRGB picks, made linear by L()
@@ -73,7 +74,10 @@ export function makeTerrain(clip, opts = {}) {
     // wavelength of the peak period
     tWave0: { value: ZERO }, tWave1: { value: ZERO }, uWaveL: { value: new THREE.Vector2(1, 1) }, uRun: { value: new THREE.Vector2(0, 0) },
   };
+  const shore = opts.shoreField; // the shore table (shorefield.js), for the swash; without it the swash reads the waves
+  if (shore) Object.assign(U, shore.uniforms, { uShoreWave: opts.uShoreWave || { value: new THREE.Vector4(0, 8, 0, 8) }, uShoreSea: opts.uShoreSea || { value: opts.sea ?? 0 } });
   const CLIP = clip.glsl() + CLOUD_SHADOW_GLSL;
+  const SHORE = shore ? shore.glsl() + '\n' + SHORE_WAVE_GLSL + '\n#define T_SHORE\n' : '';
   const VERT_HEAD = `${CLIP}\nattribute float aLevel;\nvarying vec3 vW;\n`;
   const VERT_BODY = /* glsl */ `
   int lvl = int(aLevel);
@@ -89,7 +93,7 @@ export function makeTerrain(clip, opts = {}) {
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, U);
     sh.vertexShader = VERT_HEAD + sh.vertexShader.replace('#include <begin_vertex>', VERT_BODY);
-    sh.fragmentShader = `${CLIP}\n${NOISE_GLSL}\n${WEAR_GLSL}\n${TERRAIN_SHADE_GLSL}
+    sh.fragmentShader = `${CLIP}\n${NOISE_GLSL}\n${SHORE}\n${WEAR_GLSL}\n${TERRAIN_SHADE_GLSL}
 uniform float uSea, uShadowFar, uTreeFar, uPaving, uTime, uWet, uShore, uSnowLine, uGrassR, uSnowOn; uniform vec3 uSunDir, uGrassTint;
 uniform sampler2D tWave0, tWave1; uniform vec2 uWaveL, uRun;
 varying vec3 vW;
@@ -162,18 +166,26 @@ float hfShadow(vec2 p, float h0, float dist) {
   if (uShore > 0.5 && uRun.x > 1e-5 && hgt > -0.1 && hgt < 0.6) {
     float tb = sqrt(max(1.0 - TN.y * TN.y, 0.0)) / max(TN.y, 0.05), HL = uRun.x;
     float R2 = 1.1 * (0.35 * tb * sqrt(HL) + 0.5 * sqrt(HL * (0.563 * tb * tb + 0.004)));
-    // the incident waves where this cross-shore line meets the water (straight downhill by hgt / slope), so the edge
-    // runs along the shore as one line
+    float aa = max(fwidth(hgt), 0.002), above = smoothstep(-0.05, 0.0, hgt);
+#ifdef T_SHORE
+    // the swash from the shore table (shorefield.js): the front that broke out there arrives at the line and climbs
+    // the sand at the table's travel time, the same phase the water draws its breakers with
+    vec3 sw = shoreSwash(P, shoreAt(P), hgt, R2, uTime, shoreState(TW));
+    film = sw.x * smoothstep(-0.03, 0.0, hgt);
+    float edgeF = sw.y;
+#else
+    // no table: the edge follows the incident waves where this cross-shore line meets the water (downhill by hgt / slope)
     vec2 Ps = P + (length(TN.xz) > 1e-4 ? normalize(TN.xz) : vec2(0.0)) * clamp(hgt / max(tb, 0.01), 0.0, 20.0);
     float hw = texture(tWave0, Ps / uWaveL.x).y + texture(tWave1, Ps / uWaveL.y).y;
     float sEdge = R2 * clamp(0.45 + 0.55 * hw / max(0.5 * uRun.y, 1e-4), 0.0, 1.0);
-    float aa = max(fwidth(hgt), 0.002), above = smoothstep(-0.05, 0.0, hgt);
     film = (1.0 - smoothstep(sEdge - aa, sEdge + aa, hgt)) * smoothstep(-0.03, 0.0, hgt);
+    float edgeF = (1.0 - smoothstep(0.0, aa * 2.0 + 0.003, abs(hgt - sEdge))) * step(0.004, sEdge);
+#endif
     wetB = (1.0 - smoothstep(R2, R2 + aa, hgt)) * above;
     damp = (1.0 - smoothstep(R2, R2 + 0.04 + aa, hgt)) * (1.0 - wetB) * above;
     col *= (1.0 - 0.4 * wetB) * (1.0 - 0.2 * damp) * (1.0 - 0.15 * film); // wet sand: water in the pores roughly halves what the grains send back
     // foam at the swash's leading edge, broken into bubbles
-    fl = (1.0 - smoothstep(0.0, aa * 2.0 + 0.003, abs(hgt - sEdge))) * film * step(0.004, sEdge) * smoothstep(-0.1, 0.5, w2noise(P / 0.07 + uTime * 0.3, 214) * NF(0.07) + 0.2);
+    fl = edgeF * film * smoothstep(-0.1, 0.5, w2noise(P / 0.07 + uTime * 0.3, 214) * NF(0.07) + 0.2);
     col = mix(col, vec3(0.75), fl * 0.8);
   }
   // stone on steep ground, in soft blocks

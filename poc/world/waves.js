@@ -44,6 +44,16 @@ export function omega(k) { return Math.sqrt(WAVES.g * k + WAVES.T * k * k * k); 
 export function phaseSpeed(k) { return Math.sqrt(WAVES.g / k * (1 + (k / WAVES.km) ** 2)); }
 const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
+// The swell that reaches a coast from a long fetch (W3.1): the open sea's significant height and peak period for a wind
+// U10 over a fetch, from the JONSWAP fetch relations (Hasselmann et al. 1973: Hs = 1.6e-3 X^1/2 U^2/g, Tp = 0.286 X^1/3
+// U/g, X = g F/U^2), held under the fully developed limits (Pierson and Moskowitz 1964: Hs = 0.21 U^2/g, Tp = 7.14 U/g).
+// The wave field itself (wavegpu.js) holds the local chop; the shore waves of the table ride this.
+export function swellState(U10, fetch) {
+  const g = WAVES.g, U = Math.max(U10, 0.05), X = g * fetch / (U * U);
+  const Hs = Math.min(1.6e-3 * Math.sqrt(X) * U * U / g, 0.21 * U * U / g);
+  const Tp = Math.min(0.286 * Math.cbrt(X) * U / g, 7.14 * U / g);
+  return { Hs, Tp };
+}
 // Everything of the spectrum that depends on the wind and fetch only
 export function seaState(U10, fetch) {
   const g = WAVES.g, U = Math.max(U10, 0.05);

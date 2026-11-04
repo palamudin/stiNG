@@ -1,0 +1,61 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>World v3.1 shore table: the GPU bake against a brute-force distance on the CPU</title>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
+<pre id="out">running</pre>
+<script type="module">
+// The shore table's fine slot (shorefield.js, baked by jump flooding on the GPU) against the exact nearest water-line
+// crossing computed on the CPU from the same texel grid (the source sampled at the level's texels): the signed
+// distance per texel, the share within half a texel, the direction's agreement, and the travel time against the
+// straight-line integral. Jump flooding misses the nearest seed in a few cells (a known property); the share says how
+// many.
+import * as THREE from 'three';
+import { World } from '../index.js';
+import { wildSource } from '../sources/wild.js';
+import { SHORE } from '../shorefield.js';
+const renderer = new THREE.WebGLRenderer();
+const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(55, 1, 0.1, 60000);
+const src = wildSource({ seed: 7 });
+const world = new World(renderer, scene, camera, src, { quality: 'low', clip: { levels: 12 } });
+// a shore: the demo's start finder, in short
+let X0 = 0, Z0 = 0;
+outer: for (let r = 0; r < 12000; r += 60) for (let a = 0; a < 6.283; a += 0.3) {
+  const x = Math.cos(a) * r, z = Math.sin(a) * r, o = src.sample(x, z);
+  if (o[0] > 2 && o[0] < 7 && o[2] < 0.3 && o[4] <= src.sea) { X0 = x; Z0 = z; break outer; }
+}
+world.build(X0, Z0);
+const slot = 0, l = SHORE.levels[slot], L = world.clip.lv[l], W = 128, s = L.s, wi = L.wi, wj = L.wj;
+// the GPU table, slot 0
+const px = new Float32Array(W * W * 4);
+renderer.setRenderTarget(world.shore.rt, slot); renderer.readRenderTargetPixels(world.shore.rt, 0, 0, W, W, px); renderer.setRenderTarget(null);
+// the CPU: e per texel of the window, then every crossing, then the nearest per texel
+const e = new Float32Array(W * W), o = [0, 0, 0, 0, 0];
+for (let j = 0; j < W; j++) for (let i = 0; i < W; i++) { src.sample((wi + i) * s, (wj + j) * s, o, s); e[j * W + i] = o[0] - o[4]; }
+const seeds = [];
+for (let j = 0; j < W; j++) for (let i = 0; i < W; i++) {
+  const e0 = e[j * W + i];
+  if (i < W - 1) { const e1 = e[j * W + i + 1]; if ((e0 < 0) !== (e1 < 0)) { const f = e0 / (e0 - e1); seeds.push([(wi + i + f) * s, (wj + j) * s]); } }
+  if (j < W - 1) { const e1 = e[(j + 1) * W + i]; if ((e0 < 0) !== (e1 < 0)) { const f = e0 / (e0 - e1); seeds.push([(wi + i) * s, (wj + j + f) * s]); } }
+}
+let n = 0, within = 0, maxErr = 0, dirOk = 0, tauErr = 0, tauN = 0, signOk = 0;
+for (let j = 0; j < W; j++) for (let i = 0; i < W; i++) {
+  const k = j * W + i, x = (wi + i) * s, z = (wj + j) * s;
+  const ti = (wi + i) & 127, tj = (wj + j) & 127, g = ((tj * W) + ti) * 4;
+  let bd = Infinity, bx = 0, bz = 0;
+  for (const q of seeds) { const d = Math.hypot(q[0] - x, q[1] - z); if (d < bd) { bd = d; bx = q[0]; bz = q[1]; } }
+  if (!seeds.length) continue;
+  const sg = e[k] < 0 ? -1 : 1, want = sg * bd, got = px[g];
+  n++; const err = Math.abs(got - want); maxErr = Math.max(maxErr, err); if (err < 0.5 * s) within++;
+  if (Math.sign(got) === sg) signOk++;
+  if (bd > s) { const dx = (bx - x) / bd, dz = (bz - z) / bd; if (dx * px[g + 1] + dz * px[g + 2] > 0.9) dirOk++; }
+  // the travel time on the water side against a straight-line integral at the table's own depth clamp
+  if (e[k] < 0 && bd > s && bd < 200) {
+    let tau = 0; const M = 32;
+    for (let m = 0; m < M; m++) { const t = (m + 0.5) / M; src.sample(x + (bx - x) * t, z + (bz - z) * t, o, s); const dep = Math.min(SHORE.dMax, Math.max(SHORE.dMin, o[4] - o[0])); tau += bd / M / Math.sqrt(9.81 * dep); }
+    tauErr = Math.max(tauErr, Math.abs(-px[g + 3] - tau) / tau); tauN++;
+  }
+}
+const dirN = n; // the direction is checked where the line is at least a texel away
+window.__result = { level: l, texel: s, texels: n, seeds: seeds.length, withinHalfTexel: within / n, maxErrM: maxErr, signAgree: signOk / n, dirAgree: dirOk / Math.max(1, dirN), tauRelErrMax: tauErr, tauChecked: tauN, bakes: world.shore.stats.bakes };
+document.getElementById('out').textContent = JSON.stringify(window.__result, null, 1);
+</script>

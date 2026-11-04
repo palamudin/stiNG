@@ -27,8 +27,10 @@ export const WILD = {
   mountains: 780,  // metres at the top of a full ridge (W3: a fjord coast, the ridges rise from the sea)
   ridgeCell: 3400,
   roll: 22, rollCell: 520, // rolling hills: metres, cell
-  beach: 0.8,      // metres the shore is pushed away from the water line either side
-  shelf: 2.4,      // metres a lake drops past its shallow shelf
+  beach: 0.3,      // the shore's slope at the water line, as a share of the land's own: the sand runs out under the water
+  beachBand: 2.5,  // metres above and below the line over which the slope comes back to the land's
+  shelf: 2.4,      // metres the floor drops past the shallows
+  shelfAt: 1.5,    // metres of depth where that drop begins (over 2 m more)
   contCell: 9000,
   step: 5,         // metres between ledges on mountains
   riverCell: 2600,
@@ -121,10 +123,13 @@ export function wildSample(P, x, z, out = [0, 0, 0, 0, 0]) {
     band = 1 - smoothstep(R * (1 + 0.6 * W.lakeRim), R * (1 + W.lakeRim), d);
     if (d < R * (1 + 0.4 * W.lakeRim)) wl = lake.level;
   }
-  // beaches: waves smooth the ground near the water, so the fine octaves give way to the broad shape there, and the
-  // shore crosses the water line with a definite slope instead of a plain of puddles
+  // beaches: waves smooth the ground near the water, so the fine octaves give way to the broad shape there; and the
+  // shore crosses the water line at a fraction of the land's slope (the height above the line is scaled by a factor
+  // that grows back to 1 over the band), so the sand slopes gently into the shallows, where the floor shows through,
+  // and the floor drops away only past them. The scaling keeps the sign of the height, so the water line itself is
+  // where it was and no puddles appear
   h += (hlo - h) * (1 - smoothstep(1.5, 5, Math.abs(hlo - wl)));
-  { const e = h - wl; h += W.beach * e / Math.sqrt(e * e + 0.36); if (e < 0) h -= W.shelf * smoothstep(0.2, 1.8, -e); }
+  { const e = h - wl, k = W.beach + (1 - W.beach) * smoothstep(0, W.beachBand, Math.abs(e)); h = wl + e * k; if (e < 0) h -= W.shelf * smoothstep(W.shelfAt, W.shelfAt + 2, -e * k); }
   // mountains: ridged noise on a continental mask
   const cont = smoothstep(-0.2, 0.45, B1[4]) * (1 - inLake);
   let r = 0, rb = 0.55, rx = (0.6 * x + 0.8 * z + 611 * w1) / W.ridgeCell, rz = (-0.8 * x + 0.6 * z - 577 * w2) / W.ridgeCell, prev = 1;
@@ -146,8 +151,8 @@ export function wildSample(P, x, z, out = [0, 0, 0, 0, 0]) {
   const low = 1 - smoothstep(18, 55, h);
   const river = (1 - smoothstep(W.riverW, W.riverW + W.riverBank, rd)) * low * P.rivers * (1 - inLake) * (1 - band);
   h += (Math.min(h, P.sea - W.riverDepth * (1 - smoothstep(0, W.riverW, rd) * 0.4)) - h) * river;
-  // the lake's bowl: a basin under its level, blended into the land over the outer part of the radius
-  if (inLake > 0) { const q = lake.d / lake.R; vnoised(x / 90, z / 90, ss(S, 76), N); const bowl = lake.level - lake.depth * (1 - q * q) * (0.85 + 0.15 * N[0]); h += (bowl - h) * inLake; }
+  // the lake's bowl: a basin under its level, shallow over its outer third, blended into the land over the outer part of the radius
+  if (inLake > 0) { const q = lake.d / lake.R; vnoised(x / 90, z / 90, ss(S, 76), N); const bowl = lake.level - lake.depth * (1 - q * q) * (1 - q * q) * (0.85 + 0.15 * N[0]); h += (bowl - h) * inLake; } // (1 - q^2)^2: shallow for the outer third
   // moisture
   vnoised(x / W.moistCell + 9.1, z / W.moistCell - 2.3, ss(S, 5), N);
   const moist = clamp(0.5 + 0.45 * N[0] + 0.4 * (1 - smoothstep(wl, wl + 14, h)) - 0.3 * smoothstep(300, 600, h - P.sea), 0, 1);
@@ -240,7 +245,7 @@ void wildSampleW(vec2 xz, out vec4 S, out float wlOut) {
     if (d < R * ${f(1 + 0.4 * W.lakeRim)}) wl = L.w;
   }
   h += (hlo - h) * (1.0 - wsmooth(1.5, 5.0, abs(hlo - wl)));
-  { float e = h - wl; h += ${f(W.beach)} * e / sqrt(e * e + 0.36); if (e < 0.0) h -= ${f(W.shelf)} * wsmooth(0.2, 1.8, -e); }
+  { float e = h - wl, k = ${f(W.beach)} + ${f(1 - WILD.beach)} * wsmooth(0.0, ${f(W.beachBand)}, abs(e)); h = wl + e * k; if (e < 0.0) h -= ${f(W.shelf)} * wsmooth(${f(W.shelfAt)}, ${f(W.shelfAt + 2)}, -e * k); }
   float cont = wsmooth(-0.2, 0.45, cn) * (1.0 - inLake);
   float r = 0.0, rb = 0.55, prev = 1.0;
   vec2 rp = vec2((0.6 * x + 0.8 * z + 611.0 * w1) / ${f(W.ridgeCell)}, (-0.8 * x + 0.6 * z - 577.0 * w2) / ${f(W.ridgeCell)});
@@ -260,7 +265,7 @@ void wildSampleW(vec2 xz, out vec4 S, out float wlOut) {
   float low = 1.0 - wsmooth(18.0, 55.0, h);
   float river = (1.0 - wsmooth(${f(W.riverW)}, ${f(W.riverW + W.riverBank)}, rd)) * low * wRivers * (1.0 - inLake) * (1.0 - band);
   h += (min(h, wSea - ${f(W.riverDepth)} * (1.0 - wsmooth(0.0, ${f(W.riverW)}, rd) * 0.4)) - h) * river;
-  if (inLake > 0.0) { float q = d / L.z; float bowl = L.w - depth * (1.0 - q * q) * (0.85 + 0.15 * w2noise(xz / 90.0, wss(76))); h += (bowl - h) * inLake; }
+  if (inLake > 0.0) { float q = d / L.z; float bowl = L.w - depth * (1.0 - q * q) * (1.0 - q * q) * (0.85 + 0.15 * w2noise(xz / 90.0, wss(76))); h += (bowl - h) * inLake; }
   float moist = clamp(0.5 + 0.45 * w2noise(vec2(x / ${f(W.moistCell)} + 9.1, z / ${f(W.moistCell)} - 2.3), wss(5)) + 0.4 * (1.0 - wsmooth(wl, wl + 14.0, h)) - 0.3 * wsmooth(300.0, 600.0, h - wSea), 0.0, 1.0);
   float fo = w2noise(vec2((0.8 * x - 0.6 * z + 340.0 * w1) / ${f(W.forestCell)}, (0.6 * x + 0.8 * z + 360.0 * w2) / ${f(W.forestCell)}), wss(6));
   fo += 0.45 * w2noise(vec2((0.6 * x + 0.8 * z) / ${f(W.forestCell * 0.31)} + 2.2 * w2, (-0.8 * x + 0.6 * z) / ${f(W.forestCell * 0.31)} - 1.7 * w1), wss(60));
@@ -304,7 +309,7 @@ export function wildSource(opts = {}) {
     grassHeight: [0.1, 0.42], // a wild meadow: ankle-high where dry, knee-high where wet
     cosmetic: hash3(P.seed | 0, 0xc05, 77) & 0xfffff, // decoration's salt, from the world's seed
     // lakes and the sea: wind over 600 m of open water; tiles of 48 m down to 14 cm, from metre chop to millimetre ripples
-    water: { fetch: 600, cascades: [48, 6.9, 1.0, 0.14] },
+    water: { swellFetch: 40000, fetch: 600, cascades: [48, 6.9, 1.0, 0.14] },
   };
 }
 const TMP = [0, 0, 0, 0, 0];

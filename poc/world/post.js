@@ -13,7 +13,8 @@
 //   -> final: exposure, AgX, a light grade, vignette, grain, sRGB out.
 import * as THREE from 'three';
 import { SKY_GLSL } from './sky.js';
-import { waterGLSL, WATER_SHADE_GLSL, WATER } from './water.js';
+import { waterGLSL, WATER_SHADE_GLSL, WATER, POISSON, poissonTableData } from './water.js';
+import { SHORE_WAVE_GLSL } from './shorefield.js';
 import { NOISE_GLSL } from './noise.js';
 import { MAP_GLSL } from './map.js';
 
@@ -21,6 +22,11 @@ const VS = 'out vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy
 
 function pass(frag, uniforms) {
   return new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, uniforms, vertexShader: VS, fragmentShader: 'precision highp float; precision highp int;\nin vec2 vUv; out vec4 oColor;\n' + frag, depthTest: false, depthWrite: false });
+}
+function poissonTexture() { // the glints' table (water.js), once
+  const tex = new THREE.DataTexture(poissonTableData(), POISSON.cols, POISSON.rows, THREE.RedFormat, THREE.FloatType);
+  tex.minFilter = tex.magFilter = THREE.NearestFilter; tex.generateMipmaps = false; tex.needsUpdate = true;
+  return tex;
 }
 function target(w, h, o = {}) {
   return new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, depthBuffer: false, magFilter: THREE.LinearFilter, minFilter: THREE.LinearFilter, ...o });
@@ -38,7 +44,7 @@ export class Post {
       tColor: { value: null }, tDepth: { value: null }, tPrev: { value: null }, tBlur: { value: null }, tRays: { value: null }, tBloom: { value: null },
       uInvProj: { value: new THREE.Matrix4() }, uCamWorld: { value: new THREE.Matrix4() }, uViewProj: { value: new THREE.Matrix4() }, uCamPos: { value: new THREE.Vector3() },
       uLogF: { value: 1 }, uRes: { value: new THREE.Vector2(1, 1) }, uTime: { value: 0 },
-      uSea: { value: 0 }, uDebug: { value: 0 }, uMist: { value: 0.0025 }, uMistH: { value: 45 }, uWet: { value: 0 }, uWaterOn: { value: 1 },
+      uSea: { value: 0 }, uDebug: { value: 0 }, uMist: { value: 0.0025 }, uMistH: { value: 45 }, uWet: { value: 0 }, uWaterOn: { value: 1 }, uShoreWave: { value: new THREE.Vector4(0, 8, 0, 8) }, uShoreSea: { value: 0 }, tPoisson: { value: poissonTexture() },
       uSkyUp: { value: new THREE.Color() }, uSkyHz: { value: new THREE.Color() },
       uSunUV: { value: new THREE.Vector2() }, uSunVis: { value: 0 }, uRays: { value: 0.6 },
       uFocus: { value: 10 }, uFocal: { value: 0.045 }, uFstop: { value: 2.8 }, uSensor: { value: 0.024 }, uMaxCoc: { value: 14 }, uBlurIn: { value: 0 },
@@ -146,7 +152,7 @@ void main() {
 }`, this.U);
   }
   _composite(C) {
-    return pass(`${SKY_GLSL}\n${NOISE_GLSL}\n${this.clipGLSL ? this.clipGLSL + '\n#define W_CLIP' : ''}\n#define W_CASCADES ${C}\n${C ? waterGLSL(C) : ''}
+    return pass(`${SKY_GLSL}\n${NOISE_GLSL}\n${this.clipGLSL ? this.clipGLSL + '\n#define W_CLIP' : ''}\n${C && this.shoreGLSL ? this.shoreGLSL + '\n#define W_SHORE' : ''}\n#define W_CASCADES ${C}\n${C ? waterGLSL(C) : ''}
 uniform sampler2D tColor, tDepth, uSkyView; uniform mat4 uInvProj, uCamWorld, uViewProj; uniform vec3 uCamPos, uSun, uSunColor, uSkyUp, uSkyHz;
 uniform float uLogF, uSea, uMist, uMistH, uTime, uWet, uWaterOn, uDebug, uCloudOn, uCloudBase, uFlash; uniform vec2 uRes; uniform sampler2D tCloud;
 #if W_CASCADES == 0
@@ -246,9 +252,13 @@ void main() {
 
   // the wave field (wavegpu.js) and the sea's caustics (caustics.js); null for none
   // clip: the clipmap (its GLSL and uniforms), so the composite can read the water level where a ray lands
-  setWater(field, caustics, clip) {
+  // shore: the shore table (shorefield.js: its GLSL, the shore waves' GLSL and uniforms), for breakers and shore foam
+  setWater(field, caustics, clip, shore) {
     const C = field ? field.C : 0, U = this.U;
-    if (clip && !this.clipGLSL) { this.clipGLSL = clip.glsl(); Object.assign(U, clip.uniforms); this.composite.dispose(); this.composite = this._composite(C); this.C = C; this.mapPass = this._mapPass(); }
+    let rebuild = false;
+    if (clip && !this.clipGLSL) { this.clipGLSL = clip.glsl(); Object.assign(U, clip.uniforms); rebuild = true; }
+    if (shore && !this.shoreGLSL) { this.shoreGLSL = shore.glsl() + '\n' + SHORE_WAVE_GLSL; Object.assign(U, shore.uniforms); rebuild = true; }
+    if (rebuild) { this.composite.dispose(); this.composite = this._composite(C); this.C = C; this.mapPass = this._mapPass(); }
     else if (C !== this.C) { this.composite.dispose(); this.C = C; this.composite = this._composite(C); }
     if (field) {
       U.uWL.value = field.U.uL.value;

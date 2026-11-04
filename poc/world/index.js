@@ -19,9 +19,10 @@ import { Post } from './post.js';
 import { Forest } from './trees.js';
 import { Grass } from './grass.js';
 import { WaveField } from './wavegpu.js';
+import { ShoreField, SHORE } from './shorefield.js';
 import { Caustics } from './caustics.js';
 import { WATER } from './water.js';
-import { WAVES } from './waves.js';
+import { WAVES, swellState } from './waves.js';
 import { weatherAt, seasonAt } from './seasons.js';
 import { Rain } from './rain.js';
 import { GpuTimer } from './gputimer.js';
@@ -64,7 +65,12 @@ export class World {
     this.season = seasonAt(100); this.weather = null;
     this.clip = new Clipmap(renderer, source, { levels: this.q.levels, ...(opts.clip || {}) });
     const wet = source.sea > -1e5; // a source without water: no beaches, no mud, no snow line; heights count from 0
-    this.terrain = makeTerrain(this.clip, { sea: wet ? source.sea : 0, paving: source.kind === 'sting', shore: wet ? 1 : 0, snowLine: wet ? 215 : 1e9 });
+    // the shore table (shorefield.js): baked from the clipmap when its levels move; the water and the beach read it
+    const floatRT = renderer.capabilities.isWebGL2 && !!renderer.extensions.get('EXT_color_buffer_float');
+    this.shore = wet && floatRT ? new ShoreField(renderer, this.clip, { levels: SHORE.levels.filter((l) => l < this.q.levels) }) : null;
+    this.uShoreWave = { value: new THREE.Vector4(0, 8, 0, 8) }; // the swell's and the wind sea's (Hs, Tp): set from the wave field each frame
+    this.uShoreSea = { value: source.sea };
+    this.terrain = makeTerrain(this.clip, { sea: wet ? source.sea : 0, paving: source.kind === 'sting', shore: wet ? 1 : 0, snowLine: wet ? 215 : 1e9, shoreField: this.shore, uShoreWave: this.uShoreWave, uShoreSea: this.uShoreSea });
     this.group = new THREE.Group(); this.group.name = 'world2';
     this.group.add(this.terrain.mesh);
     this.uniforms = this.terrain.uniforms;
@@ -88,7 +94,7 @@ export class World {
     this.group.add(this.grass.group);
     this.rain = new Rain(this); this.group.add(this.rain.mesh);
     this.post = new Post(renderer, this.sky, { msaa: this.q.msaa, scale: this.q.scale });
-    this.post.U.uSea.value = source.sea;
+    this.post.U.uSea.value = source.sea; this.post.U.uShoreWave = this.uShoreWave; this.post.U.uShoreSea = this.uShoreSea;
     if (opts.lens) { const L = opts.lens, U = this.post.U; if (L.fstop) U.uFstop.value = L.fstop; if (L.maxCoc) U.uMaxCoc.value = L.maxCoc; if (L.focal) U.uFocal.value = L.focal; if (L.sensor) U.uSensor.value = L.sensor; }
     if (source.sea < -1e5) this.post.U.uWaterOn.value = 0;
     this._water();
@@ -112,7 +118,7 @@ export class World {
       this.waves = new WaveField(gl, { cascades: W.cascades, fetch: W.fetch, N: this.q.waveN, salt: this.source.cosmetic | 0, float });
       if (this.source.sea > -1e5 && this.q.caustics) this.caustics = new Caustics(gl, this.waves, this.clip.glsl(), this.clip.uniforms, { res: this.q.caustics[0], grid: this.q.caustics[1], msaa: this.q.msaa ? 4 : 0 });
     }
-    this.post.setWater(this.waves, this.caustics, this.source.sea > -1e5 ? this.clip : null);
+    this.post.setWater(this.waves, this.caustics, this.source.sea > -1e5 ? this.clip : null, this.shore);
     // the shore reads the first two cascades for its swash (terrain.js)
     const TU = this.terrain.uniforms;
     if (this.waves && this.source.sea > -1e5) {
@@ -155,8 +161,8 @@ export class World {
   setSource(source, x = 0, z = 0) {
     this.source = source;
     this._bodyMemo = null; // a new world: its water bodies afresh
-    this.clip.setSource(source);
-    this.post.U.uSea.value = source.sea; this.post.U.uWaterOn.value = source.sea < -1e5 ? 0 : 1;
+    this.clip.setSource(source); if (this.shore) this.shore.rebake();
+    this.post.U.uSea.value = source.sea; this.post.U.uWaterOn.value = source.sea < -1e5 ? 0 : 1; this.uShoreSea.value = source.sea;
     this._water();
     this.group.remove(this.forest.group);
     this.forest = new Forest(this, { range: this.q.trees, far: this.q.far });
@@ -168,12 +174,13 @@ export class World {
   // twice; userData.ring is the flag game.js already skips
   _mark() { this.group.traverse((o) => { o.userData.ring = true; o.userData.world2 = true; }); }
   set(o) { Object.assign(this.env, o); }
-  build(x, z) { this.clip.build(x, z); }
+  build(x, z) { this.clip.build(x, z); if (this.shore) this.shore.update(); }
   update(dt, eye, focusDist = 10) {
     const E = this.env, U = this.post.U;
     this.time += dt;
     this.eye.copy(eye); this.focusDist = focusDist;
     this.clip.update(eye.x, eye.z, dt, this.source.glsl ? 0 : 3);
+    if (this.shore) { this.timer.begin('shore'); this.shore.update(); this.timer.end(); }
     // the weather and the season from the clock (the template); the game sets these fields itself (auto: false)
     const S = this.season = seasonAt(E.day ?? 100);
     if (E.auto) {
@@ -235,7 +242,12 @@ export class World {
       this.waves.update(this.time, w10, Math.PI / this._dtAvg);
       const st = this.waves.state;
       // the run-up's sea state: significant height H0 and the deep-water wavelength L0 of the peak period (2 pi g / w^2)
-      if (this.source.sea > -1e5) { const wp = Math.sqrt(9.81 * st.kp + WAVES.T * st.kp ** 3); this.terrain.uniforms.uRun.value.set(this.waves.stats.Hs * 2 * Math.PI * 9.81 / (wp * wp), this.waves.stats.Hs); }
+      if (this.source.sea > -1e5) {
+        const wp = Math.sqrt(9.81 * st.kp + WAVES.T * st.kp ** 3); this.terrain.uniforms.uRun.value.set(this.waves.stats.Hs * 2 * Math.PI * 9.81 / (wp * wp), this.waves.stats.Hs);
+        // the shore waves (shorefield.js): the sea's swell from the long fetch, a lake's from the local wind sea
+        const sw = swellState(st.U10, this.source.water.swellFetch || this.source.water.fetch);
+        this.uShoreWave.value.set(sw.Hs, Math.max(1.5, sw.Tp), this.waves.stats.Hs, Math.max(1.5, 2 * Math.PI / wp));
+      }
       U.uWLost.value = this.waves.lostSlope; U.uWPeak.value = Math.min(2 * Math.PI / WAVES.km, 2 * Math.PI / st.kp); // the ripples at the gravity-capillary minimum, or the peak if shorter
       if (this.caustics) {
         const fx2 = eye.x + TMPV.x * focusDist, fz2 = eye.z + TMPV.z * focusDist, size = THREE.MathUtils.clamp(focusDist * 2.2, 6, 96);

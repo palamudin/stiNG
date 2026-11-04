@@ -139,6 +139,70 @@ by dither-free snapping; a real GPU will show whether the step reads).
 if it wants the seasons (the sim has its own season, GDD 6.4: map it to `day`).
 
 
+## W3.1: the shore, as a table
+
+The water met the sand as a cut: the shore profile pushed the ground away from the water line on both sides (a 1:4
+slope at the line, then a 2.4 m shelf drop within two metres of depth), and the water drew its full open-sea waves up
+to the line with nothing between. Now:
+
+**The beach profile** (`sources/wild.js`). The height above the water line is scaled by a factor that is `beach`
+(0.3) at the line and 1 again 2.5 m above or below it, so the sand crosses the line at a third of the land's slope and
+runs on under the water as a shallow shelf where the floor shows through; the drop (`shelf`) begins at 1.5 m of
+depth. The scaling keeps the sign, so the water line is exactly where it was and no puddles appear. A lake's bowl is
+`(1 - q^2)^2` of its depth, shallow over its outer third. At the template's start: 0.23 m deep 2 m out, 0.42 m at 4 m,
+0.98 m at 10 m (a node check).
+
+**The shore table** (`shorefield.js`). Everything the water and the beach need to know about the water line is baked
+once and read as a table, per texel of three clipmap levels (2 m texels round the eye, 16 m to 500 m, 64 m to 2 km):
+the signed distance to the water line in metres, the unit direction to the nearest point of the line, and a shallow
+water front's travel time from the line (the straight line to the nearest shore point at `sqrt(g depth)`, depth clamped
+to 0.3..14 m; negative up the beach at the swash's speed). Baked on the GPU by jump flooding from the clipmap's own
+texels: a seed pass finds the crossings between neighbouring texels at sub-texel accuracy, seven flood passes spread
+the nearest seed over the 128² window, a last pass writes the table at the clipmap's own toroidal address. A level is
+baked again only when its window moves (every few texels of travel); nothing per frame computes a shoreline. The
+precision is the texel count: the fine slot puts the line within a few decimetres where the swash is drawn.
+
+**The shore waves** (`SHORE_WAVE_GLSL`, read by `water.js` and `terrain.js`). Two trains (the peak period and 0.62
+of it) of narrow-crested shallow-water waves ride the table: phase `w (t + tau)`, wavenumber `w / sqrt(g depth)`, so
+crests slow and bunch toward the line; Green's law raises them as the water shoals, a wave higher than 0.78 of the
+depth breaks (McCowan 1894) and runs on as a bore; whitewater on a broken crest's face, trailing off behind it, lace in
+the surf zone; sets by a slow noise, a phase that wanders along the coast so crests are not rings. The sea gets the
+swell of a 40 km fetch (JONSWAP fetch relations, under the fully developed limits, `waves.js swellState`: 1.23 m and
+4.9 s at 12 m/s), a lake only what its own wind raised over 600 m (0.15 m); the water's level tells which. The open
+water's cascades fade as the floor comes up (the long waves first; the chop reaches the beach). Foam is one pattern of
+three scales, covered to a share set by the foam's strength, so a crest is nearly solid and the lace sparse; the thin
+water at the very edge foams in patches, more where the waves work.
+
+**The swash** (`terrain.js`). The beach reads the same table and phase: the front that broke out there arrives at the
+line and climbs the sand at the table's travel time (1.7 m/s up the beach), sits for half a period and drains from the
+top down, its leading edge a line of bubbles; the sand is wet to the run-up limit (Stockdon et al. 2006, as before)
+and damp a little above. Without a table (a source without water) the swash reads the waves as in W2.
+
+**The glints' Poisson draw** (`water.js`). The count of mirror facets a cell draws came from summing the Poisson
+series per cell per pixel (up to forty terms, twice); it is now a 128 x 256 table of the inverse distribution (rows by
+the mean on a square-root scale to 12, columns by the uniform draw), computed once; a pixel reads one texel. Row means
+are within 1.5% of their lambda (a node check). Means past 12 keep the normal approximation.
+
+**Checks.** `node world/test/world.test.mjs`: the beach profile, the swell state, the Poisson table (35 checks pass).
+`world/test/shore-parity.html`: the GPU table's fine slot against a brute-force nearest crossing on the CPU over its
+16,384 texels (176 crossings): every texel within half a texel (max 0.30 m), signs agree everywhere, the direction
+agrees at 98.3% of texels a texel or more from the line (the rest sit on ties between two shore points), the travel
+time within 13% of a 32-step integral (the bake marches 8). `world/test/gpu-parity.html` with the new profile: height
+within 1.3 cm (seed 7), 0.1 cm (99), 2.9 cm (1234: one point of 4,096 over 2 cm, the lake trigonometry in float32).
+Renders: the beach from the sand, from above, the surf
+zone and a storm. Not verified: the timings of the bake on a real GPU (`shore` in the per-pass stats; it runs only
+when a window moves), the swash in motion.
+
+**Known limits (W3.1).**
+- The travel time is along the straight line to the nearest shore point: fronts do not refract round headlands or
+  bars as a solved eikonal would (Ultra-Water sweeps one); on a straight beach it is the same.
+- A source filled on the CPU (the composite) has only the sea's water line in its table: its lakes' levels are not
+  in the clipmap's water channel there.
+- The shore waves lift the water's surface but do not move it sideways (no Gerstner lean): a plunging lip is not
+  drawn, the bore is.
+- The far slots (16 m and 64 m texels) place the line to a few metres: foam lines on a far coast sit within that.
+- The caustics are splatted from the open water's cascades, undamped in the shallows.
+
 ## Water (W2)
 
 One wave field drives every water surface: the lakes of the wild world and the game's birdbaths, fountains and puddles.
