@@ -350,11 +350,11 @@ vec2 shoreState(float level) { return level > uShoreSea + 0.5 ? uShoreWave.zw : 
 float shoreCelerity(float depth) { return sqrt(SW_G * clamp(depth, ${SHORE.dMin.toFixed(2)}, ${SHORE.dMax.toFixed(1)})); }
 float shorePhaseNoise(vec2 p) { return w2noise(p / 240.0, 611) * 5.0 + w2noise(p / 70.0, 612) * 1.6; }
 float shoreGroup(vec2 p, float t) { return 0.45 + 0.55 * (0.5 + 0.5 * w2noise(p / 320.0 + vec2(t * 0.012, -t * 0.009), 613)); }
-struct ShoreWave { float y; vec2 slope; float foam; float lace; float a; float ph; float breaking; };
+struct ShoreWave { float y; vec2 slope; float foam; float lace; float a; float ph; float breaking; float surf; }; // surf: the standing foam of a surf zone, by how often waves break there
 // p: the point (xz); sh: shoreAt(p); depth: the water's depth there (<= 0 on land); t: time; cell: the sampling
 // interval in metres (a train shorter than a few cells fades out instead of aliasing)
 ShoreWave shoreWaves(vec2 p, vec4 sh, float depth, float t, float cell, vec2 st) {
-  ShoreWave o = ShoreWave(0.0, vec2(0.0), 0.0, 0.0, 0.0, 0.0, 0.0);
+  ShoreWave o = ShoreWave(0.0, vec2(0.0), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
   if (st.x <= 0.0 || depth <= -0.3) return o;
   float know = gShoreKnow, coh = know > 0.0 ? length(sh.yz) : 0.0;
   vec2 dir = coh > 1e-4 ? sh.yz / coh : vec2(0.0);
@@ -387,7 +387,12 @@ ShoreWave shoreWaves(vec2 p, vec4 sh, float depth, float t, float cell, vec2 st)
     float psi = mod(ph + 3.14159, 6.2831853) - 3.14159;
     // whitewater on the broken crest's face, trailing off behind it: a line that rides the crest to the sand
     o.foam += breaking * smoothstep(-0.7, 0.0, psi) * exp(-max(psi, 0.0) * 1.3);
-    if (i == 0) { o.a = a; o.ph = ph; o.breaking = breaking; o.lace = breaking * 0.3 * exp(-mod(ph, 6.2831853) * 0.45); } // lace in patches behind each crest, a third of its white, gone before the next
+    if (i == 0) {
+      o.a = a; o.ph = ph; o.breaking = breaking; o.lace = breaking * 0.3 * exp(-mod(ph, 6.2831853) * 0.45); // lace in patches behind each crest, a third of its white, gone before the next
+      // the surf zone's standing foam: where waves break often (the unbroken height against the depth, past the
+      // break point) the water carries foam between crests too, more toward the line
+      o.surf = smoothstep(0.26, 0.55, rel) * smoothstep(0.03, 0.15, a0) * (0.55 + 0.45 * smoothstep(0.55, 1.2, rel));
+    }
   }
   return o;
 }

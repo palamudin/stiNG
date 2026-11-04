@@ -66,6 +66,7 @@ export function makeTerrain(clip, opts = {}) {
     uGrassR: { value: 0 },  // how far the grass blades reach round the camera (grass.js); the lawn's thatch lies under them
     tCloudShadow: { value: null }, uCloudRect: { value: new THREE.Vector4(0, 0, 1, 0) }, // the clouds' shadow map round the camera (clouds.js)
     uGrassTint: { value: new THREE.Vector3(1, 1, 1) }, uSnowOn: { value: 0 }, // the season's grass colour and snow (seasons.js)
+    uRunup: { value: new THREE.Vector4(0, 5, 0, 0) },
   };
   const shore = opts.shoreField; // the shore table (shorefield.js), for the swash; without it the swash reads the waves
   if (shore) Object.assign(U, shore.uniforms, { uShoreWave: opts.uShoreWave || { value: new THREE.Vector4(0, 8, 0, 8) }, uShoreSea: opts.uShoreSea || { value: opts.sea ?? 0 } });
@@ -88,6 +89,7 @@ export function makeTerrain(clip, opts = {}) {
     sh.vertexShader = VERT_HEAD + sh.vertexShader.replace('#include <begin_vertex>', VERT_BODY);
     sh.fragmentShader = `${CLIP}\n${NOISE_GLSL}\n${SHORE}\n${WEAR_GLSL}\n${TERRAIN_SHADE_GLSL}
 uniform float uSea, uShadowFar, uTreeFar, uPaving, uTime, uWet, uShore, uSnowLine, uGrassR, uSnowOn; uniform vec3 uSunDir, uGrassTint;
+uniform vec4 uRunup; // the fallback run-up band (no shore table): swell height, period, on
 varying vec3 vW;
 float hfShadow(vec2 p, float h0, float dist) {
   // march toward the sun through the clipmap; soft by the closest miss (Quilez's penumbra trick)
@@ -165,6 +167,23 @@ float hfShadow(vec2 p, float h0, float dist) {
     vec2 ws = SHORE_BEACH == 1 ? shoreWet(P, shoreAt(P), hgt, TN, uTime, shoreState(TW)) : vec2(1.0 - smoothstep(-0.01, 0.03, hgt), 0.0);
     wetB = ws.x; col *= 1.0 - 0.4 * wetB; // wet sand: water in the pores roughly halves what the grains send back
     TROUGH_WET = mix(1.0, 0.5, ws.y);     // damp sand is damp-shiny; the sheet of water over it is the mirror
+  }
+#else
+  // no shore table (a device without float render targets): a simple run-up band on the same wave clock — a tongue
+  // climbing to the run-up limit for this slope and the swell (held to the crest's height) and draining back, a foam
+  // lip at its edge, the sand wet to its reach
+  if (uShore > 0.5 && uRunup.z > 0.5 && hgt > -0.5 && hgt < 3.0) {
+    float tb = sqrt(max(1.0 - TN.y * TN.y, 0.0)) / max(TN.y, 0.05), L0 = 9.81 * uRunup.y * uRunup.y / 6.2831853, HL = uRunup.x * L0;
+    float R2 = min(1.1 * (0.35 * tb * sqrt(HL) + 0.5 * sqrt(HL * (0.563 * tb * tb + 0.004))), 0.575 * uRunup.x);
+    float ph = uTime / uRunup.y + 0.6 * w2noise(P / 40.0, 630) + 0.2 * w2noise(P / 6.0, 631), f = fract(ph);
+    float reach = R2 * (0.6 + 0.4 * (0.5 + 0.5 * w2noise(P / 9.0 + floor(ph) * 3.1, 632)));
+    float lvl = reach * 4.0 * f * (1.0 - f);                       // up and back at one pace
+    float film = 1.0 - smoothstep(lvl - 0.004, lvl + 0.004, hgt);
+    wetB = 1.0 - smoothstep(reach * 0.95, reach * 1.05, hgt);       // wet to this tongue's reach
+    col *= (1.0 - 0.4 * wetB) * (1.0 - 0.15 * film);
+    float lip = (1.0 - smoothstep(0.0, 0.01, abs(hgt - lvl))) * step(0.004, lvl) * smoothstep(-0.1, 0.5, w2noise(P / 0.3 + uTime * 0.2, 633) + 0.2);
+    col = mix(col, vec3(0.75), lip * 0.8);
+    TROUGH_WET = mix(1.0, 0.25, film * (1.0 - lip));
   }
 #endif
   // stone on steep ground, in soft blocks

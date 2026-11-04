@@ -68,8 +68,8 @@ export class World {
     // the shore table (shorefield.js): baked from the clipmap when its levels move; the water and the beach read it
     const floatRT = renderer.capabilities.isWebGL2 && !!renderer.extensions.get('EXT_color_buffer_float');
     // opts.shore 'live': no table, the shore computed per pixel (the comparison; shorefield.js shoreLive)
-    this.shoreMode = opts.shore === 'live' ? 'live' : 'table';
-    this.shore = wet && floatRT ? (this.shoreMode === 'live' ? null : new ShoreField(renderer, this.clip, source)) : null;
+    this.shoreMode = opts.shore === 'live' ? 'live' : opts.shore === 'none' ? 'none' : 'table'; // 'none': as a device without float targets (the fallback band)
+    this.shore = wet && floatRT && this.shoreMode === 'table' ? new ShoreField(renderer, this.clip, source) : null;
     this.uShoreWave = { value: new THREE.Vector4(0, 8, 0, 8) }; // the swell's and the wind sea's (Hs, Tp): set from the wave field each frame
     this.uShoreSea = { value: source.sea };
 
@@ -247,6 +247,7 @@ export class World {
         // the shore waves (shorefield.js): the sea's swell from the long fetch, a lake's from the local wind sea
         const sw = swellState(Math.max(st.U10, WAVES.swellMin), this.source.water.swellFetch || this.source.water.fetch);
         this.uShoreWave.value.set(Math.max(WAVES.swellHmin, sw.Hs), Math.max(WAVES.swellTmin, sw.Tp), this.waves.stats.Hs, Math.max(1.5, 2 * Math.PI / wp));
+        this.terrain.uniforms.uRunup.value.set(this.uShoreWave.value.x, this.uShoreWave.value.y, this.shore ? 0 : 1, 0); // the fallback band, when there is no shore table
       }
       U.uWLost.value = this.waves.lostSlope; U.uWPeak.value = Math.min(2 * Math.PI / WAVES.km, 2 * Math.PI / st.kp); // the ripples at the gravity-capillary minimum, or the peak if shorter
       if (this.caustics) {

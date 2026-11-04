@@ -29,7 +29,7 @@ const camera = new THREE.PerspectiveCamera(55, 1, 0.005, 60000);
 
 // the shore by table (the default) or by live calculation per pixel, for the comparison: ?shore=live, or a page that
 // sets window.__SHORE_MODE before this script
-const SHORE_MODE = (new URLSearchParams(location.search).get('shore') || window.__SHORE_MODE || 'table') === 'live' ? 'live' : 'table';
+const SHORE_MODE = ((m) => (m === 'live' || m === 'none' ? m : 'table'))(new URLSearchParams(location.search).get('shore') || window.__SHORE_MODE || 'table');
 const state = { source: 'wild', seed: 7, tod: 16.6, day: 100, weather: 'auto', zoom: 0.42, blocky: 0.6, fog: 1, wet: 0, wind: 5, fstop: 2.8, quality: 'high', ui: true };
 let world = null, src = null;
 

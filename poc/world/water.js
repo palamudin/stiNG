@@ -217,9 +217,9 @@ vec3 wUnder(vec3 floorCol, float D, float L, float cz) {
 vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, float dist, vec3 sceneCol, float bodyK, float bodyD, vec3 bodyC, float bodyR) {
   vec3 V = -v; float tw = length(P - uCamPos);
   float fp = sqrt(max(length(gx) * length(gy), 1e-12));
-  wDamp = vec4(1.0); float swFoam = 0.0, swLace = 0.0, cloud = 1.0; vec2 swSlope = vec2(0.0);
+  wDamp = vec4(1.0); float swFoam = 0.0, swLace = 0.0, swSurf = 0.0, cloud = 1.0; vec2 swSlope = vec2(0.0);
 #ifdef W_SHORE
-  if (bodyK == 0.0) { wDamp = gDampSea; swSlope = gSW.slope; swFoam = gSW.foam; swLace = gSW.lace; }
+  if (bodyK == 0.0) { wDamp = gDampSea; swSlope = gSW.slope; swFoam = gSW.foam; swLace = gSW.lace; swSurf = gSW.surf; }
   if (bodyK == 3.0) wDamp = gDampSea; // the swash sheet: glassy, the chop damped for its thickness
   cloud = shoreCloud(P.xz); // the clouds' shadow: the sun's share of the light here
 #endif
@@ -330,6 +330,11 @@ vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, floa
     float wf = clamp(swFoam, 0.0, 1.0), lf = clamp(swLace, 0.0, 1.0);
     fm = max(fm, smoothstep(1.0 - 0.75 * wf, 1.15 - 0.75 * wf, pat) * (0.6 + 0.4 * wf));
     fm = max(fm, smoothstep(1.0 - 0.5 * lf, 1.1 - 0.5 * lf, pat) * 0.45);
+    // the surf zone's standing foam: patches of bubbles and thin scum that never quite clear between crests, drifting
+    // slowly, a bed under the crests' own white
+    float sp = 0.5 + 0.5 * (w2noise(x0 / 2.4 + vec2(uTime * 0.03, -uTime * 0.02), 626) * 0.55 + w2noise(x0 / 0.6 - vec2(uTime * 0.06, 0.0), 627) * 0.3 + w2noise(x0 / 0.15, 628) * 0.15);
+    float sf = clamp(swSurf, 0.0, 1.0);
+    fm = max(fm, smoothstep(0.95 - 0.45 * sf, 1.05 - 0.45 * sf, sp) * (0.25 + 0.3 * sf));
   }
   col = mix(col, amb * 0.9 + uSunColor * sunUp * 0.25 * cloud, fm * 0.7);
   if (uDebug > 1.5 && uDebug < 5.5) col = vec3(D / 3.0, F, ss.a) * 2.0;
