@@ -134,7 +134,7 @@ export function stingSource(sim) {
   }
   function sample(x, z, out = [0, 0, 0, 0], cell = 0) {
     const fine = cell <= 1;
-    out[0] = groundAt(seed, x, z, settings);
+    out[0] = groundAt(seed, x, z, settings, cell > 1); // coarse texels leave out the small footings (GDD 18.75): they would generate every far chunk
     out[1] = pondWet(x, z, landBlend(x, z, MOIST));
     out[2] = fine ? shade(x, z) : landBlend(x, z, FOREST);
     const pv = paving(x, z) || (fine ? pondPath(x, z) : 0);

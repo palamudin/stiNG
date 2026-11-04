@@ -851,7 +851,8 @@ function syncChunks() {
 function swayTrees(time) {
   SWAY.uWind.value.set(sim.wind.x, sim.wind.z); SWAY.uTime.value = time;
   SWAY.uSunDir.value.copy(sun.position).sub(sun.target.position).normalize(); SWAY.uSunCol.value.copy(sun.color).multiplyScalar(Math.min(1, sun.intensity / 2.1));
-  const fx = camera.position.x, fz = camera.position.z, R = NEAR_DRAW + 46; // a chunk's corner is 45 m from its middle
+  // measured from the wasp (or the map's focus), in the sim's frame: World v3 draws with its own camera frame
+  const fw = ov.on ? null : sim && (sim._driven() || sim.wasp || sim.nest), fx = ov.on ? ov.fx : fw ? fw.x : 0, fz = ov.on ? ov.fz : fw ? fw.z : 0, R = NEAR_DRAW + 46; // a chunk's corner is 45 m from its middle
   for (const g of chunkViews.values()) { const d = g.userData.dyn, k = g.userData.key, cx = d.cx, cz = d.cz; d.near.visible = (cx - fx) * (cx - fx) + (cz - fz) * (cz - fz) < R * R; }
 }
 
@@ -3692,7 +3693,9 @@ function w2Frame(dt, focus) {
   // hour is the game's own clock
   const W = sim.weatherToday, storm = W.kind === 'storm' && sim.raining ? 1 : 0;
   const cloud = sim.raining ? 0.8 + 0.15 * storm : W.rain ? 0.55 : W.kind === 'heat' ? 0.1 : W.kind === 'cold' ? 0.45 : 0.3;
-  const day = sim.winter ? 300 : Math.min(269, Math.max(0, sim.seasonFrac * 270));
+  // World v3's year opens in late winter (snow until t 0.06), greens by 0.08, turns from 0.55, bare and snowy past 0.76:
+  // the colony's spring-to-autumn runs over t 0.08..0.78 of it, its winter at 0.9
+  const day = 360 * (sim.winter ? 0.9 : 0.08 + 0.7 * Math.min(1, Math.max(0, sim.seasonFrac)));
   world2.set({ map: ov.m, hour: md / 60, day, cloud, rain, storm, snow: 0, haze: 1 + rain, mist: 1 + 3 * rain, wet: rain, wind: w2Breeze(wd), wind10: [wd.x * 1.26, wd.z * 1.26] });
   const fy = focus ? terrAt(focus.x, focus.z) : 0;
   const fd = focus ? Math.max(0.05, Math.hypot(camera.position.x - focus.x, camera.position.y - focus.y - fy, camera.position.z - focus.z)) : 10;

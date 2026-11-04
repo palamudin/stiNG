@@ -2370,6 +2370,10 @@ It is in the rules hash only when set, so standard worlds keep their hash. It is
 - **The classic look** draws the moon's disc and 1,400 stars.
 - **World v3** draws its own sky. The game's people, houses and trees take the moonlight in both looks; World v3's own ground and grass do not yet. That needs the moon in its sky and lighting, a request to the world thread.
 
+**Fixed after the merge (18.81).**
+- **Small things vanished up close in World v3.** Picnic tables, legs, cups and bee boxes were culled by their distance from the camera's position, which World v3 keeps in its own frame. They now go by the wasp, or by the map's focus when zoomed out.
+- **The first load of a hilly world was slow in World v3.** Its far ground is filled on the CPU, and every coarse sample was generating whole chunks just to level picnic-table footings. A coarse sample now leaves the footings out: they are a metre or two, below what a coarse texel shows. This took a 32 m sample on a hilly world from 164 µs to 18 µs.
+
 ---
 
 ## 19. Feature tiers and the current stack
@@ -2473,7 +2477,7 @@ World v3 replaces v2 behind the same seam, in `poc/world/` only; `poc/world/WORL
 **Plugged in.** The game's `w2Frame` now passes the sim's own weather and season, not the template's:
 - **Cloud cover** from the day's weather: about 0.3 normally, 0.55 on a day it will rain, 0.8 while it rains, 0.95 in a storm, 0.1 in a heat spell and 0.45 in a cold one.
 - **Rain and storm** while the sim's rain falls.
-- **The day of the year:** spring to autumn across the colony's year, then winter.
+- **The day of the year:** the colony's spring to autumn over World v3's own (its t 0.08 to 0.78), its winter at 0.9. World v3's year opens with the tail of winter (snow, bare trees, frozen water), so a mapping from 0 had buried the grass at the start of a game.
 - **The hour:** the game's clock, so the sun follows the real seasonal track.
 
 **Not plugged in yet.**

@@ -567,26 +567,29 @@ export function settledOf(seed, settings) {
   return { R, S, site, R0, R1: R0 + WILD.band };
 }
 const WO = [0, 0, 0, 0, 0];
-export function groundAt(seed, x, z, settings) {
+// coarse (the drawing's far ground only, never the sim): leave out the footings of small things, which would generate
+// every chunk the far ground passes over; a footing is a metre or two, below what a coarse texel shows
+export function groundAt(seed, x, z, settings, coarse = false) {
   if (settings && settings.settled) {
     const I = settledOf(seed, settings), r = Math.sqrt(x * x + z * z);
     if (r >= I.R1) return wildAt(I.S, x + I.site.x, z + I.site.z, WO)[0];
-    const hs = groundSim(seed, x, z, settings) + I.site.h;
+    const hs = groundSim(seed, x, z, settings, coarse) + I.site.h;
     if (r <= I.R0) return hs;
     const k = smooth(Math.min(1, (r - I.R0) / (I.R1 - I.R0)));
     return hs + (wildAt(I.S, x + I.site.x, z + I.site.z, WO)[0] - hs) * k;
   }
-  return groundSim(seed, x, z, settings);
+  return groundSim(seed, x, z, settings, coarse);
 }
 // the wild land at (x, z) of a settled world, in the sim's coordinates: [height, moisture, forest, trail, water level]
 export function wildHere(seed, x, z, settings, out = [0, 0, 0, 0, 0]) {
   const I = settledOf(seed, settings);
   return wildAt(I.S, x + I.site.x, z + I.site.z, out);
 }
-function groundSim(seed, x, z, settings) {
+function groundSim(seed, x, z, settings, coarse) {
   const terrain = settings ? settings.terrain || 0 : 0;
   if (!terrain) return 0;
   let h = groundBase(seed, x, z, settings, terrain);
+  if (coarse) return h;
   const Gr = T.terrain.grade, M = Gr.reach, c0x = chunkOf(x - M), c1x = chunkOf(x + M), c0z = chunkOf(z - M), c1z = chunkOf(z + M);
   for (let cz = c0z; cz <= c1z; cz++) for (let cx = c0x; cx <= c1x; cx++) {
     for (const p of footingsOf(seed, cx, cz, settings)) {
