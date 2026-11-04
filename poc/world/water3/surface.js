@@ -41,6 +41,7 @@ import { SWASH_GLSL, SURF_GLSL } from './swash.js';
 import { SurfFoam } from './surffoam.js';
 import { bakeFoamTexture } from './foamtex.js';
 import { FoamField } from './foamfield.js';
+import { CurlMesh } from './curl.js';
 import { SHORE } from '../shorefield.js';
 
 export const SURFACE = {
@@ -468,6 +469,9 @@ void main() {
     this.foam = shore ? new SurfFoam(world, this) : null;
     // the foam that lasts and travels (water3/foamfield.js): made by whitecaps and breakers, carried in, lingering
     this.field = new FoamField(world, this); Object.assign(U, this.field.read);
+    // the breakers' curl over it (water3/curl.js): a mesh of its own, where there is a shore table
+    this.curl = shore ? new CurlMesh(world, this) : null;
+    if (this.curl) this.scene.add(this.curl.mesh);
     if (this.foam) this.scene.add(this.foam.streaks, this.foam.billows);
     this._t = null;
   }
@@ -484,5 +488,5 @@ void main() {
     const dt = this._t === null ? 0 : Math.min(Math.max(time - this._t, 0), 0.25); this._t = time;
     if (wind) U.uDrift.value.x += wind[0] * 0.6 * dt, U.uDrift.value.y += wind[1] * 0.6 * dt; // gusts run at about the wind's pace
   }
-  dispose() { this.mesh.geometry.dispose(); this.mat.dispose(); if (this.foam) this.foam.dispose(); this.foamRT.dispose(); this.field.dispose(); }
+  dispose() { this.mesh.geometry.dispose(); this.mat.dispose(); if (this.foam) this.foam.dispose(); this.foamRT.dispose(); this.field.dispose(); if (this.curl) this.curl.dispose(); }
 }

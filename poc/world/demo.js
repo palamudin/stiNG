@@ -209,6 +209,7 @@ const WCTL = {};
     ['wavelength', 'Wavelength', 8, 60, 0.5, (v) => v.toFixed(1) + ' m'],
     ['speed', 'Speed', 0.3, 2, 0.01],
     ['steepness', 'Steepness', 0, 1.5, 0.01],
+    ['curl', 'Curl', 0, 2, 0.01],
     ['foam', 'Foam charge', 0, 2, 0.01],
     ['foamSize', 'Foam size', 0.1, 4, 0.01],
     ['foamAmount', 'Foam amount', 0, 1, 0.01],
