@@ -383,7 +383,9 @@ ShoreWave shoreWaves(vec2 p, vec4 sh, float depth, float t, float cell, vec2 st)
     float early = w2noise(p / 30.0 + vec2(cycle * 7.3, cycle * 3.1 + float(i) * 31.0), 614);
     // a wave breaks when its height passes 0.78 of the depth (a0 past 0.39 depth), early or late along the crest; the
     // short train never does: the crest of the swell is the one that crashes
-    float breaking = i == 0 ? smoothstep(0.33 + 0.08 * early, 0.45 + 0.1 * early, rel) * smoothstep(0.03, 0.15, a0) : 0.0;
+    // spilling from a depth about 4x the wave's height (tekano/shoreline's measure on a flat beach), and broken all
+    // the way in from there: the saturated surf zone
+    float breaking = i == 0 ? smoothstep(0.17 + 0.06 * early, 0.32 + 0.08 * early, rel) * smoothstep(0.03, 0.15, a0) : 0.0;
     float psi = mod(ph + 3.14159, 6.2831853) - 3.14159;
     // whitewater on the broken crest's face, trailing off behind it: a line that rides the crest to the sand
     o.foam += breaking * smoothstep(-0.7, 0.0, psi) * exp(-max(psi, 0.0) * 1.3);
@@ -391,7 +393,7 @@ ShoreWave shoreWaves(vec2 p, vec4 sh, float depth, float t, float cell, vec2 st)
       o.a = a; o.ph = ph; o.breaking = breaking; o.lace = breaking * 0.3 * exp(-mod(ph, 6.2831853) * 0.45); // lace in patches behind each crest, a third of its white, gone before the next
       // the surf zone's standing foam: where waves break often (the unbroken height against the depth, past the
       // break point) the water carries foam between crests too, more toward the line
-      o.surf = smoothstep(0.26, 0.55, rel) * smoothstep(0.03, 0.15, a0) * (0.55 + 0.45 * smoothstep(0.55, 1.2, rel));
+      o.surf = smoothstep(0.17, 0.45, rel) * smoothstep(0.03, 0.15, a0) * (0.55 + 0.45 * smoothstep(0.45, 1.2, rel));
     }
   }
   return o;

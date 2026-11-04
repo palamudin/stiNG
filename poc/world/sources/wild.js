@@ -29,8 +29,13 @@ export const WILD = {
   roll: 22, rollCell: 520, // rolling hills: metres, cell
   beach: 0.3,      // the shore's slope at the water line, as a share of the land's own: the sand runs out under the water
   beachBand: 2.5,  // metres above and below the line over which the slope comes back to the land's
-  shelf: 2.4,      // metres the floor drops past the shallows
+  shelf: 2.4,      // metres a lake's floor drops past its shallows
   shelfAt: 1.5,    // metres of depth where that drop begins (over 2 m more)
+  // the sea's surf platform (W3.1): a dissipative nearshore — the floor shelves at surfK of the land's slope for the
+  // first surfD metres of depth, then rejoins it smoothly, so a coast of 1:30 has a platform of about 1:100 some 180 m
+  // wide where the waves spill and stay broken all the way in; a sandbar on it at barAt metres, up to bar metres high,
+  // with gaps along the shore (rip channels) where it fades
+  surfK: 0.3, surfD: 6, bar: 0.5, barAt: 1.1, barW: 0.35, barCell: 110,
   contCell: 9000,
   step: 5,         // metres between ledges on mountains
   riverCell: 2600,
@@ -129,7 +134,16 @@ export function wildSample(P, x, z, out = [0, 0, 0, 0, 0]) {
   // and the floor drops away only past them. The scaling keeps the sign of the height, so the water line itself is
   // where it was and no puddles appear
   h += (hlo - h) * (1 - smoothstep(1.5, 5, Math.abs(hlo - wl)));
-  { const e = h - wl, k = W.beach + (1 - W.beach) * smoothstep(0, W.beachBand, Math.abs(e)); h = wl + e * k; if (e < 0) h -= W.shelf * smoothstep(W.shelfAt, W.shelfAt + 2, -e * k); }
+  {
+    const e = h - wl;
+    if (wl === P.sea && e < 0) { // the sea's floor: the surf platform and its bar
+      const d = -e, K = W.surfK, sm = (q) => 0.5 * (q + Math.sqrt(q * q + 4));
+      let d2 = K * d + (1 - K) * (sm(d - W.surfD) - sm(-W.surfD));
+      vnoised(x / W.barCell, z / W.barCell, ss(S, 81), N); const bar = W.bar * smoothstep(-0.25, 0.35, N[0]);
+      const d3 = d2 - bar * Math.exp(-(((d2 - W.barAt) / W.barW) ** 2));
+      h = wl - Math.max(d3, Math.min(d2, 0.3)); // the bar's crest stays under water
+    } else { const k = W.beach + (1 - W.beach) * smoothstep(0, W.beachBand, Math.abs(e)); h = wl + e * k; if (e < 0) h -= W.shelf * smoothstep(W.shelfAt, W.shelfAt + 2, -e * k); }
+  }
   // mountains: ridged noise on a continental mask
   const cont = smoothstep(-0.2, 0.45, B1[4]) * (1 - inLake);
   let r = 0, rb = 0.55, rx = (0.6 * x + 0.8 * z + 611 * w1) / W.ridgeCell, rz = (-0.8 * x + 0.6 * z - 577 * w2) / W.ridgeCell, prev = 1;
@@ -245,7 +259,18 @@ void wildSampleW(vec2 xz, out vec4 S, out float wlOut) {
     if (d < R * ${f(1 + 0.4 * W.lakeRim)}) wl = L.w;
   }
   h += (hlo - h) * (1.0 - wsmooth(1.5, 5.0, abs(hlo - wl)));
-  { float e = h - wl, k = ${f(W.beach)} + ${f(1 - WILD.beach)} * wsmooth(0.0, ${f(W.beachBand)}, abs(e)); h = wl + e * k; if (e < 0.0) h -= ${f(W.shelf)} * wsmooth(${f(W.shelfAt)}, ${f(W.shelfAt + 2)}, -e * k); }
+  {
+    float e = h - wl;
+    if (wl == wSea && e < 0.0) {
+      float d = -e, K = ${f(W.surfK)};
+      float q1 = d - ${f(W.surfD)}, q0 = -${f(W.surfD)};
+      float d2 = K * d + (1.0 - K) * (0.5 * (q1 + sqrt(q1 * q1 + 4.0)) - 0.5 * (q0 + sqrt(q0 * q0 + 4.0)));
+      float bar = ${f(W.bar)} * wsmooth(-0.25, 0.35, w2noised(vec2(x, z) / ${f(W.barCell)}, wss(81)).x);
+      float br = (d2 - ${f(W.barAt)}) / ${f(W.barW)};
+      float d3 = d2 - bar * exp(-br * br);
+      h = wl - max(d3, min(d2, 0.3));
+    } else { float k = ${f(W.beach)} + ${f(1 - WILD.beach)} * wsmooth(0.0, ${f(W.beachBand)}, abs(e)); h = wl + e * k; if (e < 0.0) h -= ${f(W.shelf)} * wsmooth(${f(W.shelfAt)}, ${f(W.shelfAt + 2)}, -e * k); }
+  }
   float cont = wsmooth(-0.2, 0.45, cn) * (1.0 - inLake);
   float r = 0.0, rb = 0.55, prev = 1.0;
   vec2 rp = vec2((0.6 * x + 0.8 * z + 611.0 * w1) / ${f(W.ridgeCell)}, (-0.8 * x + 0.6 * z - 577.0 * w2) / ${f(W.ridgeCell)});

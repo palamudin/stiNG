@@ -278,6 +278,9 @@ vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, floa
     cz = mix(1.0, clamp(1.0 / max(abs(determinant(J)), 0.35), 0.0, 2.5), exp(-tw * 0.2));
   }
   vec3 under = wUnder(floorCol, D, L, cz * cloud);
+  // the surf zone's water is churned: sand held up in it, the colour of the bottom it was lifted from, lit through
+  // the water (green-grey), by how much the waves work there
+  { float tb = clamp(swSurf, 0.0, 1.0) * 0.5; vec3 turb = vec3(0.32, 0.4, 0.27) * (uSkyUp * 0.8 + uSunColor * max(uSun.y, 0.0) * 0.6 * cloud); under = mix(under, turb, tb); }
   // ---- reflection: the scene where SSR finds it, else the sky
   vec3 R = reflect(v, n); R.y = abs(R.y);
   vec4 ss = wSSR(P, R, P.y);

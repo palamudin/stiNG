@@ -152,6 +152,15 @@ depth. The scaling keeps the sign, so the water line is exactly where it was and
 `(1 - q^2)^2` of its depth, shallow over its outer third. At the template's start: 0.23 m deep 2 m out, 0.42 m at 4 m,
 0.98 m at 10 m (a node check).
 
+**The surf platform** (`sources/wild.js`, both twins). The sea's coasts had a floor 2 m deep within 15 m of the line,
+so a swell broke in a few metres right at it. A dissipative nearshore now: under the sea the floor shelves at 0.3 of the
+land's slope for the first 6 m of depth and rejoins it smoothly (a 1:30 coast gets a 1:100 platform some 180 m wide),
+with a sandbar at about 1.1 m depth, up to 0.5 m high, fading out in gaps along the shore (rip channels) on a 110 m
+noise. Lakes keep their shelf. At the template's start: 0.29 m deep 2 m out, 1.1 m at 10 m, 1.5 m at 20 m, about 2 m
+from 40 m to 140 m, then the coast's own drop. The shore waves spill from a depth about 4x their height
+(tekano/shoreline's measure on a flat beach) and stay broken all the way in, so the platform is a surf zone of
+whitewater lines with standing foam between, and its water is churned green-grey with the sand held up in it.
+
 **The shore table** (`shorefield.js`). The water line is world data (the ground does not move), so everything the
 water and the beach need to know about it is baked once per world chunk and kept, like a chunk of the map: three
 levels of fixed chunks (128 m at 0.5 m texels, 1 km at 4 m, 4 km at 16 m), each chunk 256 texels a side, holding the
