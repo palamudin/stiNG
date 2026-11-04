@@ -132,6 +132,8 @@ void main() {
   c += (h12(vUv * uRes + fract(uTime) * 91.7) - 0.5) * uGrain + (h12(vUv * uRes + 7.1) - 0.5) / 255.0;
   oColor = vec4(c, 1.0);
 }`, U);
+    // a copy of the scene's colour for the water (water3/surface.js) to read, when there is no MSAA resolve to read
+    this.copy = pass('uniform sampler2D tColor; void main() { oColor = texture(tColor, vUv); }', U);
     this.size = new THREE.Vector2();
     this._alloc(1, 1);
   }
@@ -299,9 +301,10 @@ void main() {
   }
   _alloc(w, h) {
     this.w = w; this.h = h;
-    for (const t of [this.rtScene, this.rtA, this.rtB, this.rtHalf, this.rtHalf2, this.rtQ, this.rtQ2, ...(this.mips || [])]) t && t.dispose();
+    for (const t of [this.rtScene, this.rtCopy, this.rtA, this.rtB, this.rtHalf, this.rtHalf2, this.rtQ, this.rtQ2, ...(this.mips || [])]) t && t.dispose();
     const dt = new THREE.DepthTexture(w, h, THREE.UnsignedIntType);
     this.rtScene = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, samples: this.msaa, depthTexture: dt, depthBuffer: true });
+    this.rtCopy = this.msaa ? null : target(w, h);
     this.rtA = target(w, h); this.rtB = target(w, h);
     const hw = Math.max(1, w >> 1), hh = Math.max(1, h >> 1), qw = Math.max(1, w >> 2), qh = Math.max(1, h >> 2);
     this.rtHalf = target(hw, hh); this.rtHalf2 = target(hw, hh);
@@ -342,6 +345,17 @@ void main() {
     // the scene
     const prevTM = r.toneMapping; r.toneMapping = THREE.NoToneMapping;
     T.begin('scene'); r.setRenderTarget(this.rtScene); r.clear(); r.render(scene, camera); T.end();
+    // the water (water3/surface.js): drawn over the scene with its depth test, reading the scene's colour under it. With
+    // MSAA the scene was resolved into its texture while the drawing goes on in the multisampled buffers, so the
+    // texture can be read as it is; without, it is copied first (a target cannot be read while drawn into)
+    if (opts.water) {
+      T.begin('water');
+      let src = this.rtScene.texture;
+      if (!this.msaa) { U.tColor.value = this.rtScene.texture; this._run(this.copy, this.rtCopy); src = this.rtCopy.texture; }
+      opts.water.U.tScene.value = src;
+      r.setRenderTarget(this.rtScene); const ac = r.autoClear; r.autoClear = false; r.render(opts.water.scene, camera); r.autoClear = ac;
+      T.end();
+    }
     U.tDepth.value = this.rtScene.depthTexture;
     // the clouds at quarter resolution, before the composite blends them in
     T.begin('clouds'); if (opts.clouds) { opts.clouds.render(this.rtQ, this.rtScene.depthTexture, camera, U.uLogF.value, this.rtQ.width, this.rtQ.height, camera.position, opts.skyUp); U.tCloud.value = this.rtQ.texture; U.uCloudOn.value = 1; } else U.uCloudOn.value = 0; T.end();

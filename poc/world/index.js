@@ -128,9 +128,9 @@ export class World {
     this.post.setWater(this.waves, this.caustics, this.source.sea > -1e5 ? this.clip : null, this.shore);
     this.drawsWater = !!(this.waves && this.source.waters); // the caller can stop drawing its own water bodies
     // water 3 (opts.water === 3, the rebuild): the surface as a mesh in the scene; the post pass's sea is turned off
-    if (this.surface) { this.group.remove(this.surface.mesh); this.surface.dispose(); this.surface = null; }
+    if (this.surface) { this.surface.dispose(); this.surface = null; }
     if (this.waterMode === 3 && this.waves && this.source.sea > -1e5) {
-      this.surface = new WaterSurface(this); this.group.add(this.surface.mesh);
+      this.surface = new WaterSurface(this); // drawn by the post chain after the scene (it reads the scene under it)
       this.post.U.uWaterOn.value = 0;
     }
     this._dtAvg = 1 / 60;
@@ -267,7 +267,7 @@ export class World {
         U.uCaus.value.set(this.caustics.L, this.caustics.on ? 1 : 0, this.caustics.res, 0);
       }
       this._bodies(eye);
-      if (this.surface) this.surface.update(this.camera);
+      if (this.surface) this.surface.update(this.camera, this.time, w10);
     }
     this.timer.end();
     U.uMist.value = 0.0012 * E.mist; U.uMistH.value = 40;
@@ -282,7 +282,7 @@ export class World {
   render() {
     // count the whole frame (shadows, scene, post), not just its last pass
     const info = this.renderer.info; info.autoReset = false; info.reset();
-    if (this.q.post) this.post.render(this.scene, this.camera, { dof: this.q.dof, rays: this.q.rays, clouds: this.q.clouds ? this.clouds : null, skyUp: this.sky.skyUp, timer: this.timer });
+    if (this.q.post) this.post.render(this.scene, this.camera, { dof: this.q.dof, rays: this.q.rays, clouds: this.q.clouds ? this.clouds : null, skyUp: this.sky.skyUp, timer: this.timer, water: this.surface });
     else this.renderer.render(this.scene, this.camera);
     this.timer.frame();
     this.frameInfo = { calls: info.render.calls, tris: info.render.triangles };

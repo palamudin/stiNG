@@ -138,8 +138,8 @@ float wPoisson(float lam, float u, float u2) {
 `;
 }
 
-// placed after the composite's helpers (viewRay, rayDist, skyAt, uViewProj, tColor, tDepth, uSun, ...)
-export const WATER_SHADE_GLSL = /* glsl */ `
+// the caustics' reader (also water3/surface.js): needs uSun and W_N
+export const WATER_CAUSTIC_GLSL = /* glsl */ `
 uniform sampler2D tCaus; uniform vec4 uCaus; // the caustics tile (caustics.js): tile size, on, texels a side
 // the caustic brightness at floor point Pb under depth D, at footprint fp metres a pixel: the tile looked up where the
 // point's sunlight entered the surface, at the mip for the footprint (far and high views blur to an even light), the
@@ -154,6 +154,11 @@ float wCaustic(vec2 Pb, float D, float fp) {
   float cd = D < d0 ? mix(1.0, c.r, smoothstep(0.0, d0, D)) : D < d1 ? mix(c.r, c.g, (D - d0) / (d1 - d0)) : D < d2 ? mix(c.g, c.b, (D - d1) / (d2 - d1)) : mix(c.b, 1.0, smoothstep(d2, 3.0 * d2, D));
   return max(cd, 0.0);
 }
+`;
+
+// placed after the composite's helpers (viewRay, rayDist, skyAt, uViewProj, tColor, tDepth, uSun, ...)
+export const WATER_SHADE_GLSL = /* glsl */ `
+${WATER_CAUSTIC_GLSL}
 // screen-space reflection: march the reflected ray, compare with the depth buffer; 0 alpha when it misses
 vec4 wSSR(vec3 P, vec3 R, float yb) {
   float t = min(0.4 + 0.02 * length(P - uCamPos), 0.02 + 0.05 * length(P - uCamPos)), tp = 0.0; vec3 q; bool front = true;

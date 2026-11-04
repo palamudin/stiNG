@@ -305,6 +305,30 @@ B-spline so the lines do not bead. `world/test/caustics.html`: the mean over the
 - The clouds' shadow reaches the sea through a copy of the shadow map (27 m texels): a cloud's edge on the water is
   as soft as on the ground, no softer.
 
+## Water 3: the rebuild (`water3/`, `?water=3` or V in the template)
+
+The surface is a real mesh (`water3/surface.js`): a polar grid round the camera, displaced by the wave field's
+cascades, drawn by the post chain after the scene with the depth test. The waterline is where the mesh meets the
+terrain, cut by the hardware and smoothed by MSAA; the trough is held 4 cm over the floor in the vertex shader.
+
+- **Detiling (1c).** The 12 m, 1 m and 14 cm cascades are each read twice, the second time rotated and shifted, and
+  blended by a slow noise, divided by the length of the weights so the height is kept where they mix (Heitz and Neyret
+  2018). The chop also varies in gust patches about 40 m across that drift with the wind.
+- **The swell turns to the coast (3a).** Within 180 m of a shore the far swell (the first cascade) has handed over to
+  the coast's own swell, fading over 180 to 420 m: three trains of the swell's periods (T, 0.93 T, 1.08 T, so they beat
+  into sets) on the shore table's travel time, so their crests run straight at the beach at sqrt(g depth), the same
+  speed for every wave. Green's law shoaling, Gerstner steepening, the set held under 0.39 of the depth. A coast in the
+  swell's lee gets 45% of it.
+- **The optics (2).** The scene's colour under the surface is read along the refracted ray (with MSAA the scene's
+  resolved texture is read while the water draws into the multisampled buffers; without, it is copied first), lit by
+  the sun that reaches the floor (lost to the surface and the water, focused by the caustics) and the sky, attenuated
+  per channel over the path (Beer-Lambert) with the water's own scattering added; the sky reflected by exact Fresnel,
+  the sun through the slopes' distribution (LEAN). The thickness comes from the clipmap's floor under the point;
+  the refraction's offset, the reflection and the highlight fade out over the last 6 cm of depth, so the edge is the
+  floor seen through no water.
+- **Not yet:** the scene's own reflection (sky only), foam, the swash and wet sand (the beach layer is off), rocks as
+  obstacles, partly submerged objects' thickness (the floor's depth is used, not the depth buffer's).
+
 ## Water (W2)
 
 One wave field drives every water surface: the lakes of the wild world and the game's birdbaths, fountains and puddles.
