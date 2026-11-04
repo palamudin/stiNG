@@ -371,7 +371,7 @@ ShoreWave shoreWaves(vec2 p, vec4 sh, float depth, float t, float cell, vec2 st)
   for (int i = 0; i < 2; i++) {
     float T = st.y * (i == 0 ? 1.0 : 0.62), w = 6.2831853 / T, k = w / cel;
     float a0 = 0.5 * st.x * (i == 0 ? 1.0 : 0.3) * env * shoal * group;
-    float a = min(a0, 0.39 * depth + 0.06), rel = a0 / max(depth, 0.05); // a bore keeps a few centimetres at the line
+    float a = min(a0, 0.39 * max(depth, 0.0)), rel = a0 / max(depth, 0.05); // held under the depth: its trough (0.78 a) never reaches the bed, so the surface never crosses the sand
     float ph = w * (t + sh.w) + pn * (i == 0 ? 1.0 : 1.37) + float(i) * 2.1;
     float c = max(0.5 + 0.5 * cos(ph), 0.0), cp = pow(c, 0.6), s = sin(ph); // max: a GPU's cos can overshoot 1 by a bit at large phases, and pow of a negative is NaN
     float bl = 1.0 - smoothstep(0.1, 0.3, k * cell / 6.2831853);

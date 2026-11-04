@@ -374,11 +374,6 @@ float wSeaHit(vec2 uv, vec3 v, float yb, out vec2 x0, out vec2 gx, out vec2 gy) 
       vec3 q = uCamPos + v * t;
       vec4 d = wDisp(x0, gx, gy); x0 = q.xz - d.xz * near; d = wDisp(x0, gx, gy);
       float ys = yb + d.y * near + swY;
-#ifdef W_CLIP
-      // the water never dips below the bed where the bed is under the still level: held 4 cm over it (as Ultra-Water
-      // does); a trough under the sand showed the bare bed through no water, a band that moved with the waves
-      float ysw = ys; ys = max(ys, min(clipHeight(x0) + 0.04, yb)); gClamped = ys > ysw + 1e-4 ? 1.0 : 0.0;
-#endif
       float f = q.y - ys;
       t += clamp(f / max(-v.y, 0.02), -2.0, 2.0) * 0.85;
     }
