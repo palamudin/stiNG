@@ -60,6 +60,11 @@ export class World {
     this.shadowMin = opts.shadowBox ?? 3; // the shadow box's least half-width (the game wants the people round the wasp)
     this.shadowAhead = opts.shadowAhead ?? 0; // the box's centre pushed this many half-widths ahead along the view (the game's: what is in front)
     if (opts.shadowMap) this.q.shadow = opts.shadowMap; // the caller's shadow map size, over the tier's
+    // the caustics' square: at least causticsMin metres across (the square follows the focus distance, and a game camera
+    // a few centimetres behind a wasp made it 6 m, past which the floor went flat and murky), pushed causticsAhead of its
+    // size along the view; caustics: [texture, grid] over the tier's, to keep the detail over a bigger square
+    this.causMin = opts.causticsMin ?? 6; this.causAhead = opts.causticsAhead ?? 0;
+    if (opts.caustics && this.q.caustics) this.q.caustics = opts.caustics;
     this.time = 0;
     // day: the day of the year (0 is the first of spring); auto: the weather and season follow the clock (seasons.js)
     this.env = { hour: 16.5, day: 100, auto: false, haze: 1, mist: 1, wet: 0, wind: [0.8, 0.3], cloud: 0.35, cloudDens: 1, rain: 0, snow: 0, flash: 0 }; // auto is the template's; the game keeps its own weather
@@ -240,7 +245,8 @@ export class World {
       if (this.source.sea > -1e5) { const wp = Math.sqrt(9.81 * st.kp + WAVES.T * st.kp ** 3); this.terrain.uniforms.uRun.value.set(this.waves.stats.Hs * 2 * Math.PI * 9.81 / (wp * wp), this.waves.stats.Hs); }
       U.uWLost.value = this.waves.lostSlope; U.uWPeak.value = Math.min(2 * Math.PI / WAVES.km, 2 * Math.PI / st.kp); // the ripples at the gravity-capillary minimum, or the peak if shorter
       if (this.caustics) {
-        const fx2 = eye.x + TMPV.x * focusDist, fz2 = eye.z + TMPV.z * focusDist, size = THREE.MathUtils.clamp(focusDist * 2.2, 6, 96);
+        const size = THREE.MathUtils.clamp(focusDist * 2.2, this.causMin, 96), ah = Math.max(focusDist, size * this.causAhead);
+        const fx2 = eye.x + TMPV.x * ah, fz2 = eye.z + TMPV.z * ah;
         this.caustics.update(fx2, fz2, size, this.source.sea, this.sunDir);
         U.uCaus.value.set(this.caustics.U.uCenter.value.x, this.caustics.U.uCenter.value.y, size, this.caustics.on ? 1 : 0);
       }

@@ -3807,7 +3807,7 @@ function w2Attach() {
     src = W2M[4].compositeSource(src, wild, { radius: I.R0, band: I.R1 - I.R0, site: I.site, simHeight: true });
   }
   if (world2) { world2.setSource(src, w.x, w.z); return; }
-  world2 = new W2M[0].World(renderer, scene, camera, src, { quality: $('gfx').value === 'low' || touch.on ? 'low' : 'medium', clip: { levels: W2_LEVELS }, sun, hemi, shadowBox: SHADOW.half, shadowAhead: SHADOW.ahead, shadowMap: SHADOW.map, dof: false, grass: $('gfx').value === 'low' || touch.on ? undefined : 0.75 }); // depth of field at a wasp's distance blurs the whole world away
+  world2 = new W2M[0].World(renderer, scene, camera, src, { quality: $('gfx').value === 'low' || touch.on ? 'low' : 'medium', clip: { levels: W2_LEVELS }, sun, hemi, shadowBox: SHADOW.half, shadowAhead: SHADOW.ahead, shadowMap: SHADOW.map, causticsMin: 16, causticsAhead: 0.3, caustics: [512, 384], dof: false, grass: $('gfx').value === 'low' || touch.on ? undefined : 0.75 }); // depth of field at a wasp's distance blurs the whole world away
   Object.assign(LIFT, world2.clip.uniforms);
   world2.build(w.x, w.z);
   WATER_MAT.visible = !world2.drawsWater; // World v2 draws the birdbaths', fountains' and puddles' water (WORLD.md, W2)

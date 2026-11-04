@@ -2479,6 +2479,10 @@ On a jump the CPU path no longer blurs a level out to its parent: the window it 
 
 **Back from the map.** Zoomed out, the camera's near plane is pushed metres out. Leaving the map other than by scrolling back in left it there, which cut away the ground round the wasp and showed the land's insides as walls. The ways out that did this were Esc or M, a dev click-teleport, and the atlas's teleport. Leaving the map now restores the camera's planes. When the view jumps back from afar, the ground round the wasp is rebuilt whole behind the curtain first.
 
+**Caustics over a wider floor.** World v3 sized its square of caustics by the focus distance, 2.2 times it with 6 m at least. The game's camera is a few centimetres behind the wasp, so the square was 6 m across round the wasp: sharp light patterns under the wasp, and past them a flat, murky floor. It was also coarse for its size (a 256 texture and a 192 grid, the medium tier), which showed as blocky cells.
+
+The game now asks for a square at least 16 m across (`causticsMin`), pushed 30% of its size ahead along the view (`causticsAhead`), on a 512 texture with a 384 grid. That is about the old detail (3 cm texels, 7 cm cells, against 2.3 and 5 cm) over 2.7 times the width. Water seen at a slant still clouds with distance: that is the water, not the caustics.
+
 ---
 
 ## 19. Feature tiers and the current stack
