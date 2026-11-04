@@ -416,11 +416,12 @@ void main() {
   // whitecaps where the surface folds: the Jacobian under 0.6 + bias, by the scale (defaults 0.05 and 1.3)
   float fm = clamp((0.6 + uLook2.y - vJ) * uLook2.z, 0.0, 1.0) * smoothstep(0.25, 0.6, texture(tFoam, vXZ / 1.4).r + 0.2);
   // the foam's pattern: the baked lace (water3/foamtex.js) at two scales, drifting apart slowly so it churns
-  float pat = 0.62 * texture(tFoam, vXZ / 3.1 + vec2(uTime * 0.011, -uTime * 0.007)).r + 0.38 * texture(tFoam, vXZ / 1.17 - vec2(uTime * 0.017, uTime * 0.005)).r + 0.12;
+  float fs = max(uLook3.y, 0.05); // the panel's foam size: the lace's scale too
+  float pat = 0.62 * texture(tFoam, vXZ / (3.1 * fs) + vec2(uTime * 0.011, -uTime * 0.007)).r + 0.38 * texture(tFoam, vXZ / (1.17 * fs) - vec2(uTime * 0.017, uTime * 0.005)).r + 0.12;
   float wf = clamp(vCoast.x, 0.0, 1.0), lc = clamp(vCoast.y, 0.0, 1.0);
   fm = max(fm, smoothstep(1.0 - 0.75 * wf, 1.15 - 0.75 * wf, pat) * (0.6 + 0.4 * wf));
   fm = max(fm, smoothstep(1.0 - 0.5 * lc, 1.1 - 0.5 * lc, pat) * 0.45);
-  float spf = 0.55 * texture(tFoam, vXZ / 5.3 + vec2(uTime * 0.006, -uTime * 0.004)).r + 0.45 * texture(tFoam, vXZ / 1.9 - vec2(uTime * 0.012, 0.0)).r + 0.15;
+  float spf = 0.55 * texture(tFoam, vXZ / (5.3 * fs) + vec2(uTime * 0.006, -uTime * 0.004)).r + 0.45 * texture(tFoam, vXZ / (1.9 * fs) - vec2(uTime * 0.012, 0.0)).r + 0.15;
   float sf = clamp(vCoast.z, 0.0, 1.0);
   // (patches over a fifth of the zone at most, broken into bubbles: a bed under the crests' own white, not a sheet)
   fm = max(fm, smoothstep(0.98 - 0.3 * sf, 1.08 - 0.3 * sf, spf) * smoothstep(-0.35, 0.45, w2noise(vXZ / 0.22 + uTime * 0.05, 629)) * (0.15 + 0.25 * sf));

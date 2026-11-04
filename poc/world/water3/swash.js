@@ -113,16 +113,19 @@ vec3 w3Coast(vec2 p, float depth, float cell) {
   vec3 d = vec3(0.0); vec2 sl = vec2(0.0); float foam = 0.0, charge = 0.0, backwash = 0.0, residual = 0.0;
   for (int i = 0; i < 2; i++) {
     float w = sw3Omega(i), k = w / cel;
-    float a = min(uSurf.x * (i == 0 ? 1.0 : ${SWASH.second[1].toFixed(2)}) * env * shoal * group, amax * (i == 0 ? 1.0 : 0.5));
+    float a0 = uSurf.x * (i == 0 ? 1.0 : ${SWASH.second[1].toFixed(2)}) * env * shoal * group; // the wave's own height, before the depth holds it
+    float a = min(a0, amax * (i == 0 ? 1.0 : 0.5));
     float ph = sw3Phase(i, uWTime, gTau, gPn);
     float psi = mod(ph + 3.14159265, 6.2831853) - 3.14159265;
     float c = 0.5 + 0.5 * cos(ph), s = sin(ph);
     float cp = pow(max(c, 0.0), 0.6); // P - 1, P = 1.6: sharper crests, wider troughs
-    float rel = a / max(depth, 0.05);
+    // breaking and its foam are judged on the wave's own height (a0), not the height the depth leaves it: once broken a
+    // wave stays broken, and its white runs on into the swash instead of dying in the last half metre of water
+    float rel = a / max(depth, 0.05), rel0 = a0 / max(depth, 0.05);
     float cyc = floor((ph + 3.14159265) / 6.2831853);
     float early = 0.5 + 0.5 * w2noise(p / 33.0 + vec2(cyc * 7.3, cyc * 3.1 + float(i) * 31.0), 614);
-    float energy = smoothstep(0.03, 0.2, a);
-    float breaking = smoothstep(0.12 + 0.14 * early, 0.3 + 0.2 * early, rel) * energy;
+    float energy = smoothstep(0.03, 0.2, a0);
+    float breaking = smoothstep(0.12 + 0.14 * early, 0.3 + 0.2 * early, rel0) * energy;
     // the lip leans furthest just before it collapses; over the next half radian the crest gives up to 48% of its
     // height to the whitewater running ahead
     float collapse = breaking * smoothstep(-0.75, -0.12, psi) * (1.0 - smoothstep(0.05, 0.7, psi));

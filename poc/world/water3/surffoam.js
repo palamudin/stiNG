@@ -65,12 +65,12 @@ FoamState foamState(vec2 anchor, vec4 seed) {
   o.dir = gDir;
   float env = gNear * gExpo * smoothstep(-0.9, 0.5, depth);
   float shoal = pow(clamp(max(depth, 0.6) / ${SHORE.dMax.toFixed(1)}, 0.04, 1.0), -0.25);
-  float a = min(uSurf.x * env * shoal * sw3Group(anchor, uWTime), 0.42 * depth + 0.02);
+  float a0 = uSurf.x * env * shoal * sw3Group(anchor, uWTime), a = min(a0, 0.42 * depth + 0.02);
   float w = sw3Omega(0), ph = sw3Phase(0, uWTime, gTau, gPn);
   float cyc = floor((ph + 3.14159265) / 6.2831853);
   float early = 0.5 + 0.5 * w2noise(anchor / 33.0 + vec2(cyc * 7.3, cyc * 3.1), 614);
-  float energy = smoothstep(0.03, 0.2, a);
-  o.breaking = smoothstep(0.12 + 0.14 * early, 0.3 + 0.2 * early, a / max(depth, 0.05)) * energy;
+  float energy = smoothstep(0.03, 0.2, a0); // as the surface's: by the wave's own height (swash.js)
+  o.breaking = smoothstep(0.12 + 0.14 * early, 0.3 + 0.2 * early, a0 / max(depth, 0.05)) * energy;
   float psi = mod(ph + 3.14159265, 6.2831853) - 3.14159265;
   float c = 0.5 + 0.5 * cos(ph), cp = pow(max(c, 0.0), 0.6);
   float collapse = o.breaking * smoothstep(-0.75, -0.12, psi) * (1.0 - smoothstep(0.05, 0.7, psi));
