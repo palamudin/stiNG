@@ -77,7 +77,7 @@ void main() {
     float depth = level - clipHeight(xz);
     float cel = sqrt(9.81 * clamp(depth, ${SHORE.dMin.toFixed(2)}, ${SHORE.dMax.toFixed(1)})), w = sw3Omega(0), k = w / cel;
     float ph = sw3Phase(0, uWTime, gTau, gPn), psi = mod(ph + 3.14159265, 6.2831853) - 3.14159265;
-    if (psi > -1.2 && psi < ${(C.lipWidth + 0.7).toFixed(2)}) {
+    if (psi > -0.45 && psi < ${(C.lipWidth + 0.35).toFixed(2)}) {
       // the crest nearest: psi / k metres shoreward (psi > 0 is behind the crest); its breaker there
       vec2 cx = xz + gDir * (psi / k);
       float dC = max(level - clipHeight(cx), 0.02);
@@ -87,15 +87,19 @@ void main() {
       float lo = 0.12 + 0.14 * early, hi = 0.3 + 0.2 * early;
       float stage = clamp(smoothstep(lo, hi + 0.15, rel) * uLook3.w, 0.0, 1.0);
       float show = smoothstep(lo, lo + 0.08, rel) * (1.0 - smoothstep(hi + 0.2, hi + 0.45, rel)) * smoothstep(0.03, 0.2, a0) * smoothstep(0.1, 0.35, dC);
-      if (show > 0.002 && psi < ${(C.lipWidth + 0.3).toFixed(2)}) {
+      if (show > 0.002) {
+        // the lip: phase 0 (the crest) to lipWidth behind it, root to tip. Past the tip the sheet goes straight down
+        // into the water in front of the face (the lip plunging in), ahead of the crest straight down into the wave's
+        // body from the root: nothing joins the lip back over the crest to the water behind it
         float u = clamp(psi / ${C.lipWidth.toFixed(2)}, 0.0, 1.0);
+        float drop = psi < 0.0 ? clamp(-psi / 0.4, 0.0, 1.0) : clamp((psi - ${C.lipWidth.toFixed(2)}) / 0.3, 0.0, 1.0);
         float H = 1.2 * a * show;
         vec2 o = curlAt(u, stage) * H, dir = gDir;
         // the root on the water's own crest: the surface's displacement there (both trains, the lean forward before
         // the collapse, the Gerstner shift: water3/swash.js w3Coast), so the lip grows out of the wave the water draws
         vec3 top = vec3(cx.x, level + 1.1 * a, cx.y);
         if (sw3Ctx(cx)) { vec3 d = w3Coast(cx, dC, 0.25); top = vec3(cx.x + d.x, level + d.y, cx.y + d.z); }
-        P = top + vec3(dir.x, 0.0, dir.y) * o.x + vec3(0.0, o.y, 0.0);
+        P = top + vec3(dir.x, 0.0, dir.y) * o.x + vec3(0.0, o.y - drop * (1.2 * a + 0.6), 0.0);
         vLip = vec3(u, stage, show);
       }
     }
