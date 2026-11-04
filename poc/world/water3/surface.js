@@ -40,6 +40,7 @@ import { WATER, WATER_CAUSTIC_GLSL, POISSON } from '../water.js';
 import { SWASH_GLSL, SURF_GLSL } from './swash.js';
 import { SurfFoam } from './surffoam.js';
 import { bakeFoamTexture } from './foamtex.js';
+import { FoamField } from './foamfield.js';
 import { SHORE } from '../shorefield.js';
 
 export const SURFACE = {
@@ -133,7 +134,7 @@ float w3Blend(vec2 p, float L, int c) { return smoothstep(-0.4, 0.4, w2noise(p /
 // stretched across the flow; the phase's start offset by a slow noise, so the river does not pulse as one
 const float W3_FT = 1.6;
 vec3 w3FlowPh(vec2 p) { float f1 = fract(uTime / W3_FT + 0.5 + 0.5 * w2noise(p / 9.0, 720)); return vec3(f1 * W3_FT, fract(f1 + 0.5) * W3_FT, 1.0 - abs(1.0 - 2.0 * f1)); }
-mat2 w3FlowM(vec2 v) { float sp = length(v); if (sp < 1e-4) return mat2(1.0); vec2 a = v / sp; vec2 n = vec2(-a.y, a.x); return outerProduct(a, a) + 0.5 * outerProduct(n, n); }
+mat2 w3FlowM(vec2 v) { return mat2(1.0); } // carried only: a stretch across the flow drew the highlights out into streaks at a river's speed
 vec2 w3Gust(vec2 p) { float n = w2noise((p - uDrift) / ${f(S.gust)}, 710) + 0.5 * w2noise((p - uDrift * 1.3) / ${f(S.gust * 0.37)}, 711); return vec2(1.0 + 0.25 * n, 1.0 + 0.55 * n); }`;
 
     // ---- the coast's swell (vertex): displacement and slope of the three trains, their foam; sw3Ctx has been run
@@ -215,7 +216,7 @@ void main() {
 ${head}
 ${coast}
 ${SKY_GLSL}
-uniform vec3 uSun, uSunColor, uSkyUp; uniform sampler2D uSkyView, tScene, tFoam; uniform mat4 uVP; uniform float uWLost, uRain, uIce, uGlint, uWPeak;
+uniform vec3 uSun, uSunColor, uSkyUp; uniform sampler2D uSkyView, tScene, tFoam, tFoamField; uniform vec3 uFoamWin; uniform mat4 uVP; uniform float uWLost, uRain, uIce, uGlint, uWPeak;
 in vec3 vW; in vec2 vXZ; in float vCell, vNear, vJ; in vec2 vCoastSlope; in vec3 vCoast, vFlow; in vec4 vRough; out vec4 oColor;
 uniform float uDebug;
 const float W_N = ${f(WATER.n)};
@@ -417,11 +418,17 @@ void main() {
   // standing foam, and the swash's lace at its tip and white behind it; one pattern of three scales covered to a
   // share set by each foam's strength
   // whitecaps where the surface folds: the Jacobian under 0.6 + bias, by the scale (defaults 0.05 and 1.3)
-  float fm = clamp((0.6 + uLook2.y - vJ) * uLook2.z, 0.0, 1.0) * smoothstep(0.25, 0.6, texture(tFoam, vXZ / 1.4).r + 0.2);
+  // the foam field (water3/foamfield.js): what the whitecaps and breakers made, carried in and lingering; past its
+  // window the folds' own whitecaps, this frame's
+  float ff = 0.0, inField = 0.0;
+  { vec2 fu = (vXZ - uFoamWin.xy) / uFoamWin.z; float e = min(min(fu.x, fu.y), min(1.0 - fu.x, 1.0 - fu.y)); if (e > 0.0) { inField = smoothstep(0.0, 0.08, e); ff = texture(tFoamField, fu).r * inField; } }
+  float fm = clamp((0.6 + uLook2.y - vJ) * uLook2.z, 0.0, 1.0) * smoothstep(0.25, 0.6, texture(tFoam, vXZ / 1.4).r + 0.2) * (1.0 - inField);
   // the foam's pattern: the baked lace (water3/foamtex.js) at two scales, drifting apart slowly so it churns
   float fs = max(uLook3.y, 0.05); // the panel's foam size: the lace's scale too
   float pat = 0.62 * texture(tFoam, vXZ / (3.1 * fs) + vec2(uTime * 0.011, -uTime * 0.007)).r + 0.38 * texture(tFoam, vXZ / (1.17 * fs) - vec2(uTime * 0.017, uTime * 0.005)).r + 0.12;
-  float wf = clamp(vCoast.x, 0.0, 1.0), lc = clamp(vCoast.y, 0.0, 1.0);
+  float wf = clamp(vCoast.x, 0.0, 1.0), lc = clamp(vCoast.y, 0.0, 1.0) * (1.0 - 0.6 * inField);
+  // the field's foam: thick and white where fresh, eroding into lace as it fades
+  fm = max(fm, smoothstep(1.0 - 0.85 * ff, 1.1 - 0.85 * ff, pat) * (0.35 + 0.55 * clamp(ff, 0.0, 1.0)));
   fm = max(fm, smoothstep(1.0 - 0.75 * wf, 1.15 - 0.75 * wf, pat) * (0.6 + 0.4 * wf));
   fm = max(fm, smoothstep(1.0 - 0.5 * lc, 1.1 - 0.5 * lc, pat) * 0.45);
   float spf = 0.55 * texture(tFoam, vXZ / (5.3 * fs) + vec2(uTime * 0.006, -uTime * 0.004)).r + 0.45 * texture(tFoam, vXZ / (1.9 * fs) - vec2(uTime * 0.012, 0.0)).r + 0.15;
@@ -459,6 +466,8 @@ void main() {
     // the breakers' whitewater over it (water3/surffoam.js): where there is a shore table to find the surf with
     this.foamRT = bakeFoamTexture(world.renderer); U.tFoam.value = this.foamRT.texture; // baked once
     this.foam = shore ? new SurfFoam(world, this) : null;
+    // the foam that lasts and travels (water3/foamfield.js): made by whitecaps and breakers, carried in, lingering
+    this.field = new FoamField(world, this); Object.assign(U, this.field.read);
     if (this.foam) this.scene.add(this.foam.streaks, this.foam.billows);
     this._t = null;
   }
@@ -469,9 +478,11 @@ void main() {
     const above = Math.max(0, camera.position.y - W.waterAt(camera.position.x, camera.position.z));
     U.uGridScale.value = Math.max(1, above / 2);
     U.uSkyUp.value.copy(W.sky.skyUp);
+    const wt = W.uWTime.value, wdt = this._wt === undefined ? 0 : wt - this._wt; this._wt = wt;
+    this.field.update(W.renderer, wdt, camera, wind || [0, 0], W.waterCtl.linger);
     U.uTime.value = W.uWTime.value; U.uWLost.value = W.waves.lostSlope || 0;
     const dt = this._t === null ? 0 : Math.min(Math.max(time - this._t, 0), 0.25); this._t = time;
     if (wind) U.uDrift.value.x += wind[0] * 0.6 * dt, U.uDrift.value.y += wind[1] * 0.6 * dt; // gusts run at about the wind's pace
   }
-  dispose() { this.mesh.geometry.dispose(); this.mat.dispose(); if (this.foam) this.foam.dispose(); this.foamRT.dispose(); }
+  dispose() { this.mesh.geometry.dispose(); this.mat.dispose(); if (this.foam) this.foam.dispose(); this.foamRT.dispose(); this.field.dispose(); }
 }

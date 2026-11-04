@@ -13,7 +13,7 @@ import { SHORE } from '../shorefield.js';
 import { SWASH_GLSL } from './swash.js';
 
 export const SURF_FOAM = {
-  billows: { n: 80, cell: 1.6, per: 4 }, // the pool; the panel's foam amount draws a share of it // a grid n x n of cells this size round the camera, this many billows a cell
+  billows: { n: 128, cell: 1.0, per: 2 }, // the pool, many and small; the panel's foam amount draws a share of it // a grid n x n of cells this size round the camera, this many billows a cell
   streaks: { n: 64, cell: 2.0, per: 1 },
 };
 
@@ -123,7 +123,7 @@ void main() {
   vSand = clamp(smoothstep(0.0, 0.8, o.backAge) * (0.25 + 0.65 * o.breaking) * smoothstep(-1.8, 0.35, o.bed), 0.0, 0.85);
   vPlunge = crash;
   // small puffs, a wasp's scale: 10 to 60 cm, a little bigger in the crash
-  float size = (0.1 + 0.26 * o.breaking) * mix(0.7, 1.7, seed.w) * (1.0 + 0.1 * o.age) * uLook3.y;
+  float size = (0.05 + 0.12 * o.breaking) * mix(0.7, 1.4, seed.w) * (1.0 + 0.1 * o.age) * uLook3.y; // 4 to 24 cm
   size *= mix(1.0, 0.65, smoothstep(1.0, 4.0, o.age)) * (1.0 + 0.6 * crash);
   float waterY = foamWaterY(o.center, o.level, o.bed) + o.waveHeight * (1.0 - smoothstep(0.5, 3.0, o.age));
   vec3 C = vec3(o.center.x, o.bed > 0.0 ? o.level + o.bed + 0.045 : waterY + 0.065, o.center.y);
