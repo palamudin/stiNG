@@ -29,6 +29,8 @@ const camera = new THREE.PerspectiveCamera(55, 1, 0.005, 60000);
 
 // the shore by table (the default) or by live calculation per pixel, for the comparison: ?shore=live, or a page that
 // sets window.__SHORE_MODE before this script
+// the water: ?water=3 the rebuild (water3/, a mesh), else the post pass's (A/B)
+const WATER_MODE = new URLSearchParams(location.search).get('water') === '3' ? 3 : 2;
 const SHORE_MODE = ((m) => (m === 'live' || m === 'none' ? m : 'table'))(new URLSearchParams(location.search).get('shore') || window.__SHORE_MODE || 'table');
 const state = { source: 'wild', seed: 7, tod: 16.6, day: 100, weather: 'auto', zoom: 0.42, blocky: 0.6, fog: 1, wet: 0, wind: 5, fstop: 2.8, quality: 'high', ui: true };
 let world = null, src = null;
@@ -56,7 +58,7 @@ async function makeWorld() {
     // the game's world set down in the wild one (sources/composite.js): the settled area's radius is the start's kind
     if (state.source !== 'sting') src = compositeSource(src, wildSource({ seed: state.seed, blocky: state.blocky }), { radius: state.source === 'town' ? 420 : 150 });
   }
-  world = new World(renderer, scene, camera, src, { quality: state.quality, shore: SHORE_MODE });
+  world = new World(renderer, scene, camera, src, { quality: state.quality, shore: SHORE_MODE, water: WATER_MODE });
   world.build(cam.fx, cam.fz);
   standIns();
 }
@@ -145,7 +147,7 @@ function showStats() {
   const d = cam.dist, ds = d < 1 ? (d * 100).toFixed(0) + ' cm' : d < 1000 ? d.toFixed(d < 10 ? 1 : 0) + ' m' : (d / 1000).toFixed(2) + ' km';
   const g = world.timer.ms, gpu = world.timer.on ? (g.total ? `gpu ${g.total.toFixed(1)} ms: ` + ['scene', 'shore', 'clouds', 'composite', 'rays', 'dof', 'bloom', 'final', 'waves'].filter((k) => g[k] !== undefined).map((k) => `${k} ${g[k].toFixed(1)}`).join(' · ') : 'gpu timing…') : 'gpu timing: not given by this browser';
   const w = world.weather, wx = w ? `${w.kind}, ${w.temp.toFixed(0)} °C, wind ${Math.hypot(...w.wind).toFixed(0)} m/s` : state.weather;
-  const sm = world.post.samplers, dbg = world.post.U.uDebug.value, smt = (sm ? ` · samplers ${sm.composite}/${sm.max}` : '') + ` · shore by ${world.shoreMode}` + (dbg ? ` · DEBUG ${dbg === 6 ? 'layers: sea blue, sheet red' : 'green depth 0-25 cm, blue table knows'}` : '');
+  const sm = world.post.samplers, dbg = world.post.U.uDebug.value, smt = (sm ? ` · samplers ${sm.composite}/${sm.max}` : '') + ` · shore by ${world.shoreMode}` + (world.surface ? ` · WATER 3 (${(world.surface.stats.verts / 1000).toFixed(0)}k verts)` : ' · water 2') + (dbg ? ` · DEBUG ${dbg === 6 ? 'layers: sea blue, sheet red' : 'green depth 0-25 cm, blue table knows'}` : '');
   $('stats').textContent = `${fps.toFixed(0)} fps · ${i.calls} draws · ${(i.triangles / 1000).toFixed(0)}k tris · ${(world.forest.stats.far / 1000).toFixed(0)}k far cells${smt}\n${gpu}\nview ${ds} · ${seasonName(state.day)} day ${state.day} · ${wx} · ${world.forest.stats.trees} near trees`;
 }
 
