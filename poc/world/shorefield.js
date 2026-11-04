@@ -367,10 +367,10 @@ ShoreWave shoreWaves(vec2 p, vec4 sh, float depth, float t, float cell, vec2 st)
     // its length, in a new pattern every wave
     float cycle = floor((ph + 3.14159) / 6.2831853);
     float early = w2noise(p / 30.0 + vec2(cycle * 7.3, cycle * 3.1 + float(i) * 31.0), 614);
-    float breaking = smoothstep(0.3 + 0.1 * early, 0.5 + 0.15 * early, rel) * smoothstep(0.03, 0.15, a);
+    float breaking = smoothstep(0.3 + 0.1 * early, 0.5 + 0.15 * early, rel) * smoothstep(0.03, 0.15, a0); // gated on the unbroken height: a broken wave runs on as a bore, white to the line
     float psi = mod(ph + 3.14159, 6.2831853) - 3.14159;
     o.foam += breaking * smoothstep(-0.8, 0.0, psi) * exp(-max(psi, 0.0) * 1.1) * (i == 0 ? 1.0 : 0.6);
-    if (i == 0) { o.a = a; o.ph = ph; o.breaking = breaking; o.lace = smoothstep(0.25, 0.5, rel) * (0.25 + 0.4 * exp(-mod(ph, 6.2831853) * 0.35)) * smoothstep(0.03, 0.15, a); }
+    if (i == 0) { o.a = a; o.ph = ph; o.breaking = breaking; o.lace = smoothstep(0.25, 0.5, rel) * (0.25 + 0.4 * exp(-mod(ph, 6.2831853) * 0.35)) * smoothstep(0.03, 0.15, a0); }
   }
   return o;
 }
