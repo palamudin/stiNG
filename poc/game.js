@@ -5,7 +5,7 @@ import {
   Sim, Act, T, DT, ZONES, ZoneName, SwatKind, SwatKindName, StyleName, TopName, BottomName, Top, Bottom,
   toWorld, toLocal, dirToWorld, chunkKey, chunkOf, hash, Domain, rangeInt, resolveSting, zoneCover, segClosest, classify, predictedKind,
   NEST, NEST_ENTRANCE, flyPos, beePos, fmtClock, minuteOfDay, isLowerZone, broodTotal, sugarCap, proteinCap, waterCap, garmentGraph, dayWeather,
-  NetLab, LINKS, pondsOf, pondEdge, POND_PATH, buildList, settledOf, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetVel, CHASE, targetLabel, assistPilot, swoopPilot, hoverPilot, hoverSetting, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE, SKILLS, SKILL_UNLOCKS, SKILL_RANKED, SKILL_HIVE, skillCost, ROLES,
+  NetLab, LINKS, generateChunk, wildHere, pondsOf, pondEdge, POND_PATH, buildList, settledOf, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetVel, CHASE, targetLabel, assistPilot, swoopPilot, hoverPilot, hoverSetting, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE, SKILLS, SKILL_UNLOCKS, SKILL_RANKED, SKILL_HIVE, skillCost, ROLES,
 } from './sim/index.js';
 import { Rings, RING, ringGrid, ringGLSL } from './view/rings.js';
 import { Batch, place } from './view/merge.js';
@@ -2822,6 +2822,15 @@ function mapStep(kind, d) {
 // tiles each time it is drawn; what moves or changes is drawn over them.
 const mapTiles = new Map();
 let mapColors = null; // the theme's colours, read once (getComputedStyle is slow)
+// the map without fog of war (the start screen's Map, for checking a world): undiscovered chunks drawn from what the
+// generator would put there, a pure function of the seed, kept in a table; nothing in the sim is touched
+const devOpts = { reveal: false, dev: false };
+const revealedT = new Map();
+function revealed(cx, cz) {
+  const k = cx + ',' + cz; let r = revealedT.get(k);
+  if (!r) { if (revealedT.size > 4000) revealedT.clear(); r = { cx, cz, content: generateChunk(sim.seed, cx, cz, sim.settings), revealed: true }; revealedT.set(k, r); }
+  return r;
+}
 function mapTile(rec, cell, detail, dpr) {
   const px = Math.max(4, Math.round(cell * dpr)), key = rec.cx + ',' + rec.cz + '|' + px + (detail ? 'd' : '');
   let cv = mapTiles.get(key);
@@ -2833,6 +2842,14 @@ function mapTile(rec, cell, detail, dpr) {
   const use = c.use || 'park';
   g.fillStyle = use === 'yards' ? 'hsla(95, 22%, 31%, 0.92)' : use === 'forest' ? 'hsla(100, 35%, 14%, 0.95)' : use === 'mall' ? 'hsla(40, 6%, 30%, 0.92)' : use === 'town' ? 'hsla(30, 18%, 42%, 0.95)' : `hsla(${88 + c.tint * 20}, 30%, ${21 + c.tint * 8}%, 0.92)`;
   g.fillRect(dpr, dpr, px - 2 * dpr, px - 2 * dpr);
+  if (use === 'wild') { // the wild land (GDD 21.6): water, wood or meadow in a 6 x 6 grid of samples
+    const o = [0, 0, 0, 0, 0], n = 6;
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+      wildHere(sim.seed, ex - (i + 0.5) / n * CSZ, ez - (j + 0.5) / n * CSZ, sim.settings, o);
+      g.fillStyle = o[0] < o[4] ? `hsl(205, 45%, ${Math.max(22, 42 - (o[4] - o[0]) * 2)}%)` : o[2] > 0.45 ? 'hsla(110, 32%, 20%, 0.95)' : o[0] - o[4] > 300 ? 'hsla(40, 10%, 55%, 0.95)' : 'hsla(88, 30%, 38%, 0.92)';
+      g.fillRect(i * px / n, j * px / n, px / n + 0.5, px / n + 0.5);
+    }
+  }
   g.fillStyle = 'rgba(30,30,32,.75)';
   for (const r of c.roads || []) { const [x0, y0] = L(r.maxx, r.maxz), [x1, y1] = L(r.minx, r.minz); g.fillRect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.max(2 * dpr, Math.abs(y1 - y0))); }
   for (const l of c.loops || []) { const [x, y] = L(l.x, l.z); g.beginPath(); g.arc(x, y, l.r * sc, 0, Math.PI * 2); g.fill(); }
@@ -2864,7 +2881,7 @@ function drawMapTo(ctx, W, H, ox, oz, cell, o = {}) {
   for (let dz = -sz0; dz <= sz0; dz++) for (let dx = -sx0; dx <= sx0; dx++) {
     const cx = ccx + dx, cz = ccz + dz, key = chunkKey(cx, cz);
     const [sx, sy] = toS((cx + 0.5) * CSZ, (cz + 0.5) * CSZ);
-    const rec = sim.records.get(key);
+    const rec = sim.records.get(key) || (devOpts.reveal ? revealed(cx, cz) : null);
     if (rec) {
       // the chunk's still parts, from the tile table (ground, streets, buildings, ponds, tables; zoomed in, trees and baths)
       ctx.drawImage(mapTile(rec, cell, !!o.detail, dpr), sx, sy, cell, cell);
@@ -2974,6 +2991,14 @@ function atlasControls(dt) {
   if (zoom) { atlas.cell = Math.max(6, Math.min(220, atlas.cell * Math.pow(2, zoom * dt * 1.5))); moved = true; }
   if (moved || ++atlas.frame % 6 === 0) drawAtlas();
 }
+// dev tools: put the wasp down at (x, z), 3 m over the ground, still; the sim brings the chunks round it in
+function devTeleport(x, z) {
+  const w = sim && sim._driven(); if (!w || !devOpts.dev) return;
+  Object.assign(w, { x, z, y: 3, vx: 0, vy: 0, vz: 0, state: 'fly', energy: 1 }); w.land = null;
+  const e = pos.get(w.id); if (e) { e.p.set(x, 3, z); e.c.set(x, 3, z); }
+  if (ov.on) { ov.fx = x; ov.fz = z; }
+  syncChunks(); toast(`Teleported to ${Math.round(x)}, ${Math.round(z)}`, 'var(--muted)', 1.5);
+}
 function closeAtlas() { atlas.open = false; $('atlas').hidden = true; atlas.pts.clear(); if (running && !paused && !ui.nest) lock(); }
 function toggleAtlas() { if (atlas.open) closeAtlas(); else openAtlas(); }
 function drawAtlas() {
@@ -2982,15 +3007,16 @@ function drawAtlas() {
   atlasCtx.setTransform(r, 0, 0, r, 0, 0);
   drawMapTo(atlasCtx, W, H, atlas.ox, atlas.oz, atlas.cell, { detail: atlas.cell >= 24, sel: atlas.sel });
 }
-const USE_NAME = { yards: 'Backyards', forest: 'Woods', mall: 'Strip mall', town: 'Town square', park: 'Park' };
+const USE_NAME = { yards: 'Backyards', forest: 'Woods', mall: 'Strip mall', town: 'Town square', park: 'Park', wild: 'Wild land' };
 // A card on the area under the pointer (or the tap): what it is, and how much of what is there, as low, mid or high
 const lvl = (v, a, b) => v <= 0 ? '<span class="lv low">none</span>' : `<span class="lv ${v < a ? 'low' : v < b ? 'mid' : 'high'}">${v < a ? 'low' : v < b ? 'mid' : 'high'}</span>`;
 function atlasCard(key, px, py, card = $('atlasCard'), box = $('atlas').getBoundingClientRect(), top = 46) {
   if (!key) { card.hidden = true; return; }
-  const rec = sim.records.get(key), [cx, cz] = key.split(',').map(Number), CSZ = T.chunk.size;
+  const [cx, cz] = key.split(',').map(Number), rec = sim.records.get(key) || (devOpts.reveal ? revealed(cx, cz) : null), CSZ = T.chunk.size;
   const d = Math.round(Math.hypot((cx * CSZ) - sim.nest.x, (cz * CSZ) - sim.nest.z));
   let html;
   if (!rec) html = `<b>Unexplored</b>${d} m from the nest<br>Fly over it to map it.`;
+  else if (rec.revealed) html = `<b>${USE_NAME[rec.content.use || 'park'] || 'Park'}</b> (not yet found)${d} m from the nest<br>Trees ${rec.content.trees.length} · buildings ${(rec.content.sheds || []).length}`;
   else {
     const c = rec.content, ppl = sim.active.filter((h) => h.chunk === key && h.state !== 'away' && !h.special), stung = ppl.filter((h) => sim.stung.has(h.hex)).length;
     const bloom = c.flowers.filter((f, i) => sim.inBloom(rec, i)).length, cups = sim.cupsIn(rec).length;
@@ -3013,7 +3039,12 @@ function atlasCard(key, px, py, card = $('atlasCard'), box = $('atlas').getBound
       + `Trees ${c.trees.length} · tables ${c.tables.length}${(c.sheds || []).length ? ` · buildings ${(c.sheds || []).length}` : ''}`
       + (here.length ? `<div class="here">${here.join(' · ')}</div>` : '');
   }
+  if (devOpts.dev) { // dev tools: teleport to the point clicked
+    const cv = $('atlasMap'), x = atlas.ox - (px - cv.clientWidth / 2) / atlas.cell * CSZ, z = atlas.oz - (py - cv.clientHeight / 2) / atlas.cell * CSZ;
+    atlas.tp = { x, z }; html += `<div class="here"><button id="devTp" style="pointer-events:auto">Teleport here (${Math.round(x)}, ${Math.round(z)})</button></div>`;
+  }
   card.innerHTML = html; card.hidden = false;
+  const tb = card.querySelector('#devTp'); if (tb) tb.onclick = () => { const t = atlas.tp; closeAtlas(); devTeleport(t.x, t.z); };
   const cw = card.offsetWidth, ch = card.offsetHeight;
   card.style.left = Math.max(6, Math.min(box.width - cw - 6, px + 14)) + 'px';
   card.style.top = Math.max(top, Math.min(box.height - ch - 6, py + 14)) + 'px';
@@ -3438,7 +3469,7 @@ addEventListener('wheel', (e) => {
   if (!ov.on) { if (e.deltaY > 0) ovStart(); else return; }
   ovZoom(e.deltaY > 0 ? 1.22 : 1 / 1.22);
 }, { passive: true });
-canvas.addEventListener('pointerdown', (e) => { if (ov.on) { ov.drag = { x: e.clientX, y: e.clientY }; try { canvas.setPointerCapture(e.pointerId); } catch { /* optional */ } } });
+canvas.addEventListener('pointerdown', (e) => { if (ov.on) { ov.drag = { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY }; try { canvas.setPointerCapture(e.pointerId); } catch { /* optional */ } } });
 canvas.addEventListener('pointermove', (e) => {
   if (!ov.on || !ov.drag) return;
   const dx = e.clientX - ov.drag.x, dy = e.clientY - ov.drag.y; ov.drag.x = e.clientX; ov.drag.y = e.clientY;
@@ -3446,7 +3477,15 @@ canvas.addEventListener('pointermove', (e) => {
   const rx = Math.cos(ov.yaw), rz = -Math.sin(ov.yaw), fx = -Math.sin(ov.yaw), fz = -Math.cos(ov.yaw);
   ov.fx += (-dx * rx + dy * fx * (1 / Math.max(0.3, Math.sin(ov.pitch || 1)))) * mpp; ov.fz += (-dx * rz + dy * fz * (1 / Math.max(0.3, Math.sin(ov.pitch || 1)))) * mpp;
 });
-canvas.addEventListener('pointerup', () => { ov.drag = null; });
+canvas.addEventListener('pointerup', (e) => {
+  const d = ov.drag; ov.drag = null;
+  if (!ov.on || !devOpts.dev || !d || Math.hypot(e.clientX - d.x0, e.clientY - d.y0) > 5) return;
+  // dev tools: where the click meets the ground near the focus height is where the wasp goes
+  const r = canvas.getBoundingClientRect(), ndc = new THREE.Vector2((e.clientX - r.left) / r.width * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  const ray = new THREE.Raycaster(); ray.setFromCamera(ndc, camera);
+  const gy = terrAt(ov.fx, ov.fz), t = (gy - ray.ray.origin.y) / ray.ray.direction.y;
+  if (t > 0) { const p = ray.ray.origin.clone().addScaledVector(ray.ray.direction, t); ovEnd(); devTeleport(p.x, p.z); }
+});
 addEventListener('keydown', (e) => { if (ov.on && (e.code === 'Escape' || e.code === 'KeyM')) { e.preventDefault(); ovEnd(); } });
 // zoomed well out, the game's own objects (buildings, people, wasps, furniture) are not drawn: World v3 draws the land
 // itself there, and the classic look hands over to the big map; drawn, they would sit on the far ground's coarse heights
@@ -3851,6 +3890,7 @@ $('bStart').addEventListener('click', async () => {
   initAudio();
   if (warm.p) await warm.p; // still warming the menu's world
   const st = readSettings();
+  devOpts.reveal = $('fog').value === '0'; devOpts.dev = $('dev').value === '1'; revealedT.clear(); mapTiles.clear(); // the map's fog and the dev tools (not rules)
   if (!sim || sim.tick > 0 || warm.key !== warmKey(st)) { warm.rebuilt++; BOOT.begin("Building the world"); await warmWorld(st); BOOT.done(); }
   else applyDisplaySettings();
   $('startScreen').hidden = true; running = true; lock();
