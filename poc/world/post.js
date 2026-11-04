@@ -47,7 +47,7 @@ export class Post {
       uTexel: { value: new THREE.Vector2() }, uBloomMax: { value: 1e4 }, uWind: { value: new THREE.Vector2(0.8, 0.3) },
       uWL: { value: new THREE.Vector4(1, 1, 1, 1) }, uWLost: { value: 0 }, uWPeak: { value: 0.05 }, uGlint: { value: WATER.glint },
       uBody: { value: Array.from({ length: WATER.bodies }, () => new THREE.Vector4()) }, uBodyB: { value: Array.from({ length: WATER.bodies }, () => new THREE.Vector4()) }, uBodyC: { value: Array.from({ length: WATER.bodies }, () => new THREE.Vector4()) }, uBodies: { value: 0 },
-      tCaus: { value: null }, uCaus: { value: new THREE.Vector4(0, 0, 1, 0) },
+      tCaus: { value: null }, uCaus: { value: new THREE.Vector4(1, 0, 1, 0) },
       tCloud: { value: null }, uCloudOn: { value: 0 }, uCloudBase: { value: 1000 }, uIce: { value: 0 }, uFlash: { value: 0 },
       uMap: { value: 0 }, uSnowLine: { value: 1e9 },
       ...sky.uniforms,

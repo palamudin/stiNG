@@ -23,6 +23,7 @@
 //   - single scattering from the water itself, foam where the surface folds and at the very edge, rain rings.
 import { WAVES } from './waves.js';
 
+export const CAUSTIC_DEPTHS = [0.5, 1.5, 4.0]; // metres: the floors of the caustics' three slices (caustics.js)
 export const WATER = {
   absorb: [0.45, 0.075, 0.035], // per metre: a clear lake with a little dissolved matter
   scatter: [0.025, 0.04, 0.045],
@@ -139,7 +140,20 @@ float wPoisson(float lam, float u, float u2) {
 
 // placed after the composite's helpers (viewRay, rayDist, skyAt, uViewProj, tColor, tDepth, uSun, ...)
 export const WATER_SHADE_GLSL = /* glsl */ `
-uniform sampler2D tCaus; uniform vec4 uCaus; // centre x, z, size, on
+uniform sampler2D tCaus; uniform vec4 uCaus; // the caustics tile (caustics.js): tile size, on, texels a side
+// the caustic brightness at floor point Pb under depth D, at footprint fp metres a pixel: the tile looked up where the
+// point's sunlight entered the surface, at the mip for the footprint (far and high views blur to an even light), the
+// depth slices blended, faded in over the first decimetres and out with depth
+float wCaustic(vec2 Pb, float D, float fp) {
+  if (uCaus.y < 0.5 || D <= 0.0005) return 1.0;
+  vec3 rs = refract(-uSun, vec3(0.0, 1.0, 0.0), 1.0 / W_N);
+  vec2 entry = Pb + rs.xz / rs.y * D;
+  float lod = log2(max(fp * uCaus.z / uCaus.x, 1.0));
+  vec3 c = min(textureLod(tCaus, entry / uCaus.x, lod).rgb, vec3(64.0));
+  float d0 = ${CAUSTIC_DEPTHS[0].toFixed(2)}, d1 = ${CAUSTIC_DEPTHS[1].toFixed(2)}, d2 = ${CAUSTIC_DEPTHS[2].toFixed(2)};
+  float cd = D < d0 ? mix(1.0, c.r, smoothstep(0.0, d0, D)) : D < d1 ? mix(c.r, c.g, (D - d0) / (d1 - d0)) : D < d2 ? mix(c.g, c.b, (D - d1) / (d2 - d1)) : mix(c.b, 1.0, smoothstep(d2, 3.0 * d2, D));
+  return max(cd, 0.0);
+}
 // screen-space reflection: march the reflected ray, compare with the depth buffer; 0 alpha when it misses
 vec4 wSSR(vec3 P, vec3 R, float yb) {
   float t = min(0.4 + 0.02 * length(P - uCamPos), 0.02 + 0.05 * length(P - uCamPos)), tp = 0.0; vec3 q; bool front = true;
@@ -246,25 +260,8 @@ vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, floa
   }
   // ---- caustics: splatted for the sea, from the ripples' curvature for bodies
   float cz = 1.0;
-  if (bodyK == 0.0) {
-    // the splat round the focus, faded out radially over its outer third; past it, the ripples' curvature stands in
-    // (the analytic caustic below, held to the first 1.5 m of depth), so the splat's region has no edge to see
-    vec2 cu = (Pb.xz - uCaus.xy) / uCaus.z + 0.5;
-    float rr = length(cu - 0.5) * 2.0, inSplat = uCaus.w > 0.5 ? 1.0 - smoothstep(0.62, 0.95, rr) : 0.0;
-    float splat = inSplat > 0.0 ? min(texture(tCaus, clamp(cu, vec2(0.001), vec2(0.999))).r, 400.0) : 1.0; // a focus can sum past half-float range
-    float an = 1.0;
-    if (inSplat < 1.0 && D > 0.0005) {
-      vec2 q = Pb.xz; float e = 0.02;
-      vec2 s0 = wSlopeAt(q), sxp = wSlopeAt(q + vec2(e, 0.0)), szp = wSlopeAt(q + vec2(0.0, e));
-      mat2 H = mat2((sxp - s0) / e, (szp - s0) / e);
-      vec3 L0 = -uSun; float de = 0.01;
-      vec3 r0 = refract(L0, normalize(vec3(-s0.x, 1.0, -s0.y)), 1.0 / W_N), rx = refract(L0, normalize(vec3(-s0.x - de, 1.0, -s0.y)), 1.0 / W_N), rz = refract(L0, normalize(vec3(-s0.x, 1.0, -s0.y - de)), 1.0 / W_N);
-      vec2 o0 = r0.xz / -r0.y, ox = rx.xz / -rx.y, oz = rz.xz / -rz.y;
-      mat2 M = mat2((ox - o0) / de, (oz - o0) / de);
-      mat2 J = mat2(1.0) + min(D, 1.5) * M * H;
-      an = mix(1.0, clamp(1.0 / max(abs(determinant(J)), 0.35), 0.0, 2.5), exp(-tw * 0.02) * smoothstep(0.0, 0.3, D));
-    }
-    cz = mix(an, splat, inSplat);
+  if (bodyK == 0.0 || bodyK == 3.0) {
+    cz = wCaustic(Pb.xz, D, fp); // the sea and the swash sheet: the tiled pattern (caustics.js)
   } else if (D > 0.0005) {
     // the sun's refracted offset on the floor as a function of slope, linearised; with the slope's derivative (the
     // curvature) this is the Jacobian of the map from the surface to the floor; brightness = 1 / |det J|

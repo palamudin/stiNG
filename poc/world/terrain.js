@@ -178,7 +178,10 @@ float hfShadow(vec2 p, float h0, float dist) {
   col = mix(col, T_SNOW, snow);
   col *= 1.0 - 0.35 * uWet * (1.0 - snow);
   diffuseColor.rgb = col;
-  float TROUGH = mix(mix(0.95, 0.75, rk) * (1.0 - 0.5 * uWet), 0.45, wetB) * TROUGH_WET; // wet sand is smoother; freshly left sand shines
+  // wet sand is smoother and freshly left sand shines, out of the water only: under it the shine is the water's own
+  // surface (post.js), and the sand is as matte as ever
+  float subm = 1.0 - smoothstep(-0.02, 0.0, hgt);
+  float TROUGH = mix(mix(mix(0.95, 0.75, rk) * (1.0 - 0.5 * uWet), 0.45, wetB) * TROUGH_WET, 0.95, subm);
 `)
       .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = TROUGH;')
       .replace('#include <normal_fragment_begin>', /* glsl */ `#include <normal_fragment_begin>

@@ -121,7 +121,7 @@ export class World {
     if (W) {
       const float = gl.extensions.has('EXT_color_buffer_float');
       this.waves = new WaveField(gl, { cascades: W.cascades, fetch: W.fetch, N: this.q.waveN, salt: this.source.cosmetic | 0, float });
-      if (this.source.sea > -1e5 && this.q.caustics) this.caustics = new Caustics(gl, this.waves, this.clip.glsl(), this.clip.uniforms, { res: this.q.caustics[0], grid: this.q.caustics[1], msaa: this.q.msaa ? 4 : 0 });
+      if (this.source.sea > -1e5 && this.q.caustics) this.caustics = new Caustics(gl, this.waves, { res: this.q.caustics[0], msaa: this.q.msaa ? 4 : 0 });
     }
     this.post.setWater(this.waves, this.caustics, this.source.sea > -1e5 ? this.clip : null, this.shore);
     this.drawsWater = !!(this.waves && this.source.waters); // the caller can stop drawing its own water bodies
@@ -250,9 +250,8 @@ export class World {
       }
       U.uWLost.value = this.waves.lostSlope; U.uWPeak.value = Math.min(2 * Math.PI / WAVES.km, 2 * Math.PI / st.kp); // the ripples at the gravity-capillary minimum, or the peak if shorter
       if (this.caustics) {
-        const fx2 = eye.x + TMPV.x * focusDist, fz2 = eye.z + TMPV.z * focusDist, size = THREE.MathUtils.clamp(focusDist * 2.2, 24, 96); // at least 24 m: a wasp near the water sees the floor for tens of metres
-        this.caustics.update(fx2, fz2, size, this.source.sea, this.sunDir);
-        U.uCaus.value.set(this.caustics.U.uCenter.value.x, this.caustics.U.uCenter.value.y, size, this.caustics.on ? 1 : 0);
+        this.caustics.update(this.sunDir); // the tile: everywhere on the water, wherever the camera looks
+        U.uCaus.value.set(this.caustics.L, this.caustics.on ? 1 : 0, this.caustics.res, 0);
       }
       this._bodies(eye);
     }

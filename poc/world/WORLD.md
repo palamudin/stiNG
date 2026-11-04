@@ -203,6 +203,9 @@ water's cascades fade as the floor comes up (the long waves first; the chop reac
 three scales, covered to a share set by the foam's strength, so a crest is nearly solid and the lace sparse; the thin
 water at the very edge foams in patches, more where the waves work.
 
+**Sand under the water is matte**: wet sand shines only above the water; under it the sand's roughness is back to
+dry and the shine is the water's own surface.
+
 **The swash sheet** (`post.js`, `shoreSheet`). The water washes the sand as water: on every sand pixel within reach
 of the line the composite asks whether the tongue's level stands above the sand — one tongue per wave, on the water
 line's own clock (the phase of the wave arriving at the nearest shore point, so every height of the beach sees the
@@ -273,7 +276,16 @@ when a window moves), the swash in motion.
   where and when they were baked; the wild source bakes exactly.
 - The chunk cache is bounded (32 fine chunks: a 0.5 km² neighbourhood); a chunk let go is baked again on return,
   identically.
-- The caustics are splatted from the open water's cascades, undamped in the shallows.
+- The caustics come from one cascade's tile (6.9 m), undamped in the shallows.
+
+**The caustics** (`caustics.js`, W3.1). The window round the focus is gone (its edge was the triangle a wasp saw near
+the surface, and from high up it was a patch under the wasp). As in Ultra-Water, the pattern is computed over one tile
+of the cascade nearest 8 m (it is periodic, so the pattern repeats over the whole sea), at three floor depths (0.5,
+1.5, 4 m, one channel each), into a mipmapped repeating target; the water looks it up where a floor point's sunlight
+entered the surface, at the mip for the pixel's footprint (a far or high view sees an even light, not aliasing),
+blends the slices by depth, fades it in over the first half metre and out past 12 m. The slopes are read by a cubic
+B-spline so the lines do not bead. `world/test/caustics.html`: the mean over the tile is 1.00 on still water and within
+1-2% under waves at every depth (energy kept). Wherever the camera looks, at any height, the caustics are there.
 - The clouds' shadow reaches the sea through a copy of the shadow map (27 m texels): a cloud's edge on the water is
   as soft as on the ground, no softer.
 
