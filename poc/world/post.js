@@ -256,7 +256,7 @@ void main() {
     const C = field ? field.C : 0, U = this.U;
     let rebuild = false;
     if (clip && !this.clipGLSL) { this.clipGLSL = clip.glsl(); Object.assign(U, clip.uniforms); rebuild = true; }
-    if (shore && !this.shoreGLSL) { this.shoreGLSL = shore.glsl() + '\n' + SHORE_WAVE_GLSL; Object.assign(U, shore.uniforms); rebuild = true; }
+    if (shore && !this.shoreGLSL) { this.shoreGLSL = shore.glsl() + '\n' + (shore.compositeGLSL || '') + '\n' + SHORE_WAVE_GLSL; Object.assign(U, shore.uniforms); rebuild = true; }
     if (rebuild) { this.composite.dispose(); this.composite = this._composite(C); this.C = C; this.mapPass = this._mapPass(); }
     else if (C !== this.C) { this.composite.dispose(); this.C = C; this.composite = this._composite(C); }
     if (field) {

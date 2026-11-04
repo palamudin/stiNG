@@ -24,21 +24,24 @@ outer: for (let r = 0; r < 12000; r += 60) for (let a = 0; a < 6.283; a += 0.3) 
   if (o[0] > 2 && o[0] < 7 && o[2] < 0.3 && o[4] <= src.sea) { X0 = x; Z0 = z; break outer; }
 }
 world.build(X0, Z0);
-const slot = 0, S = world.shore.slots[slot], W = SHORE.N, s = S.s, ox = S.ox, oz = S.oz;
-// the GPU table, slot 0 (half floats)
-const raw = new Uint16Array(W * W * 4), px = new Float32Array(W * W * 4);
-renderer.setRenderTarget(world.shore.rt, slot); renderer.readRenderTargetPixels(world.shore.rt, 0, 0, W, W, raw); renderer.setRenderTarget(null);
-const half = (h) => { const sg = h >> 15 ? -1 : 1, e = (h >> 10) & 31, m = h & 1023; return e === 0 ? sg * m * 2 ** -24 : e === 31 ? (m ? NaN : sg * Infinity) : sg * (1 + m / 1024) * 2 ** (e - 15); };
-for (let i = 0; i < raw.length; i++) px[i] = half(raw[i]);
+const L = world.shore.levels[0], cx = Math.floor(X0 / L.chunk), cz = Math.floor(Z0 / L.chunk);
+const si = L.slots.findIndex((S) => S.cx === cx && S.cz === cz), slot = L.slotBase + si, W = SHORE.tex, s = L.s, ox = cx * L.chunk, oz = cz * L.chunk;
+if (si < 0) throw new Error('the chunk under the start is not held');
+// the GPU table: the chunk's layer
+const px = new Float32Array(W * W * 4);
+renderer.setRenderTarget(world.shore.rt, slot); renderer.readRenderTargetPixels(world.shore.rt, 0, 0, W, W, px); renderer.setRenderTarget(null);
 // the CPU: e per texel of the window (the source at the texel's point), then every crossing, then the nearest per texel
 const e = new Float32Array(W * W), o = [0, 0, 0, 0, 0];
 const P = (i, j) => [ox + (i + 0.5) * s, oz + (j + 0.5) * s];
-for (let j = 0; j < W; j++) for (let i = 0; i < W; i++) { const [x, z] = P(i, j); src.sample(x, z, o, s); e[j * W + i] = o[0] - o[4]; }
+for (let j = 0; j < W; j++) for (let i = 0; i < W; i++) { const [x, z] = P(i, j); src.sample(x, z, o); e[j * W + i] = o[0] - o[4]; }
+// the crossings, over the chunk and the level's margin round it (what the bake saw)
+const M = Math.ceil(L.margin / s), WM = W + 2 * M, eM = new Float32Array(WM * WM);
+for (let j = 0; j < WM; j++) for (let i = 0; i < WM; i++) { src.sample(ox + (i - M + 0.5) * s, oz + (j - M + 0.5) * s, o); eM[j * WM + i] = o[0] - o[4]; }
 const seeds = [];
-for (let j = 0; j < W; j++) for (let i = 0; i < W; i++) {
-  const e0 = e[j * W + i], [x, z] = P(i, j);
-  if (i < W - 1) { const e1 = e[j * W + i + 1]; if ((e0 < 0) !== (e1 < 0)) { const f = e0 / (e0 - e1); seeds.push([x + f * s, z]); } }
-  if (j < W - 1) { const e1 = e[(j + 1) * W + i]; if ((e0 < 0) !== (e1 < 0)) { const f = e0 / (e0 - e1); seeds.push([x, z + f * s]); } }
+for (let j = 0; j < WM; j++) for (let i = 0; i < WM; i++) {
+  const e0 = eM[j * WM + i], x = ox + (i - M + 0.5) * s, z = oz + (j - M + 0.5) * s;
+  if (i < WM - 1) { const e1 = eM[j * WM + i + 1]; if ((e0 < 0) !== (e1 < 0)) { const f = e0 / (e0 - e1); seeds.push([x + f * s, z]); } }
+  if (j < WM - 1) { const e1 = eM[(j + 1) * WM + i]; if ((e0 < 0) !== (e1 < 0)) { const f = e0 / (e0 - e1); seeds.push([x, z + f * s]); } }
 }
 // a grid of the seeds for the nearest search
 const cell = 8 * s, grid = new Map(); const gk = (x, z) => Math.floor(x / cell) + ',' + Math.floor(z / cell);
@@ -61,20 +64,20 @@ const step = 4; // every fourth texel each way (a 128 x 128 sample of the 512 x 
 for (let j = 1; j < W - 1; j += step) for (let i = 1; i < W - 1; i += step) {
   const k = j * W + i, [x, z] = P(i, j), g = k * 4;
   if (!seeds.length) continue;
-  const [bd, bx, bz] = nearest(x, z); if (bd === Infinity) continue;
+  const [bd, bx, bz] = nearest(x, z); if (bd === Infinity || bd > L.margin * 0.95 || Math.abs(px[g]) > 9e3) continue;
   const sg = e[k] < 0 ? -1 : 1, want = sg * bd, got = px[g];
   n++; const err = Math.abs(got - want); errs.push(err); maxErr = Math.max(maxErr, err); if (err < 0.5 * s) within++;
   if (Math.sign(got) === sg) signOk++;
   if (Math.sign(px[g + 3]) === -sg) tauSign++; // the travel time: positive on the water, negative on land
-  if (bd > s) { dirN++; const dx = (bx - x) / bd, dz = (bz - z) / bd; if (dx * px[g + 1] + dz * px[g + 2] > 0.9) dirOk++; }
+  if (bd > 2 * s) { dirN++; const dx = (bx - x) / bd, dz = (bz - z) / bd, dl = Math.hypot(px[g + 1], px[g + 2]) || 1; if ((dx * px[g + 1] + dz * px[g + 2]) / dl > 0.9) dirOk++; }
   if (e[k] < 0 && bd > s && bd < 200) {
     let tau = 0; const M = 64;
-    for (let m = 0; m < M; m++) { const t = (m + 0.5) / M; src.sample(x + (bx - x) * t, z + (bz - z) * t, o, s); const dep = Math.min(SHORE.dMax, Math.max(SHORE.dMin, o[4] - o[0])); tau += bd / M / Math.sqrt(9.81 * dep); }
+    for (let m = 0; m < M; m++) { const t = (m + 0.5) / M; src.sample(x + (bx - x) * t, z + (bz - z) * t, o); const dep = Math.min(SHORE.dMax, Math.max(SHORE.dMin, o[4] - o[0])); tau += bd / M / Math.sqrt(9.81 * dep); }
     const te = Math.abs(px[g + 3] - tau) / tau; tauErrs.push(te); tauErr = Math.max(tauErr, te); tauN++;
   }
 }
 renderer.render(scene, camera); renderer.render(scene, camera); // (the composite is not run here: the sampler count is for the world's post, below)
 const pct = (a, q) => { const b = a.slice().sort((x, y) => x - y); return b[Math.min(b.length - 1, Math.floor(q * b.length))]; };
-window.__result = { errP50: pct(errs, 0.5), errP90: pct(errs, 0.9), tauRelErrP50: pct(tauErrs, 0.5), tauRelErrP90: pct(tauErrs, 0.9), texel: s, span: W * s, texelsChecked: n, seeds: seeds.length, withinHalfTexel: within / n, maxErrM: maxErr, signAgree: signOk / n, tauSignAgree: tauSign / n, dirAgree: dirOk / Math.max(1, dirN), tauRelErrMax: tauErr, tauChecked: tauN, bakes: world.shore.stats.bakes, slots: world.shore.slots.map((S) => [S.s, S.ox, S.oz]) };
+window.__result = { texelsKnown: n, errP50: pct(errs, 0.5), errP90: pct(errs, 0.9), tauRelErrP50: pct(tauErrs, 0.5), tauRelErrP90: pct(tauErrs, 0.9), texel: s, span: W * s, texelsChecked: n, seeds: seeds.length, withinHalfTexel: within / n, maxErrM: maxErr, signAgree: signOk / n, tauSignAgree: tauSign / n, dirAgree: dirOk / Math.max(1, dirN), tauRelErrMax: tauErr, tauChecked: tauN, bakes: world.shore.stats.bakes, held: world.shore.stats.held, chunk: [cx, cz, L.chunk] };
 document.getElementById('out').textContent = JSON.stringify(window.__result, null, 1);
 </script>

@@ -40,7 +40,7 @@ const f = (v) => (Number.isInteger(v) ? v.toFixed(1) : String(v));
 // square-root scale of the mean (small means, where a cell draws none or one, get the fine rows), columns over u.
 // Built once; the GPU reads a texel instead of summing the series per cell per pixel. 512 rows: the row's mean is
 // within 0.1% of the pixel's past a mean of 1, columns of u at 1/512.
-export const POISSON = { rows: 512, cols: 512, lamMax: 12 };
+export const POISSON = { rows: 256, cols: 1024, lamMax: 12 };
 export function poissonTableData() {
   const { rows, cols, lamMax } = POISSON, data = new Float32Array(rows * cols);
   for (let r = 0; r < rows; r++) {

@@ -152,19 +152,35 @@ depth. The scaling keeps the sign, so the water line is exactly where it was and
 `(1 - q^2)^2` of its depth, shallow over its outer third. At the template's start: 0.23 m deep 2 m out, 0.42 m at 4 m,
 0.98 m at 10 m (a node check).
 
-**The shore table** (`shorefield.js`). Everything the water and the beach need to know about the water line is baked
-once and read as a table: three square windows round the eye, 512 texels a side (0.5 m texels over 256 m, 4 m over
-2 km, 16 m over 8 km), each holding the signed distance to the water line in metres, the unit direction to the nearest
-point of the line, and a shallow-water front's travel time from the line (the straight line to the nearest shore point
-at `sqrt(g depth)`, depth clamped to 0.3..14 m, 32 steps; positive on the water, negative up the beach at the swash's
-speed). Baked on the GPU by jump flooding from the clipmap (height and water level read from the finest level at each
-texel's point): a seed pass finds the crossings between neighbouring texels at sub-texel accuracy, nine flood passes
-spread the nearest seed, a last pass writes the table. A window is baked again only when the eye has moved an eighth of
-its span (32 m for the fine one); nothing per frame computes a shoreline. The precision is the row count: the reader
-addresses a texel, so finer texels cost a few megabytes and bake time, nothing per pixel. Readers blend the windows
-over the outer tenth of each span, so no seam shows where one hands over to the next. The array texture carries two
-more layers read through the same sampler: the glints' Poisson table and a copy of the clouds' shadow map each frame,
-so the sea darkens under a cloud as the ground does.
+**The shore table** (`shorefield.js`). The water line is world data (the ground does not move), so everything the
+water and the beach need to know about it is baked once per world chunk and kept, like a chunk of the map: three
+levels of fixed chunks (128 m at 0.5 m texels, 1 km at 4 m, 4 km at 16 m), each chunk 256 texels a side, holding the
+signed distance to the water line, the direction to its nearest point scaled by the front's coherence, and a shallow
+water front's travel time from the line (the straight line to the nearest shore point at `sqrt(g depth)`, depth
+clamped to 0.3..14 m, 16 steps; positive on the water, negative up the beach at the swash's speed). Baked on the GPU
+from the source's own GLSL twin (exact at any point, no view in it; the clipmap for a source without one) by jump
+flooding over the chunk plus a margin (32 m, 256 m, 1 km by level), so a point by a chunk's edge finds the same
+nearest shore point its neighbour across the edge finds: one continuous field, no seams. A level answers where the
+line is within its margin; past that the next level does, blended over the last quarter of the margin. A chunk is
+baked when it first comes near (the 3 x 3 round the eye at each level, two a frame; all at a build) and stays in its
+slot until the slots run out (32, 12, 6 by level: 37 MB of float texels) and the one used longest ago is let go;
+nothing per frame computes a shoreline. The coherence comes from the travel time's gradient over a wide stencil: a
+clean front has `|grad tau| = 1 / c`; along the spine of a body, where fronts from two shores meet, the ridge in tau
+flattens the wide difference and the trains fade out there instead of folding into each other, so the middle of a
+body is the wind sea and the swell alone. Floats, not halves: the travel time is a phase, and a half's step across a
+5 s wave is a visible terrace. The precision is the row count: the reader addresses a texel; finer texels cost memory
+and bake time, nothing per pixel. The array texture carries two more layers read through the same sampler: the
+glints' Poisson table and a copy of the clouds' shadow map each frame, so the sea darkens under a cloud as the ground
+does.
+
+**The shore by calculation** (`?shore=live`, `shoreLive`). For the comparison the same four readers exist as live
+calculation: every water pixel searches the clipmap for the line itself (16 directions, 6 radii, 192 reads), takes the
+distance over the depth under it for the travel time, sums the Poisson series, reads the clouds' own map. Same
+function names, same answers in the limit, so the water and the beach run unchanged either way; the stats line says
+which is on.
+
+**The water never lies flat** (`waves.js`). The wind sea is raised by at least a 1.5 m/s wind (a residual chop) and
+the swell by at least 4.5 m/s over the 40 km fetch (weather elsewhere, 0.2 m at 4 s); the wind adds to these.
 
 **The shore waves** (`SHORE_WAVE_GLSL`, read by `water.js` and `terrain.js`). Two trains (the peak period and 0.62
 of it) of narrow-crested shallow-water waves ride the table: phase `w (t + tau)`, wavenumber `w / sqrt(g depth)`, so
@@ -197,12 +213,12 @@ the table, and the shore distance by a 48-tap live search on the clipmap against
 in question; on a software renderer the times are CPU times and the ratios do not carry.
 
 **Checks.** `node world/test/world.test.mjs`: the beach profile, the swell state, the Poisson table (35 checks pass).
-`world/test/shore-parity.html`: the fine window against a brute-force nearest crossing on the CPU from the source at
-the texels' points (16,384 of its 262,144 texels, 707 crossings): the distance within 8 cm at the median and 0.63 m at
-the 90th percentile (the window's edge, 128 m out, where the clipmap's finest level has 4 m texels and its water line
-differs from the source's by up to a texel; max 1.27 m); the signs of distance and travel time agree at 99.9%, the
-direction at 99.8% of texels a texel or more from the line; the travel time within 0.9% of a 64-step integral at the
-median, 4.2% at the 90th percentile (a few per cent of a wave period). `world/test/gpu-parity.html` with the new profile: height
+`world/test/shore-parity.html`: the fine chunk under the start against a brute-force nearest crossing on the CPU from
+the source at the texels' points, over the chunk and its margin: 1,882 texels the level knows (within 32 m of the line) of a 128 x 128 sample, 557 crossings: the distance within 0.3 mm
+at the median, 2.7 mm at the 90th percentile, 5.7 cm at worst (the bake is from the same world function); the signs of
+distance and travel time agree everywhere; the direction (from the travel time's gradient over a 3 m stencil) within
+25 degrees of the exact at 97.6% of texels two or more texels from the line; the travel time within 0.02% of a 64-step
+integral at the median, 0.09% at the 90th percentile, 10.7% at worst. `world/test/gpu-parity.html` with the new profile: height
 within 1.3 cm (seed 7), 0.1 cm (99), 2.9 cm (1234: one point of 4,096 over 2 cm, the lake trigonometry in float32).
 Renders: the beach from the sand, from above, the surf
 zone and a storm. Not verified: the timings of the bake on a real GPU (`shore` in the per-pass stats; it runs only
@@ -215,9 +231,11 @@ when a window moves), the swash in motion.
   in the clipmap's water channel there.
 - The shore waves lift the water's surface but do not move it sideways (no Gerstner lean): a plunging lip is not
   drawn, the bore is.
-- The far windows (4 m and 16 m texels) place the line to a few metres: foam lines on a far coast sit within that.
-- The table is as good as the clipmap where it is baked: at a window's edge the clipmap's level there is coarser than
-  the table's texels, and the line follows the clipmap's (which is what the water is drawn from anyway).
+- The coarse levels (4 m and 16 m texels) place the line to a few metres: foam lines on a far coast sit within that.
+- A source without a GLSL twin (the composite) bakes from the clipmap, so its chunks are as good as the clipmap was
+  where and when they were baked; the wild source bakes exactly.
+- The chunk cache is bounded (32 fine chunks: a 0.5 km² neighbourhood); a chunk let go is baked again on return,
+  identically.
 - The caustics are splatted from the open water's cascades, undamped in the shallows.
 - The clouds' shadow reaches the sea through a copy of the shadow map (27 m texels): a cloud's edge on the water is
   as soft as on the ground, no softer.

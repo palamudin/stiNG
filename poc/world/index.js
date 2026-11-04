@@ -19,7 +19,7 @@ import { Post } from './post.js';
 import { Forest } from './trees.js';
 import { Grass } from './grass.js';
 import { WaveField } from './wavegpu.js';
-import { ShoreField } from './shorefield.js';
+import { ShoreField, shoreLive } from './shorefield.js';
 import { Caustics } from './caustics.js';
 import { WATER } from './water.js';
 import { WAVES, swellState } from './waves.js';
@@ -67,9 +67,15 @@ export class World {
     const wet = source.sea > -1e5; // a source without water: no beaches, no mud, no snow line; heights count from 0
     // the shore table (shorefield.js): baked from the clipmap when its levels move; the water and the beach read it
     const floatRT = renderer.capabilities.isWebGL2 && !!renderer.extensions.get('EXT_color_buffer_float');
-    this.shore = wet && floatRT ? new ShoreField(renderer, this.clip) : null;
+    // opts.shore 'live': no table, the shore computed per pixel (the comparison; shorefield.js shoreLive)
+    this.shoreMode = opts.shore === 'live' ? 'live' : 'table';
+    this.shore = wet && floatRT ? (this.shoreMode === 'live' ? null : new ShoreField(renderer, this.clip, source)) : null;
     this.uShoreWave = { value: new THREE.Vector4(0, 8, 0, 8) }; // the swell's and the wind sea's (Hs, Tp): set from the wave field each frame
     this.uShoreSea = { value: source.sea };
+
+    this.sky = new Sky(renderer);
+    this.clouds = new Clouds(renderer, this.sky);
+    if (wet && floatRT && this.shoreMode === 'live') this.shore = shoreLive(this.clouds);
     this.terrain = makeTerrain(this.clip, { sea: wet ? source.sea : 0, paving: source.kind === 'sting', shore: wet ? 1 : 0, snowLine: wet ? 215 : 1e9, shoreField: this.shore, uShoreWave: this.uShoreWave, uShoreSea: this.uShoreSea });
     this.group = new THREE.Group(); this.group.name = 'world2';
     this.group.add(this.terrain.mesh);
@@ -83,10 +89,8 @@ export class World {
     this.hemi = opts.hemi || new THREE.HemisphereLight(0xffffff, 0x404030, 1);
     if (!opts.sun) this.group.add(this.sun, this.sun.target);
     if (!opts.hemi) this.group.add(this.hemi);
-    this.sky = new Sky(renderer);
-    this.clouds = new Clouds(renderer, this.sky);
     this.uniforms.tCloudShadow.value = this.clouds.rtShadow.texture; this.uniforms.uCloudRect = this.clouds.U.uShadowRect;
-    if (this.shore) { this.shore.uniforms.uShoreCloudRect = this.clouds.U.uShadowRect; this.clouds.onShadow = (tex) => this.shore.copyInto(tex, this.shore.cloud); }
+    if (this.shore && !this.shore.live) { this.shore.uniforms.uShoreCloudRect = this.clouds.U.uShadowRect; this.clouds.onShadow = (tex) => this.shore.copyInto(tex, this.shore.cloud); }
     this.forest = new Forest(this, { range: this.q.trees, far: this.q.far });
     this.group.add(this.forest.group);
     this.uniforms.uTreeFar.value = this.forest.farOn ? this.forest.cfg.far[1] : this.forest.bands[3];
@@ -162,7 +166,7 @@ export class World {
   setSource(source, x = 0, z = 0) {
     this.source = source;
     this._bodyMemo = null; // a new world: its water bodies afresh
-    this.clip.setSource(source); if (this.shore) this.shore.rebake();
+    this.clip.setSource(source); if (this.shore) this.shore.setSource(source);
     this.post.U.uSea.value = source.sea; this.post.U.uWaterOn.value = source.sea < -1e5 ? 0 : 1; this.uShoreSea.value = source.sea;
     this._water();
     this.group.remove(this.forest.group);
@@ -175,7 +179,7 @@ export class World {
   // twice; userData.ring is the flag game.js already skips
   _mark() { this.group.traverse((o) => { o.userData.ring = true; o.userData.world2 = true; }); }
   set(o) { Object.assign(this.env, o); }
-  build(x, z) { this.clip.build(x, z); if (this.shore) { this.shore.rebake(); this.shore.update(TMPV.set(x, 0, z)); } }
+  build(x, z) { this.clip.build(x, z); if (this.shore) this.shore.update(TMPV.set(x, 0, z), true); }
   update(dt, eye, focusDist = 10) {
     const E = this.env, U = this.post.U;
     this.time += dt;
@@ -239,14 +243,15 @@ export class World {
     this.timer.begin('waves');
     if (this.waves) {
       this._dtAvg += (Math.min(Math.max(dt, 1 / 240), 0.2) - this._dtAvg) * 0.05;
-      const w10 = E.wind10 || [E.wind[0] * 8, E.wind[1] * 8];
+      const w10 = (E.wind10 || [E.wind[0] * 8, E.wind[1] * 8]).slice();
+      { const m = Math.hypot(w10[0], w10[1]); if (m < WAVES.residual) { const d = m > 1e-3 ? [w10[0] / m, w10[1] / m] : [0.8, 0.6]; w10[0] = d[0] * WAVES.residual; w10[1] = d[1] * WAVES.residual; } } // never flat
       this.waves.update(this.time, w10, Math.PI / this._dtAvg);
       const st = this.waves.state;
       // the run-up's sea state: significant height H0 and the deep-water wavelength L0 of the peak period (2 pi g / w^2)
       if (this.source.sea > -1e5) {
         const wp = Math.sqrt(9.81 * st.kp + WAVES.T * st.kp ** 3); this.terrain.uniforms.uRun.value.set(this.waves.stats.Hs * 2 * Math.PI * 9.81 / (wp * wp), this.waves.stats.Hs);
         // the shore waves (shorefield.js): the sea's swell from the long fetch, a lake's from the local wind sea
-        const sw = swellState(st.U10, this.source.water.swellFetch || this.source.water.fetch);
+        const sw = swellState(Math.max(st.U10, WAVES.swellMin), this.source.water.swellFetch || this.source.water.fetch);
         this.uShoreWave.value.set(sw.Hs, Math.max(1.5, sw.Tp), this.waves.stats.Hs, Math.max(1.5, 2 * Math.PI / wp));
       }
       U.uWLost.value = this.waves.lostSlope; U.uWPeak.value = Math.min(2 * Math.PI / WAVES.km, 2 * Math.PI / st.kp); // the ripples at the gravity-capillary minimum, or the peak if shorter

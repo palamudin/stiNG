@@ -1,60 +1,78 @@
-// The shore table (W3.1): everything the water and the beach need to know about the water line, computed once and
-// read as a table. Three square windows round the eye (fine, middle, far: 0.5 m, 4 m and 16 m texels, 512 of them a
-// side) hold, per texel:
+// The shore table (W3.1): the water line is world data (the ground does not move), so everything the water and the
+// beach need to know about it is baked once per world chunk and kept, like a chunk of the map: three levels of fixed
+// chunks (128 m at 0.5 m texels, 1 km at 4 m, 4 km at 16 m), each chunk 256 texels a side holding, per texel:
 //   x  the signed distance to the water line in metres: above the water positive, under it negative;
-//   yz the unit direction to the nearest point of the water line (from the water: the way waves travel in);
+//   yz the direction to the nearest point of the water line (from the water: the way waves travel in), scaled by the
+//      front's coherence: 1 where the travel time runs cleanly from one shore, falling to 0 along the spine of a body
+//      where fronts from two shores meet (so the trains fade there instead of folding);
 //   w  the travel time of a shallow-water front from the line, in seconds, along the straight line to the nearest
 //      shore point at speed sqrt(g depth) (depth clamped to 0.3..14 m): positive on the water, negative up the beach
 //      at the swash's speed, so one phase runs from the breakers to the run-up.
-// Baked on the GPU from the clipmap (height and water level at the texel's point, read from the finest level there)
-// by jump flooding (Rong and Tan 2006): a seed pass finds the water line between neighbouring texels (the crossing at
-// sub-texel accuracy), log2(512) passes spread the nearest seed, a last pass writes the table. A window is baked
-// again only when the eye has moved an eighth of its span, never per frame; nothing in a frame computes a shoreline.
-// Precision is the row count: the reader addresses a texel, so finer texels cost memory (a few MB) and bake time,
-// nothing per pixel. Readers blend the windows at their edges, so no seam shows where one hands over to the next.
-// The array texture carries two more layers the composite reads through this one sampler (it is at the fragment
-// sampler limit of Chrome on Windows, 16): the glints' Poisson table (water.js), and a copy of the clouds' shadow map
-// each frame (clouds.js), so the sea darkens under a cloud like the ground does.
+// Baked on the GPU from the source's own GLSL twin where it has one (exact at any point, no view in it; the clipmap
+// otherwise) by jump flooding (Rong and Tan 2006) over the chunk plus a margin, so a point by a chunk's edge finds the
+// same nearest shore point its neighbour across the edge finds: no seams between chunks. A chunk is baked when it
+// first comes near and stays in its slot until the slots run out and the farthest is let go; nothing per frame
+// computes a shoreline. A level answers where the line is within its margin; past that the next level does. Floats,
+// not halves: the travel time is a phase, and a half's step across a 5 s wave is a visible terrace. The precision is
+// the row count: the reader addresses a texel; finer texels cost memory and bake time, nothing per pixel.
+// Two more layers ride in the same array texture, read through the one sampler the composite can spare (it is at the
+// fragment sampler limit of Chrome on Windows, 16): the glints' Poisson table (water.js), and a copy of the clouds'
+// shadow map each frame (clouds.js), so the sea darkens under a cloud like the ground does.
 import * as THREE from 'three';
 import { POISSON, poissonTableData } from './water.js';
 
-export const SHORE = { N: 512, texels: [0.5, 4, 16], march: 32, dMin: 0.3, dMax: 14, rebake: 0.125 };
+export const SHORE = {
+  tex: 256,                       // texels a chunk side
+  levels: [{ s: 0.5, slots: 32, margin: 32 }, { s: 4, slots: 12, margin: 256 }, { s: 16, slots: 6, margin: 1024 }], // texel size, slots kept, metres the bake looks past the chunk
+  near: 1,                        // chunks round the eye's wanted at each level (1: the 3 x 3)
+  dirN: 16,                       // the directory: chunks a side the reader can address at each level, round the eye
+  march: 16, dMin: 0.3, dMax: 14,
+  perFrame: 2,                    // bakes a frame at most once running
+};
 
 const VS = 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }';
 const G = 9.81;
 
 export class ShoreField {
-  constructor(renderer, clip, cfg = {}) {
+  // source: a source with a GLSL twin bakes exactly from it; without one the clipmap is read
+  constructor(renderer, clip, source, cfg = {}) {
     this.cfg = { ...SHORE, ...cfg };
-    const C = this.cfg, N = C.N;
-    this.renderer = renderer; this.clip = clip;
-    this.slots = C.texels.map((s) => ({ s, ox: 0, oz: 0, baked: false }));
-    this.tables = this.slots.length; this.cloud = this.slots.length + 1; // the extra layers
-    this.rt = new THREE.WebGLArrayRenderTarget(N, N, this.slots.length + 2, { depthBuffer: false });
-    Object.assign(this.rt.texture, { type: THREE.HalfFloatType, format: THREE.RGBAFormat, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, generateMipmaps: false });
+    const C = this.cfg, T = C.tex, M = C.levels.reduce((a, L) => Math.max(a, Math.ceil(L.margin / L.s)), 0), W = T + 2 * M; // the bake window
+    this.renderer = renderer; this.clip = clip; this.source = source; this.W = W; this.M = M;
+    this.levels = C.levels.map((L, k) => ({ ...L, k, chunk: L.s * T, slotBase: C.levels.slice(0, k).reduce((a, l) => a + l.slots, 0), slots: Array.from({ length: L.slots }, () => ({ cx: null, cz: null, used: 0 })) }));
+    const nSlots = C.levels.reduce((a, L) => a + L.slots, 0);
+    this.tables = nSlots; this.cloud = nSlots + 1;
+    this.rt = new THREE.WebGLArrayRenderTarget(T, T, nSlots + 2, { depthBuffer: false });
+    Object.assign(this.rt.texture, { type: THREE.FloatType, format: THREE.RGBAFormat, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, generateMipmaps: false });
     const o = { type: THREE.FloatType, format: THREE.RGBAFormat, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: false, generateMipmaps: false };
-    this.ping = new THREE.WebGLRenderTarget(N, N, o); this.pong = new THREE.WebGLRenderTarget(N, N, o);
+    this.rtH = new THREE.WebGLRenderTarget(W, W, o); this.ping = new THREE.WebGLRenderTarget(W, W, o); this.pong = new THREE.WebGLRenderTarget(W, W, o); this.rtT = new THREE.WebGLRenderTarget(W, W, o);
+    const D = C.dirN * C.dirN / 4;
     this.uniforms = {
       uShoreTab: { value: this.rt.texture },
-      uShoreLv: { value: this.slots.map(() => new THREE.Vector4()) }, // origin x, origin z, texel, span
+      uShoreLv: { value: this.levels.map(() => new THREE.Vector4()) },        // texel, chunk size, directory origin chunk x, z
+      uShoreDir: { value: Array.from({ length: this.levels.length * D }, () => new THREE.Vector4(-1, -1, -1, -1)) }, // slot per chunk of the directory, 4 a vec4, -1 none
       uShoreOn: { value: 0 },
       uShoreCloudRect: { value: new THREE.Vector4(0, 0, 1, 0) }, // index.js points this at the clouds' own
     };
-    const U = { ...clip.uniforms, uOrg: { value: new THREE.Vector2() }, uCell: { value: 1 }, uStep: { value: 1 }, uSrc: { value: null } };
-    const head = `precision highp float; precision highp int;\n${clip.glsl()}\nuniform vec2 uOrg; uniform float uCell, uStep; uniform highp sampler2D uSrc; out vec4 o;
-// the height above the water at a point, from the clipmap's finest level there
-float shoreE(vec2 p) { return clipAt(p).x - clipWater(p); }
-vec2 shoreP(ivec2 u) { return uOrg + (vec2(u) + 0.5) * uCell; }`;
+    const exact = !!source.glsl;
+    const U = { ...clip.uniforms, ...(exact ? source.uniforms : {}), uOrg: { value: new THREE.Vector2() }, uCell: { value: 1 }, uStep: { value: 1 }, uSrc: { value: null }, uSrc2: { value: null }, uMargin: { value: 0 } };
+    const head = `precision highp float; precision highp int;\n${clip.glsl()}\n${exact ? source.glsl : ''}\nuniform vec2 uOrg; uniform float uCell, uStep, uMargin; uniform highp sampler2D uSrc, uSrc2; out vec4 o;
+vec2 shoreP(ivec2 u) { return uOrg + (vec2(u) + 0.5) * uCell; }
+float shoreEAt(ivec2 u) { return texelFetch(uSrc, u, 0).x; }`;
     const mat = (frag) => new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, uniforms: U, vertexShader: VS, fragmentShader: head + '\n' + frag, depthTest: false, depthWrite: false });
+    // the window's heights above the water, once per texel (the source itself, or the clipmap)
+    this._height = mat(exact
+      ? `void main() { vec2 p = shoreP(ivec2(gl_FragCoord.xy)); vec4 S; float wl; wildSampleW(p, S, wl); o = vec4(S.x - wl, 0.0, 0.0, 1.0); }`
+      : `void main() { vec2 p = shoreP(ivec2(gl_FragCoord.xy)); o = vec4(clipAt(p).x - clipWater(p), 0.0, 0.0, 1.0); }`);
     // the seed: texel u holds the nearest water-line crossing with its four neighbours, if any
     this._seed = mat(`
 void main() {
   ivec2 u = ivec2(gl_FragCoord.xy); vec2 p = shoreP(u);
-  float e0 = shoreE(p); vec2 best = vec2(0.0); float bd = 1e9, has = 0.0;
+  float e0 = shoreEAt(u); vec2 best = vec2(0.0); float bd = 1e9, has = 0.0;
   ivec2 N[4] = ivec2[4](ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1));
   for (int n = 0; n < 4; n++) {
-    ivec2 v = u + N[n]; if (any(lessThan(v, ivec2(0))) || any(greaterThan(v, ivec2(${N - 1})))) continue;
-    float e1 = shoreE(shoreP(v));
+    ivec2 v = u + N[n]; if (any(lessThan(v, ivec2(0))) || any(greaterThan(v, ivec2(${W - 1})))) continue;
+    float e1 = shoreEAt(v);
     if ((e0 < 0.0) == (e1 < 0.0)) continue;
     float f = e0 / (e0 - e1); vec2 c = p + vec2(N[n]) * f * uCell; float d = f * uCell;
     if (d < bd) { bd = d; best = c; has = 1.0; }
@@ -69,118 +87,220 @@ void main() {
   int s = int(uStep);
   for (int dj = -1; dj <= 1; dj++) for (int di = -1; di <= 1; di++) {
     if (di == 0 && dj == 0) continue;
-    ivec2 v = u + ivec2(di, dj) * s; if (any(lessThan(v, ivec2(0))) || any(greaterThan(v, ivec2(${N - 1})))) continue;
+    ivec2 v = u + ivec2(di, dj) * s; if (any(lessThan(v, ivec2(0))) || any(greaterThan(v, ivec2(${W - 1})))) continue;
     vec4 c = texelFetch(uSrc, v, 0); if (c.z < 0.5) continue;
     float d = distance(c.xy, p); if (d < bd) { bd = d; best = vec4(c.xy, 1.0, me.w); }
   }
   o = best;
 }`);
-    // the table: signed distance, direction, travel time
+    // distance and travel time (uSrc: the flood's result; uSrc2: the heights), marched on the heights
     this._final = mat(`
+float eAt(vec2 q) { vec2 g = (q - uOrg) / uCell - 0.5; vec2 g0 = floor(g); vec2 f = g - g0; ivec2 i = ivec2(g0);
+  float a = texelFetch(uSrc2, clamp(i, ivec2(0), ivec2(${W - 1})), 0).x, b = texelFetch(uSrc2, clamp(i + ivec2(1, 0), ivec2(0), ivec2(${W - 1})), 0).x;
+  float c = texelFetch(uSrc2, clamp(i + ivec2(0, 1), ivec2(0), ivec2(${W - 1})), 0).x, d = texelFetch(uSrc2, clamp(i + ivec2(1, 1), ivec2(0), ivec2(${W - 1})), 0).x;
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y); }
 void main() {
   ivec2 u = ivec2(gl_FragCoord.xy); vec2 p = shoreP(u);
   vec4 s = texelFetch(uSrc, u, 0); float e = s.w; bool water = e < 0.0;
-  if (s.z < 0.5) { o = vec4(water ? -1.0e4 : 1.0e4, 0.0, 0.0, water ? 1.0e4 : -1.0e4); return; }
-  vec2 d = s.xy - p; float dist = length(d); vec2 dir = dist > 1e-4 ? d / dist : vec2(0.0);
-  // the travel time: the straight line to the shore point, marched in ${C.march} steps at the shallow-water speed;
-  // up the beach at the speed of the shallowest water
+  if (s.z < 0.5 || distance(s.xy, p) > uMargin) { o = vec4(water ? -1.0e4 : 1.0e4, 0.0, 0.0, water ? 1.0e4 : -1.0e4); return; } // the line is past the margin: this level does not know
+  vec2 d = s.xy - p; float dist = length(d);
   float tau = 0.0, ds = dist / ${C.march.toFixed(1)};
   for (int k = 0; k < ${C.march}; k++) {
     vec2 q = p + d * ((float(k) + 0.5) / ${C.march.toFixed(1)});
-    float dep = clamp(water ? -shoreE(q) : ${C.dMin.toFixed(2)}, ${C.dMin.toFixed(2)}, ${C.dMax.toFixed(1)});
+    float dep = clamp(water ? -eAt(q) : ${C.dMin.toFixed(2)}, ${C.dMin.toFixed(2)}, ${C.dMax.toFixed(1)});
     tau += ds / sqrt(${G.toFixed(2)} * dep);
   }
-  o = vec4(water ? -dist : dist, dir, water ? tau : -tau);
+  float dep0 = clamp(water ? -eAt(p) : ${C.dMin.toFixed(2)}, ${C.dMin.toFixed(2)}, ${C.dMax.toFixed(1)});
+  o = vec4(water ? -dist : dist, dep0, 0.0, water ? tau : -tau);
 }`);
-    this._copy = new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, uniforms: { uSrc: { value: null } }, vertexShader: VS,
-      fragmentShader: 'precision highp float; uniform highp sampler2D uSrc; out vec4 o; void main() { o = texelFetch(uSrc, ivec2(gl_FragCoord.xy), 0); }', depthTest: false, depthWrite: false });
+    // the direction and coherence from the travel time's gradient over a wide stencil (uSrc: the final), and the
+    // chunk's texels (the window less the margin) into the slot. A clean front has |grad tau| = 1 / c; along the spine
+    // of a body, where fronts from two shores meet, tau has a ridge, the wide difference across it comes out small,
+    // and the coherence falls to 0 over the stencil's width: the trains fade there instead of folding into each other
+    this._pack = mat(`
+float tauAt(ivec2 v, float e) { vec4 t = texelFetch(uSrc, clamp(v, ivec2(0), ivec2(${W - 1})), 0); return abs(t.x) > 9.0e3 ? e : t.w; }
+void main() {
+  ivec2 u = ivec2(gl_FragCoord.xy) + ivec2(int(uMargin)); vec4 v = texelFetch(uSrc, u, 0);
+  if (abs(v.x) > 9.0e3) { o = v; return; }
+  float e = v.w; bool water = v.x < 0.0; const int R = 3;
+  vec2 g = vec2(tauAt(u + ivec2(R, 0), e) - tauAt(u - ivec2(R, 0), e), tauAt(u + ivec2(0, R), e) - tauAt(u - ivec2(0, R), e)) / (2.0 * float(R) * uCell);
+  if (!water) g = -g; // up the beach tau falls away from the line
+  float gl = length(g); vec2 dir = gl > 1e-7 ? -g / gl : vec2(0.0);
+  float cel = sqrt(${G.toFixed(2)} * v.y);
+  float coh = smoothstep(0.45, 0.85, gl * cel);
+  o = vec4(v.x, dir * coh, v.w);
+}`);
+    this._copy = new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, uniforms: { uSrc: { value: null }, uScale: { value: 1 } }, vertexShader: VS,
+      fragmentShader: `precision highp float; uniform highp sampler2D uSrc; uniform float uScale; out vec4 o; void main() { o = texture(uSrc, gl_FragCoord.xy / ${T.toFixed(1)}); }`, depthTest: false, depthWrite: false });
     this._quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2)); this._quad.frustumCulled = false;
     this._cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     this._scene = new THREE.Scene(); this._scene.add(this._quad);
-    this.U = U;
-    this.stats = { bakes: 0, ms: 0 };
+    this.U = U; this.frame = 0;
+    this.stats = { bakes: 0, ms: 0, held: 0 };
     this._writeTables();
     { const r = renderer, prev = r.getRenderTarget(), cc = r.getClearColor(new THREE.Color()), ca = r.getClearAlpha(); // no clouds yet: the open
       r.setRenderTarget(this.rt, this.cloud); r.setClearColor(0xffffff, 1); r.clear(true, false, false); r.setClearColor(cc, ca); r.setRenderTarget(prev); }
   }
-  // a texture into a layer, texel for texel (the Poisson table once; the clouds' shadow map each frame)
+  // a texture into a layer, sampled over the layer's texels (the clouds' shadow map each frame; a table once)
   copyInto(tex, layer) {
     const r = this.renderer, prev = r.getRenderTarget();
     this._copy.uniforms.uSrc.value = tex; this._quad.material = this._copy;
     r.setRenderTarget(this.rt, layer); r.render(this._scene, this._cam); r.setRenderTarget(prev);
   }
   _writeTables() {
-    const N = this.cfg.N, data = poissonTableData(), packed = new Float32Array(N * N * 4);
-    if (POISSON.rows > N || POISSON.cols > N) throw new Error('shorefield: the Poisson table must fit the layer');
-    for (let r = 0; r < POISSON.rows; r++) for (let c = 0; c < POISSON.cols; c++) packed[(r * N + c) * 4] = data[r * POISSON.cols + c];
-    const tex = new THREE.DataTexture(packed, N, N, THREE.RGBAFormat, THREE.FloatType); tex.needsUpdate = true;
+    const T = this.cfg.tex, data = poissonTableData(), packed = new Float32Array(T * T * 4);
+    if (POISSON.rows > T || POISSON.cols > 4 * T) throw new Error('shorefield: the Poisson table must fit the layer (rows x 4 columns a texel)');
+    for (let r = 0; r < POISSON.rows; r++) for (let c = 0; c < POISSON.cols; c++) packed[(r * T + (c >> 2)) * 4 + (c & 3)] = data[r * POISSON.cols + c];
+    const tex = new THREE.DataTexture(packed, T, T, THREE.RGBAFormat, THREE.FloatType); tex.minFilter = tex.magFilter = THREE.NearestFilter; tex.needsUpdate = true;
     this.copyInto(tex, this.tables); tex.dispose();
   }
-  // once a frame, after the clipmap's update: a window the eye has left by an eighth of its span is baked again
-  update(eye) {
-    const C = this.cfg, t0 = performance.now();
-    this.slots.forEach((S, k) => {
-      const span = C.N * S.s, cx = S.ox + span / 2, cz = S.oz + span / 2;
-      if (!S.baked || Math.max(Math.abs(eye.x - cx), Math.abs(eye.z - cz)) > span * C.rebake) {
-        S.ox = Math.round((eye.x - span / 2) / S.s) * S.s; S.oz = Math.round((eye.z - span / 2) / S.s) * S.s;
-        this._bake(k, S); S.baked = true;
+  // once a frame: the chunks round the eye that are not held yet are baked (a couple a frame; all of them when all is
+  // true, for a build), the directory is pointed at the eye's neighbourhood
+  update(eye, all = false) {
+    const C = this.cfg, t0 = performance.now(), D = C.dirN; this.frame++;
+    let budget = all ? 1e9 : C.perFrame;
+    for (const L of this.levels) {
+      const ex = Math.floor(eye.x / L.chunk), ez = Math.floor(eye.z / L.chunk);
+      // wanted: the 3 x 3 round the eye, nearest first
+      const want = [];
+      for (let dz = -C.near; dz <= C.near; dz++) for (let dx = -C.near; dx <= C.near; dx++) want.push([ex + dx, ez + dz, dx * dx + dz * dz]);
+      want.sort((a, b) => a[2] - b[2]);
+      for (const [cx, cz] of want) {
+        let slot = L.slots.find((S) => S.cx === cx && S.cz === cz);
+        if (slot) { slot.used = this.frame; continue; }
+        if (budget <= 0) continue;
+        // a free slot, else the one used longest ago
+        slot = L.slots.find((S) => S.cx === null) || L.slots.reduce((a, S) => (S.used < a.used ? S : a), L.slots[0]);
+        this._bake(L, slot, cx, cz); slot.cx = cx; slot.cz = cz; slot.used = this.frame; budget--;
       }
-      this.uniforms.uShoreLv.value[k].set(S.ox, S.oz, S.s, span);
-    });
-    this.uniforms.uShoreOn.value = 1;
-    this.stats.ms = performance.now() - t0;
-  }
-  rebake() { for (const S of this.slots) S.baked = false; }
-  _bake(k, S) {
-    const r = this.renderer, prev = r.getRenderTarget(), U = this.U, N = this.cfg.N;
-    U.uOrg.value.set(S.ox, S.oz); U.uCell.value = S.s;
-    this._quad.material = this._seed; r.setRenderTarget(this.ping); r.render(this._scene, this._cam);
-    let src = this.ping, dst = this.pong;
-    for (let s = N / 2; s >= 1; s >>= 1) {
-      U.uStep.value = s; U.uSrc.value = src.texture; this._quad.material = this._flood;
-      r.setRenderTarget(dst); r.render(this._scene, this._cam);
-      [src, dst] = [dst, src];
+      // the directory: a D x D window of chunks round the eye
+      const ox = ex - D / 2, oz = ez - D / 2;
+      this.uniforms.uShoreLv.value[L.k].set(L.s, L.chunk, ox, oz);
+      const dir = this.uniforms.uShoreDir.value, base = L.k * (D * D / 4);
+      for (let i = 0; i < D * D / 4; i++) dir[base + i].set(-1, -1, -1, -1);
+      for (let i = 0; i < L.slots.length; i++) {
+        const S = L.slots[i]; if (S.cx === null) continue;
+        const dx = S.cx - ox, dz = S.cz - oz; if (dx < 0 || dz < 0 || dx >= D || dz >= D) continue;
+        const idx = dz * D + dx, v = dir[base + (idx >> 2)]; v.setComponent(idx & 3, L.slotBase + i);
+      }
     }
-    U.uSrc.value = src.texture; this._quad.material = this._final;
-    r.setRenderTarget(this.rt, k); r.render(this._scene, this._cam);
+    this.uniforms.uShoreOn.value = 1;
+    this.stats.ms = performance.now() - t0; this.stats.held = this.levels.reduce((a, L) => a + L.slots.filter((S) => S.cx !== null).length, 0);
+  }
+  rebake() { for (const L of this.levels) for (const S of L.slots) { S.cx = S.cz = null; S.used = 0; } }
+  // another source of the same kind (a new seed): its uniforms, and every chunk baked again
+  setSource(source) { this.source = source; if (source.glsl) Object.assign(this.U, source.uniforms); this.rebake(); }
+  _bake(L, slot, cx, cz) {
+    const r = this.renderer, prev = r.getRenderTarget(), U = this.U, W = this.W, M = this.M, mt = Math.ceil(L.margin / L.s);
+    // the window: the chunk plus the level's margin, inside the common window size (the rest unused)
+    U.uOrg.value.set(cx * L.chunk - M * L.s, cz * L.chunk - M * L.s); U.uCell.value = L.s; U.uMargin.value = M;
+    const draw = (mat, rt, layer) => { this._quad.material = mat; if (layer === undefined) r.setRenderTarget(rt); else r.setRenderTarget(rt, layer); r.render(this._scene, this._cam); };
+    draw(this._height, this.rtH);
+    U.uSrc.value = this.rtH.texture; draw(this._seed, this.ping);
+    let src = this.ping, dst = this.pong;
+    for (let s = 1 << Math.ceil(Math.log2(W)) - 1; s >= 1; s >>= 1) { U.uStep.value = s; U.uSrc.value = src.texture; draw(this._flood, dst); [src, dst] = [dst, src]; }
+    U.uSrc.value = src.texture; U.uSrc2.value = this.rtH.texture; U.uMargin.value = mt * L.s; draw(this._final, this.rtT);
+    U.uSrc.value = this.rtT.texture; U.uMargin.value = M; draw(this._pack, this.rt, L.slotBase + L.slots.indexOf(slot));
     r.setRenderTarget(prev);
     this.stats.bakes++;
   }
-  // GLSL for a reader: shoreAt(p) = (signed distance, direction to the line, travel time) from the finest window that
-  // holds p, bilinear, blended into the next window over the outer tenth of its span; (1e4, 0, 0, 1e4) beyond every
-  // window (no shore effects there). shoreCloud(xz): the clouds' shadow over a point (1 in the open), from the copy.
+  // GLSL for a reader: shoreAt(p) = (signed distance, direction to the line times the front's coherence, travel time)
+  // from the finest level that holds p and knows its line, bilinear in the chunk's texels, handed to the next level
+  // over the last quarter of its margin; (1e4, 0, 0, 1e4) where no level knows (no shore effects there).
+  // shoreCloud(xz): the clouds' shadow over a point (1 in the open), from the copy.
   glsl() {
-    const n = this.slots.length;
+    const C = this.cfg, n = this.levels.length, D = C.dirN, T = C.tex;
     return /* glsl */ `
-#define SHORE_SLOTS ${n}
+#define SHORE_LEVELS ${n}
 #define SHORE_TABLES ${this.tables}
 #define SHORE_CLOUD ${this.cloud}
-uniform highp sampler2DArray uShoreTab; uniform vec4 uShoreLv[SHORE_SLOTS]; uniform float uShoreOn;
+uniform highp sampler2DArray uShoreTab; uniform vec4 uShoreLv[SHORE_LEVELS]; uniform vec4 uShoreDir[${n * D * D / 4}]; uniform float uShoreOn;
 const vec4 SHORE_FAR = vec4(1.0e4, 0.0, 0.0, 1.0e4);
-vec4 shoreRead(int k, vec2 p) { vec4 L = uShoreLv[k]; return texture(uShoreTab, vec3((p - L.xy) / L.w, float(k))); }
-float shoreHold(int k, vec2 p) { vec4 L = uShoreLv[k]; vec2 uv = (p - L.xy) / L.w; float m = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y)); return smoothstep(0.01, 0.1, m); }
+const float SHORE_HAND[SHORE_LEVELS] = float[SHORE_LEVELS](${C.levels.map((L) => L.margin.toFixed(1)).join(', ')});
+int shoreSlot(int l, vec2 p) {
+  vec4 L = uShoreLv[l]; ivec2 c = ivec2(floor(p / L.y)) - ivec2(L.zw);
+  if (any(lessThan(c, ivec2(0))) || any(greaterThanEqual(c, ivec2(${D})))) return -1;
+  int i = c.y * ${D} + c.x; vec4 v = uShoreDir[l * ${D * D / 4} + (i >> 2)]; int q = i & 3;
+  return int(q == 0 ? v.x : q == 1 ? v.y : q == 2 ? v.z : v.w);
+}
+vec4 shoreRead(int l, int slot, vec2 p) {
+  vec4 L = uShoreLv[l]; vec2 o = floor(p / L.y) * L.y; vec2 g = (p - o) / L.x - 0.5; vec2 g0 = floor(g); vec2 f = g - g0; ivec2 i = ivec2(g0);
+  ivec2 lo = ivec2(0), hi = ivec2(${T - 1});
+  vec4 a = texelFetch(uShoreTab, ivec3(clamp(i, lo, hi), slot), 0), b = texelFetch(uShoreTab, ivec3(clamp(i + ivec2(1, 0), lo, hi), slot), 0);
+  vec4 c = texelFetch(uShoreTab, ivec3(clamp(i + ivec2(0, 1), lo, hi), slot), 0), d = texelFetch(uShoreTab, ivec3(clamp(i + ivec2(1, 1), lo, hi), slot), 0);
+  // a texel the level does not know is left out of the blend
+  vec4 s = vec4(0.0); float w = 0.0;
+  if (abs(a.x) < 9.0e3) { s += a * (1.0 - f.x) * (1.0 - f.y); w += (1.0 - f.x) * (1.0 - f.y); }
+  if (abs(b.x) < 9.0e3) { s += b * f.x * (1.0 - f.y); w += f.x * (1.0 - f.y); }
+  if (abs(c.x) < 9.0e3) { s += c * (1.0 - f.x) * f.y; w += (1.0 - f.x) * f.y; }
+  if (abs(d.x) < 9.0e3) { s += d * f.x * f.y; w += f.x * f.y; }
+  return w > 1e-4 ? s / w : SHORE_FAR;
+}
 vec4 shoreAt(vec2 p) {
   if (uShoreOn < 0.5) return SHORE_FAR;
-  for (int k = 0; k < SHORE_SLOTS; k++) {
-    float w = shoreHold(k, p); if (w <= 0.0) continue;
-    vec4 v = shoreRead(k, p);
-    if (w < 1.0) { vec4 nx = SHORE_FAR; if (k + 1 < SHORE_SLOTS && shoreHold(k + 1, p) > 0.0) nx = shoreRead(k + 1, p); v = mix(nx, v, w); }
-    float dl = length(v.yz); v.yz = dl > 1e-3 ? v.yz / dl : vec2(0.0);
-    return v;
+  vec4 v = SHORE_FAR; float wv = 0.0;
+  for (int l = 0; l < SHORE_LEVELS; l++) {
+    int slot = shoreSlot(l, p); if (slot < 0) continue;
+    vec4 u = shoreRead(l, slot, p); if (abs(u.x) > 9.0e3) continue;
+    if (wv <= 0.0) { v = u; wv = 1.0 - smoothstep(0.75 * SHORE_HAND[l], SHORE_HAND[l], abs(u.x)); if (wv >= 1.0) return v; }
+    else { return mix(u, v, wv); } // the coarser level takes over past the finer one's margin
   }
-  return SHORE_FAR;
+  return v;
 }
 // the glints' Poisson table (water.js wPoisson): row r, column c
-float shorePoisson(int r, int c) { return texelFetch(uShoreTab, ivec3(c, r, SHORE_TABLES), 0).x; }
+float shorePoisson(int r, int c) { vec4 t = texelFetch(uShoreTab, ivec3(c >> 2, r, SHORE_TABLES), 0); int q = c & 3; return q == 0 ? t.x : q == 1 ? t.y : q == 2 ? t.z : t.w; }
 uniform vec4 uShoreCloudRect; // the clouds' shadow map's centre x, z and half span (clouds.js uShadowRect)
 float shoreCloud(vec2 xz) {
   vec2 uv = (xz - uShoreCloudRect.xy) / (2.0 * uShoreCloudRect.z) + 0.5;
   if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return 1.0;
-  return texture(uShoreTab, vec3(uv, float(SHORE_CLOUD))).r;
+  return texelFetch(uShoreTab, ivec3(ivec2(uv * ${T.toFixed(1)}), SHORE_CLOUD), 0).r;
 }
 `;
   }
-  dispose() { this.rt.dispose(); this.ping.dispose(); this.pong.dispose(); this._seed.dispose(); this._flood.dispose(); this._final.dispose(); this._copy.dispose(); }
+  dispose() { this.rt.dispose(); this.rtH.dispose(); this.rtT.dispose(); this.ping.dispose(); this.pong.dispose(); for (const m of [this._height, this._seed, this._flood, this._final, this._pack, this._copy]) m.dispose(); }
+}
+
+// The same four readers by live calculation (W3.1, for the comparison in the template: ?shore=live): no table, every
+// pixel searches the clipmap for the water line itself. shoreAt: 16 directions, 6 radii from 0.5 m to 128 m, the
+// crossing refined linearly (192 clipmap reads a pixel against one texel read); the travel time is the distance at the
+// speed of the depth under the pixel (no march); shorePoisson sums the series; shoreCloud reads the clouds' own map.
+// Same function names, same answers in the limit, so the water and the beach run unchanged either way.
+export const SHORE_LIVE_GLSL = /* glsl */ `
+uniform float uShoreOn;
+const vec4 SHORE_FAR = vec4(1.0e4, 0.0, 0.0, 1.0e4);
+float shoreLiveE(vec2 q) { return clipAt(q).x - clipWater(q); }
+vec4 shoreAt(vec2 p) {
+  if (uShoreOn < 0.5) return SHORE_FAR;
+  float e0 = shoreLiveE(p); bool water = e0 < 0.0; float best = 1e4; vec2 bdir = vec2(0.0);
+  for (int d = 0; d < 16; d++) {
+    float a = 6.2831853 * (float(d) + 0.5 * float(d & 1)) / 16.0; vec2 v = vec2(cos(a), sin(a)); float r0 = 0.0, ep = e0;
+    for (int t = 0; t < 6; t++) {
+      float r = 0.5 * pow(3.03, float(t)); float et = shoreLiveE(p + v * r);
+      if ((et < 0.0) != (ep < 0.0)) { float f = ep / (ep - et); float dd = r0 + (r - r0) * f; if (dd < best) { best = dd; bdir = v; } break; }
+      r0 = r; ep = et;
+    }
+  }
+  if (best >= 1e4) return vec4(water ? -1.0e4 : 1.0e4, 0.0, 0.0, water ? 1.0e4 : -1.0e4);
+  float dep = clamp(water ? -e0 : ${SHORE.dMin.toFixed(2)}, ${SHORE.dMin.toFixed(2)}, ${SHORE.dMax.toFixed(1)});
+  float tau = best / sqrt(9.81 * dep);
+  return vec4(water ? -best : best, bdir, water ? tau : -tau);
+}
+float shorePoisson(int r, int c) {
+  float lam = 12.0 * pow(float(r) / ${(POISSON.rows - 1).toFixed(1)}, 2.0), u = (float(c) + 0.5) / ${POISSON.cols.toFixed(1)};
+  float p = exp(-lam), cc = p, n = 0.0; for (int i = 0; i < 40; i++) { if (u <= cc) break; n += 1.0; p *= lam / n; cc += p; } return n;
+}
+`;
+export const SHORE_LIVE_CLOUD_GLSL = /* glsl */ `
+uniform sampler2D tCloudShadow; uniform vec4 uShoreCloudRect;
+float shoreCloud(vec2 xz) {
+  vec2 uv = (xz - uShoreCloudRect.xy) / (2.0 * uShoreCloudRect.z) + 0.5;
+  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return 1.0;
+  return texture(tCloudShadow, uv).r;
+}
+`;
+// what World hands the terrain and the composite in place of a ShoreField when the shore is computed live
+export function shoreLive(clouds) {
+  return { live: true, uniforms: { uShoreOn: { value: 1 }, tCloudShadow: { value: clouds.rtShadow.texture }, uShoreCloudRect: clouds.U.uShadowRect }, glsl: () => SHORE_LIVE_GLSL, compositeGLSL: SHORE_LIVE_CLOUD_GLSL, update() {}, rebake() {}, stats: { bakes: 0, ms: 0 } };
 }
 
 // The shore waves, read from the table by the water (water.js) and the beach (terrain.js), so the breakers and the
@@ -204,8 +324,8 @@ struct ShoreWave { float y; vec2 slope; float foam; float lace; float a; float p
 // interval in metres (a train shorter than a few cells fades out instead of aliasing)
 ShoreWave shoreWaves(vec2 p, vec4 sh, float depth, float t, float cell, vec2 st) {
   ShoreWave o = ShoreWave(0.0, vec2(0.0), 0.0, 0.0, 0.0, 0.0, 0.0);
-  float sdf = sh.x; vec2 dir = sh.yz;
-  float env = (1.0 - smoothstep(60.0, 220.0, -sdf)) * step(1e-3, dot(dir, dir)) * smoothstep(-0.3, 0.3, depth);
+  float sdf = sh.x, coh = length(sh.yz); vec2 dir = coh > 1e-4 ? sh.yz / coh : vec2(0.0);
+  float env = (1.0 - smoothstep(60.0, 220.0, -sdf)) * smoothstep(0.05, 0.6, coh) * smoothstep(-0.3, 0.3, depth);
   if (env <= 0.0 || st.x <= 0.0) return o;
   float cel = shoreCelerity(depth);
   float shoal = clamp(pow(max(depth, 0.6) / ${SHORE.dMax.toFixed(1)}, -0.25), 1.0, 2.2);

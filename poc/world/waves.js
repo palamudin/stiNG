@@ -37,6 +37,10 @@ export const WAVES = {
   loop: 256,    // s
   chop: 0.85,
   onset: [0.02, 0.04], // friction velocity: no waves below, the full spectrum above (m/s)
+  // the water never lies flat (W3.1): the wind sea is raised by at least this wind (a residual chop from the last
+  // breeze and the air that is never quite still), and the swell by at least swellMin, weather elsewhere; the wind
+  // adds to these, it does not switch them on
+  residual: 1.5, swellMin: 4.5, // m/s
 };
 
 const TAU = Math.PI * 2;
