@@ -834,6 +834,16 @@ function buildChunk(rec) {
     g.add(nest, hole);
   }
   batchMeshes(BF, bmats, g); batchMeshes(BN, bmats, near);
+  // what is drawn lifted onto the ground keeps its bounds at the ground's height there (with room for the chunk's own
+  // relief), or the view culls it too soon: a village sits tens of metres up on the wild land (GDD 21.6)
+  if (sim.hilly) {
+    const lift = sim.ground(rec.cx * 64, rec.cz * 64), pad = 14;
+    g.traverse((o) => {
+      if (o.isInstancedMesh) { if (!o.boundingSphere) o.computeBoundingSphere(); o.boundingSphere.center.y += lift; o.boundingSphere.radius += pad; }
+      else if (o.userData.own && o.geometry) { if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere(); o.geometry.boundingSphere.center.y += lift; o.geometry.boundingSphere.radius += pad; }
+      else if (o.isMesh || o.isLine || o.isPoints) o.frustumCulled = false; // shared shapes: their bounds are not theirs to move
+    });
+  }
   g.userData.dyn = dyn;
   return g;
 }
@@ -1340,7 +1350,8 @@ function buildHuman(hm) {
   return view;
 }
 
-function rebuildHuman(view) {
+function rebuildHuman(view) { rebuildHumanParts(view); if (sim.hilly) view.group.traverse((o) => { o.frustumCulled = false; }); } // lifted onto the ground in the shader: their bounds are at its foot
+function rebuildHumanParts(view) {
   const { hm, group } = view;
   for (const m of Object.values(view.meshes)) group.remove(m);
   view.meshes = {};
@@ -1705,7 +1716,7 @@ function renderWasps(alpha, t, dt) {
   for (const w of sim.wasps) {
     seen.add(w.id);
     let g = waspViews.get(w.id);
-    if (!g) { g = buildWasp(false, sim.isRival(w), w.caste, w.sp || 'wasp'); waspViews.set(w.id, g); } // the line's sister colonies look like yours (T2-4)
+    if (!g) { g = buildWasp(false, sim.isRival(w), w.caste, w.sp || 'wasp'); if (sim.hilly) g.traverse((o) => { o.frustumCulled = false; }); waspViews.set(w.id, g); } // the line's sister colonies look like yours (T2-4)
     const pp = pos.get(w.id);
     const p = pp ? new THREE.Vector3().lerpVectors(pp.p, pp.c, alpha) : V(w);
     const driven = w.id === sim.drivenId;

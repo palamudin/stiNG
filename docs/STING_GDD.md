@@ -2406,6 +2406,21 @@ It is in the rules hash only when set, so standard worlds keep their hash. It is
 
 **Seen while checking.** Wild chunks show many bee hives and rival nests on the map. Hollow trees hold feral hives and rivals at the rates of parks, and wild chunks have many more trees. Thinning them in the wild is a tuning matter, for later.
 
+### 18.84 Day lengths, and nothing culled too soon on raised ground
+
+**Day lengths.** The menu offers seven, for a game day of:
+- 2 minutes (test);
+- 5 (ultrafast);
+- 10 (fast);
+- 30 (medium);
+- 1 hour (slow);
+- 2 hours (ultraslow);
+- 24 hours (real time).
+
+**Culling.** Everything the game draws is lifted onto the ground in its vertex shader, but its bounds stayed at the ground's foot. On a hilly world, and above all in a village set on the wild land tens of metres above the sea, the view culled a house's walls as soon as the camera looked up, while its roof, whose bounds sat higher, stayed. On shaped ground:
+- each chunk's merged and instanced meshes now keep their bounds at the ground's height in the chunk's middle, with 14 m to spare for its relief;
+- shared shapes, people and wasps are not culled.
+
 ---
 
 ## 19. Feature tiers and the current stack
