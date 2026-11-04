@@ -57,14 +57,16 @@ export class WaterSurface {
     const U = {
       ...world.clip.uniforms,
       uCam: { value: new THREE.Vector3() }, uGridScale: { value: 1 }, uWL: { value: field.U.uL.value },
-      uSun: { value: new THREE.Vector3(0, 1, 0) }, uSunColor: { value: new THREE.Color() }, uSkyUp: { value: new THREE.Color() },
+      uSeaLevel: { value: world.source.sea }, uSun: { value: new THREE.Vector3(0, 1, 0) }, uSunColor: { value: new THREE.Color() }, uSkyUp: { value: new THREE.Color() },
     };
     cs.forEach((c) => { U['tWD' + c] = { value: field.disp[c].texture }; U['tWS' + c] = { value: field.slope[c].texture }; });
     this.U = U;
     const N = field.N, S = SURFACE;
     const damp = /* glsl */ `
 // the cascades' weights by the depth under the water: the long ones need depth, the chop reaches the beach
-vec4 w3Damp(float depth) { float sw = smoothstep(1.5, 8.0, depth), mid = smoothstep(0.3, 3.0, depth), ch = smoothstep(-0.2, 1.0, depth); return vec4(sw, mid, ch, ch); }`;
+// (the first cascade holds the swell; a lake, above the sea's level, has none)
+uniform float uSeaLevel;
+vec4 w3Damp(float depth, float level) { float sw = smoothstep(1.5, 8.0, depth) * step(level, uSeaLevel + 0.5), mid = smoothstep(0.3, 3.0, depth), ch = smoothstep(-0.2, 1.0, depth); return vec4(sw, mid, ch, ch); }`;
     const head = /* glsl */ `
 ${world.clip.glsl()}
 uniform vec3 uCam; uniform float uGridScale; uniform vec4 uWL;
@@ -86,7 +88,7 @@ void main() {
   // the floor, read only where it can matter
   float bed = -1e4, depth = 1e4;
   if (dc < ${S.floorReach.toFixed(1)}) { bed = clipHeight(xz); depth = level - bed; }
-  vec4 k = w3Damp(depth);
+  vec4 k = w3Damp(depth, level);
   // each cascade at the mip its vertex spacing can carry (+1: a little blurrier than the spacing, so it never shimmers)
   float cell = max(r, 1.0) * ${grid.cellStep.toFixed(5)} * uGridScale;
   vec3 d = vec3(0.0);
@@ -109,8 +111,8 @@ in vec3 vW; in vec2 vXZ; in float vDepth, vCell; out vec4 oColor;
 void main() {
   #include <logdepthbuf_fragment>
   // the slope, filtered to the pixel's footprint, damped by the depth like the displacement
-  float depth = vDepth < 1e3 ? clipWater(vXZ) - clipHeight(vXZ) : 1e4;
-  vec4 k = w3Damp(depth);
+  float lv = clipWater(vXZ), depth = vDepth < 1e3 ? lv - clipHeight(vXZ) : 1e4;
+  vec4 k = w3Damp(depth, lv);
   vec2 s = vec2(0.0); vec2 gx = dFdx(vXZ), gy = dFdy(vXZ);
   ${cs.map((c) => `s += textureGrad(tWS${c}, vXZ / uWL[${c}], gx / uWL[${c}], gy / uWL[${c}]).xy * k[${Math.min(c, 3)}];`).join('\n  ')}
   vec3 n = normalize(vec3(-s.x, 1.0, -s.y));

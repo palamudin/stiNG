@@ -247,14 +247,18 @@ export class World {
       this._dtAvg += (Math.min(Math.max(dt, 1 / 240), 0.2) - this._dtAvg) * 0.05;
       const w10 = (E.wind10 || [E.wind[0] * 8, E.wind[1] * 8]).slice();
       { const m = Math.hypot(w10[0], w10[1]); if (m < WAVES.residual) { const d = m > 1e-3 ? [w10[0] / m, w10[1] / m] : [0.8, 0.6]; w10[0] = d[0] * WAVES.residual; w10[1] = d[1] * WAVES.residual; } } // never flat
-      this.waves.update(this.time, w10, Math.PI / this._dtAvg);
+      // the swell from far away (the sea only): its height from the long fetch, its period long and growing with it, so
+      // a bigger swell runs slower crests and longer splashes; the same swell drives the wave field and the shore trains
+      const seaSw = this.source.sea > -1e5 ? swellState(Math.max(Math.hypot(w10[0], w10[1]), WAVES.swellMin), this.source.water.swellFetch || this.source.water.fetch) : null;
+      const swell = seaSw ? { Hs: Math.max(WAVES.swellHmin, seaSw.Hs), T: Math.min(10.5, Math.max(WAVES.swellT - 1, WAVES.swellT - 1 + 2.5 * seaSw.Hs)) } : null;
+      this.swell = swell;
+      this.waves.update(this.time, w10, Math.PI / this._dtAvg, swell);
       const st = this.waves.state;
       // the run-up's sea state: significant height H0 and the deep-water wavelength L0 of the peak period (2 pi g / w^2)
       if (this.source.sea > -1e5) {
         const wp = Math.sqrt(9.81 * st.kp + WAVES.T * st.kp ** 3);
         // the shore waves (shorefield.js): the sea's swell from the long fetch, a lake's from the local wind sea
-        const sw = swellState(Math.max(st.U10, WAVES.swellMin), this.source.water.swellFetch || this.source.water.fetch);
-        this.uShoreWave.value.set(Math.max(WAVES.swellHmin, sw.Hs), Math.max(WAVES.swellTmin, sw.Tp), this.waves.stats.Hs, Math.max(1.5, 2 * Math.PI / wp));
+        this.uShoreWave.value.set(swell.Hs, swell.T, this.waves.stats.Hs, Math.max(1.5, 2 * Math.PI / wp));
         this.terrain.uniforms.uRunup.value.set(this.uShoreWave.value.x, this.uShoreWave.value.y, this.shore ? 0 : 1, 0); // the fallback band, when there is no shore table
       }
       U.uWLost.value = this.waves.lostSlope; U.uWPeak.value = Math.min(2 * Math.PI / WAVES.km, 2 * Math.PI / st.kp); // the ripples at the gravity-capillary minimum, or the peak if shorter

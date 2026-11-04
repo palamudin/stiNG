@@ -1,7 +1,7 @@
 // The GPU side of waves.js: the spectrum evolved per frame, the inverse FFT as Stockham passes, and the per-cascade
 // displacement and slope-moment textures. See waves.js for the physics and the choices.
 import * as THREE from 'three';
-import { WAVES, bands, seaState, fieldStats, gauss2 } from './waves.js';
+import { WAVES, swellNorm, bands, seaState, fieldStats, gauss2 } from './waves.js';
 
 const f = (v) => (Number.isInteger(v) ? v.toFixed(1) : String(v));
 const VS = 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }';
@@ -52,10 +52,11 @@ export class WaveField {
       uL: { value: pad4(this.cascades, 1) }, uKmin: { value: pad4(this.band.map((b) => b[0]), 0) }, uKmax: { value: pad4(this.band.map((b) => b[1]), 0) },
       uWindDir: { value: new THREE.Vector2(1, 0) }, uT: { value: 0 }, uChop: { value: WAVES.chop }, uOmegaMax: { value: 1e9 },
       uKp: { value: 1 }, uCp: { value: 1 }, uOm: { value: 1 }, uGamma: { value: 1 }, uSigma: { value: 0.1 }, uAp: { value: 0 }, uAm: { value: 0 }, uOnset: { value: 0 }, uAmS: { value: 0 },
+      uSwK: { value: 0.05 }, uSwVar: { value: 0 }, uSwDir: { value: new THREE.Vector2(1, 0) }, uSwN: { value: 1 }, uSwS: { value: WAVES.swellS }, uSpread: { value: WAVES.spread }, uUpwind: { value: WAVES.upwind },
       uNs: { value: 2 }, uDirY: { value: 0 }, uCas: { value: 0 },
     };
     this.spectrum = pass(`${SPECTRUM_GLSL}
-uniform sampler2D tNoise; uniform vec4 uL, uKmin, uKmax; uniform vec2 uWindDir; uniform float uT, uChop, uOmegaMax;
+uniform sampler2D tNoise; uniform vec4 uL, uKmin, uKmax; uniform vec2 uWindDir, uSwDir; uniform float uT, uChop, uOmegaMax, uSwK, uSwVar, uSwN, uSwS, uSpread, uUpwind;
 const int N = ${N}; const float LOOP = ${f(WAVES.loop)};
 vec2 cmul(vec2 a, vec2 b) { return vec2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x); }
 void main() {
@@ -64,9 +65,18 @@ void main() {
   if (kl <= 0.0 || kl < uKmin[c] || kl >= uKmax[c]) { oColor = vec4(0.0); return; }
   vec4 xi = texelFetch(tNoise, ivec2(p.x, i), 0);
   float dk = 6.28318531 / L, cphi = dot(k, uWindDir) / kl;
-  float psi = curvature(kl) / (kl * kl * kl * kl) * (1.0 + spreading(kl) * (2.0 * cphi * cphi - 1.0)) / 6.28318531;
-  float fw = (1.0 + cphi) * (1.0 + cphi) / (2.0 + 2.0 * cphi * cphi);
-  float ap = dk * sqrt(max(psi * fw, 0.0)), am = dk * sqrt(max(psi * (1.0 - fw), 0.0));
+  // the wind sea: Elfouhaily's spectrum, its directional term broadened (uSpread) and some of the downwind split given
+  // back to an even one (uUpwind), so short waves cross and run against the wind as a real sea's do
+  float psi = curvature(kl) / (kl * kl * kl * kl) * (1.0 + uSpread * spreading(kl) * (2.0 * cphi * cphi - 1.0)) / 6.28318531;
+  float fw = mix((1.0 + cphi) * (1.0 + cphi) / (2.0 + 2.0 * cphi * cphi), 0.5, uUpwind);
+  // the swell: a narrow Gaussian peak in k round uSwK, all of it running along uSwDir within cos^(2s)(dtheta/2); per unit
+  // kx kz, psi = variance G(k) D(theta) / k, so it integrates to the variance (Hs / 4)^2
+  float sw = 0.0;
+  if (uSwVar > 0.0) {
+    float cs = clamp(dot(k, uSwDir) / kl, -1.0, 1.0), sg = max(${WAVES.swellWidth.toFixed(3)} * uSwK, dk), dk2 = (kl - uSwK) / sg; // never narrower than the grid, or it falls between its points
+    sw = uSwVar * exp(-0.5 * dk2 * dk2) / (2.50662827 * sg) * uSwN * pow(max(0.5 + 0.5 * cs, 0.0), uSwS) / kl;
+  }
+  float ap = dk * sqrt(max(psi * fw + sw, 0.0)), am = dk * sqrt(max(psi * (1.0 - fw), 0.0));
   float w = sqrt(G * kl + TS * kl * kl * kl), w0 = 6.28318531 / LOOP, m = floor(w / w0 + 0.5);
   float ph = 6.28318531 * fract(m * uT / LOOP);
   float fd = 1.0 - smoothstep(0.7 * uOmegaMax, uOmegaMax, w);
@@ -112,9 +122,15 @@ void main() {
   }
   _run(mat, out) { this.quad.material = mat; this.renderer.setRenderTarget(out); this.renderer.render(this.scene, this.cam); }
   // wind: [x, z] at 10 m in m/s; omegaMax: pi * the frame rate (waves faster than that are faded)
-  update(time, wind, omegaMax = Math.PI * 60) {
+  // swell: { Hs, T } in m and s, or null for none (a lake); its direction is the wind's turned by WAVES.swellTurn
+  update(time, wind, omegaMax = Math.PI * 60, swell = null) {
     const U10 = Math.hypot(wind[0], wind[1]), U = this.U, P = this.state = seaState(U10, this.fetch);
     if (U10 > 1e-3) U.uWindDir.value.set(wind[0] / U10, wind[1] / U10);
+    if (swell && swell.Hs > 0) {
+      const w = 2 * Math.PI / swell.T, a = WAVES.swellTurn, d = U.uWindDir.value;
+      U.uSwK.value = w * w / WAVES.g; U.uSwVar.value = (swell.Hs / 4) ** 2; U.uSwS.value = WAVES.swellS; U.uSwN.value = swellNorm(WAVES.swellS);
+      U.uSwDir.value.set(d.x * Math.cos(a) - d.y * Math.sin(a), d.x * Math.sin(a) + d.y * Math.cos(a));
+    } else U.uSwVar.value = 0;
     U.uKp.value = P.kp; U.uCp.value = P.cp; U.uOm.value = P.Om; U.uGamma.value = P.gamma; U.uSigma.value = P.sigma;
     U.uAp.value = P.ap; U.uAm.value = P.am; U.uOnset.value = P.onset; U.uAmS.value = P.a_m;
     U.uT.value = time % WAVES.loop; U.uOmegaMax.value = omegaMax;

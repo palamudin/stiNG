@@ -334,7 +334,7 @@ export function wildSource(opts = {}) {
     grassHeight: [0.1, 0.42], // a wild meadow: ankle-high where dry, knee-high where wet
     cosmetic: hash3(P.seed | 0, 0xc05, 77) & 0xfffff, // decoration's salt, from the world's seed
     // lakes and the sea: wind over 600 m of open water; tiles of 48 m down to 14 cm, from metre chop to millimetre ripples
-    water: { swellFetch: 40000, fetch: 600, cascades: [48, 6.9, 1.0, 0.14] },
+    water: { swellFetch: 40000, fetch: 600, cascades: [600, 12, 1.0, 0.14] }, // as Ultra-Water: the first tile holds the swell (to ~10 s, 170 m: three to four wavelengths a tile)
   };
 }
 const TMP = [0, 0, 0, 0, 0];
