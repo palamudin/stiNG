@@ -4,11 +4,10 @@
 // until the lip reaches the trough and the tube closes; then it crashes, its foam left in the foam field where the
 // lip came down, and that stretch of tube is gone for that wave (a big one may throw a second, smaller tube).
 //
-// The tube's cross-section: a wall of water with girth (a third of the face at the root, a third of that at the
-// lip's tip) along a line from the hollowed face's foot up to the crest's top and out along the lip. The lip is a
-// thrown sheet: its path is a throw's (up and forward from the crest's top, topping out a third of the face above it,
-// coming down at the trough 1.3 faces ahead), so its tip keeps going forward as it falls. Sized by the face (crest to
-// trough) times the panel's 'Curl size'; a closed loop of wall, smooth normals.
+// The tube's cross-section: a body of water, a swell on the swell pushed forward: as wide at its base as half the wave,
+// up its back just over the swell's own, to a fat head (a third of the face thick) that leans out over the face; the
+// head is then thrown, its tip going on forward and falling under gravity to the trough, the tube under it, the face
+// hollowed. Sized by the face (crest to trough) times the panel's 'Curl size'; a closed loop, smooth normals.
 //
 // Placement: the tube is cut into world cells (4 m) round the camera, one instance each. A pass once a frame finds the
 // cells a breaking crest runs through (cheap: one texel per cell); in those, each slice of the instance is a point of
@@ -203,24 +202,41 @@ void main() {
         vec2 dir = gDir;
         vec3 d = w3Coast(gcCx, gcDC, 0.25); // the crest's top: the water's own (both trains, its lean, its collapse)
         vec3 top = vec3(gcCx.x + d.x, clipWater(gcCx) + d.y, gcCx.y + d.z);
-        float H = gcH0 * uLook3.w * gcSc, uf = 0.55 * gcRise + 0.45 * gcFall, lt = gcP * curlLand(max(H, 0.05));
-        // the wall's girth: a third of the face at the face and root, a third of that at the lip's tip; grown in as it rises
-        float thk = 0.35 * H * (0.3 + 0.7 * smoothstep(0.0, 0.4, gcRise));
-        // round the wall's loop: the outer side from the face's foot over the top to the tip, the tip rounded, the inner
-        // side (the tube's) back, the foot rounded
-        float q = tube.y, c = q < 0.45 ? q / 0.45 : q < 0.5 ? 1.0 : q < 0.95 ? 1.0 - (q - 0.5) / 0.45 : 0.0;
-        vec4 L = curlLine(c, H, uf, lt);
-        vec2 t = length(L.zw) > 1e-6 ? normalize(L.zw) : vec2(0.6, 0.8), nO = vec2(-t.y, t.x); // nO: away from the tube
-        float th = thk * (c < 0.4 ? 1.0 : mix(1.0, 0.33, (c - 0.4) / 0.6)), ph; vec2 n2, o;
-        if (q < 0.45) { n2 = nO; o = L.xy + nO * th * 0.5; }
-        else if (q < 0.5) { ph = (q - 0.45) / 0.05 * 3.14159265; n2 = nO * cos(ph) + t * sin(ph); o = L.xy + n2 * th * 0.5; }
-        else if (q < 0.95) { n2 = -nO; o = L.xy - nO * th * 0.5; }
-        else { ph = (q - 0.95) / 0.05 * 3.14159265; n2 = -nO * cos(ph) - t * sin(ph); o = L.xy + n2 * th * 0.5; }
+        // the body: a swell on the swell, pushed forward. Its cross-section, (forward, up) from the crest's top, round
+        // eleven points: the back's foot (half a half-wave behind, under the water), up the back (just over the swell's
+        // own), the head (fat: a third of the face from its top to the tube's ceiling), the lip and its tip, under the
+        // lip (the tube's ceiling), down the hollowed face, its foot ahead (under the water drawn down), and back along
+        // the bottom under the water. It rises from a cap on the crest (2-3 s), then the head is thrown: the tip goes on
+        // forward and falls under gravity to the trough. H the face (crest to trough) times the panel's size; Lh half
+        // the wave's length there
+        float H = gcH0 * uLook3.w * gcSc, Lh = 3.14159265 * curlCel(gcDC) / sw3Omega(0) * gcSc;
+        float r = gcRise, f = gcFall, f2 = f * f;
+        vec2 K[11];
+        K[0] = vec2(-0.6 * Lh, -1.0 * H);
+        K[1] = vec2(-0.35 * Lh, (-0.35 + 0.1 * r) * H);
+        K[2] = vec2(-0.12 * Lh, (-0.05 + 0.35 * r) * H);
+        K[3] = vec2(0.1 + 0.5 * r + 0.15 * f, 0.15 + 0.45 * r - 0.2 * f2) * H;                                   // the head's top
+        K[4] = vec2(mix(0.3, 0.9, r) + 0.35 * f, mix(0.05, 0.55, r) - 0.35 * f2) * H;                          // the lip
+        K[5] = vec2(mix(0.4, 1.15, r) + 0.3 * f, mix(-0.1, 0.3, r) - 1.25 * f2) * H;                           // its tip
+        K[6] = vec2(mix(0.3, 0.85, r) + 0.25 * f, mix(-0.15, 0.2, r) - 0.7 * f2) * H;                          // under the lip
+        K[7] = vec2(mix(0.2, 0.4, r) + 0.15 * f, mix(-0.15, 0.15, r) - 0.05 * f) * H;                          // the tube's ceiling
+        K[8] = vec2(0.2, -0.25) * H;                                                                            // the hollowed face
+        K[9] = vec2(0.35, -0.75) * H;
+        K[10] = vec2(0.6, -1.2) * H;                                                                            // its foot
+        // the loop: closed Catmull-Rom through them
+        float g = tube.y * 11.0; int k = int(floor(g)); float u = g - float(k);
+        vec2 p0 = K[(k + 10) % 11], p1 = K[k % 11], p2 = K[(k + 1) % 11], p3 = K[(k + 2) % 11];
+        float u2 = u * u, u3 = u2 * u;
+        vec2 o = 0.5 * (2.0 * p1 + (-p0 + p2) * u + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * u2 + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * u3);
+        vec2 t = 0.5 * ((-p0 + p2) + 2.0 * (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * u + 3.0 * (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * u2);
+        t = length(t) > 1e-6 ? normalize(t) : vec2(1.0, 0.0);
+        vec2 n2 = vec2(-t.y, t.x); // outward: the loop runs clockwise (over the top forward, along the bottom back)
         o += uCurl.xy * gcH0; // the panel's nudge, forward and up, in face heights
         P = top + vec3(dir.x, 0.0, dir.y) * o.x + vec3(0.0, o.y, 0.0);
         vN = vec3(dir.x, 0.0, dir.y) * n2.x + vec3(0.0, n2.y, 0.0);
-        vTh = th;
-        vInfo = vec4((1.0 - c) * 4.0, gcS, gcVis, gcVis > 0.002 && H > 0.03 ? 1.0 : 0.0);
+        float fromTip = abs(g - 5.0);
+        vTh = H * (0.3 + 0.6 * smoothstep(1.0, 3.5, fromTip)); // the water the view crosses: the head's and the body's, thin at the lip
+        vInfo = vec4(fromTip * 0.45, gcS, gcVis, gcVis > 0.002 && H > 0.03 ? 1.0 : 0.0);
       }
     }
   }
