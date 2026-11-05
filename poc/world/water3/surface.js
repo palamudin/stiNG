@@ -152,7 +152,7 @@ ${SURF_GLSL}
 #include <logdepthbuf_pars_vertex>
 ${head}
 ${coast}
-out vec3 vW; out vec2 vXZ; out float vCell, vNear, vJ, vShoreD; out vec2 vCoastSlope; out vec3 vCoast, vFlow; out vec4 vRough;
+out vec3 vW; out vec2 vXZ; out float vCell, vNear, vJ; out vec2 vCoastSlope; out vec3 vCoast, vFlow; out vec4 vRough;
 void main() {
   bool skirt = position.y > 0.5;
   float r = length(position.xz);
@@ -208,12 +208,6 @@ void main() {
     P.y = depth < 0.0 ? sheet : max(P.y, sheet);
   }
 #endif
-  // metres to the shore (the sea's or a lake's), for the foam's scale; where the shore table does not know, ten
-  // metres a metre of depth instead
-  vShoreD = depth * 10.0;
-#ifdef W3_COAST
-  if (!skirt) { vec4 shd = shoreAt(xz); if (gShoreKnow > 0.0 && abs(shd.x) < 9.0e3) vShoreD = mix(vShoreD, max(-shd.x, 0.0), gShoreKnow); }
-#endif
   vW = P; vXZ = xz; vCell = cell;
   gl_Position = projectionMatrix * viewMatrix * vec4(P, 1.0);
   #include <logdepthbuf_vertex>
@@ -235,8 +229,14 @@ float laceTap(vec2 p) {
 float lacePat(vec2 x, float s, vec2 drift) {
   float v = (0.5 + 0.5 * w2noise(x / (11.0 * s), 841)) * uLace.y;
   return mix(laceTap(x / s + drift), laceTap(x / (1.7 * s) + drift * 0.6 + 0.43), v);
+}
+// the lace by the water's depth (gLaceT: 0 the shallows .. 1 from about 3 m): crossfaded between 0.25x, 0.8x and 2.5x
+float gLaceT = 0.0;
+float laceD(vec2 x, float s, vec2 drift) {
+  float t = gLaceT * 2.0;
+  return t < 1.0 ? mix(lacePat(x, 0.25 * s, drift), lacePat(x, 0.8 * s, drift), t) : mix(lacePat(x, 0.8 * s, drift), lacePat(x, 2.5 * s, drift), t - 1.0);
 } uniform mat4 uVP; uniform float uWLost, uRain, uIce, uGlint, uWPeak;
-in vec3 vW; in vec2 vXZ; in float vCell, vNear, vJ, vShoreD; in vec2 vCoastSlope; in vec3 vCoast, vFlow; in vec4 vRough; out vec4 oColor;
+in vec3 vW; in vec2 vXZ; in float vCell, vNear, vJ; in vec2 vCoastSlope; in vec3 vCoast, vFlow; in vec4 vRough; out vec4 oColor;
 uniform float uDebug;
 const float W_N = ${f(WATER.n)};
 // the panel's 'Water' (index.js waterCtl): uAbs absorption and uSca scattering per metre (the colour preset), uLook
@@ -443,30 +443,32 @@ void main() {
   { vec2 fu = (vXZ - uFoamFarWin.xy) / uFoamFarWin.z; float e = min(min(fu.x, fu.y), min(1.0 - fu.x, 1.0 - fu.y)); if (e > 0.0) { inField = smoothstep(0.0, 0.08, e); ff = texture(tFoamFar, fu).r * inField; } }
   { vec2 fu = (vXZ - uFoamWin.xy) / uFoamWin.z; float e = min(min(fu.x, fu.y), min(1.0 - fu.x, 1.0 - fu.y)); if (e > 0.0) { float k = smoothstep(0.0, 0.08, e); ff = mix(ff, texture(tFoamField, fu).r, k); inField = max(inField, k); } }
   ff = clamp(ff, 0.0, 1.0);
-  // the panel's lace scale, by the distance to the shore: fine at the shore (a quarter), ten times that 30 m out and
-  // beyond (the open water's sloshing, dispersed)
-  float ls = max(uLace.x, 0.02) * (0.25 + 2.25 * smoothstep(0.0, 30.0, vShoreD));
+  float ls = max(uLace.x, 0.02); // the panel's lace scale
+  // by the water's depth: fine in the shallows (a quarter of it), ten times that from about 3 m deep (the open water's
+  // sloshing, dispersed). Drawn at three fixed sizes and crossfaded, not at a size that varies from pixel to pixel
+  // (that warps the pattern into stripes)
+  gLaceT = smoothstep(0.0, 3.0, depth);
   // the foam's patches: denser here, thinner there, a new arrangement over every few tens of metres
   float fpatch = mix(1.0, 0.45 + 1.1 * (0.5 + 0.5 * w2noise(vXZ / (9.0 * max(ls, 0.3)) + vec2(uTime * 0.01, 0.0), 842)), uLace.z);
-  float fm = clamp((0.6 + uLook2.y - vJ) * uLook2.z, 0.0, 1.0) * smoothstep(0.25, 0.6, lacePat(vXZ, 1.4 * ls, vec2(0.0)) + 0.2) * (1.0 - inField) * fpatch;
+  float fm = clamp((0.6 + uLook2.y - vJ) * uLook2.z, 0.0, 1.0) * smoothstep(0.25, 0.6, laceD(vXZ, 1.4 * ls, vec2(0.0)) + 0.2) * (1.0 - inField) * fpatch;
   ff *= fpatch;
   // the open water's own lace, now and then: where the sloshing crests heap up (the surface squeezed: its Jacobian
-  // under 1) and a slow drifting noise allows, patches of lace form and fade; away from the shore (its own foam there),
+  // under 1) and a slow drifting noise allows, patches of lace form and fade; away from the shallows (their own foam there),
   // on a lake as on the sea
   {
     float pn = smoothstep(0.6, 0.85, 0.5 + 0.5 * w2noise(vXZ / 23.0 + vec2(uTime * 0.07, -uTime * 0.05), 851))
              * smoothstep(0.5, 0.8, 0.5 + 0.5 * w2noise(vXZ / 61.0 - vec2(uTime * 0.03, uTime * 0.04), 852));
-    float slosh = pn * smoothstep(1.03, 0.88, vJ) * smoothstep(8.0, 25.0, vShoreD);
-    fm = max(fm, slosh * smoothstep(0.3, 0.65, lacePat(vXZ, 1.6 * ls, vec2(uTime * 0.02, uTime * 0.013)) + 0.15) * 0.6 * fpatch);
+    float slosh = pn * smoothstep(1.03, 0.88, vJ) * smoothstep(0.8, 2.5, depth);
+    fm = max(fm, slosh * smoothstep(0.3, 0.65, laceD(vXZ, 1.6 * ls, vec2(uTime * 0.02, uTime * 0.013)) + 0.15) * 0.6 * fpatch);
   }
   // the foam's pattern: the baked lace (water3/foamtex.js) at two scales, drifting apart slowly so it churns
-  float pat = 0.62 * lacePat(vXZ, 3.1 * ls, vec2(uTime * 0.011, -uTime * 0.007)) + 0.38 * lacePat(vXZ, 1.17 * ls, -vec2(uTime * 0.017, uTime * 0.005)) + 0.12;
+  float pat = 0.62 * laceD(vXZ, 3.1 * ls, vec2(uTime * 0.011, -uTime * 0.007)) + 0.38 * laceD(vXZ, 1.17 * ls, -vec2(uTime * 0.017, uTime * 0.005)) + 0.12;
   float wf = clamp(vCoast.x, 0.0, 1.0), lc = clamp(vCoast.y, 0.0, 1.0) * (1.0 - 0.6 * inField);
   // the field's foam: thick and white where fresh, eroding into lace as it fades
   fm = max(fm, smoothstep(1.0 - 0.6 * ff, 1.1 - 0.6 * ff, pat) * (0.3 + 0.55 * ff)); // never solid: even the thickest foam shows its lace
   fm = max(fm, smoothstep(1.0 - 0.6 * wf, 1.12 - 0.6 * wf, pat) * (0.6 + 0.4 * wf)); // the breaker's white, open lace even at its thickest
   fm = max(fm, smoothstep(1.0 - 0.5 * lc, 1.1 - 0.5 * lc, pat) * 0.45);
-  float spf = 0.55 * lacePat(vXZ, 5.3 * ls, vec2(uTime * 0.006, -uTime * 0.004)) + 0.45 * lacePat(vXZ, 1.9 * ls, -vec2(uTime * 0.012, 0.0)) + 0.15;
+  float spf = 0.55 * laceD(vXZ, 5.3 * ls, vec2(uTime * 0.006, -uTime * 0.004)) + 0.45 * laceD(vXZ, 1.9 * ls, -vec2(uTime * 0.012, 0.0)) + 0.15;
   float sf = clamp(vCoast.z, 0.0, 1.0);
   // (patches over a fifth of the zone at most, broken into bubbles: a bed under the crests' own white, not a sheet)
   fm = max(fm, smoothstep(0.98 - 0.3 * sf, 1.08 - 0.3 * sf, spf) * smoothstep(-0.35, 0.45, w2noise(vXZ / 0.22 + uTime * 0.05, 629)) * (0.15 + 0.25 * sf));
