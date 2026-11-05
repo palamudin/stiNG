@@ -341,7 +341,7 @@ void main() {
   // the sand at the wrong moment); its sheet's foam
   float swLace = 0.0, swWhite = 0.0, thin = 0.06;
 #ifdef W3_COAST
-  if (depth < 0.3 && depth > -3.0 && lv <= uSeaLevel + 0.5 && uSurf.x > 0.0) {
+  if (depth < 0.8 && depth > -3.0 && lv <= uSeaLevel + 0.5 && uSurf.x > 0.0) {
     vec3 cn = clipNormal(vW.xz); vec2 grad = -cn.xz / max(cn.y, 0.05);
     sw3Beach(vW.xz, grad); gExpo *= 1.0 - fl; // no swash up a river's banks
     float s, th = lv + sw3Shore(vW.xz, length(grad), uWTime, s) - bed;
@@ -354,6 +354,13 @@ void main() {
     float band = smoothstep(-aa, aa, th) * (1.0 - smoothstep(0.0, 0.3 * uLook2.w + aa, th));
     swLace = smoothstep(0.0, 0.04, s) * band * (s < SW3_UP ? 1.0 : mix(0.75, 0.4, (s - SW3_UP) / (1.0 - SW3_UP))) * (1.0 - smoothstep(0.0, 0.3, depth));
     swWhite = (s < SW3_UP ? 1.0 - 0.4 * s / SW3_UP : 0.6 - 0.35 * (s - SW3_UP) / (1.0 - SW3_UP)) * smoothstep(0.0, 0.05, s) * smoothstep(0.0, 0.08, th) * (1.0 - smoothstep(0.1, 0.3, depth)); // grown in as the bore arrives, thinning to a quarter as it drains
+    // the shoreline's own foam mass: the bore's foam, handed over at the line, up the sand with the swash (from the
+    // line to the tip), back down with it as it drains (the sand above the tip left first), then on down into the
+    // water, the shore side going first, until the next bore brings the next; it reaches 75 cm of depth at most
+    float zeta = th - depth, p = s < SW3_UP ? 0.0 : (s - SW3_UP) / (1.0 - SW3_UP);
+    float top = zeta - 0.75 * smoothstep(0.3, 1.0, p); // its shoreward edge, over the still water
+    float mass = smoothstep(0.0, 0.03, top + depth) * (1.0 - smoothstep(0.45, 0.75, depth)) * smoothstep(0.0, 0.06, s) * (s < SW3_UP ? 0.9 : mix(0.85, 0.5, p));
+    swLace = max(swLace, mass);
     if (depth < 0.0 || th > 0.0) thin = 0.015; // the sheet on the sand, and the water by the line while the swash is up: thin, and still water (a mirror), never faded to see-through (it read as a dry strip between the two)
   }
 #endif
