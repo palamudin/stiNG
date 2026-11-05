@@ -16,10 +16,9 @@
 // the neighbouring cells' pieces meet on it; each cell draws only the part of the tube whose spine lies inside it.
 //
 // The event (curlEvent: also the foam field's and the water surface's, which draws its face down to the tube's floor
-// so the tube is open): a plunge is local and brief (field and lab: the lip's throw to its landing within about half a
-// second, the tube closing within a second); a crest breaks first where it meets its break depth and the curl runs
-// along it (a peel). Each wave picks, along its crest, stretches that plunge (the rest spill: the surf model's
-// whitewater only); a big wave's tubes are big and rarer, a small wave's small and quick.
+// so the tube is open): it rides with the wave for about three seconds: the lip rising out of the crest slowly, then
+// falling at gravity's pace to the trough, then crashing into foam. Each wave picks, along its crest, stretches that
+// plunge (the rest spill: the surf model's whitewater only); a big wave's tubes are big and rarer, a small wave's small.
 import * as THREE from 'three';
 import { NOISE_GLSL } from '../noise.js';
 import { SHORE } from '../shorefield.js';
@@ -31,10 +30,10 @@ export const CURL = { cell: 4, cells: 80, along: 14, around: 48, sweep: 12 };
 // the curl event of the main train's crest a point belongs to (sw3Ctx(xz) already called; the caller's coast context
 // is restored on return). Out: the crest gcCx, the phase gcPsi (> 0 behind the crest), k at the point gcK, the depth
 // at the crest gcDC, the wave's own height gcA0, the face (2a) gcH0, gcBig how much of a tube-making wave it is; the
-// raw clock gcEv; the tube being drawn: its own clock gcE (0 .. 0.8 grown and closed .. 1 crashed and gone), its size
-// gcSc (1, or the second tube's), its growth gcS, gcGate0 (whether this stretch plunges at all) and gcVis (shown now)
+// raw clock gcEv (s since it broke here); the tube being drawn: its own clock gcE (0 .. 0.8 landed .. 1 crashed and
+// gone), its size gcSc (1, or the second tube's), its rise gcRise and fall gcDrop (0..1 each), its growth gcS, gcGate0 (whether this stretch plunges at all) and gcVis (shown now)
 export const CURL_EVENT_GLSL = /* glsl */ `
-vec2 gcCx = vec2(0.0); float gcPsi = 0.0, gcK = 1.0, gcDC = 1.0, gcA0 = 0.0, gcH0 = 0.0, gcBig = 0.0, gcEv = 0.0, gcE = 0.0, gcSc = 1.0, gcS = 0.0, gcGate0 = 0.0, gcVis = 0.0;
+vec2 gcCx = vec2(0.0); float gcPsi = 0.0, gcK = 1.0, gcDC = 1.0, gcA0 = 0.0, gcH0 = 0.0, gcBig = 0.0, gcEv = 0.0, gcE = 0.0, gcSc = 1.0, gcS = 0.0, gcRise = 0.0, gcDrop = 0.0, gcGate0 = 0.0, gcVis = 0.0;
 float curlCel(float d) { return sqrt(9.81 * clamp(d, ${SHORE.dMin.toFixed(2)}, ${SHORE.dMax.toFixed(1)})); }
 void curlEvent(vec2 xz, float level, float depth) {
   float sN = gNear, sE = gExpo, sP = gPn, sT = gTau, sD = gShoreD, sK = gShoreKnow; vec2 sG = gDir;
@@ -56,21 +55,32 @@ void curlEvent(vec2 xz, float level, float depth) {
   // break line, 0 at the stretch's starting points); a big wave's stretches long and fewer, a small one's short
   float s = dot(gcCx, vec2(-gDir.y, gDir.x)); gcBig = smoothstep(0.7, 1.5, a0);
   float plunge = smoothstep(0.5 + 0.12 * gcBig, 0.66 + 0.12 * gcBig, 0.5 + 0.5 * w2noise(vec2(s / mix(90.0, 260.0, gcBig), cyc * 2.71), 618));
-  float delay = mix(1.0, 2.0, gcBig) * (0.5 + 0.5 * w2noise(vec2(s / mix(22.0, 60.0, gcBig), cyc * 1.37), 617));
-  float te = mix(0.7, 1.2, gcBig) + 0.3 * clamp(a0, 0.0, 1.5); gcEv = (tSince - delay) / te;
-  // the tube: grown and closed by 0.8 of its time, crashed and gone by 1; after it, on some stretches of a big wave,
-  // a second one at about half the size
-  float e = gcEv, g2 = 1.0; gcSc = 1.0;
-  if (e > 1.05) { e = (gcEv - 1.1) / 0.75; gcSc = 0.55; g2 = smoothstep(0.3, 0.7, gcBig) * smoothstep(0.45, 0.55, 0.5 + 0.5 * w2noise(vec2(s / 80.0, cyc * 4.1), 619)); }
-  gcE = e; gcS = smoothstep(0.0, 0.8, e);
+  // the stretch breaks nearly together (it rides with the wave as one), its ends a little later
+  float delay = 0.5 * (0.5 + 0.5 * w2noise(vec2(s / 70.0, cyc * 1.37), 617));
+  float t = tSince - delay; gcEv = t;
+  // the tube, in seconds: it rises out of the crest slowly, riding with the wave (2.2 s, more for a big one), the lip
+  // reaching out level; then the lip falls under gravity to the trough (sqrt(2 h / g) for a fall of the face's
+  // height); then it crashes into foam and is gone (0.4 s). On some stretches of a big wave a second tube follows,
+  // about half the size, quicker
+  float tr = mix(2.2, 2.8, gcBig), tf = sqrt(2.0 * max(gcH0, 0.05) / 9.81), tc = 0.4, g2 = 1.0; gcSc = 1.0;
+  if (t > tr + tf + tc + 0.1) {
+    t -= tr + tf + tc + 0.2; gcSc = 0.55; tr *= 0.6; tf *= 0.75; tc *= 0.8;
+    g2 = smoothstep(0.3, 0.7, gcBig) * smoothstep(0.45, 0.55, 0.5 + 0.5 * w2noise(vec2(s / 80.0, cyc * 4.1), 619));
+  }
+  gcRise = smoothstep(0.0, tr, t);
+  float u = clamp((t - tr) / tf, 0.0, 1.0); gcDrop = u * u; // falling: the lip's angle runs on as the fall's distance
+  gcE = t < tr + tf ? 0.8 * max(t, -1.0) / (tr + tf) : 0.8 + 0.2 * (t - tr - tf) / tc; // 0.8 landed, 1 gone
+  gcS = 0.7 * gcRise + 0.3 * gcDrop;
   gcGate0 = smoothstep(0.05, 0.25, a0) * smoothstep(0.1, 0.35, dC) * plunge * g2;
-  gcVis = gcGate0 * smoothstep(0.0, 0.06, e) * (1.0 - smoothstep(0.82, 1.0, e));
+  gcVis = gcGate0 * smoothstep(0.0, 0.3, t) * (1.0 - smoothstep(tr + tf + 0.05, tr + tf + tc, t));
   gNear = sN; gExpo = sE; gPn = sP; gTau = sT; gShoreD = sD; gShoreKnow = sK; gDir = sG;
 }
 // the tube's circle (in the crest's plane: forward, up from the crest's top): (centre, radius); and the arc shown (its
 // ends, radians from straight up, forward positive)
 vec3 curlCircle(float scale, vec2 nudge) { float r = 0.667 * gcH0 * scale * gcSc; return vec3(vec2(0.866, -0.5) * r + nudge * gcH0, r); }
-vec2 curlArc() { return vec2(-1.0472 - gcS * 2.0944, -1.0472 + gcS * 4.0143); }
+// rising, the lip reaches from the top out level (90 degrees) and the face hollows half way; falling, the lip goes on
+// down to the trough (170) and the face to its foot
+vec2 curlArc() { return vec2(-1.0472 - (0.6 * gcRise + 0.4 * gcDrop) * 2.0944, -1.0472 + gcRise * 2.618 + gcDrop * 1.3963); }
 // the water under a tube (water3/surface.js): its front face drawn down to the tube's floor between the crest and
 // the lip's landing, so the tube is open. Returns (weight, the height to draw it down to, from the still water);
 // sw3Ctx(xz) already called
@@ -79,7 +89,7 @@ vec2 curlScoop(vec2 xz, float level, float depth, float scale, vec2 nudge) {
   if (gcPsi >= 0.0 || gcVis <= 0.0) return vec2(0.0);
   vec3 C = curlCircle(scale, nudge);
   float xa = -gcPsi / gcK - (C.x - 0.866 * C.z); // ahead of the crest's top (the nudge's share taken off)
-  return vec2(smoothstep(0.0, 0.35 * C.z, xa) * smoothstep(0.25, 0.6, gcS) * gcVis, max(-0.39 * gcH0, 0.61 * gcH0 + C.y - C.z));
+  return vec2(smoothstep(0.0, 0.35 * C.z, xa) * smoothstep(0.3, 0.7, gcRise) * gcVis, max(-0.39 * gcH0, 0.61 * gcH0 + C.y - C.z));
 }
 `;
 

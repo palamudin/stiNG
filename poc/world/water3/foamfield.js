@@ -70,7 +70,7 @@ void main() {
       if (gcPsi < 0.0 && gcGate0 > 0.0) {
         vec3 Cr = curlCircle(uLook3.w, uCurl.xy); float r = max(Cr.z, 0.05);
         float xa = -gcPsi / gcK, tip = Cr.x + r * 0.17; // ahead of the crest; where the closed lip comes down
-        float land = smoothstep(0.6, 0.8, gcE) * (1.0 - smoothstep(1.0, 1.1, gcE)) * (1.0 - smoothstep(0.15 * r, 0.9 * r, abs(xa - tip - 0.2 * r)));
+        float land = smoothstep(0.7, 0.8, gcE) * (1.0 - smoothstep(1.0, 1.1, gcE)) * (1.0 - smoothstep(0.15 * r, 0.9 * r, abs(xa - tip - 0.2 * r)));
         float crash = smoothstep(0.8, 0.9, gcE) * (1.0 - smoothstep(1.0, 1.1, gcE)) * smoothstep(-0.1 * r, 0.2 * r, xa) * (1.0 - smoothstep(Cr.x + 0.9 * r, Cr.x + 1.6 * r, xa));
         make = max(make, gcGate0 * max(land, crash) * smoothstep(0.05, 0.4, gcA0) * 1.2);
       }
