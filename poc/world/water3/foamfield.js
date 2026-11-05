@@ -68,7 +68,7 @@ void main() {
     if (uLook3.w > 0.0) {
       curlEvent(p, level, depth);
       float Lt = max(gcH0 * uLook3.w * gcXs * 1.64, 0.1), xa = -gcPsi / gcK / Lt; // this texel ahead of its crest, in the lip's reach
-      float land = smoothstep(0.55, 0.7, gcEv) * smoothstep(0.75, 0.95, xa) * (1.0 - smoothstep(1.3, 1.9, xa));
+      float land = smoothstep(0.4, 0.55, gcEv) * smoothstep(0.75, 0.95, xa) * (1.0 - smoothstep(1.3, 1.9, xa));
       float drop = gcFall * smoothstep(0.1, 0.4, xa) * (1.0 - smoothstep(1.2, 1.6, xa));
       make = max(make, gcShow * max(land, drop) * smoothstep(0.05, 0.4, gcA0) * 1.2);
     }

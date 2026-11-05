@@ -16,10 +16,9 @@
 // the next one's) are thrown away. Normals from the cross-section (smooth, not the triangles'); only its outward
 // faces drawn, writing depth, so it reads as a body of water.
 //
-// The event (curlEvent: also the foam field's, so the splash lands where the lip does): the time since the crest
-// crossed its break line (the depth falling to its height over the breaking ratio) runs it, about three seconds (more
-// for a bigger wave): built over its first 0.7, held as a tube, then the lip drops into the bore. The break line varies
-// along the crest, so the tube travels along it (a peel). The panel's 'Curl' scales it.
+// The event (curlEvent: also the foam field's, so the splash lands where the lip does): local and brief, a little
+// over a second at any point of the crest, on the stretches of a wave that plunge (the rest spill), running along the
+// crest from where it starts (a peel): see curlEvent. The panel's 'Curl' scales it.
 import * as THREE from 'three';
 import { NOISE_GLSL } from '../noise.js';
 import { SHORE } from '../shorefield.js';
@@ -92,30 +91,50 @@ function curlGrid() {
 }
 
 // the curl event of the main train's crest a point belongs to (sw3Ctx(xz) already called): the crest gcCx, the phase
-// gcPsi (> 0 behind the crest), k at the point gcK; the event gcEv (0 thrown .. 0.7 landed .. 1.2 gone), gcStage,
-// gcFall (the lip dropping), gcShow; the face's height gcH0 (2a) and the forward stretch gcXs; the depth at the crest gcDC
+// gcPsi (> 0 behind the crest), k at the point gcK; the event gcEv (0 starting .. 0.55 landed .. 1 gone), gcStage,
+// gcFall (the lip dropping), gcShow; the face's height gcH0 (2a) and the forward stretch gcXs; the depth at the crest gcDC.
+//
+// A plunge is local and brief (field and lab: the lip's throw to its landing within about half a second, the tube
+// closing within a second; a crest breaks first where it meets shallow water first and the curl runs along it, a
+// peel): so the event is not the whole crest at once. Each wave picks, along its crest, stretches that plunge (the
+// rest spill: whitewater only, the surf model's own) and, within them, where the break starts: the delay before a
+// point of the crest breaks, after it reached its break line, grows away from those starting points, so the curl
+// runs along the crest at a few metres a second and only the stretch it is passing has a tube; behind it the lip
+// has landed and is gone into the bore, ahead of it the crest has yet to throw.
 export const CURL_EVENT_GLSL = /* glsl */ `
 vec2 gcCx = vec2(0.0); float gcPsi = 0.0, gcK = 1.0, gcEv = 0.0, gcStage = 0.0, gcFall = 0.0, gcShow = 0.0, gcH0 = 0.0, gcXs = 1.0, gcDC = 1.0, gcA0 = 0.0;
+float curlCel(float d) { return sqrt(9.81 * clamp(d, ${SHORE.dMin.toFixed(2)}, ${SHORE.dMax.toFixed(1)})); }
 void curlEvent(vec2 xz, float level, float depth) {
-  float w = sw3Omega(0); gcK = w / sqrt(9.81 * clamp(depth, ${SHORE.dMin.toFixed(2)}, ${SHORE.dMax.toFixed(1)}));
+  float w = sw3Omega(0); gcK = w / curlCel(depth);
   float ph = sw3Phase(0, uWTime, gTau, gPn); gcPsi = mod(ph + 3.14159265, 6.2831853) - 3.14159265;
-  gcCx = xz + gDir * (gcPsi / gcK);
+  float cyc = floor((ph + 3.14159265) / 6.2831853);
+  vec2 c0 = xz + gDir * (gcPsi / gcK);
+  // one step more onto the crest itself (its own phase, its own depth there): every vertex of a cross-section lands on
+  // the same crest point, so a lip is built from one event, not torn between neighbours that each guessed the crest
+  // a little differently
+  if (sw3Ctx(c0)) { float p0 = mod(sw3Phase(0, uWTime, gTau, gPn) + 3.14159265, 6.2831853) - 3.14159265; c0 += gDir * (p0 * curlCel(level - clipHeight(c0)) / w); sw3Ctx(c0); }
+  gcCx = c0;
   float dC = max(level - clipHeight(gcCx), 0.02); gcDC = dC;
   float shoal = pow(clamp(max(dC, 0.6) / ${SHORE.dMax.toFixed(1)}, 0.04, 1.0), -0.25);
   float a0 = uSurf.x * gNear * gExpo * shoal * sw3Group(gcCx, uWTime), a = min(a0, 0.42 * dC + 0.02); gcA0 = a0;
-  float cyc = floor((ph + 3.14159265) / 6.2831853), early = 0.5 + 0.5 * w2noise(gcCx / 33.0 + vec2(cyc * 7.3, cyc * 3.1), 614);
-  // the break line varies along the crest over a hundred metres or so, a new layout every wave: the tube runs along it
-  float peel = 0.5 + 0.5 * w2noise(gcCx / 120.0 + vec2(cyc * 3.7, -cyc * 2.3), 616);
-  float rb = 0.3 + 0.12 * mix(early, peel, 0.7), db = a0 / rb; // about the breaking limit (water3/swash.js)
+  float early = 0.5 + 0.5 * w2noise(gcCx / 33.0 + vec2(cyc * 7.3, cyc * 3.1), 614);
+  float rb = 0.3 + 0.09 * early, db = a0 / rb; // the breaking limit, early or late along the crest (water3/swash.js)
   vec3 cn = clipNormal(gcCx); float tb = max(sqrt(max(1.0 - cn.y * cn.y, 0.0)) / max(cn.y, 0.05), 0.004);
-  float tSince = (db - dC) / tb / sqrt(9.81 * max(dC, 0.1)); // seconds since the crest crossed its break line
-  float te = 2.2 + 1.0 * clamp(a0, 0.0, 1.5); gcEv = tSince / te;
-  gcStage = clamp(smoothstep(0.0, 0.7, gcEv), 0.0, 1.0); gcFall = smoothstep(0.8, 1.15, gcEv);
-  gcShow = smoothstep(0.0, 0.08, gcEv) * (1.0 - smoothstep(1.0, 1.2, gcEv)) * smoothstep(0.03, 0.2, a0) * smoothstep(0.1, 0.35, dC);
+  float tSince = (db - dC) / tb / sqrt(9.81 * max(dC, 0.1)); // seconds since the crest reached its break line
+  // along the crest (s): which stretches of this wave plunge (more of a bigger wave's), and the peel: the delay before
+  // it breaks here, 0 at the stretch's starting points to 4 s between them (60 m apart or so: the curl runs at 5 to
+  // 15 m/s), a new layout every wave
+  float s = dot(gcCx, vec2(-gDir.y, gDir.x)), big = smoothstep(0.3, 1.2, a0);
+  float plunge = smoothstep(0.62 - 0.2 * big, 0.78 - 0.2 * big, 0.5 + 0.5 * w2noise(vec2(s / 260.0, cyc * 2.71), 618));
+  float delay = 4.0 * (0.5 + 0.5 * w2noise(vec2(s / 60.0, cyc * 1.37), 617));
+  // the event itself: a little over a second (more for a bigger wave): thrown and landed by 0.55, the lip dropping
+  // into the bore from 0.7, gone by 1
+  float te = 1.0 + 0.4 * clamp(a0, 0.0, 1.5); gcEv = (tSince - delay) / te;
+  gcStage = clamp(smoothstep(0.0, 0.55, gcEv), 0.0, 1.0); gcFall = smoothstep(0.7, 1.0, gcEv);
+  gcShow = smoothstep(0.0, 0.1, gcEv) * (1.0 - smoothstep(0.88, 1.05, gcEv)) * smoothstep(0.05, 0.25, a0) * smoothstep(0.1, 0.35, dC) * plunge;
   gcH0 = 2.0 * a;
   // forward: it lands where the face has fallen a third of its height (about 1 rad of the wave ahead of the crest)
-  float kc = w / sqrt(9.81 * clamp(dC, ${SHORE.dMin.toFixed(2)}, ${SHORE.dMax.toFixed(1)}));
-  gcXs = clamp(1.01 / (kc * max(gcH0, 0.05)) / ${CURL.ratio.toFixed(2)}, 0.75, 1.3);
+  gcXs = clamp(1.01 * curlCel(dC) / (w * max(gcH0, 0.05)) / ${CURL.ratio.toFixed(2)}, 0.75, 1.3);
 }
 `;
 
@@ -161,7 +180,7 @@ void main() {
     curlEvent(xz, level, level - clipHeight(xz));
     float show = gcShow * (1.0 - smoothstep(${(C.reach - 70).toFixed(1)}, ${(C.reach - 10).toFixed(1)}, distance(gcCx, uCam.xz)));
     if (show > 0.002 && sw3Ctx(gcCx)) {
-      float H = gcH0 * uLook3.w * smoothstep(0.0, 0.12, gcEv); // grown from nothing as it starts
+      float H = gcH0 * uLook3.w * smoothstep(0.0, 0.15, gcEv); // grown from nothing as it starts
       float v = (3.14159265 - gcPsi) / 6.2831853, dv = 1.0 / ${(C.samples - 1).toFixed(1)};
       vec4 T = curlAt(v, gcStage);
       vec2 sc = vec2(H * gcXs, H), o = T.xy * sc;
@@ -201,7 +220,7 @@ void main() {
   // interpolated |phase| and the interpolated phase disagree) would join two lips; thrown away, pixel by pixel
   if (vLip.z < 0.002 || vIn < 0.999 || vPsi.y - abs(vPsi.x) > 1.2) discard;
   vec3 V = normalize(cameraPosition - vW), n = normalize(vN);
-  if (dot(n, V) < -0.2) discard; // its outward faces only: a body, not a shell seen from both sides
+  if (dot(n, V) < -0.08) discard; // its outward faces only: a body, not a shell seen from both sides
   n = normalize(n + V * max(0.0, -dot(n, V)) * 1.2); // the rim turned to the eye
   if (uDebug > 8.5 && uDebug < 9.5) { oColor = vec4(mix(vec3(1.0, 0.08, 0.06), vec3(0.5, 0.0, 0.12), step(vLip.x, -0.001)) * (0.45 + 0.55 * max(dot(n, normalize(vec3(0.3, 1.0, 0.2))), 0.0)) * (uSkyUp * 0.6 + uSunColor * max(uSun.y, 0.0) * 0.4) * 3.0, 1.0); return; } // debug 9: the curl red, its underside dark red
   float sunUp = max(uSun.y, 0.0);
