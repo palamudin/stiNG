@@ -51,6 +51,7 @@ float sw3Group(vec2 p, float t) { return 0.45 + 0.55 * (0.5 + 0.5 * w2noise(p / 
 // gradient), the clock's noise from the point itself, the crest of the first train reaching the line (its phase at
 // travel time 0) starting each climb
 const float SW3_UP = ${SWASH.up.toFixed(2)};
+const float SW3_EARLY = 0.2; // seconds: the shoreline's climb starts this much sooner still (the user's tuning)
 const float SW3_LEAD = 0.58; // radians: the bore (the crest's foam charge, running ahead of it) reaches the line this much before the crest
 void sw3Beach(vec2 p, vec2 grad) {
   gNear = 1.0;
@@ -70,14 +71,14 @@ float sw3Reach(vec2 p, float tb, float tc, float cyc) {
 float sw3Shape(float s) { return s < SW3_UP ? sin(s / SW3_UP * 1.5707963) : cos((s - SW3_UP) / (1.0 - SW3_UP) * 1.5707963); }
 // the shoreline's height over the still water at p now, and s
 float sw3Shore(vec2 p, float tb, float t, out float s) {
-  float T0 = sw3Period(), f = (sw3Omega(0) * t + gPn + SW3_LEAD) / 6.2831853, cyc = floor(f); s = f - cyc;
+  float T0 = sw3Period(), f = (sw3Omega(0) * (t + SW3_EARLY) + gPn + SW3_LEAD) / 6.2831853, cyc = floor(f); s = f - cyc;
   return sw3Reach(p, tb, t - s * T0, cyc) * sw3Shape(s);
 }
 // the sand at p, hgt over the still water: (darkness 0..1, gloss 0..1, covered 0/1): wet from when the shoreline rose
 // past it (never before) to when it fell back past it, in each of the last waves; drying from then
 vec3 sw3Wet(vec2 p, float hgt, float tb, float t) {
   if (hgt <= 0.0) return vec3(1.0, 1.0, 1.0);
-  float T0 = sw3Period(), f = (sw3Omega(0) * t + gPn + SW3_LEAD) / 6.2831853, cyc = floor(f), s = f - cyc;
+  float T0 = sw3Period(), f = (sw3Omega(0) * (t + SW3_EARLY) + gPn + SW3_LEAD) / 6.2831853, cyc = floor(f), s = f - cyc;
   vec3 o = vec3(0.0);
   for (int k = 0; k < ${SWASH.memory}; k++) {
     float R = sw3Reach(p, tb, t - (s + float(k)) * T0, cyc - float(k));
