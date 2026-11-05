@@ -108,15 +108,17 @@ float sw3EdgeY(vec2 xz, float level, float bed, float py, vec2 grad, float t, fl
 }
 // the shoreline's own foam (the water's surface, and the foam field, so it lasts as long as the water's own foam):
 // the bore's foam handed over at the line, up the sand with the swash (from the line to the tip), back down with it
-// as it drains, then on down into the water as far as it has drained back, the shore side going first; never where
+// as it drains, then on down into the water as far as it has drained back, the shore side going first; thinner where
 // the incoming bore's foam is. depth: of the still water (< 0 on the sand); th: the water over the floor with the
 // shoreline; s: the swash's clock (sw3Shore); wave: the bore's own foam here
 float sw3ShoreFoam(float depth, float th, float s, float wave) {
   if (th <= 0.0) return 0.0;
   float zeta = th - depth, p = s < SW3_UP ? 0.0 : (s - SW3_UP) / (1.0 - SW3_UP);
   float top = zeta - 0.75 * smoothstep(0.3, 1.0, p), reach = 0.75 * smoothstep(0.15, 1.0, p);
-  return smoothstep(0.0, 0.03, top + depth) * (1.0 - smoothstep(reach - 0.05, reach + 0.02, depth)) * smoothstep(0.0, 0.06, s)
-       * (s < SW3_UP ? 0.9 : mix(0.85, 0.5, p)) * (1.0 - clamp(wave * 1.5, 0.0, 1.0));
+  // soft edges both ways (the foam field holds it in half-metre texels: a hard edge drew their steps), and only thinned
+  // where the bore's own foam is, not cut out, so the two overlap and join instead of leaving a line between them
+  return smoothstep(0.0, 0.12, top + depth) * (1.0 - smoothstep(0.35 * reach, reach + 0.1, depth)) * smoothstep(0.0, 0.06, s)
+       * (s < SW3_UP ? 0.9 : mix(0.85, 0.5, p)) * (1.0 - 0.4 * clamp(wave, 0.0, 1.0));
 }
 // the waves' sideways shift near the line, faded out: a trough must not pull the water's edge back off the sand
 float sw3EdgeShift(float depth) { return smoothstep(0.4, 2.0, depth); }
