@@ -171,6 +171,7 @@ Run the tests from this folder with `node test/sim.test.mjs`, `node test/net.tes
 | 141 | Farmland in the outer ring of a settled area: fields in hedgerows, gravel lanes, farmsteads (farmhouse, wooden barn, shed, yard) on footings to code on slopes, people on the lanes and in the yards (S5) | 18.90 | 25 |
 | 142 | Urban blocks round a town square: rows of houses and mid-rises with shops on main streets, terraced pads stepping down the street, retaining walls with stairs down to courtyards, garden and front walls (S6) | 18.91 | 25 |
 | 143 | Ultra far from home: the world checked at 200 km, 1,000 km and 10,000 km (land uses, buildings, grading, people, a wasp in flight), far-safe land use in C# and wider cache keys; dev J jumps there and back; the lace foam's far fix | 18.92 | 25 |
+| 144 | A floating render origin (classic look): the scene drawn shifted by a snapped origin near the camera, chunk geometry and instances stored from their chunk's middle, the crowds and the ground rings from the origin, so 10,000 km out draws as home does | 18.93 | 25 |
 
 ## Verified
 

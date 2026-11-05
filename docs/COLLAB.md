@@ -18,6 +18,10 @@ The repository is the single place they meet. Everything goes through commits an
 5. **Start from `main`.** Fetch and branch from the latest `main` before starting work, and rebase before opening the pull request.
 6. **Commit messages** say what changed and name the GDD section, and end with the thread's attribution lines.
 
+## Open asks
+
+- **World v3: adopt the render origin (GDD 18.93).** The classic look draws everything from a floating origin RO (snapped to 12,288 m, moved when the camera is 9,216 m from it), so it draws 10,000 km from home as it does at home. World v3 still draws in absolute 32-bit coordinates, so the game holds RO at 0 when it runs. To adopt it, World v3 would add `world.setOrigin(x, z)`, put its clipmap and terrain centres in from RO (each level's texel phase stays whole, since RO is a multiple of every window), and read grass, trees, water and post patterns from the offset, as the lace foam already does. The game then calls `setOrigin` and drops the `W2on` guard in `originFrame`.
+
 ## A thread that cannot push
 
 A claude.ai chat may only have read access to GitHub. It then hands its work over as files: an artifact, or a zip attached in the chat. The game thread, which can push, commits those files unchanged on a `world/<topic>` branch. It names the source chat and artifact in the commit message, and opens the pull request. Its own changes go on top as separate commits, so the history keeps the world thread's work and the game thread's integration apart.

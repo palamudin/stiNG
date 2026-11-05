@@ -53,6 +53,16 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 const SKY_FLASH = new THREE.Color('#e8ecff'), SKY_DAY = new THREE.Color('#a9cfe3'), SKY_DUSK = new THREE.Color('#e3a271'), SKY_NIGHT = new THREE.Color('#0e1626'), SKY_RAIN = new THREE.Color('#7d8792');
 const sky = SKY_DAY.clone();
 const scene = new THREE.Scene();
+// A floating render origin (planet scale): the sim works in absolute metres (doubles, or Q32.32 in C#), but a GPU works
+// in 32-bit floats, a centimetre's step at 200 km and a metre's at 10,000 km, where a wasp is 1.5 cm long. So the whole
+// scene is drawn shifted by -RO (scene.position), RO snapped to RO_SNAP m near the camera and moved only once the
+// camera is RO_KEEP m from it: every position the GPU sees is within a few kilometres of the eye. The camera is in the
+// scene (it is shifted with it), so object and camera positions stay absolute in JS; only what the GPU stores is
+// relative: merged chunk geometry and instance matrices from their chunk's middle (Batch origin, anchor), moving
+// instances and points from RO, the ground rings and cover maps from RO. RO_SNAP is a multiple of the rings' texel
+// windows (128 x 8 m), of the grass tile (3 m) and of the paving's patterns, so the ground reads the same textures and
+// nothing a texel addresses jumps when RO moves. World v3 draws in absolute coordinates for now: RO stays 0 there.
+const RO = { x: 0, z: 0 }, RO_SNAP = 12288, RO_KEEP = 9216, RO_ANCHORED = [];
 scene.background = sky;
 scene.fog = W2on ? null : new THREE.Fog(sky, 30, 115); // World v2 draws the air itself (post chain)
 
@@ -72,6 +82,35 @@ Object.assign(sun.shadow.camera, { left: -SHADOW.half, right: SHADOW.half, top: 
 sun.shadow.bias = -0.00015;
 sun.shadow.normalBias = 0.015;
 scene.add(sun, sun.target);
+if (!W2on) scene.add(camera); // shifted with the scene (RO); World v3 renders its own passes with a top-level camera
+// an instanced mesh whose instance matrices are written in absolute metres: kept at (ox, oz), its matrices stored from
+// there (or, live, from RO)
+const _am = new THREE.Matrix4();
+function anchor(im, ox, oz, live = false) {
+  im.position.set(ox, 0, oz);
+  const set = im.setMatrixAt.bind(im);
+  im.setMatrixAt = (i, m) => { _am.copy(m); _am.elements[12] -= im.position.x; _am.elements[14] -= im.position.z; set(i, _am); };
+  if (live) RO_ANCHORED.push(im);
+  return im;
+}
+// move the render origin when the camera has gone RO_KEEP m from it (never in World v3, which draws in absolute coordinates)
+function originFrame(c = camera.position) {
+  if (W2on) return;
+  if (Math.abs(c.x - RO.x) < RO_KEEP && Math.abs(c.z - RO.z) < RO_KEEP) return;
+  RO.x = Math.round(c.x / RO_SNAP) * RO_SNAP; RO.z = Math.round(c.z / RO_SNAP) * RO_SNAP;
+  scene.position.set(-RO.x, 0, -RO.z);
+  for (const m of RO_ANCHORED) { // what was stored from the old origin is restated from the new one
+    const dx = m.position.x - RO.x, dz = m.position.z - RO.z, a = m.isInstancedMesh ? m.instanceMatrix.array : m.geometry.attributes.position.array;
+    const step = m.isInstancedMesh ? 16 : 3, ox = m.isInstancedMesh ? 12 : 0;
+    for (let i = 0; i < a.length; i += step) { a[i + ox] += dx; a[i + ox + 2] += dz; }
+    if (m.isInstancedMesh) m.instanceMatrix.needsUpdate = true; else m.geometry.attributes.position.needsUpdate = true;
+    m.position.set(RO.x, 0, RO.z);
+  }
+  scene.updateMatrixWorld();
+}
+// a point in absolute metres where the GPU draws it (for projecting to the screen), and back (for a ray's hit)
+const toView = (v) => { v.x -= RO.x; v.z -= RO.z; return v; };
+const fromView = (v) => { v.x += RO.x; v.z += RO.z; return v; };
 renderer.shadowMap.autoUpdate = false;
 // the classic look's sun: the shadow box round (fx, fz), pushed ahead along the view (ax, az), snapped to its texels
 const _sd = new THREE.Vector3();
@@ -265,7 +304,7 @@ function coverFrame(fx, fz) {
     const step = C.size / 8, ox = Math.round((fx - C.size / 2) / step) * step, oz = Math.round((fz - C.size / 2) / step) * step;
     const sig = ox + ',' + oz + ',' + sim.records.size; // repaint when moved, or when chunks have been generated
     if (sig !== C.sig) { C.sig = sig; C.ox = ox; C.oz = oz; paintCover(C, ox, oz); }
-    coverUniforms.coverBox.value[i].set(C.ox, C.oz, C.size, 0);
+    coverUniforms.coverBox.value[i].set(C.ox - RO.x, C.oz - RO.z, C.size, 0); // from the render origin
   });
 }
 const COVER_GLSL = `
@@ -343,7 +382,8 @@ function terrFrame(focus) {
   } else if (TERR.sea) TERR.sea.visible = false;
   for (const l of rings.update(focus.x, focus.z)) ringTex[l].needsUpdate = true;
   coverFrame(focus.x, focus.z);
-  rings.lv.forEach((L, l) => ringUniforms.ringLv.value[l].set(L.cx, L.cz, L.s, L.H));
+  rings.lv.forEach((L, l) => ringUniforms.ringLv.value[l].set(L.cx - RO.x, L.cz - RO.z, L.s, L.H)); // from the render origin
+  for (const m of ringMeshes) m.position.set(RO.x, 0, RO.z);
   for (const m of ringMeshes) m.visible = true;
   ground.visible = false;
   if (TERR.frame++ % 30 === 0) terrApply(scene);
@@ -445,6 +485,7 @@ function batchMeshes(B, mats, parent) {
     geo.setIndex(new THREE.BufferAttribute(b.index, 1));
     geo.computeBoundingSphere();
     const m = new THREE.Mesh(geo, mats.get(b.key)); m.castShadow = m.receiveShadow = true; m.userData.parts = b.parts; m.userData.own = true;
+    m.position.set(B.ox, 0, B.oz); // stored from the chunk's middle
     parent.add(m);
   }
 }
@@ -612,7 +653,7 @@ function surfMat(color, kind, opts = {}, ao = false) {
     Object.assign(sh.uniforms, SURF);
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute float aTop; attribute vec4 aBox; varying vec3 vSP; varying vec3 vSN; flat varying float vTop; flat varying vec4 vBox;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vSP = (modelMatrix * vec4(position, 1.0)).xyz; vSN = mat3(modelMatrix) * normal; vTop = aTop; vBox = aBox;');
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vSP = (modelMatrix * vec4(position, 1.0)).xyz; vSN = mat3(modelMatrix) * normal; vTop = aTop; vBox = aBox + vec4(modelMatrix[3].x, modelMatrix[3].z, 0.0, 0.0); // aBox from the batch origin');
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', '#include <common>\n' + SURF_GLSL)
       .replace('#include <color_fragment>', '#include <color_fragment>\n  vec3 surfGlow = vec3(0.0);\n' + SURF_FRAG)
@@ -654,7 +695,7 @@ function buildChunk(rec) {
   const c = rec.content;
   const dyn = { traps: [], candles: [], grills: [], wood: [], rain: [], rainDay: -2, near, cx: rec.cx * 64, cz: rec.cz * 64 };
   // static parts merged per material (GDD 21.4, view/merge.js): buildings and trunks drawn far, small things near
-  const BF = new Batch(), BN = new Batch(), bmats = new Map();
+  const BF = new Batch(rec.cx * 64, rec.cz * 64), BN = new Batch(rec.cx * 64, rec.cz * 64), bmats = new Map(); // from the chunk's middle (RO)
   const put = (B, material, geo, M, vals) => {
     const vb = vcBase(material); // one material per kind of surface, each part's colour in its vertices
     if (vb) { vals = { ...(vals || {}), color: [material.color.r, material.color.g, material.color.b] }; material = vb; }
@@ -721,7 +762,7 @@ function buildChunk(rec) {
     const B = q.near ? BN : BF, M = place(q.x, q.y, q.z, sc[0], sc[1], sc[2], q.rx, q.ry, q.rz);
     const geo = q.s === 0 ? geoBox : q.s === 1 ? unitCyl(q.sx / q.sz, q.n) : q.s === 2 ? gableGeo(q.sx, q.sy) : geoBulb;
     const material = q.m === 6 ? BULB_MAT : q.m === 5 ? amat(q.c) : surfMat(q.c, q.m < 4 ? [0, 1, 2, 3][q.m] : 4, q.s === 2 ? { side: THREE.DoubleSide } : {}, true);
-    put(B, material, geo, M, q.m < 4 ? { aTop: [q.top], aBox: q.wb } : undefined);
+    put(B, material, geo, M, q.m < 4 ? { aTop: [q.top], aBox: [q.wb[0] - B.ox, q.wb[1] - B.oz, q.wb[2], q.wb[3]] } : undefined);
   }
   // crowns of blocky foliage (GDD 21.5), in two kinds: evergreen conifers (tiers of needle blocks narrowing upward,
   // dark all year) and broadleaf trees (a loose ball of leaf blocks that greens in spring, turns and drops in autumn,
@@ -729,7 +770,7 @@ function buildChunk(rec) {
   // Instanced, one draw a chunk, swaying in their vertex shader (World v2/v3 draws its own crowns).
   if (c.trees.length && !W2on) {
     const plan = c.trees.map((t) => { const conifer = vh(t.x, t.z, 99, 9) < (c.use === 'forest' ? 0.45 : 0.22); return { t, conifer, n: conifer ? 5 + Math.min(3, Math.floor(t.cr)) : 9 + Math.min(6, Math.floor(t.cr * 2)) }; });
-    const n = plan.reduce((q, p) => q + p.n, 0), cg = geoBox.clone(), cm = new THREE.InstancedMesh(cg, crownMat, n), ph = new Float32Array(n);
+    const n = plan.reduce((q, p) => q + p.n, 0), cg = geoBox.clone(), cm = anchor(new THREE.InstancedMesh(cg, crownMat, n), rec.cx * 64, rec.cz * 64), ph = new Float32Array(n);
     const C = { cm, trees: [], mats: new Float32Array(n * 16), r: new Float32Array(n), key: -1 };
     let k = 0;
     for (const { t, conifer, n: q } of plan) {
@@ -764,7 +805,7 @@ function buildChunk(rec) {
     shapes.get(geo).push([b, bi]);
   });
   for (const [geo, list] of shapes) {
-    const im = new THREE.InstancedMesh(geo, woodMat, list.length), m4 = new THREE.Matrix4();
+    const im = anchor(new THREE.InstancedMesh(geo, woodMat, list.length), rec.cx * 64, rec.cz * 64), m4 = new THREE.Matrix4();
     list.forEach(([b, bi], j) => {
       m4.fromArray(place((b.minx + b.maxx) / 2, (b.miny + b.maxy) / 2, (b.minz + b.maxz) / 2, b.maxx - b.minx, b.maxy - b.miny, b.maxz - b.minz)); im.setMatrixAt(j, m4);
       const base = new THREE.Color(b.wood && b.fence ? '#b98a55' : '#8a6440'); im.setColorAt(j, base);
@@ -800,7 +841,7 @@ function buildChunk(rec) {
   if (c.cans.length) {
     // cups, instanced (GDD 21.4): painted outside, plain inside, the drink at its level; a spilled one on its side by
     // its puddle; a lid, or a hand over it. Posed again only when one changes (cupPose).
-    const n = c.cans.length, I = (geo, m) => { const im = new THREE.InstancedMesh(geo, m, n); near.add(im); return im; };
+    const n = c.cans.length, I = (geo, m) => { const im = anchor(new THREE.InstancedMesh(geo, m, n), rec.cx * 64, rec.cz * 64); near.add(im); return im; };
     const C = { outer: I(geoCan, CUP_OUT), inner: I(geoCanIn, CUP_IN), drink: I(geoDrink, CUP_DRINK), pud: I(geoPud, CUP_PUD), lid: I(geoLid, CUP_LID), cans: c.cans, level: cups.map((q) => q.level), st: c.cans.map(() => -1) };
     C.outer.castShadow = true;
     const col = new THREE.Color();
@@ -817,8 +858,8 @@ function buildChunk(rec) {
     near.add(grp); dyn.traps.push(grp);
   }
   if (c.flowers.length) {
-    const stems = new THREE.InstancedMesh(geoStem, mat('#4f7a2a'), c.flowers.length);
-    const heads = new THREE.InstancedMesh(geoHead, new THREE.MeshLambertMaterial(), c.flowers.length);
+    const stems = anchor(new THREE.InstancedMesh(geoStem, mat('#4f7a2a'), c.flowers.length), rec.cx * 64, rec.cz * 64);
+    const heads = anchor(new THREE.InstancedMesh(geoHead, new THREE.MeshLambertMaterial(), c.flowers.length), rec.cx * 64, rec.cz * 64);
     const m4 = new THREE.Matrix4(), col = new THREE.Color();
     c.flowers.forEach((f, i) => {
       m4.makeScale(1, f.y, 1).setPosition(f.x, f.y / 2, f.z); stems.setMatrixAt(i, m4);
@@ -837,14 +878,14 @@ function buildChunk(rec) {
   dyn.webs = c.webs.map((wb) => {
     const pts = [];
     const ux = -wb.nz, uz = wb.nx; // in-plane horizontal axis
-    const P = (r, a) => [wb.x + ux * r * Math.cos(a), wb.y + r * Math.sin(a), wb.z + uz * r * Math.cos(a)];
+    const P = (r, a) => [ux * r * Math.cos(a), wb.y + r * Math.sin(a), uz * r * Math.cos(a)]; // from the web's middle (lines.position)
     for (let k = 0; k < 10; k++) { const a = k / 10 * Math.PI * 2; pts.push(...P(0, a), ...P(wb.r, a)); }
     for (let ring = 1; ring <= 6; ring++) {
       const r = wb.r * ring / 6.5;
       for (let k = 0; k < 10; k++) { const a0 = k / 10 * Math.PI * 2, a1 = (k + 1) / 10 * Math.PI * 2; pts.push(...P(r, a0), ...P(r, a1)); }
     }
     const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-    const lines = new THREE.LineSegments(geo, webMat);
+    const lines = new THREE.LineSegments(geo, webMat); lines.position.set(wb.x, 0, wb.z);
     near.add(lines);
     return lines;
   });
@@ -978,7 +1019,7 @@ function buildNestParts(n, abandoned, species = 'wasp') {
     const rim = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 8), new THREE.MeshLambertMaterial({ map: paperTex, color: abandoned ? '#857a68' : tint }));
     rim.scale.set(dx ? 0.35 : 1, 0.8, dz ? 0.35 : 1); rim.position.set(n.x + dx / d * 0.005, n.y, n.z + dz / d * 0.005);
     const hole = new THREE.Mesh(new THREE.CircleGeometry(0.02, 12), mat('#0c0905', { side: THREE.DoubleSide }));
-    hole.position.set(n.x + dx / d * 0.03, n.y, n.z + dz / d * 0.03); hole.lookAt(n.x + dx / d, n.y, n.z + dz / d);
+    hole.position.set(n.x + dx / d * 0.03, n.y, n.z + dz / d * 0.03); hole.lookAt(n.x + dx / d - RO.x, n.y, n.z + dz / d - RO.z); // lookAt: where the GPU draws it
     g.add(rim, hole);
     g.userData.ball = rim;
     scene.add(g);
@@ -1073,7 +1114,7 @@ ffGeo.setAttribute('position', new THREE.BufferAttribute(ffPos, 3)); ffGeo.setDr
 const ffDot = (() => { const c = document.createElement('canvas'); c.width = c.height = 32; const g = c.getContext('2d'), r = g.createRadialGradient(16, 16, 0, 16, 16, 16);
   r.addColorStop(0, 'rgba(255,255,215,1)'); r.addColorStop(0.1, 'rgba(240,255,150,0.95)'); r.addColorStop(0.3, 'rgba(200,255,80,0.3)'); r.addColorStop(0.6, 'rgba(170,255,60,0.06)'); r.addColorStop(1, 'rgba(160,255,60,0)'); g.fillStyle = r; g.fillRect(0, 0, 32, 32); return new THREE.CanvasTexture(c); })();
 const ffGlow = new THREE.Points(ffGeo, new THREE.PointsMaterial({ map: ffDot, color: '#ffffff', size: 0.014, sizeAttenuation: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
-ffGlow.frustumCulled = false; scene.add(ffGlow);
+ffGlow.frustumCulled = false; scene.add(ffGlow); RO_ANCHORED.push(ffGlow);
 const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(1, 1, 1), _p = new THREE.Vector3();
 
 // Pest-control bait stations: a dark box on the trunk with the bait showing through its slot
@@ -1088,6 +1129,8 @@ const honeyMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.03, 8, 6).s
 honeyMesh.count = 0; honeyMesh.frustumCulled = false; scene.add(honeyMesh);
 const fruitMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.032, 10, 8), new THREE.MeshLambertMaterial({ color: '#ffffff' }), 400);
 fruitMesh.count = 0; fruitMesh.frustumCulled = false; fruitMesh.castShadow = true; scene.add(fruitMesh);
+// the moving crowds' matrices are written in absolute metres: stored from the render origin (anchor, live)
+for (const m of [flyMesh, catMesh, beeMesh, mothMesh, lampMesh, glowMesh, swarmMesh, queenMesh, fireflyMesh, carrionMesh, meatMesh, honeyMesh, fruitMesh]) anchor(m, 0, 0, true);
 const FRUIT_COLORS = ['#b8322a', '#c9a227', '#6e2a4a', '#9a3a1e'].map((c) => new THREE.Color(c));
 function renderFruit() {
   let n = 0;
@@ -1124,7 +1167,7 @@ function renderSites() {
   while (hollowPool.length < hollows.length) { const m = new THREE.Mesh(hollowGeo, mat('#120d08', { side: THREE.DoubleSide })); m.scale.set(0.7, 1.3, 1); scene.add(m); hollowPool.push(m); }
   hollowPool.forEach((m, i) => {
     const h = hollows[i]; m.visible = !!h && !(sim.nest.site === 'hollow' && Math.hypot(h.x - sim.nest.x, h.z - sim.nest.z) < 0.01);
-    if (h) { m.position.set(h.x, h.y, h.z); m.lookAt(h.x + (h.x - h.t.x), h.y, h.z + (h.z - h.t.z)); }
+    if (h) { m.position.set(h.x, h.y, h.z); m.lookAt(h.x + (h.x - h.t.x) - RO.x, h.y, h.z + (h.z - h.t.z) - RO.z); }
   });
   knobPool.forEach((m, i) => { const k = knobs[i]; m.visible = !!k; if (k) m.position.set(k.x, k.y + 0.06, k.z); });
 }
@@ -1217,7 +1260,7 @@ function renderCritters(t) {
     if (nff >= MAXI) break;
     const p = sim.fireflyPos(f, t);
     fireflyMesh.setMatrixAt(nff++, _m4.makeTranslation(p.x, p.y, p.z));
-    if (nfg < FF_MAX && sim.fireflyGlow(f, Math.floor(t))) { ffPos[nfg * 3] = p.x; ffPos[nfg * 3 + 1] = p.y; ffPos[nfg * 3 + 2] = p.z; nfg++; }
+    if (nfg < FF_MAX && sim.fireflyGlow(f, Math.floor(t))) { ffPos[nfg * 3] = p.x - RO.x; ffPos[nfg * 3 + 1] = p.y; ffPos[nfg * 3 + 2] = p.z - RO.z; nfg++; } // from RO (ffGlow sits at RO)
   }
   fireflyMesh.count = nff; fireflyMesh.instanceMatrix.needsUpdate = true;
   ffGeo.setDrawRange(0, nfg); ffGeo.attributes.position.needsUpdate = true;
@@ -1877,7 +1920,7 @@ function renderSprays() {
     const m = sprayPool[i++];
     m.visible = true;
     const head = v.rest[0].a;
-    m.position.copy(v.group.localToWorld(new THREE.Vector3(head.x, head.y, head.z + 0.1)));
+    m.position.copy(fromView(v.group.localToWorld(new THREE.Vector3(head.x, head.y, head.z + 0.1)))); // a scene child: absolute metres
     m.rotation.set(0, v.group.rotation.y, 0);
     m.scale.setScalar(0.9 + Math.random() * 0.15);
   }
@@ -1899,10 +1942,10 @@ function renderRain(center, dt) {
   const fall = 9 * (pour > 1 ? 1.6 : 1), sx = pour > 1 ? w.x * 0.05 : 0.02, sz = pour > 1 ? w.z * 0.05 : 0;
   rainDrops.forEach((d, i) => {
     d[1] -= dt * fall; if (d[1] < 0) d[1] += 12;
-    const x = center.x + d[0], y = d[1], z = center.z + d[2];
+    const x = d[0], y = d[1], z = d[2]; // round the rain's centre (rain.position), not in absolute metres
     a.set([x, y, z, x + sx, y + 0.25 * (pour > 1 ? 1.5 : 1), z + sz], i * 6);
   });
-  rainGeo.attributes.position.needsUpdate = true;
+  rainGeo.attributes.position.needsUpdate = true; rain.position.set(center.x, 0, center.z);
   // lightning now and then in a storm (presentation only)
   if (pour > 1 && Math.random() < dt * 0.12) { flash = 1; setTimeout(() => blip(60, 35, 0.9, 0.25, 'sawtooth'), 300 + Math.random() * 1500); }
   flash = Math.max(0, flash - dt * 5);
@@ -1940,7 +1983,7 @@ function nightSky(f, dayAmt) {
   NIGHT_SKY.visible = show; NIGHT_SKY.position.copy(camera.position); NIGHT_SKY.scale.setScalar(W2on ? 14 : 1); // in World v3 past its clouds, so they hide the stars
   G.stars.material.opacity = show ? night * night * (1 - cloud) : 0;
   G.disc.material.opacity = show ? night * (0.25 + 0.75 * full) * (1 - cloud * 0.8) * (Math.sin(a) > 0.02 ? 1 : 0) : 0;
-  G.disc.position.copy(mdir).multiplyScalar(330); G.disc.lookAt(0, 0, 0);
+  G.disc.position.copy(mdir).multiplyScalar(330); G.disc.lookAt(camera.position.x - RO.x, camera.position.y, camera.position.z - RO.z); // facing the eye
   sky.lerp(MOON_SKY, 0.35 * full * night * (1 - cloud)); if (scene.fog) scene.fog.color.copy(sky);
 }
 const MOON_SKY = new THREE.Color('#1d2a45');
@@ -2396,7 +2439,7 @@ function drawLock() {
   if (!lockMark) return;
   const t = input.lock, p = t && targetPos(sim, t);
   if (!p) { lockMark.hidden = true; return; }
-  const v = new THREE.Vector3(p.x, p.y + terrAt(p.x, p.z), p.z).project(camera);
+  const v = toView(new THREE.Vector3(p.x, p.y + terrAt(p.x, p.z), p.z)).project(camera);
   if (v.z > 1 || v.z < -1) { lockMark.hidden = true; return; }
   lockMark.hidden = false;
   lockMark.style.left = `${(v.x + 1) / 2 * innerWidth}px`; lockMark.style.top = `${(1 - v.y) / 2 * innerHeight}px`;
@@ -3058,6 +3101,7 @@ function devTeleport(x, z) {
 function makeReady(x, z, label, tp = false) {
   if (!TP.el) { TP.el = document.createElement('div'); TP.el.style.cssText = 'position:fixed;inset:0;z-index:50;background:#0d0f0c;color:#cfc9b8;display:flex;align-items:center;justify-content:center;font:600 15px/1 system-ui,sans-serif;letter-spacing:.08em;transition:opacity .35s;pointer-events:none'; document.body.appendChild(TP.el); }
   TP.el.textContent = label; TP.el.style.opacity = '1'; TP.el.hidden = false; TP.tp = tp;
+  originFrame({ x, z }); // the render origin there now (a teleport's place may be thousands of kilometres off)
   sim._updateChunks(true); syncChunks(); // the place's chunks now, not after the next step
   if (TERR.on && !world2) { rings.reset(); terrFrame(new THREE.Vector3(x, 0, z)); }
   if (world2) world2.build(x, z); // the ground whole there, not streamed in from where the view was
@@ -3567,7 +3611,7 @@ canvas.addEventListener('pointerup', (e) => {
   const r = canvas.getBoundingClientRect(), ndc = new THREE.Vector2((e.clientX - r.left) / r.width * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
   const ray = new THREE.Raycaster(); ray.setFromCamera(ndc, camera);
   const gy = terrAt(ov.fx, ov.fz), t = (gy - ray.ray.origin.y) / ray.ray.direction.y;
-  if (t > 0) { const p = ray.ray.origin.clone().addScaledVector(ray.ray.direction, t); ovEnd(true); devTeleport(p.x, p.z); }
+  if (t > 0) { const p = fromView(ray.ray.origin.clone().addScaledVector(ray.ray.direction, t)); ovEnd(true); devTeleport(p.x, p.z); }
 });
 addEventListener('keydown', (e) => { if (ov.on && (e.code === 'Escape' || e.code === 'KeyM')) { e.preventDefault(); ovEnd(); } });
 // dev tools: J jumps far from home along +x and back (200 km, 1,000 km, 10,000 km, home), to check the world and its
@@ -3597,7 +3641,7 @@ function overviewCamera(dt) {
   const D = ov.dist = ov.d * THREE.MathUtils.lerp(1, back, m), gy = terrAt(ov.fx, ov.fz);
   const cx = ov.fx + Math.sin(ov.yaw) * Math.cos(ov.pitch) * D, cz = ov.fz + Math.cos(ov.yaw) * Math.cos(ov.pitch) * D;
   let cy = gy + Math.sin(ov.pitch) * D; cy = Math.max(cy, terrAt(cx, cz) + 0.3);
-  camera.up.set(0, 1, 0); camera.position.set(cx, cy, cz); camera.lookAt(ov.fx, gy, ov.fz);
+  camera.up.set(0, 1, 0); camera.position.set(cx, cy, cz); camera.lookAt(ov.fx - RO.x, gy, ov.fz - RO.z);
   camera.near = THREE.MathUtils.clamp(ov.d * 0.01, 0.01, 20); camera.far = W2on ? 60000 : 400; camera.updateProjectionMatrix();
   camPos.set(cx, cy - gy, cz);
   const focus = new THREE.Vector3(ov.fx, 0, ov.fz);
@@ -3637,7 +3681,7 @@ function drawPins() {
   }
   let n = 0;
   for (const q of list) {
-    _pv.set(q.x, q.y + terrAt(q.x, q.z), q.z).project(camera);
+    toView(_pv.set(q.x, q.y + terrAt(q.x, q.z), q.z)).project(camera);
     let x = (_pv.x * 0.5 + 0.5) * W, y = (-_pv.y * 0.5 + 0.5) * H; const behind = _pv.z > 1;
     const off = behind || x < 8 || y < 8 || x > W - 8 || y > H - 8;
     if (off && !q.edge) continue;
@@ -3722,7 +3766,7 @@ function updateCamera(p, dt) {
     if (pos.y < under) { look.y += under - pos.y; pos.y = under; }
   }
   camera.position.copy(pos);
-  camera.lookAt(look);
+  camera.lookAt(look.x - RO.x, look.y, look.z - RO.z); // lookAt takes the point where the GPU draws it
   camera.getWorldDirection(_sd); placeSun(focus.x, focus.z, _sd.x, _sd.z);
   ground.position.set(Math.round(focus.x / GROUND_TILE) * GROUND_TILE, 0, Math.round(focus.z / GROUND_TILE) * GROUND_TILE);
   return focus;
@@ -3763,6 +3807,7 @@ function frame(now) {
     for (const v of humanViews.values()) poseHuman(v, t, dt);
     if (tm) { tm('humans', t0); t0 = performance.now(); }
     const p = renderWasps(alpha, t, dt);
+    originFrame(); // the render origin follows the camera (planet scale)
     if (sim) terrFrame(ov.on ? new THREE.Vector3(ov.fx, 0, ov.fz) : p || V(sim.nest.spawn));
     const focus = updateCamera(p, dt);
     drawLock();
@@ -4036,7 +4081,7 @@ warm.p = (async () => {
 })();
 
 // test hook for automated checks
-window.__sting = { get sim() { return sim; }, get lab() { return lab; }, input, padUI, touch, buildCmd, atlas, opts, start: () => $("bStart").click(), humanViews, waspViews, rings, toggleNest, toggleLab, saveWorld, camera, scene, warm, quality, get world2() { return world2; }, W2on, chunkViews, renderer };
+window.__sting = { get sim() { return sim; }, RO, get lab() { return lab; }, input, padUI, touch, buildCmd, atlas, opts, start: () => $("bStart").click(), humanViews, waspViews, rings, toggleNest, toggleLab, saveWorld, camera, scene, warm, quality, get world2() { return world2; }, W2on, chunkViews, renderer };
 window.__garment = (hm) => garmentGraph(hm.tr, hm.clothing, hm.posture, hm.parts[hm.posture]);
 window.__toWorld = toWorld;
 window.__weather = dayWeather;

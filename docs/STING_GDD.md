@@ -2483,6 +2483,32 @@ On a jump the CPU path no longer blurs a level out to its parent: the window it 
 
 The game now asks for a square at least 16 m across (`causticsMin`), pushed 30% of its size ahead along the view (`causticsAhead`), on a 512 texture with a 384 grid. That is about the old detail (3 cm texels, 7 cm cells, against 2.3 and 5 cm) over 2.7 times the width. Water seen at a slant still clouds with distance: that is the water, not the caustics.
 
+### 18.93 A floating render origin (planet scale, classic look)
+
+**The problem.** The sim is exact anywhere: doubles in JS, Q32.32 in C# (±2,100,000 km). The GPU works in 32-bit floats, though. A position stored in absolute metres has a step of about 1.5 cm at 200 km, 6 cm at 1,000 km and 1 m at 10,000 km, and a wasp is 1.5 cm long. Moving objects were safe, because three.js composes each object's matrix with the camera's in doubles. What broke far out was everything stored in absolute metres:
+- the merged chunk geometry (walls, roofs, trunks, small parts);
+- the instance matrices of crowns, trunks, cans, flowers and the moving crowds;
+- the webs, the rain and the fireflies' glow;
+- the ground rings, whose vertices, heights and grass texture are worked out in the shader from world coordinates.
+
+At 10,000 km the ground's grass smeared to one colour and the ground stepped in metre-wide ridges.
+
+**The fix.** The whole scene is drawn shifted by −RO (`scene.position`), and the camera is a child of the scene. So every JS position stays absolute, and only what the GPU stores is relative:
+- **The render origin.** RO is snapped to 12,288 m near the camera. It moves only once the camera is 9,216 m from it, and a teleport moves it to the new place before anything is built there.
+- **Chunk geometry.** A `Batch` takes an origin (the chunk's middle) and stores its parts from it. The mesh sits at that origin. The walls' window boxes (`aBox`) are stored from it too, and the shader adds the mesh's place back.
+- **Chunk instances.** `anchor(mesh, ox, oz)` places the mesh at the chunk's middle and wraps `setMatrixAt` to store each matrix from there. Webs are drawn from their middle.
+- **Moving crowds.** Flies, caterpillars, bees, moths, swarms, queens, fireflies, carrion, meat, honey, fruit and lamps are anchored at RO, and so are the fireflies' glow points. When RO moves, what they stored is restated from the new origin in the same frame.
+- **The ground rings.** Their meshes sit at RO, and their centres and the cover maps are given to the shader from RO.
+- **Why 12,288 m.** It is a whole number of every pattern a shader reads from world coordinates: 128 cells of the coarsest ring level (8 m), the grass tile (3 m), the slabs and pavers, the siding and the shadow texel. So no texture lookup jumps when RO moves.
+- **The frame-sensitive sites.** A few places pass a point to three.js, which reads it in the drawn frame: `camera.lookAt` and the other `lookAt` calls, points projected to the screen (labels, pins), the overview's ray, and the spray's start. Each of these subtracts or adds RO.
+
+**Checked.** The view suite now has a test: 10,000 km out, a batch stored from its origin keeps a 1 cm part to 10 µm; stored absolutely, the part reads 100 cm wide. Headless renders of the classic look were taken 10,000 km out, before and after the fix. Before, the ground was smeared and ridged; after, it matches home. Crossing an RO move at 9,216 m draws the same hill on both sides.
+
+**World v3.** World v3 still draws in absolute coordinates, so RO stays 0 there and the camera stays top level. Adopting the origin is the world thread's follow-up (COLLAB). It means:
+- the clipmap and terrain levels' centres given from RO, with each level's texel window phase kept as a whole number (RO is a multiple of every level's window);
+- grass, trees, water and post reading world-coordinate patterns from the offset, as the lace foam already does from its 2048 m origin;
+- a `world.setOrigin(x, z)` the game calls when RO moves.
+
 ### 18.92 Ultra far from home (the lace foam's fix, and the world checked at 200 km, 1,000 km and 10,000 km)
 
 **Water.** The world thread's fix is merged (`world/w3` 4c753ce). Far from the origin the foam's lace had broken into blocks, because its texture was read at world coordinates in 32-bit floats. It is now read from a point measured from a 2048 m-snapped origin, with the camera's offset from it in double precision.
@@ -2504,7 +2530,7 @@ At each distance the ground is finite everywhere and every house pad is level. A
 
 **Dev: J.** With dev tools on, J jumps 200 km, then 1,000 km, then 10,000 km east of home, and back home, behind the teleport's curtain, so the drawing can be checked there on a GPU.
 
-**What the drawing still has to show.** The sim is in doubles (or Q32.32, good to ±2,100,000 km), and three.js puts objects relative to the camera in double precision before the GPU sees them. Shaders that work in world coordinates are 32-bit, though: the ground's lift, the clipmap and terrain, the walls' siding and windows, and the crowns' leaves. Their step is about 1.5 cm at 200 km, 6 cm at 1,000 km and 1 m at 10,000 km. A wasp is about 1.5 cm long, so close up these can wobble or block out as the lace did. The fix for all of them at once is a floating render origin, snapped like the lace's: everything drawn relative to it, with the world-coordinate patterns read from the offset.
+**What the drawing still has to show.** The sim is in doubles (or Q32.32, good to ±2,100,000 km), and three.js puts objects relative to the camera in double precision before the GPU sees them. Shaders that work in world coordinates are 32-bit, though: the ground's lift, the clipmap and terrain, the walls' siding and windows, and the crowns' leaves. Their step is about 1.5 cm at 200 km, 6 cm at 1,000 km and 1 m at 10,000 km. A wasp is about 1.5 cm long, so close up these can wobble or block out as the lace did. The fix for all of them at once is a floating render origin, snapped like the lace's: everything drawn relative to it, with the world-coordinate patterns read from the offset. Built for the classic look in 18.93.
 
 ### 18.91 Urban blocks round a town square (S6, GEN_VERSION 17)
 

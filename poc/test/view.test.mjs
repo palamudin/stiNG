@@ -142,5 +142,17 @@ const ok = (c, msg) => { console.log((c ? 'PASS ' : 'FAIL ') + msg); if (!c) fai
   ok(big.build()[0].index instanceof Uint32Array, 'a bin past 65535 vertices takes 32-bit indices');
 }
 
+// GDD 18.93 (planet scale). A batch stores its parts from its origin (a chunk's middle), so 10,000 km from home a
+// part 1 cm across keeps its centimetre in the 32-bit positions the GPU gets; stored absolutely it would be lost
+{
+  const tri = { position: new Float32Array([0, 0, 0, 0.01, 0, 0, 0, 0, 0.01]), normal: null, index: null };
+  const X = 1e7 + 32.5, Z = -1e7 + 17.25, F = new Batch(1e7, -1e7), A = new Batch();
+  F.add('a', tri, place(X, 0, Z)); A.add('a', tri, place(X, 0, Z));
+  const f = F.build()[0].position, a = A.build()[0].position, w = (P, k, o) => P[k] + o; // back to absolute metres, in doubles
+  ok(Math.abs(w(f, 3, 1e7) - w(f, 0, 1e7) - 0.01) < 1e-5 && Math.abs(w(f, 0, 1e7) - X) < 1e-5 && Math.abs(w(f, 8, -1e7) - (Z + 0.01)) < 1e-5
+    && Math.abs(a[3] - a[0] - 0.01) > 0.002,
+    `a batch stored from its origin keeps a 1 cm part exact 10,000 km out (to 10 µm; stored absolutely its width reads ${((a[3] - a[0]) * 100).toFixed(0)} cm)`);
+}
+
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');
 process.exit(failures ? 1 : 0);

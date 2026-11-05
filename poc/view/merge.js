@@ -7,7 +7,9 @@
 // three.js BufferGeometry holds them. A transform is 16 numbers, column-major (three.js Matrix4.elements).
 
 export class Batch {
-  constructor() { this.bins = new Map(); }
+  // ox, oz: the batch's origin (a chunk's middle); positions are stored from it, so a world far from home keeps its
+  // centimetres in 32-bit floats (the mesh is placed at the origin)
+  constructor(ox = 0, oz = 0) { this.bins = new Map(); this.ox = ox; this.oz = oz; }
   // put one part into the bin `key`: `geo` placed by `m`; `vals` are constant per-part attributes, { name: [numbers] }
   add(key, geo, m, vals) {
     let b = this.bins.get(key);
@@ -34,9 +36,9 @@ export class Batch {
         const A = e * k - f * h, B = -(d * k - f * g), C = d * h - e * g, D = -(bb * k - c * h), E = a * k - c * g, F = -(a * h - bb * g), G = bb * f - c * e, H = -(a * f - c * d), K = a * e - bb * d;
         for (let i = 0; i < n; i++) {
           const x = P[i * 3], y = P[i * 3 + 1], z = P[i * 3 + 2], o = (v + i) * 3;
-          pos[o] = m[0] * x + m[4] * y + m[8] * z + m[12];
+          pos[o] = m[0] * x + m[4] * y + m[8] * z + (m[12] - this.ox);
           pos[o + 1] = m[1] * x + m[5] * y + m[9] * z + m[13];
-          pos[o + 2] = m[2] * x + m[6] * y + m[10] * z + m[14];
+          pos[o + 2] = m[2] * x + m[6] * y + m[10] * z + (m[14] - this.oz);
           if (N) {
             const nx = N[i * 3], ny = N[i * 3 + 1], nz = N[i * 3 + 2];
             let qx = A * nx + B * ny + C * nz, qy = D * nx + E * ny + F * nz, qz = G * nx + H * ny + K * nz; // the cofactor matrix: the inverse transpose times the determinant
