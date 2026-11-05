@@ -85,11 +85,9 @@ export class World {
     // the panel's 'Water' (after Ultra-Water's): colour preset, clarity, roughness, refraction, crest glow, whitecaps,
     // shore foam band, caustics, glitter; and the foam's size and amount
     this.uLook = { value: new THREE.Vector4(1, 0, 0.06, 1.6) }; this.uLook2 = { value: new THREE.Vector4(0.06, 0.05, 1.3, 0.2) }; this.uLook3 = { value: new THREE.Vector4(1, 1, 0.75, 0) };
-    this.uLace = { value: new THREE.Vector4(0.9, 0.6, 0.5, 0) }; // the lace's scale, its variation, the foam's patchiness
-    this.uCurl = { value: new THREE.Vector4(0, 0, 0, 0) }; // the breaking lip moved: forward, up (in face heights: water3/curl.js)
     this.uAbs = { value: new THREE.Vector3(...WATER.absorb) }; this.uSca = { value: new THREE.Vector3(...WATER.scatter) };
-    const ctl0 = { preset: 'ours', clarity: 1, roughness: 0, refraction: 0.06, sssPeak: 1.6, sssView: 0.06, foamBias: 0.05, foamScale: 1.3, shoreBand: 0.2, caustics: 1, glitter: WATER.glint, foamSize: 0.9, foamAmount: 0.47, linger: 4, curl: 0.6, curlFwd: 0, curlUp: 0, lace: 0.9, laceVar: 0.6, patches: 0.5,
-      windDir: null, fetchKm: fetch0 / 1000, waveScale: 1, spread: WAVES.spread, swellScale: 1, swellDir: Math.round(WAVES.swellTurn * 180 / Math.PI), chop: WAVES.chop, timeScale: 1, shoreAuto: true, amplitude: 0.8, wavelength: 30, speed: 1, steepness: 1, foam: 1.6 };
+    const ctl0 = { preset: 'ours', clarity: 1, roughness: 0, refraction: 0.06, sssPeak: 1.6, sssView: 0.06, foamBias: 0.05, foamScale: 1.3, shoreBand: 0.2, caustics: 1, glitter: WATER.glint, foamSize: 1, foamAmount: 0.75, linger: 4,
+      windDir: null, fetchKm: fetch0 / 1000, waveScale: 1, spread: WAVES.spread, swellScale: 1, swellDir: Math.round(WAVES.swellTurn * 180 / Math.PI), chop: WAVES.chop, timeScale: 1, shoreAuto: true, amplitude: 0.8, wavelength: 30, speed: 1, steepness: 1, foam: 1 };
     this.waterCtl = opts.waterCtl || {}; for (const k in ctl0) if (!(k in this.waterCtl)) this.waterCtl[k] = ctl0[k]; // the caller's object, kept across rebuilds
     this.uSurf = { value: new THREE.Vector4(0.8, 30, 1, 1) }; this.uSurfX = { value: new THREE.Vector4(1, 0, 0, 0) };
     this.uWTime = { value: 0 }; this.waterTime = 0; // the water's clock: the panel's time scale
@@ -281,7 +279,7 @@ export class World {
       const pr = WATER_PRESETS[ctl.preset] || WATER_PRESETS.ours;
       this.uAbs.value.set(...pr.absorb); this.uSca.value.set(...pr.scatter);
       this.uLook.value.set(ctl.clarity, ctl.roughness, ctl.refraction, ctl.sssPeak); this.uLook2.value.set(ctl.sssView, ctl.foamBias, ctl.foamScale, ctl.shoreBand);
-      this.uLook3.value.set(ctl.caustics, ctl.foamSize, ctl.foamAmount, ctl.curl); this.uLace.value.set(ctl.lace, ctl.laceVar, ctl.patches, 0); this.uCurl.value.set(ctl.curlFwd, ctl.curlUp, 0, 0); U.uGlint.value = ctl.glitter;
+      this.uLook3.value.set(ctl.caustics, ctl.foamSize, ctl.foamAmount, 0); U.uGlint.value = ctl.glitter;
       this.uSwDir.value.copy(this.waves.U.uSwDir.value);
       const st = this.waves.state;
       // the run-up's sea state: significant height H0 and the deep-water wavelength L0 of the peak period (2 pi g / w^2)

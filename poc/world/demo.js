@@ -36,7 +36,7 @@ let world = null, src = null;
 // ------------------------------------------------------------ camera: orbit a focus point on the ground
 // zoom 0..1 maps the distance from the focus logarithmically from 6 cm to 9 km. Pitch flattens as you come down, so
 // the far view is a map and the near view looks along the grass.
-const cam = { fx: 0, fz: 0, yaw: 0.8, pitch: 0.5, dist: 120, target: null, tour: null, map: 0, yawMap: 0, look: 0, invert: false }; // look: the view tilted up (+) or down from the focus, radians
+const cam = { fx: 0, fz: 0, yaw: 0.8, pitch: 0.5, dist: 120, target: null, tour: null, map: 0, yawMap: 0 };
 // the map comes in with the distance (map.js): 0 below MAP.from, 1 past MAP.to
 const mapFor = (d) => THREE.MathUtils.smoothstep(Math.log(d), Math.log(MAP.from), Math.log(MAP.to));
 const zoomToDist = (z) => 0.06 * Math.pow(9000 / 0.06, z);
@@ -116,7 +116,6 @@ function step(dt) {
   cy = Math.max(cy, world.surfaceAt(cx, cz) + Math.min(0.02 + cam.dist * 0.15, 2));
   camera.position.set(cx, cy, cz);
   camera.lookAt(focus);
-  if (cam.look) camera.rotateX(cam.look); // the view tilted from the focus: up to the sky, down to the ground
   camera.near = THREE.MathUtils.clamp(cam.dist * 0.02, 0.003, 20);
   camera.far = 60000;
   camera.updateProjectionMatrix();
@@ -146,19 +145,19 @@ function showStats() {
   const d = cam.dist, ds = d < 1 ? (d * 100).toFixed(0) + ' cm' : d < 1000 ? d.toFixed(d < 10 ? 1 : 0) + ' m' : (d / 1000).toFixed(2) + ' km';
   const g = world.timer.ms, gpu = world.timer.on ? (g.total ? `gpu ${g.total.toFixed(1)} ms: ` + ['scene', 'water', 'shore', 'clouds', 'composite', 'rays', 'dof', 'bloom', 'final', 'waves'].filter((k) => g[k] !== undefined).map((k) => `${k} ${g[k].toFixed(1)}`).join(' · ') : 'gpu timing…') : 'gpu timing: not given by this browser';
   const w = world.weather, wx = w ? `${w.kind}, ${w.temp.toFixed(0)} °C, wind ${Math.hypot(...w.wind).toFixed(0)} m/s` : state.weather;
-  const sm = world.post.samplers, dbg = world.post.U.uDebug.value, smt = (sm ? ` · samplers ${sm.composite}/${sm.max}` : '') + ` · shore by ${world.shoreMode}` + (world.surface ? ` · water ${(world.surface.stats.verts / 1000).toFixed(0)}k verts` : '') + (dbg ? (dbg === 9 ? ' · DEBUG meshes: water blue, crest line yellow, breaking orange' : " · DEBUG water's kinds: blue large, green river, bands its flow") : '');
+  const sm = world.post.samplers, dbg = world.post.U.uDebug.value, smt = (sm ? ` · samplers ${sm.composite}/${sm.max}` : '') + ` · shore by ${world.shoreMode}` + (world.surface ? ` · water ${(world.surface.stats.verts / 1000).toFixed(0)}k verts` : '') + (dbg ? " · DEBUG water's kinds: blue large, green river, bands its flow" : '');
   $('stats').textContent = `${fps.toFixed(0)} fps · ${i.calls} draws · ${(i.triangles / 1000).toFixed(0)}k tris · ${(world.forest.stats.far / 1000).toFixed(0)}k far cells${smt}\n${gpu}\nview ${ds} · ${seasonName(state.day)} day ${state.day} · ${wx} · ${world.forest.stats.trees} near trees`;
 }
 
 // ------------------------------------------------------------ input
 let drag = null;
-canvas.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY, yaw: cam.yaw, look: cam.look, id: e.pointerId }; canvas.setPointerCapture(e.pointerId); });
-canvas.addEventListener('pointermove', (e) => { if (drag && drag.id === e.pointerId) { cam.yaw = drag.yaw - (e.clientX - drag.x) * 0.005; cam.look = THREE.MathUtils.clamp(drag.look + (e.clientY - drag.y) * 0.005 * (cam.invert ? 1 : -1), -1.45, 1.45); } }); // across: round the focus; up and down: the view tilts (a wasp looks anywhere)
+canvas.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY, yaw: cam.yaw, id: e.pointerId }; canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener('pointermove', (e) => { if (drag && drag.id === e.pointerId) { cam.yaw = drag.yaw - (e.clientX - drag.x) * 0.005; } });
 canvas.addEventListener('pointerup', () => { drag = null; });
 canvas.addEventListener('wheel', (e) => { e.preventDefault(); setZoom(state.zoom + e.deltaY * 0.0006); }, { passive: false });
 addEventListener('keydown', (e) => keys.add(e.code));
-// L cycles the water's debug views: its kinds (blue large, green a river, the river's flow), then the meshes (water blue, crest line yellow, breaking orange), then off
-addEventListener('keydown', (e) => { if (e.code === 'KeyL' && world) { const U = world.post.U.uDebug; U.value = U.value === 0 ? 8 : U.value === 8 ? 9 : 0; } });
+// L toggles the water's debug view: its kinds (blue large, green a river) and the river's flow
+addEventListener('keydown', (e) => { if (e.code === 'KeyL' && world) { const U = world.post.U.uDebug; U.value = U.value === 0 ? 8 : 0; } });
 addEventListener('keyup', (e) => keys.delete(e.code));
 function setZoom(z) { state.zoom = THREE.MathUtils.clamp(z, 0, 1); $('zoom').value = state.zoom; $('oZoom').textContent = fmtDist(zoomToDist(state.zoom)); }
 const fmtDist = (d) => (d < 1 ? (d * 100).toFixed(0) + ' cm' : d < 1000 ? d.toFixed(0) + ' m' : (d / 1000).toFixed(1) + ' km');
@@ -211,12 +210,9 @@ const WCTL = {};
     ['speed', 'Speed', 0.3, 2, 0.01],
     ['steepness', 'Steepness', 0, 1.5, 0.01],
     ['foam', 'Foam charge', 0, 2, 0.01],
-    ['foamSize', 'Foam size', 0.02, 4, 0.01],
+    ['foamSize', 'Foam size', 0.1, 4, 0.01],
     ['foamAmount', 'Foam amount', 0, 1, 0.01],
     ['linger', 'Foam linger', 0.2, 15, 0.1, (v) => v.toFixed(1) + ' s'],
-    ['lace', 'Lace scale', 0.05, 4, 0.01],
-    ['laceVar', 'Lace variation', 0, 1, 0.01],
-    ['patches', 'Foam patches', 0, 1, 0.01],
     ['Water'],
     ['clarity', 'Clarity', 0.2, 4, 0.01],
     ['roughness', 'Roughness', 0, 0.2, 0.001, (v) => v.toFixed(3)],
@@ -251,12 +247,6 @@ const WCTL = {};
   note.textContent = 'Foam size and amount: the breakers\' puffs and streaks. Water: the colour preset, clarity (absorption divided by it), roughness, refraction, the glow through steep crests, whitecaps where the surface folds, the width of the shore\'s foam line, caustics, glitter. The sea state: fetch is the open water the wind has blown over (a lake uses its own width), the swell comes from weather far away, choppiness pinches the crests, time scale runs the water faster or slower. The surf: its first train, by its wavelength in deep water, its speed and its steepness; it follows the swell until a slider here is moved.';
   box.appendChild(note);
   $('segQ').before(box);
-  // the view: tilt it by dragging up and down; inverted at will; level again
-  const lk = document.createElement('div'); lk.className = 'seg';
-  lk.innerHTML = '<label style="display:flex;gap:6px;align-items:center;color:var(--muted);font-size:10px;letter-spacing:.08em;text-transform:uppercase"><input type="checkbox" id="wInvert"> Invert pitch</label><button id="wLevel">Level view</button>';
-  $('segQ').before(lk);
-  $('wInvert').addEventListener('change', (e) => { cam.invert = e.target.checked; });
-  $('wLevel').addEventListener('click', () => { cam.look = 0; });
   $('wWindAuto').addEventListener('click', () => { WCTL.windDir = null; });
   $('wShoreAuto').addEventListener('click', () => { WCTL.shoreAuto = true; });
   // the panel follows the values (the weather's and the swell's set some of them)
