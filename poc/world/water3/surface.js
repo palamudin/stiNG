@@ -89,7 +89,7 @@ export class WaterSurface {
     this.stats = { verts: grid.verts, tris: grid.geo.index.count / 3 };
     const U = {
       ...world.clip.uniforms, ...world.sky.uniforms, ...(shore ? shore.uniforms : {}),
-      uCam: { value: new THREE.Vector3() }, uGridScale: { value: 1 }, uWL: { value: field.U.uL.value }, uTime: { value: 0 }, uDrift: { value: new THREE.Vector2() },
+      uCam: { value: new THREE.Vector3() }, uCamL: { value: new THREE.Vector2() }, uGridScale: { value: 1 }, uWL: { value: field.U.uL.value }, uTime: { value: 0 }, uDrift: { value: new THREE.Vector2() },
       uSeaLevel: { value: world.source.sea }, uSkyUp: { value: new THREE.Color() }, uWLost: { value: 0 },
       uSurf: world.uSurf, uSurfX: world.uSurfX, uWTime: world.uWTime, uSwDir: world.uSwDir,
       uWave: world.uWave, // (the panel's wave scale, the sea's fetch m, -, -)
@@ -106,7 +106,7 @@ ${NOISE_GLSL}
 ${world.clip.glsl()}
 ${shore ? shore.glsl() + '\n#define W3_COAST' : ''}
 ${this.ssr ? '#define W3_SSR' : ''}
-uniform vec3 uCam; uniform float uGridScale, uSeaLevel, uTime; uniform vec4 uWL, uWave; uniform vec2 uDrift;
+uniform vec3 uCam; uniform float uGridScale, uSeaLevel, uTime; uniform vec4 uWL, uWave; uniform vec2 uDrift, uCamL;
 // the water's kind, its roughness: the sea's wind sea grows over the sea's fetch; a lake's over its own width (twice
 // the distance to its shore, from the shore table), so its long waves are a small share of the sea's and its ripples
 // as full (short waves saturate within metres); the panel's wave scale on all of it. Per cascade
@@ -152,7 +152,7 @@ ${SURF_GLSL}
 #include <logdepthbuf_pars_vertex>
 ${head}
 ${coast}
-out vec3 vW; out vec2 vXZ; out float vCell, vNear, vJ; out vec2 vCoastSlope; out vec3 vCoast, vFlow; out vec4 vRough;
+out vec3 vW; out vec2 vXZ, vLoc; out float vCell, vNear, vJ; out vec2 vCoastSlope; out vec3 vCoast, vFlow; out vec4 vRough;
 void main() {
   bool skirt = position.y > 0.5;
   float r = length(position.xz);
@@ -209,6 +209,7 @@ void main() {
   }
 #endif
   vW = P; vXZ = xz; vCell = cell;
+  vLoc = uCamL + position.xz * (skirt ? ${S.skirt.toFixed(1)} : uGridScale); // the same point from the snapped origin, exact (the fine patterns read it)
   gl_Position = projectionMatrix * viewMatrix * vec4(P, 1.0);
   #include <logdepthbuf_vertex>
 }`,
@@ -221,22 +222,26 @@ uniform vec3 uSun, uSunColor, uSkyUp; uniform sampler2D uSkyView, tScene, tFoam,
 // the foam's lace (water3/foamtex.js), never tiled: each read is two of the texture, the second rotated and shifted,
 // blended by a slow noise (as the waves' cascades are); its scale varies in patches (two scales blended by a slower
 // noise, by the panel's lace variation); uLace = (lace scale, scale variation, patchiness, -)
-float laceTap(vec2 p) {
-  vec2 q = vec2(0.8 * p.x - 0.6 * p.y, 0.6 * p.x + 0.8 * p.y) * 1.13 + vec2(0.37, 0.71);
-  float w = smoothstep(-0.35, 0.35, w2noise(p * 0.37, 840));
+// p: the texture's coordinates, from the exact local point (vLoc) at a size dividing 2048 m five-fold (laceQ), so it is
+// the world's own pattern far from the origin too (the second read's rotation, 3-4-5, keeps it so); pw: the same in the
+// world's coordinates, for the slow noise that blends them
+float laceQ(float s) { return 2048.0 / (5.0 * max(1.0, floor(2048.0 / (5.0 * s) + 0.5))); }
+float laceTap(vec2 p, vec2 pw) {
+  vec2 q = vec2(0.8 * p.x - 0.6 * p.y, 0.6 * p.x + 0.8 * p.y) + vec2(0.37, 0.71);
+  float w = smoothstep(-0.35, 0.35, w2noise(pw * 0.37, 840));
   return mix(texture(tFoam, p).r, texture(tFoam, q).r, w);
 }
-float lacePat(vec2 x, float s, vec2 drift) {
-  float v = (0.5 + 0.5 * w2noise(x / (11.0 * s), 841)) * uLace.y;
-  return mix(laceTap(x / s + drift), laceTap(x / (1.7 * s) + drift * 0.6 + 0.43), v);
+float lacePat(vec2 x, vec2 xl, float s, vec2 drift) { // x: the world's point, xl: the exact local one (vLoc)
+  float v = (0.5 + 0.5 * w2noise(x / (11.0 * s), 841)) * uLace.y, s1 = laceQ(s), s2 = laceQ(1.7 * s);
+  return mix(laceTap(xl / s1 + drift, x / s), laceTap(xl / s2 + drift * 0.6 + 0.43, x / (1.7 * s)), v);
 }
 // the lace by the water's depth (gLaceT: 0 the shallows .. 1 from about 3 m): crossfaded between 0.25x, 0.8x and 2.5x
 float gLaceT = 0.0;
-float laceD(vec2 x, float s, vec2 drift) {
+float laceD(vec2 x, vec2 xl, float s, vec2 drift) {
   float t = gLaceT * 2.0;
-  return t < 1.0 ? mix(lacePat(x, 0.25 * s, drift), lacePat(x, 0.8 * s, drift), t) : mix(lacePat(x, 0.8 * s, drift), lacePat(x, 2.5 * s, drift), t - 1.0);
+  return t < 1.0 ? mix(lacePat(x, xl, 0.25 * s, drift), lacePat(x, xl, 0.8 * s, drift), t) : mix(lacePat(x, xl, 0.8 * s, drift), lacePat(x, xl, 2.5 * s, drift), t - 1.0);
 } uniform mat4 uVP; uniform float uWLost, uRain, uIce, uGlint, uWPeak;
-in vec3 vW; in vec2 vXZ; in float vCell, vNear, vJ; in vec2 vCoastSlope; in vec3 vCoast, vFlow; in vec4 vRough; out vec4 oColor;
+in vec3 vW; in vec2 vXZ, vLoc; in float vCell, vNear, vJ; in vec2 vCoastSlope; in vec3 vCoast, vFlow; in vec4 vRough; out vec4 oColor;
 uniform float uDebug;
 const float W_N = ${f(WATER.n)};
 // the panel's 'Water' (index.js waterCtl): uAbs absorption and uSca scattering per metre (the colour preset), uLook
@@ -452,7 +457,7 @@ void main() {
   gLaceT = smoothstep(0.0, 3.0, depth);
   // the foam's patches: denser here, thinner there, a new arrangement over every few tens of metres
   float fpatch = mix(1.0, 0.45 + 1.1 * (0.5 + 0.5 * w2noise(vXZ / (9.0 * max(ls, 0.3)) + vec2(uTime * 0.01, 0.0), 842)), uLace.z);
-  float fm = clamp((0.6 + uLook2.y - vJ) * uLook2.z, 0.0, 1.0) * smoothstep(0.25, 0.6, laceD(vXZ, 1.4 * ls, vec2(0.0)) + 0.2) * (1.0 - inField) * fpatch;
+  float fm = clamp((0.6 + uLook2.y - vJ) * uLook2.z, 0.0, 1.0) * smoothstep(0.25, 0.6, laceD(vXZ, vLoc, 1.4 * ls, vec2(0.0)) + 0.2) * (1.0 - inField) * fpatch;
   ff *= fpatch;
   // the open water's own lace, now and then: where the sloshing crests heap up (the surface squeezed: its Jacobian
   // under 1) and a slow drifting noise allows, patches of lace form and fade; away from the shallows (their own foam there),
@@ -461,19 +466,19 @@ void main() {
     float pn = smoothstep(0.6, 0.85, 0.5 + 0.5 * w2noise(vXZ / 23.0 + vec2(uTime * 0.07, -uTime * 0.05), 851))
              * smoothstep(0.5, 0.8, 0.5 + 0.5 * w2noise(vXZ / 61.0 - vec2(uTime * 0.03, uTime * 0.04), 852));
     float slosh = pn * smoothstep(1.03, 0.88, vJ) * smoothstep(0.8, 2.5, depth);
-    fm = max(fm, slosh * smoothstep(0.3, 0.65, laceD(vXZ, 1.6 * ls, vec2(uTime * 0.02, uTime * 0.013)) + 0.15) * 0.6 * fpatch);
+    fm = max(fm, slosh * smoothstep(0.3, 0.65, laceD(vXZ, vLoc, 1.6 * ls, vec2(uTime * 0.02, uTime * 0.013)) + 0.15) * 0.6 * fpatch);
   }
   // the foam's pattern: the baked lace (water3/foamtex.js) at two scales, drifting apart slowly so it churns
-  float pat = 0.62 * laceD(vXZ, 3.1 * ls, vec2(uTime * 0.011, -uTime * 0.007)) + 0.38 * laceD(vXZ, 1.17 * ls, -vec2(uTime * 0.017, uTime * 0.005)) + 0.12;
+  float pat = 0.62 * laceD(vXZ, vLoc, 3.1 * ls, vec2(uTime * 0.011, -uTime * 0.007)) + 0.38 * laceD(vXZ, vLoc, 1.17 * ls, -vec2(uTime * 0.017, uTime * 0.005)) + 0.12;
   float wf = clamp(vCoast.x, 0.0, 1.0), lc = clamp(vCoast.y, 0.0, 1.0) * (1.0 - 0.6 * inField);
   // the field's foam: thick and white where fresh, eroding into lace as it fades
   fm = max(fm, smoothstep(1.0 - 0.6 * ff, 1.1 - 0.6 * ff, pat) * (0.3 + 0.55 * ff)); // never solid: even the thickest foam shows its lace
   fm = max(fm, smoothstep(1.0 - 0.6 * wf, 1.12 - 0.6 * wf, pat) * (0.6 + 0.4 * wf)); // the breaker's white, open lace even at its thickest
   fm = max(fm, smoothstep(1.0 - 0.5 * lc, 1.1 - 0.5 * lc, pat) * 0.45);
-  float spf = 0.55 * laceD(vXZ, 5.3 * ls, vec2(uTime * 0.006, -uTime * 0.004)) + 0.45 * laceD(vXZ, 1.9 * ls, -vec2(uTime * 0.012, 0.0)) + 0.15;
+  float spf = 0.55 * laceD(vXZ, vLoc, 5.3 * ls, vec2(uTime * 0.006, -uTime * 0.004)) + 0.45 * laceD(vXZ, vLoc, 1.9 * ls, -vec2(uTime * 0.012, 0.0)) + 0.15;
   float sf = clamp(vCoast.z, 0.0, 1.0);
   // (patches over a fifth of the zone at most, broken into bubbles: a bed under the crests' own white, not a sheet)
-  fm = max(fm, smoothstep(0.98 - 0.3 * sf, 1.08 - 0.3 * sf, spf) * smoothstep(-0.35, 0.45, w2noise(vXZ / 0.22 + uTime * 0.05, 629)) * (0.15 + 0.25 * sf));
+  fm = max(fm, smoothstep(0.98 - 0.3 * sf, 1.08 - 0.3 * sf, spf) * smoothstep(-0.35, 0.45, w2noise(vLoc / 0.22 + uTime * 0.05, 629)) * (0.15 + 0.25 * sf));
   fm = max(fm, smoothstep(1.0 - 0.7 * swLace, 1.12 - 0.7 * swLace, pat) * 0.85 * swLace);
   // a river's foam
   if (fl > 0.01 && sp > 0.02) {
@@ -481,7 +486,7 @@ void main() {
     // where it is quick; both the water's own lace, carried downstream by the ripples' two phases (not stretched
     // noise: that drew streaks running down the river)
     float fr = sp / sqrt(9.81 * max(depth, 0.05)), rap = fl * smoothstep(0.7, 1.1, fr), scum = fl * smoothstep(0.5, 1.6, sp) * 0.12;
-    float q = fph.z, pf2 = mix(laceTap((vXZ - fv * fph.y) / (1.3 * ls)), laceTap((vXZ - fv * fph.x) / (1.3 * ls)), q);
+    float q = fph.z, pf2 = mix(laceTap((vLoc - fv * fph.y) / laceQ(1.3 * ls), (vXZ - fv * fph.y) / (1.3 * ls)), laceTap((vLoc - fv * fph.x) / laceQ(1.3 * ls), (vXZ - fv * fph.x) / (1.3 * ls)), q);
     fm = max(fm, smoothstep(1.0 - 0.6 * rap, 1.1 - 0.6 * rap, pf2 + 0.1) * 0.8 * rap);
     fm = max(fm, smoothstep(0.75, 0.85, pf2) * scum);
   }
@@ -518,6 +523,9 @@ void main() {
   update(camera, time, wind) {
     const U = this.U, W = this.world;
     U.uCam.value.copy(camera.position);
+    // the camera from a point snapped to 2048 m, in double precision (the fine patterns' coordinates: water3/surface.js
+    // vLoc; far from the origin a float holds a world position only to centimetres)
+    U.uCamL.value.set(camera.position.x - Math.round(camera.position.x / 2048) * 2048, camera.position.z - Math.round(camera.position.z / 2048) * 2048);
     const above = Math.max(0, camera.position.y - W.waterAt(camera.position.x, camera.position.z));
     U.uGridScale.value = Math.max(1, above / 2);
     U.uSkyUp.value.copy(W.sky.skyUp);
