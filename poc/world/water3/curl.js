@@ -83,7 +83,12 @@ void curlEvent(vec2 xz, float level, float depth) {
   gcP = (ta / tl) * gcRise + (1.0 - ta / tl) * gcFall; // the tip's flight: rising to the throw's top, then on at the water's pace
   gcE = t < tr + tf ? 0.8 * max(t, -1.0) / (tr + tf) : 0.8 + 0.2 * (t - tr - tf) / tc; // 0.8 landed, 1 gone
   gcS = 0.5 * gcRise + 0.5 * gcFall;
-  gcGate0 = smoothstep(0.05, 0.25, a0) * smoothstep(0.1, 0.35, dC) * plunge * g2;
+  // room to fall: only where the water under the crest is deep for the wave (more than its face), where the trough the
+  // lip falls into is still water half a wave ahead, and the shoreline is well beyond that; inshore of it the crest
+  // only foams and the foam rides up the beach (the surf model's)
+  float Lh = 3.14159265 * curlCel(dC) / w, dAhead = level - clipHeight(gcCx + gDir * 0.6 * Lh);
+  float room = smoothstep(1.0, 1.5, dS / max(gcH0, 0.1)) * smoothstep(0.4, 1.0, dAhead / max(gcH0, 0.1)) * smoothstep(0.7 * Lh + 4.0, 0.7 * Lh + 20.0, -gShoreD);
+  gcGate0 = smoothstep(0.05, 0.25, a0) * smoothstep(0.1, 0.35, dC) * plunge * g2 * room;
   gcVis = gcGate0 * smoothstep(0.0, 0.3, t) * (1.0 - smoothstep(tr + tf + 0.05, tr + tf + tc, t));
   gNear = sN; gExpo = sE; gPn = sP; gTau = sT; gShoreD = sD; gShoreKnow = sK; gDir = sG;
 }
