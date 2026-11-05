@@ -549,9 +549,9 @@ void main() {
     // and thrown (W3_COPY above; the event: water3/curl.js), only where there is a shore table
     this.curl = null;
     if (shore) {
-      const cm = this.mat.clone(); cm.uniforms = U;
-      cm.vertexShader = this.mat.vertexShader.replace('precision highp int;', 'precision highp int;\n#define W3_COPY');
-      cm.fragmentShader = this.mat.fragmentShader.replace('precision highp int;', 'precision highp int;\n#define W3_COPY');
+      const m = this.mat, def = (t) => t.replace('precision highp int;', 'precision highp int;\n#define W3_COPY');
+      const cm = new THREE.ShaderMaterial({ glslVersion: m.glslVersion, uniforms: U, side: m.side, transparent: m.transparent, depthWrite: m.depthWrite, depthTest: m.depthTest, blending: m.blending,
+        vertexShader: def(m.vertexShader), fragmentShader: def(m.fragmentShader) });
       this.copyMat = cm; this.copy = new THREE.Mesh(grid.geo, cm);
       this.copy.frustumCulled = false; this.copy.renderOrder = 1; this.copy.onBeforeRender = this.mesh.onBeforeRender;
       this.scene.add(this.copy);
