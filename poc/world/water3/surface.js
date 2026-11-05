@@ -202,7 +202,7 @@ void main() {
   // the shoreline: over the sand the surface is a sheet at the shoreline's height, thin at its tip (1 cm) and
   // thickening behind it, and under the sand past the tip by as much as the sand stands over the shoreline; in the
   // last centimetres of water it is lifted to the same sheet. One height for this, the pixels' edge test and the sand
-  if (bed > -1e3 && depth < 2.0 && depth > -3.0 && level <= uSeaLevel + 0.5 && uSurf.x > 0.0) {
+  if (bed > -1e3 && depth < 0.5 && depth > -3.0 && level <= uSeaLevel + 0.5 && uSurf.x > 0.0) {
     float e = max(cell, 0.25);
     vec2 grad = vec2(clipHeight(xz + vec2(e, 0.0)) - clipHeight(xz - vec2(e, 0.0)), clipHeight(xz + vec2(0.0, e)) - clipHeight(xz - vec2(0.0, e))) / (2.0 * e);
     P.y = sw3EdgeY(xz, level, bed, P.y, grad, uWTime, fl); // the sheet over the sand, the water held up under the swash (water3/swash.js)
@@ -354,7 +354,7 @@ void main() {
     float band = smoothstep(-aa, aa, th) * (1.0 - smoothstep(0.0, 0.3 * uLook2.w + aa, th));
     swLace = smoothstep(0.0, 0.04, s) * band * (s < SW3_UP ? 1.0 : mix(0.75, 0.4, (s - SW3_UP) / (1.0 - SW3_UP))) * (1.0 - smoothstep(0.0, 0.3, depth));
     swWhite = (s < SW3_UP ? 1.0 - 0.4 * s / SW3_UP : 0.6 - 0.35 * (s - SW3_UP) / (1.0 - SW3_UP)) * smoothstep(0.0, 0.05, s) * smoothstep(0.0, 0.08, th) * (1.0 - smoothstep(0.1, 0.3, depth)); // grown in as the bore arrives, thinning to a quarter as it drains
-    if (depth < 0.0) thin = 0.015; // the sheet on the sand: thin, and still a mirror
+    if (depth < 0.0 || th > 0.0) thin = 0.015; // the sheet on the sand, and the water by the line while the swash is up: thin, and still water (a mirror), never faded to see-through (it read as a dry strip between the two)
   }
 #endif
   float edge = smoothstep(0.0, thin, D); // the water thinning to nothing at its edge

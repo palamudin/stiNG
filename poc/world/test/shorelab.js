@@ -3,7 +3,7 @@
 // mesh would put over that spot of the floor at that moment, through the same GLSL the water uses (water3/swash.js:
 // the surf's trains, the swash, the edge's height), with the floor and the shore table replaced by a plane coast with
 // the world's surf platform (sources/wild.js). Left half: the edge as it was; right half: as it is now.
-//   blue: water (darker deeper); orange: a film under 6 cm (reads as dry); red: the floor bare under the still water
+//   blue: water (darker deeper); orange: a film the water's pixels fade out (reads as dry); red: the floor bare under the still water
 //   (a dry strip between waters: must never happen); tan: sand; white: the swash's shoreline; yellow: a crest.
 // ?t0=0&t1=30&x0=-40&x1=10&m=0.033 ; window.labDone is set when drawn.
 import * as THREE from 'three';
@@ -80,8 +80,9 @@ void main() {
   if (bedX > 0.0 && zeta - bedX <= 0.0) best = -1e9;
   float D = best - bedX;
   vec3 c = bedX > 0.0 ? vec3(0.76, 0.66, 0.46) : vec3(0.85, 0.1, 0.1); // sand, or the floor bare under the still water
-  if (D > 0.06) c = mix(vec3(0.35, 0.65, 0.95), vec3(0.05, 0.2, 0.5), smoothstep(0.0, 3.0, D));
-  else if (D > 0.0) c = vec3(1.0, 0.6, 0.1); // a film: reads as dry
+  float thin = (right && -bedX < 0.3 && zeta - bedX > 0.0) || bedX > 0.0 ? 0.015 : 0.06; // as the water's pixels draw it
+  if (D > thin) c = mix(vec3(0.35, 0.65, 0.95), vec3(0.05, 0.2, 0.5), smoothstep(0.0, 3.0, D));
+  else if (D > 0.0) c = vec3(1.0, 0.6, 0.1); // a film drawn see-through: reads as dry
   // the swash's shoreline, and the first train's crest
   if (abs(zeta - bedX) < 0.01 && bedX > -0.05) c = vec3(1.0);
   if (bedX < 0.0 && sw3Ctx(vec2(x, 0.0))) { float ph = sw3Phase(0, uWTime, gTau, gPn), psi = mod(ph + 3.14159265, 6.2831853) - 3.14159265; if (abs(psi) < 0.06) c = mix(c, vec3(1.0, 0.95, 0.2), 0.8); }

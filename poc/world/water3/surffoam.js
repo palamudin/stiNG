@@ -13,8 +13,8 @@ import { SHORE } from '../shorefield.js';
 import { SWASH_GLSL } from './swash.js';
 
 export const SURF_FOAM = {
-  billows: { n: 128, cell: 1.0, per: 2 }, // the pool, many and small; the panel's foam amount draws a share of it // a grid n x n of cells this size round the camera, this many billows a cell
-  streaks: { n: 64, cell: 2.0, per: 1 },
+  billows: { n: 128, cell: 1.0, per: 4 }, // the pool, many and small; the panel's foam amount draws a share of it // a grid n x n of cells this size round the camera, this many billows a cell
+  streaks: { n: 64, cell: 2.0, per: 2 },
 };
 
 function pool(n, per) {
@@ -76,13 +76,15 @@ FoamState foamState(vec2 anchor, vec4 seed) {
   float collapse = o.breaking * smoothstep(-0.75, -0.12, psi) * (1.0 - smoothstep(0.05, 0.7, psi));
   o.waveHeight = a * (1.0 - 0.48 * collapse) * (2.0 * cp * c - 0.78);
   float period = 6.2831853 / w;
-  float generation = step(0.7, seed.y); // seven in ten from this breaker, the rest left by the one before
-  o.age = mod(ph, 6.2831853) / w + generation * period + seed.x * 0.22;
-  // a piece lives until the next bore has come (and the older generation one wave more): the foam the swash carries up
-  // the sand comes back down with it and is still there when the next one arrives, round and round
-  o.life = period * (1.0 + generation) + 0.4;
+  // each piece comes in with one crest in four (its seed's), so its clock runs from that crest passing here, never reset
+  // by the next one: in with the crest (its travel time to the line), then up the sand on the swash's sheet and back
+  // down to the line, until the next crest reaches the line; the pieces of the other three crests do the same, round
+  // and round
+  o.hitT = clamp(tauA, 0.25, 2.9 * period);
+  float kq = floor(seed.y * 4.0);
+  o.age = mod(ph - kq * 6.2831853, 4.0 * 6.2831853) / w + seed.x * 0.22;
+  o.life = o.hitT + period + 0.4;
   o.speed = sqrt(9.81 * clamp(depth, 0.3, 14.0)) * (1.04 + 0.2 * o.breaking);
-  o.hitT = clamp(tauA, 0.25, 8.0); // it reaches the line when its crest does (the crest's own travel time: the swash starts then)
   o.backAge = max(o.age - o.hitT, 0.0);
   o.strand = 0.0;
   vec2 tangent = vec2(-o.dir.y, o.dir.x);
