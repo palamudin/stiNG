@@ -63,7 +63,7 @@ ${shore.glsl()}
 ${SWASH_GLSL}
 ${SURF_GLSL}
 uniform vec3 uCam; uniform float uGridScale, uSeaLevel; uniform vec4 uLook3; uniform highp sampler2D tCurl;
-out vec3 vW; out vec3 vLip; // (u along the lip, stage, how much of it is shown)
+out vec3 vW; out vec3 vLip; out float vIn; // vLip: (u along the lip, stage, how much of it is shown); vIn: 1 for a vertex of the lip
 // the table, bilinear by hand
 vec2 curlAt(float u, float s) {
   vec2 g = vec2(u * ${(C.samples - 1).toFixed(1)}, s * ${(C.stages - 1).toFixed(1)}); vec2 i0 = floor(g), f = g - i0; ivec2 i = ivec2(i0), j = min(i + 1, ivec2(${C.samples - 1}, ${C.stages - 1}));
@@ -71,7 +71,7 @@ vec2 curlAt(float u, float s) {
   return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
 void main() {
-  vLip = vec3(0.0);
+  vLip = vec3(0.0); vIn = 0.0;
   vec2 xz = uCam.xz + position.xz * uGridScale;
   float level = clipWater(xz);
   vec3 P = vec3(xz.x, level - 0.4, xz.y); // under the water: no lip here
@@ -93,22 +93,22 @@ void main() {
       float rb = 0.345 + 0.09 * early, db = a0 / rb; // the breaking limit (water3/swash.js)
       vec3 cn = clipNormal(cx); float tb = max(sqrt(max(1.0 - cn.y * cn.y, 0.0)) / max(cn.y, 0.05), 0.004);
       float tSince = (db - dC) / tb / sqrt(9.81 * max(dC, 0.1));
-      float te = 0.8 + 0.7 * clamp(a0, 0.0, 1.5), ev = tSince / te;
+      float te = 0.5 + 0.35 * clamp(a0, 0.0, 1.5), ev = tSince / te; // a short event: half a second to a second
       float stage = clamp(smoothstep(0.0, 0.85, ev) * uLook3.w, 0.0, 1.0);
       float show = smoothstep(0.0, 0.12, ev) * (1.0 - smoothstep(0.95, 1.25, ev)) * smoothstep(0.03, 0.2, a0) * smoothstep(0.1, 0.35, dC);
-      if (show > 0.002) {
+      if (show > 0.002 && psi >= -0.05 && psi <= ${(C.lipWidth + 0.05).toFixed(2)}) {
         // the lip: phase 0 (the crest) to lipWidth behind it, root to tip. Past the tip the sheet goes straight down
         // into the water in front of the face (the lip plunging in), ahead of the crest straight down into the wave's
         // body from the root: nothing joins the lip back over the crest to the water behind it
         float u = clamp(psi / ${C.lipWidth.toFixed(2)}, 0.0, 1.0);
-        float drop = psi < 0.0 ? clamp(-psi / 0.4, 0.0, 1.0) : clamp((psi - ${C.lipWidth.toFixed(2)}) / 0.3, 0.0, 1.0);
         float H = 1.2 * a * show;
         vec2 o = curlAt(u, stage) * H, dir = gDir;
         // the root on the water's own crest: the surface's displacement there (both trains, the lean forward before
         // the collapse, the Gerstner shift: water3/swash.js w3Coast), so the lip grows out of the wave the water draws
         vec3 top = vec3(cx.x, level + 1.1 * a, cx.y);
         if (sw3Ctx(cx)) { vec3 d = w3Coast(cx, dC, 0.25); top = vec3(cx.x + d.x, level + d.y, cx.y + d.z); }
-        P = top + vec3(dir.x, 0.0, dir.y) * o.x + vec3(0.0, o.y - drop * (1.2 * a + 0.6), 0.0);
+        P = top + vec3(dir.x, 0.0, dir.y) * o.x + vec3(0.0, o.y, 0.0);
+        vIn = psi >= 0.0 && psi <= ${C.lipWidth.toFixed(2)} ? 1.0 : 0.0; // the lip's own vertices; the rest stay under the water
         vLip = vec3(u, stage, show);
       }
     }
@@ -121,7 +121,7 @@ void main() {
 #include <logdepthbuf_pars_fragment>
 ${SKY_GLSL}
 uniform vec3 uSun, uSunColor, uSkyUp, uAbs, uSca; uniform vec4 uLook, uLook2; uniform sampler2D tFoam, uSkyView;
-in vec3 vW; in vec3 vLip; out vec4 oColor;
+in vec3 vW; in vec3 vLip; in float vIn; out vec4 oColor;
 const float W_N = 1.333;
 float wFresnel(float ci) {
   ci = clamp(ci, 0.0, 1.0); float st2 = (1.0 - ci * ci) / (W_N * W_N); if (st2 >= 1.0) return 1.0;
@@ -134,7 +134,9 @@ float wFresnel(float ci) {
 // at the tip), tinted as the water tints it
 void main() {
   #include <logdepthbuf_fragment>
-  if (vLip.z < 0.002) discard;
+  // only triangles wholly of the lip are drawn: one joining it to a vertex left under the water would be a sheet
+  // between the lip and the water (a curtain, a fat wave): thrown away, pixel by pixel
+  if (vLip.z < 0.002 || vIn < 0.999) discard;
   vec3 n = normalize(cross(dFdx(vW), dFdy(vW))); vec3 V = normalize(cameraPosition - vW); if (dot(n, V) < 0.0) n = -n;
   float sunUp = max(uSun.y, 0.0);
   vec3 ext = uAbs / max(uLook.x, 0.05) + uSca;
