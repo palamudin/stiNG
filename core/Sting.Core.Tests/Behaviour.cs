@@ -1841,7 +1841,8 @@ namespace Sting.Core.Tests
                 for (int k = 0; k < 64; k++)
                 {
                     double a = k * 0.0982, r1 = 120 + k * 3, x = Math.Cos(a) * r1, z = Math.Sin(a) * r1;
-                    if (Math.Abs(D(World.GroundAt(1234, x, z, st) - World.GroundAt(1234, x, z, t1) - I.site.h)) > 1e-6) inside = false;
+                    bool farmed = false; for (int i = 0; i < 2; i++) for (int j = 0; j < 2; j++) if (World.LandUse(1234, (int)Math.Floor(x / 64) + i, (int)Math.Floor(z / 64) + j, st) == "farm") farmed = true; // farmland's ground rolls its own way (S5)
+                    if (!farmed && Math.Abs(D(World.GroundAt(1234, x, z, st) - World.GroundAt(1234, x, z, t1) - I.site.h)) > 1e-6) inside = false;
                     double r2 = D(I.R1) + 10 + k * 40, x2 = Math.Cos(a) * r2, z2 = Math.Sin(a) * r2;
                     if (World.GroundAt(1234, x2, z2, st) != World.WildHere(1234, x2, z2, st)[0]) beyond = false;
                     for (double r = D(I.R0) - 4; r < D(I.R1) + 4; r += 2) step = Math.Max(step, Math.Abs(D(World.GroundAt(1234, Math.Cos(a) * (r + 2), Math.Sin(a) * (r + 2), st) - World.GroundAt(1234, Math.Cos(a) * r, Math.Sin(a) * r, st))));

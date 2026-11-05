@@ -2416,7 +2416,8 @@ function seated(sim, pred) {
   let inside = true, beyond = true, step = 0;
   for (let k = 0; k < 64; k++) {
     const a = k * 0.0982, r1 = 120 + k * 3, x = Math.cos(a) * r1, z = Math.sin(a) * r1;
-    if (Math.abs(groundAt(S, x, z, st) - groundAt(S, x, z, { terrain: 1 }) - I.site.h) > 1e-9) inside = false;
+    const farmed = [[0, 0], [1, 0], [0, 1], [1, 1]].some(([i, j]) => landUse(S, Math.floor(x / 64) + i, Math.floor(z / 64) + j, st) === 'farm'); // farmland's ground rolls its own way (S5)
+    if (!farmed && Math.abs(groundAt(S, x, z, st) - groundAt(S, x, z, { terrain: 1 }) - I.site.h) > 1e-9) inside = false;
     const r2 = I.R1 + 10 + k * 40, x2 = Math.cos(a) * r2, z2 = Math.sin(a) * r2;
     if (groundAt(S, x2, z2, st) !== wildHere(S, x2, z2, st, o)[0]) beyond = false;
     for (let r = I.R0 - 4; r < I.R1 + 4; r += 2) step = Math.max(step, Math.abs(groundAt(S, Math.cos(a) * (r + 2), Math.sin(a) * (r + 2), st) - groundAt(S, Math.cos(a) * r, Math.sin(a) * r, st)));
