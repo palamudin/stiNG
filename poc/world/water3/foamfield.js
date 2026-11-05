@@ -13,12 +13,13 @@ import * as THREE from 'three';
 import { NOISE_GLSL } from '../noise.js';
 import { SWASH_GLSL, SURF_GLSL } from './swash.js';
 
-export const FOAM_FIELD = { n: 256, texel: 0.5 }; // 128 m round the camera
+export const FOAM_FIELD = { near: { n: 256, texel: 0.5 }, far: { n: 256, texel: 8.0 } }; // 128 m and 2 km round the camera
 
 export class FoamField {
-  // world: the World; surface: the WaterSurface (its uniforms)
-  constructor(world, surface) {
-    const C = FOAM_FIELD, n = C.n, W = n * C.texel, shore = world.shore, field = world.waves;
+  // world: the World; surface: the WaterSurface (its uniforms); level: FOAM_FIELD.near or .far; names: what the surface
+  // reads it as [texture, window]
+  constructor(world, surface, level = FOAM_FIELD.near, names = ['tFoamField', 'uFoamWin']) {
+    const C = this.C = level, n = C.n, W = n * C.texel, shore = world.shore, field = world.waves;
     const rt = () => new THREE.WebGLRenderTarget(n, n, { type: THREE.HalfFloatType, format: THREE.RGBAFormat, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false, generateMipmaps: false, wrapS: THREE.ClampToEdgeWrapping, wrapT: THREE.ClampToEdgeWrapping });
     this.a = rt(); this.b = rt(); this.world = world; this.W = W;
     this.U = {
@@ -29,7 +30,7 @@ export class FoamField {
       tPrev: { value: null }, uOrigin: { value: new THREE.Vector2() }, uPrevOrigin: { value: new THREE.Vector2() }, uDt: { value: 0 }, uLinger: { value: 4 }, uDrift: { value: new THREE.Vector2() },
     };
     // what the surface reads: the field, its window's corner and size
-    this.read = { tFoamField: { value: this.a.texture }, uFoamWin: { value: new THREE.Vector3(0, 0, W) } };
+    this.names = names; this.read = { [names[0]]: { value: this.a.texture }, [names[1]]: { value: new THREE.Vector3(0, 0, W) } };
     const coast = shore ? `${shore.glsl()}\n#define FF_COAST\n${SWASH_GLSL}\n${SURF_GLSL}` : '';
     this.mat = new THREE.ShaderMaterial({
       glslVersion: THREE.GLSL3, uniforms: this.U, depthTest: false, depthWrite: false,
@@ -48,8 +49,9 @@ void main() {
   if (depth <= 0.0) { oColor = vec4(0.0); return; } // the sand's foam is the swash's own
   vec2 v = uDrift; float make = 0.0;
   // whitecaps: the open water folding (the 85 m and 12 m cascades' Jacobian), by the panel's bias and scale
-  float J = 1.0 + (textureLod(tWD1, p / uWL.y, 2.0).w - 1.0) * smoothstep(0.6, 5.0, depth) + (textureLod(tWD2, p / uWL.z, 1.0).w - 1.0) * smoothstep(0.2, 2.0, depth);
-  make = clamp((0.6 + uLook2.y - J) * uLook2.z, 0.0, 1.0) * 0.8;
+  float lod1 = max(0.0, log2(TX * ${field.N}.0 / uWL.y)), lod2 = max(0.0, log2(TX * ${field.N}.0 / uWL.z)); // the folds the texel can hold
+  float J = 1.0 + (textureLod(tWD1, p / uWL.y, lod1).w - 1.0) * smoothstep(0.6, 5.0, depth) + (textureLod(tWD2, p / uWL.z, lod2).w - 1.0) * smoothstep(0.2, 2.0, depth);
+  make = clamp((0.6 + uLook2.y - J) * uLook2.z, 0.0, 1.0) * 0.5;
 #ifdef FF_COAST
   // the surf: its crest's whitewater and the charge it throws ahead, made in proportion to the wave that broke; the
   // foam behind carried shoreward at the bore's speed
@@ -57,11 +59,14 @@ void main() {
     w3Coast(p, depth, TX);
     float big = smoothstep(0.1, 0.9, uSurf.x * gNear * gExpo);
     make = max(make, gCoastFoam.x * mix(0.55, 1.0, big));
-    v += gDir * sqrt(9.81 * clamp(depth, 0.3, 6.0)) * 0.75 * gNear;
+    // foam left behind stays where it was made and only drifts in slowly; the bore's own white is made afresh at its
+    // front each frame (the crest's whitewater and charge), so it keeps up with the wave without the field dragging
+    v += gDir * 0.25 * gNear;
   }
 #endif
   float prev = prevAt(p - v * uDt); // carried from upstream
-  float f = max(prev * exp(-uDt / max(uLinger, 0.05)), make);
+  // foam builds up where breaking goes on (a surf beach stays foamed), fading over the linger time where it stops
+  float f = min(prev * exp(-uDt / max(uLinger, 0.05)) + make * uDt * 2.0, 1.0);
   oColor = vec4(f, 0.0, 0.0, 1.0);
 }`,
     });
@@ -71,7 +76,7 @@ void main() {
   }
   // once a frame, after the wave field: dt in seconds of the water's clock, the camera, the wind (m/s), linger (s)
   update(renderer, dt, camera, wind, linger) {
-    const U = this.U, C = FOAM_FIELD, half = this.W / 2;
+    const U = this.U, C = this.C, half = this.W / 2;
     U.uPrevOrigin.value.copy(U.uOrigin.value);
     U.uOrigin.value.set(Math.floor((camera.position.x - half) / C.texel) * C.texel, Math.floor((camera.position.z - half) / C.texel) * C.texel);
     if (!this._init) { U.uPrevOrigin.value.copy(U.uOrigin.value); this._init = true; }
@@ -80,7 +85,12 @@ void main() {
     U.tPrev.value = this.a.texture;
     const prev = renderer.getRenderTarget(); renderer.setRenderTarget(this.b); renderer.render(this.scene, this.cam); renderer.setRenderTarget(prev);
     [this.a, this.b] = [this.b, this.a];
-    this.read.tFoamField.value = this.a.texture; this.read.uFoamWin.value.set(U.uOrigin.value.x, U.uOrigin.value.y, this.W);
+    // the foam pieces' splats (water3/surffoam.js), added into the new state
+    if (this.splat) {
+      const SU = this.splat.U; SU.uFieldWin.value.set(U.uOrigin.value.x, U.uOrigin.value.y, this.W); SU.uSplatK.value = U.uDt.value * 1.5;
+      const ac = renderer.autoClear; renderer.autoClear = false; renderer.setRenderTarget(this.a); renderer.render(this.splat.splats, this.cam); renderer.setRenderTarget(prev); renderer.autoClear = ac;
+    }
+    this.read[this.names[0]].value = this.a.texture; this.read[this.names[1]].value.set(U.uOrigin.value.x, U.uOrigin.value.y, this.W);
   }
   dispose() { this.a.dispose(); this.b.dispose(); this.mat.dispose(); this.quad.geometry.dispose(); }
 }

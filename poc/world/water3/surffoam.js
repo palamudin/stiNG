@@ -70,7 +70,7 @@ FoamState foamState(vec2 anchor, vec4 seed) {
   float cyc = floor((ph + 3.14159265) / 6.2831853);
   float early = 0.5 + 0.5 * w2noise(anchor / 33.0 + vec2(cyc * 7.3, cyc * 3.1), 614);
   float energy = smoothstep(0.03, 0.2, a0); // as the surface's: by the wave's own height (swash.js)
-  o.breaking = smoothstep(0.12 + 0.14 * early, 0.3 + 0.2 * early, a0 / max(depth, 0.05)) * energy;
+  o.breaking = smoothstep(0.30 + 0.09 * early, 0.39 + 0.09 * early, a0 / max(depth, 0.05)) * energy;
   float psi = mod(ph + 3.14159265, 6.2831853) - 3.14159265;
   float c = 0.5 + 0.5 * cos(ph), cp = pow(max(c, 0.0), 0.6);
   float collapse = o.breaking * smoothstep(-0.75, -0.12, psi) * (1.0 - smoothstep(0.05, 0.7, psi));
@@ -151,8 +151,10 @@ void main() {
   #include <logdepthbuf_fragment>
   vec2 p = (vUv - 0.5) * 2.0; float radial = max(0.0, 1.0 - dot(p, p));
   // the puff's texture: cauliflower lumps at two scales
-  vec4 ft = texture(tFoam, vUv * 0.92 + vec2(vSeed, vSeed * 0.371)); float t = ft.r; // the baked lace; ft.g its billow height
-  float a = min(0.88, vAlpha * radial * radial * (0.45 + 1.25 * t));
+  // a patch of lace, not a ball: the baked lace cuts it into strands and holes, its outline torn by the same pattern
+  vec4 ft = texture(tFoam, vUv * 0.55 + vec2(vSeed, vSeed * 0.371)); float t = ft.r; // the baked lace; ft.g its billow height
+  float lace = smoothstep(0.38, 0.6, t * (0.55 + 0.75 * radial));
+  float a = min(0.9, vAlpha * smoothstep(0.0, 0.35, radial) * lace * 1.3);
   if (a < 0.008) discard;
   vec3 white = mix(vec3(0.9, 0.96, 0.95), vec3(1.15, 1.13, 1.06), clamp(vPlunge * 2.0, 0.0, 1.0));
   vec3 col = mix(white, vec3(0.58, 0.405, 0.22), vSand * vGrounded * (0.25 + 0.55 * t)) * foamLight() * (0.78 + 0.3 * ft.g); // the billow's lumps lit a little
@@ -200,10 +202,26 @@ void main() {
       blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
     };
     this.billows = new THREE.Mesh(pool(B.n, B.per), new THREE.ShaderMaterial({ ...common, vertexShader: billowVert, fragmentShader: billowFrag }));
+    // the pieces as data points (water3/foamfield.js): not drawn as sprites (cotton balls, flying) but splatted into the
+    // foam field where they are, a soft cloud a few times their size, so the surface draws the surge's foam as one
+    // bubbling body through its lace, carried and lingering with the rest of the field's foam
+    U.uFieldWin = { value: new THREE.Vector3(0, 0, 128) }; U.uSplatK = { value: 0 };
+    const toField = (vert, xzExpr, radius) => vert
+      .replace(/gl_Position = projectionMatrix \* viewMatrix \* vec4\([^;]*\);\n  #include <logdepthbuf_vertex>/, `vec2 fxz = ${xzExpr}; gl_Position = vec4(((fxz - uFieldWin.xy) / uFieldWin.z) * 2.0 - 1.0, 0.0, 1.0);`)
+      .replace('uniform vec3 uCam;', 'uniform vec3 uCam, uFieldWin; uniform float uSplatK;');
+    const splatFrag = (body) => `precision highp float; uniform float uSplatK; in vec2 vUv; in float vAlpha; out vec4 oColor; void main() { ${body} }`;
+    const add = { glslVersion: THREE.GLSL3, uniforms: U, depthTest: false, depthWrite: false, transparent: true, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor };
+    const bv = toField(billowVert.replace('vec3 P = C + right * position.x * size + up * position.y * size * stretch;', 'vec3 P = C + vec3(position.x, 0.0, position.y) * size * 3.0;'), 'P.xz');
+    const sv = toField(streakVert, 'xz');
+    this.splats = new THREE.Scene();
+    for (const [g, v, body] of [[pool(B.n, B.per), bv, 'vec2 p = (vUv - 0.5) * 2.0; float r = max(0.0, 1.0 - dot(p, p)); oColor = vec4(r * r * vAlpha * uSplatK, 0.0, 0.0, 0.0);'],
+      [pool(S.n, S.per), sv, 'float sides = smoothstep(0.5, 0.08, abs(vUv.x - 0.5)), ends = smoothstep(0.0, 0.18, vUv.y) * smoothstep(1.0, 0.72, vUv.y); oColor = vec4(sides * ends * vAlpha * uSplatK, 0.0, 0.0, 0.0);']]) {
+      const m = new THREE.Mesh(g, new THREE.ShaderMaterial({ ...add, vertexShader: v, fragmentShader: splatFrag(body) })); m.frustumCulled = false; this.splats.add(m);
+    }
     this.streaks = new THREE.Mesh(pool(S.n, S.per), new THREE.ShaderMaterial({ ...common, vertexShader: streakVert, fragmentShader: streakFrag, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
     for (const m of [this.billows, this.streaks]) m.frustumCulled = false;
     this.streaks.renderOrder = 3; this.billows.renderOrder = 4;
     this.stats = { billows: B.n * B.n * B.per, streaks: S.n * S.n * S.per };
   }
-  dispose() { for (const m of [this.billows, this.streaks]) { m.geometry.dispose(); m.material.dispose(); } }
+  dispose() { for (const m of [this.billows, this.streaks, ...this.splats.children]) { m.geometry.dispose(); m.material.dispose(); } }
 }
