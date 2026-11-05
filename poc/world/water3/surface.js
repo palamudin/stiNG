@@ -501,7 +501,9 @@ void main() {
   { vec2 fu = (vXZ - uFoamFarWin.xy) / uFoamFarWin.z; float e = min(min(fu.x, fu.y), min(1.0 - fu.x, 1.0 - fu.y)); if (e > 0.0) { inField = smoothstep(0.0, 0.08, e); ff = texture(tFoamFar, fu).r * inField; } }
   { vec2 fu = (vXZ - uFoamWin.xy) / uFoamWin.z; float e = min(min(fu.x, fu.y), min(1.0 - fu.x, 1.0 - fu.y)); if (e > 0.0) { float k = smoothstep(0.0, 0.08, e); ff = mix(ff, texture(tFoamField, fu).r, k); inField = max(inField, k); } }
   ff = clamp(ff, 0.0, 1.0);
-  float ls = max(uLace.x, 0.02); // the panel's lace scale
+  // the panel's lace scale, by the water's depth: fine in the shallows (small, broken waves), wider in deep water where the
+  // sloshing is dispersed (0.55x at the waterline, 1.2x at 4 m, 1.8x past 25 m)
+  float ls = max(uLace.x, 0.02) * (0.55 + 0.65 * smoothstep(0.3, 4.0, depth) + 0.6 * smoothstep(4.0, 25.0, depth));
   // the foam's patches: denser here, thinner there, a new arrangement over every few tens of metres
   float fpatch = mix(1.0, 0.45 + 1.1 * (0.5 + 0.5 * w2noise(vXZ / (9.0 * max(ls, 0.3)) + vec2(uTime * 0.01, 0.0), 842)), uLace.z);
   float fm = clamp((0.6 + uLook2.y - vJ) * uLook2.z, 0.0, 1.0) * smoothstep(0.25, 0.6, lacePat(vXZ, 1.4 * ls, vec2(0.0)) + 0.2) * (1.0 - inField) * fpatch;
