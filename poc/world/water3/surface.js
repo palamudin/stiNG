@@ -157,12 +157,33 @@ uniform vec4 uLook3, uCurl;
 ${CURL_EVENT_GLSL}
 #endif
 out vec3 vW; out vec2 vXZ; out float vCell, vNear, vJ; out vec2 vCoastSlope; out vec3 vCoast, vFlow; out vec4 vRough;
+#ifdef W3_COPY
+out float vCopy;
+#endif
 void main() {
   bool skirt = position.y > 0.5;
   float r = length(position.xz);
   vec2 xz = skirt ? uCam.xz + position.xz * ${S.skirt.toFixed(1)} : uCam.xz + position.xz * uGridScale;
   float level = clipWater(xz);
   float dc = distance(xz, uCam.xz);
+#ifdef W3_COPY
+  // the breaking crest's copy (the event: water3/curl.js): this same surface again, read from behind so the copy stands
+  // forward of the wave, lifted out of it, its upper part thrown further forward (the lip) and falling under gravity;
+  // only round a breaking crest, sunk under the water everywhere else (and its pixels there thrown away)
+  vec2 cpS = vec2(0.0), cpDir = vec2(0.0); float cpLift = -1.0, cpHook = 0.0, cpDrop = 0.0, cpA = 0.0; vCopy = 0.0;
+  if (!skirt && dc < 230.0 && level <= uSeaLevel + 0.5 && uSurf.x > 0.0 && uLook3.w > 0.0 && sw3Ctx(xz)) {
+    curlEvent(xz, level, level - clipHeight(xz));
+    if (gcVis > 0.002) {
+      float cpH = gcH0 * uLook3.w * gcSc, Lh = 3.14159265 / gcK; cpA = gcH0; cpDir = gDir;
+      float fwd = cpH * (0.3 * gcRise + 0.5 * gcFall) + uCurl.x * gcH0;  // the copy's crest this far ahead of the wave's
+      float xa = -gcPsi / gcK - fwd;                                     // this point ahead of the copy's crest (m)
+      float b = smoothstep(-0.5 * Lh, -0.2 * Lh, xa) * (1.0 - smoothstep(0.8 * cpH, 1.8 * cpH, xa)) * gcVis;
+      cpLift = mix(-0.6, cpH * (0.08 + 0.3 * gcRise) + uCurl.y * gcH0, b);
+      cpHook = cpH * (0.35 * gcRise + 0.65 * gcFall) * b; cpDrop = cpH * 1.1 * gcFall * gcFall * b;
+      cpS = gDir * fwd; xz -= cpS; vCopy = b;
+    }
+  }
+#endif
   // the floor, read only where it can matter
   float bed = -1e4, depth = 1e4;
   if (dc < ${S.floorReach.toFixed(1)}) { bed = clipHeight(xz); depth = level - bed; }
@@ -180,7 +201,9 @@ void main() {
     if (bed > -1e3 && depth > -3.0 && level <= uSeaLevel + 0.5 && uSurf.x > 0.0) coast = sw3Ctx(xz);
     if (coast && depth > 0.0) { d.xyz += w3Coast(xz, depth, cell) * (1.0 - fl); vNear = gNear; vCoastSlope = gCoastSlope * (1.0 - fl); vCoast = gCoastFoam * (1.0 - fl); k.x *= 1.0 - gNear; }
     // under a plunging lip the front face drawn down to the trough: the tube open under it (water3/curl.js)
+#ifndef W3_COPY
     if (coast && depth > 0.0 && uLook3.w > 0.0) { vec2 sc = curlScoop(xz, level, depth, uLook3.w, uCurl.xy); d.y = mix(d.y, sc.y, sc.x * (1.0 - fl)); }
+#endif
 #endif
     k.x *= 1.0 - fl; // a river carries no swell
     vec3 fph = w3FlowPh(xz); mat2 fM = w3FlowM(fv);
@@ -214,6 +237,14 @@ void main() {
     P.y = depth < 0.0 ? sheet : max(P.y, sheet);
   }
 #endif
+#ifdef W3_COPY
+  {
+    // its height on the wave (0 the trough .. 1 the crest), squared: the top thrown furthest and falling most
+    float hr = clamp((d.y + 0.39 * cpA) / max(cpA, 0.05), 0.0, 1.0); hr *= hr;
+    P.xz += cpS + cpDir * cpHook * hr;
+    P.y += cpLift - cpDrop * hr;
+  }
+#endif
   vW = P; vXZ = xz; vCell = cell;
   gl_Position = projectionMatrix * viewMatrix * vec4(P, 1.0);
   #include <logdepthbuf_vertex>
@@ -237,6 +268,9 @@ float lacePat(vec2 x, float s, vec2 drift) {
   return mix(laceTap(x / s + drift), laceTap(x / (1.7 * s) + drift * 0.6 + 0.43), v);
 } uniform mat4 uVP; uniform float uWLost, uRain, uIce, uGlint, uWPeak;
 in vec3 vW; in vec2 vXZ; in float vCell, vNear, vJ; in vec2 vCoastSlope; in vec3 vCoast, vFlow; in vec4 vRough; out vec4 oColor;
+#ifdef W3_COPY
+in float vCopy;
+#endif
 uniform float uDebug;
 const float W_N = ${f(WATER.n)};
 // the panel's 'Water' (index.js waterCtl): uAbs absorption and uSca scattering per metre (the colour preset), uLook
@@ -308,6 +342,11 @@ vec4 wSSR(vec3 P, vec3 R) {
 #endif
 void main() {
   #include <logdepthbuf_fragment>
+#ifdef W3_COPY
+  // the breaking crest's copy: only where it is lifted out of the water (debug 9: red)
+  if (vCopy < 0.02) discard;
+  if (uDebug > 8.5 && uDebug < 9.5) { vec3 nn = normalize(cross(dFdx(vW), dFdy(vW))); oColor = vec4(vec3(1.0, 0.12, 0.08) * (0.4 + 0.6 * abs(nn.y)), 1.0); return; }
+#endif
   // the floor under this point of the surface, and the waves' weights for it (as the vertices had them)
   float lv = clipWater(vW.xz), bed = clipHeight(vW.xz), depth = lv - bed;
   float D = max(vW.y - bed, 0.0); // the water's thickness under the point
@@ -506,9 +545,17 @@ void main() {
     // the foam that lasts and travels (water3/foamfield.js): made by whitecaps and breakers, carried in, lingering
     this.field = new FoamField(world, this); Object.assign(U, this.field.read); this.field.splat = this.foam;
     this.fieldFar = new FoamField(world, this, FOAM_FIELD.far, ['tFoamFar', 'uFoamFarWin']); Object.assign(U, this.fieldFar.read); // the open sea's whitecaps, 2 km round
-    // the breakers' curl over it (water3/curl.js): a mesh of its own, where there is a shore table
-    this.curl = shore ? new CurlMesh(world, this) : null;
-    if (this.curl) this.scene.add(this.curl.mesh);
+    // the breaker's lip over it: the same surface drawn again as a copy of the breaking crest, forward of it, lifted
+    // and thrown (W3_COPY above; the event: water3/curl.js), only where there is a shore table
+    this.curl = null;
+    if (shore) {
+      const cm = this.mat.clone(); cm.uniforms = U;
+      cm.vertexShader = this.mat.vertexShader.replace('precision highp int;', 'precision highp int;\n#define W3_COPY');
+      cm.fragmentShader = this.mat.fragmentShader.replace('precision highp int;', 'precision highp int;\n#define W3_COPY');
+      this.copyMat = cm; this.copy = new THREE.Mesh(grid.geo, cm);
+      this.copy.frustumCulled = false; this.copy.renderOrder = 1; this.copy.onBeforeRender = this.mesh.onBeforeRender;
+      this.scene.add(this.copy);
+    }
     // (the foam pieces are not drawn: they splat into the near foam field, which the surface draws)
     this._t = null;
   }
@@ -527,5 +574,5 @@ void main() {
     const dt = this._t === null ? 0 : Math.min(Math.max(time - this._t, 0), 0.25); this._t = time;
     if (wind) U.uDrift.value.x += wind[0] * 0.6 * dt, U.uDrift.value.y += wind[1] * 0.6 * dt; // gusts run at about the wind's pace
   }
-  dispose() { this.mesh.geometry.dispose(); this.mat.dispose(); if (this.foam) this.foam.dispose(); this.foamRT.dispose(); this.field.dispose(); this.fieldFar.dispose(); if (this.curl) this.curl.dispose(); }
+  dispose() { this.mesh.geometry.dispose(); this.mat.dispose(); if (this.foam) this.foam.dispose(); this.foamRT.dispose(); this.field.dispose(); this.fieldFar.dispose(); if (this.curl) this.curl.dispose(); if (this.copyMat) this.copyMat.dispose(); }
 }
