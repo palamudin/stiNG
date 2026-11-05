@@ -251,7 +251,7 @@ void main() {
         vec2 tg = 0.5 * ((-p0 + p2) + 2.0 * (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * v + 3.0 * (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * v2);
         tg = length(tg) > 1e-6 ? normalize(tg) : vec2(1.0, 0.0);
         T += uCurl.xy * gcH0; // the panel's nudge, forward and up, in face heights
-        vec2 cx = gcCx; sw3Ctx(cx); vec2 dir = gDir;
+        vec2 cx = gcCx; sw3Ctx(cx); sw3CtxE(cx); vec2 dir = gDirE; // the reef's wave's way
         vec3 dt = w3Coast(cx, gcDC, cell); // the crest's top, as the surface has it
         vec3 top = vec3(cx.x + dt.x, level + dt.y, cx.y + dt.z);
         vec3 Pc = top + vec3(dir.x, 0.0, dir.y) * T.x + vec3(0.0, T.y, 0.0);

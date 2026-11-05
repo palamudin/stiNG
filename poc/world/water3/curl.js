@@ -41,60 +41,54 @@ float curlLand(float H) { float vy = sqrt(2.0 * CG * 0.35 * H); return (vy + sqr
 float curlCel(float d) { return sqrt(9.81 * clamp(d, ${SHORE.dMin.toFixed(2)}, ${SHORE.dMax.toFixed(1)})); }
 void curlEvent(vec2 xz, float level, float depth) {
   float sN = gNear, sE = gExpo, sP = gPn, sT = gTau, sD = gShoreD, sK = gShoreKnow; vec2 sG = gDir;
-  float w = sw3Omega(0); gcK = w / curlCel(depth);
-  float ph = sw3Phase(0, uWTime, gTau, gPn); gcPsi = mod(ph + 3.14159265, 6.2831853) - 3.14159265;
-  float cyc = floor((ph + 3.14159265) / 6.2831853);
-  vec2 c0 = xz + gDir * (gcPsi / gcK);
-  // one step more onto the crest itself (its own phase, its own depth there)
-  if (sw3Ctx(c0)) { float p0 = mod(sw3Phase(0, uWTime, gTau, gPn) + 3.14159265, 6.2831853) - 3.14159265; c0 += gDir * (p0 * curlCel(level - clipHeight(c0)) / w); sw3Ctx(c0); }
-  gcCx = c0;
-  float tauC = gTau; // the crest's travel time to the line (s): it falls at one second a second as the crest comes in
-  float dC = max(level - clipHeight(gcCx), 0.02); gcDC = dC;
-  vec2 pp = vec2(-gDir.y, gDir.x);
-  // the depth there over the bed's small bumps (12 m across), for when it breaks
-  float dS = max(level - 0.2 * (clipHeight(gcCx) + clipHeight(gcCx + gDir * 6.0) + clipHeight(gcCx - gDir * 6.0) + clipHeight(gcCx + pp * 6.0) + clipHeight(gcCx - pp * 6.0)), 0.05);
-  float shoal = pow(clamp(max(dC, 0.6) / ${SHORE.dMax.toFixed(1)}, 0.04, 1.0), -0.25);
-  float a0 = uSurf.x * gNear * gExpo * shoal * sw3Group(gcCx, uWTime), a = min(a0, 0.42 * dC + 0.02); gcA0 = a0; gcH0 = 2.0 * a;
-  float s = dot(gcCx, pp);
-  float early = 0.5 + 0.5 * w2noise(vec2(s / 33.0, cyc * 3.1), 614); // along the crest only: it does not change as the crest comes in
-  float rb = 0.3 + 0.09 * early, db = a0 / rb; // the breaking limit, early or late along the crest (water3/swash.js)
-  // the time since the crest passed its break line, on the water's own clock: on a plane beach tau = 2 sqrt(d) /
-  // (slope sqrt g), so the line where the depth is db lies at tau sqrt(db / d); tau is the table's smooth travel time,
-  // which the crest follows exactly, so this runs at one second a second with no jumps from the bed's bumps
-  float tSince = tauC * (sqrt(db / dS) - 1.0);
-  // along the crest (s): which stretches of this wave plunge, and the peel (the delay before it breaks here after its
-  // break line, 0 at the stretch's starting points); a big wave's stretches long and fewer, a small one's short
-  gcBig = smoothstep(0.7, 1.5, a0);
-  float plunge = smoothstep(0.5 + 0.12 * gcBig, 0.66 + 0.12 * gcBig, 0.5 + 0.5 * w2noise(vec2(s / mix(90.0, 260.0, gcBig), cyc * 2.71), 618));
-  // the stretch breaks nearly together (it rides with the wave as one), its ends a little later
-  float delay = 0.5 * (0.5 + 0.5 * w2noise(vec2(s / 70.0, cyc * 1.37), 617));
-  float t = tSince - delay; gcEv = t;
-  // the tube, in seconds: the lip rises out of the crest slowly, riding with the wave (2.2 s, more for a big one), up to
-  // the top of its throw; then it is a thrown sheet: its tip flies on forward and falls under gravity to the trough
-  // (the throw's own flight time: about half a second for a metre's face); then it crashes into foam and is gone
-  // (0.4 s). On some stretches of a big wave a second tube follows, about half the size, quicker
-  float tl = curlLand(max(gcH0, 0.05)), ta = curlLaunch(max(gcH0, 0.05)).y / CG;
-  float tr = mix(2.2, 2.8, gcBig), tf = tl - ta, tc = 0.9, g2 = 1.0; gcSc = 1.0;
-  if (t > tr + tf + tc + 0.1) {
-    t -= tr + tf + tc + 0.2; gcSc = 0.55; tr *= 0.6; tf *= 0.75; tc *= 0.8;
-    g2 = smoothstep(0.3, 0.7, gcBig) * smoothstep(0.45, 0.55, 0.5 + 0.5 * w2noise(vec2(s / 80.0, cyc * 4.1), 619));
+  float sEW = gEdgeW, sET = gTauE, sED = gEdgeD; vec2 sEG = gDirE;
+  gcVis = 0.0; gcGate0 = 0.0; gcRise = 0.0; gcFall = 0.0; gcUnf = 0.0; gcS = 0.0; gcE = -1.0; gcPsi = 0.0;
+  // the plunge rides the reef's waves (water3/swash.js sw3CtxE): none where there is no reef
+  sw3CtxE(xz);
+  if (gEdgeW > 0.002) {
+    float w = sw3Omega(0); gcK = w / curlCel(depth);
+    float ph = sw3PhaseE(uWTime, gTauE, gPn); gcPsi = mod(ph + 3.14159265, 6.2831853) - 3.14159265;
+    float cyc = floor((ph + 3.14159265) / 6.2831853);
+    vec2 c0 = xz + gDirE * (gcPsi / gcK);
+    // one step more onto the crest itself (its own phase, its own depth there)
+    sw3Ctx(c0); sw3CtxE(c0);
+    { float p0 = mod(sw3PhaseE(uWTime, gTauE, gPn) + 3.14159265, 6.2831853) - 3.14159265; c0 += gDirE * (p0 * curlCel(level - clipHeight(c0)) / w); sw3Ctx(c0); sw3CtxE(c0); }
+    gcCx = c0;
+    float dC = max(level - clipHeight(gcCx), 0.02); gcDC = dC;
+    vec2 pp = vec2(-gDirE.y, gDirE.x);
+    float shoal = pow(clamp(max(dC, 0.6) / ${SHORE.dMax.toFixed(1)}, 0.04, 1.0), -0.25);
+    float a0 = uSurf.x * gEdgeW * gExpo * shoal * sw3Group(gcCx, uWTime), a = min(a0, 0.42 * dC + 0.02); gcA0 = a0; gcH0 = 2.0 * a;
+    float s = dot(gcCx, pp);
+    gcBig = smoothstep(0.7, 1.5, a0);
+    // along the crest (s): which stretches of this wave plunge (a big wave's stretches long, a small one's short), and
+    // a little delay along it (the stretch breaks nearly together, its ends a little later)
+    float plunge = smoothstep(0.5 + 0.12 * gcBig, 0.66 + 0.12 * gcBig, 0.5 + 0.5 * w2noise(vec2(s / mix(90.0, 260.0, gcBig), cyc * 2.71), 618));
+    float delay = 0.5 * (0.5 + 0.5 * w2noise(vec2(s / 70.0, cyc * 1.37), 617));
+    // the tube, in seconds: the lip rises out of the crest slowly as it comes in over the deep water, riding with the
+    // wave (2.2 s, more for a big one), up to the top of its throw; the throw comes as the crest reaches the reef's
+    // edge (its travel time to the edge, gTauE, runs at one second a second: the clock); then the lip flies on forward
+    // and falls under gravity to the trough (the throw's own flight time); then it crashes into foam and is gone. On
+    // some stretches of a big wave a second tube follows, about half the size, quicker
+    float tl = curlLand(max(gcH0, 0.05)), ta = curlLaunch(max(gcH0, 0.05)).y / CG;
+    float tr = mix(2.2, 2.8, gcBig), tf = tl - ta, tc = 0.9, g2 = 1.0; gcSc = 1.0;
+    float t = -gTauE + tr - delay; gcEv = t;
+    if (t > tr + tf + tc + 0.1) {
+      t -= tr + tf + tc + 0.2; gcSc = 0.55; tr *= 0.6; tf *= 0.75; tc *= 0.8;
+      g2 = smoothstep(0.3, 0.7, gcBig) * smoothstep(0.45, 0.55, 0.5 + 0.5 * w2noise(vec2(s / 80.0, cyc * 4.1), 619));
+    }
+    gcRise = smoothstep(0.0, tr, t); gcFall = clamp((t - tr) / tf, 0.0, 1.0); gcUnf = clamp((t - tr - tf) / tc, 0.0, 1.0);
+    gcP = (ta / tl) * gcRise + (1.0 - ta / tl) * gcFall;
+    gcE = t < tr + tf ? 0.8 * max(t, -1.0) / (tr + tf) : 0.8 + 0.2 * (t - tr - tf) / tc; // 0.8 landed, 1 gone
+    gcS = 0.5 * gcRise + 0.5 * gcFall;
+    // room to fall: water under the crest deep enough for the wave, the trough the lip falls into still water half a
+    // wave ahead, the shoreline well beyond that
+    float Lh = 3.14159265 * curlCel(dC) / w, dAhead = level - clipHeight(gcCx + gDirE * 0.6 * Lh);
+    float room = smoothstep(0.7, 1.1, dC / max(gcH0, 0.1)) * smoothstep(0.4, 1.0, dAhead / max(gcH0, 0.1)) * smoothstep(0.7 * Lh + 4.0, 0.7 * Lh + 20.0, -gShoreD);
+    gcGate0 = smoothstep(0.05, 0.25, a0) * smoothstep(0.1, 0.35, dC) * mix(1.0, plunge, 0.5) * smoothstep(0.1, 0.5, gEdgeW) * g2 * room;
+    gcVis = gcGate0 * smoothstep(0.0, 0.3, t) * (1.0 - smoothstep(tr + tf + 0.05, tr + tf + tc, t));
   }
-  gcRise = smoothstep(0.0, tr, t); gcFall = clamp((t - tr) / tf, 0.0, 1.0); gcUnf = clamp((t - tr - tf) / tc, 0.0, 1.0);
-  gcP = (ta / tl) * gcRise + (1.0 - ta / tl) * gcFall; // the tip's flight: rising to the throw's top, then on at the water's pace
-  gcE = t < tr + tf ? 0.8 * max(t, -1.0) / (tr + tf) : 0.8 + 0.2 * (t - tr - tf) / tc; // 0.8 landed, 1 gone
-  gcS = 0.5 * gcRise + 0.5 * gcFall;
-  // room to fall: only where the water under the crest is deep for the wave (more than its face), where the trough the
-  // lip falls into is still water half a wave ahead, and the shoreline is well beyond that; inshore of it the crest
-  // only foams and the foam rides up the beach (the surf model's)
-  float Lh = 3.14159265 * curlCel(dC) / w, dAhead = level - clipHeight(gcCx + gDir * 0.6 * Lh);
-  float room = smoothstep(1.0, 1.5, dS / max(gcH0, 0.1)) * smoothstep(0.4, 1.0, dAhead / max(gcH0, 0.1)) * smoothstep(0.7 * Lh + 4.0, 0.7 * Lh + 20.0, -gShoreD);
-  // the floor's rise under the break: the big plunging waves are where deep water meets a sharp rise (a reef's edge:
-  // sources/wild.js); over a gentle shelf the wave spills (whitewater only, the surf model's)
-  float mB = (clipHeight(gcCx + gDir * 8.0) - clipHeight(gcCx - gDir * 8.0)) / 16.0;
-  float steep = smoothstep(0.03, 0.08, mB);
-  gcGate0 = smoothstep(0.05, 0.25, a0) * smoothstep(0.1, 0.35, dC) * mix(1.0, plunge, 0.5) * steep * g2 * room;
-  gcVis = gcGate0 * smoothstep(0.0, 0.3, t) * (1.0 - smoothstep(tr + tf + 0.05, tr + tf + tc, t));
   gNear = sN; gExpo = sE; gPn = sP; gTau = sT; gShoreD = sD; gShoreKnow = sK; gDir = sG;
+  gEdgeW = sEW; gTauE = sET; gEdgeD = sED; gDirE = sEG;
 }
 // the wall's centreline for a tube of face H (m), at c: 0 the hollowed face's foot, 0.4 the crest's top, 1 the lip's tip;
 // (forward, up) from the crest's top and its direction of travel along c (not normalised). The face: hollowed, down

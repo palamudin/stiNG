@@ -45,6 +45,24 @@ bool sw3Ctx(vec2 p) {
 float sw3Omega(int i) { return sqrt(9.81 * 6.2831853 / (uSurf.y * (i == 0 ? 1.0 : ${SWASH.second[0].toFixed(2)}))) * uSurf.z; }
 float sw3Phase(int i, float t, float tau, float pn) { return sw3Omega(i) * (t + tau) + pn * (i == 0 ? 1.0 : 1.37) + float(i) * 2.1; }
 float sw3Period() { return 6.2831853 / sw3Omega(0); }
+// the reef's waves: the swell coming in over deep water to a reef's edge and breaking there, with fronts of their own
+// (the edge's isobath: shorefield.js shoreAtE), at an angle to the shore's. gEdgeW how much of them there is here: by
+// how sharply the floor rises across the edge's nearest point (a reef: deep water against a sharp rise; a gentle shelf
+// has none, so most of the coast has none), out to a few hundred metres offshore of it, dying within a few tens of
+// metres inshore of it (they broke there); gDirE the way they travel, gTauE their travel time to the edge (negative
+// past it). The caller's shore context is left as it was
+float gEdgeW = 0.0, gTauE = 0.0, gEdgeD = 1e4; vec2 gDirE = vec2(0.0);
+void sw3CtxE(vec2 p) {
+  gEdgeW = 0.0;
+  float kn = gShoreKnow; vec4 sh = shoreAtE(p); float know = gShoreKnow; gShoreKnow = kn;
+  float coh = know > 0.0 ? length(sh.yz) : 0.0;
+  if (know <= 0.0 || abs(sh.x) > 9.0e3 || coh < 1e-4) return;
+  vec2 toL = sh.yz / coh; gDirE = sh.x < 0.0 ? toL : -toL; gTauE = sh.w; gEdgeD = sh.x;
+  vec2 e = p + toL * abs(sh.x); // the edge's nearest point
+  float rise = (clipHeight(e + gDirE * 10.0) - clipHeight(e - gDirE * 10.0)) / 20.0;
+  gEdgeW = know * coh * smoothstep(0.05, 0.15, rise) * (1.0 - smoothstep(200.0, 450.0, -sh.x)) * exp(-max(sh.x, 0.0) / 25.0);
+}
+float sw3PhaseE(float t, float tau, float pn) { return sw3Omega(0) * (t + tau) + pn * 0.83 + 4.4; }
 // the sets: slowly drifting groups of bigger waves along the coast
 float sw3Group(vec2 p, float t) { return 0.45 + 0.55 * (0.5 + 0.5 * w2noise(p / 250.0 + vec2(t * 0.021, -t * 0.017), 613)); }
 // ---- the shoreline (the swash). Every sea beach; exposure from the way the sand faces (grad: the ground's uphill
@@ -110,12 +128,16 @@ vec3 w3Coast(vec2 p, float depth, float cell) {
   float cel = sqrt(9.81 * clamp(depth, ${SHORE.dMin.toFixed(2)}, ${SHORE.dMax.toFixed(1)}));
   float amax = 0.42 * max(depth, 0.0) + 0.02;
   float group = sw3Group(p, uWTime), pinch = 0.85;
+  sw3CtxE(p); // the reef's waves here, if any
+  float shoreShare = 1.0 - 0.8 * gEdgeW; // where the reef's waves come in, the shore's own are mostly theirs
   vec3 d = vec3(0.0); vec2 sl = vec2(0.0); float foam = 0.0, charge = 0.0, backwash = 0.0, residual = 0.0;
-  for (int i = 0; i < 2; i++) {
-    float w = sw3Omega(i), k = w / cel;
-    float a0 = uSurf.x * (i == 0 ? 1.0 : ${SWASH.second[1].toFixed(2)}) * env * shoal * group; // the wave's own height, before the depth holds it
-    float a = min(a0, amax * (i == 0 ? 1.0 : 0.5));
-    float ph = sw3Phase(i, uWTime, gTau, gPn);
+  for (int i = 0; i < 3; i++) { // the shore's two trains, then the reef's
+    bool E = i == 2; if (E && gEdgeW <= 0.0) continue;
+    vec2 dr = E ? gDirE : gDir;
+    float w = sw3Omega(E ? 0 : i), k = w / cel;
+    float a0 = uSurf.x * (i == 1 ? ${SWASH.second[1].toFixed(2)} : 1.0) * (E ? gEdgeW * gExpo * smoothstep(-0.9, 0.5, depth) : env * shoreShare) * shoal * group; // the wave's own height, before the depth holds it
+    float a = min(a0, amax * (i == 1 ? 0.5 : 1.0));
+    float ph = E ? sw3PhaseE(uWTime, gTauE, gPn) : sw3Phase(i, uWTime, gTau, gPn);
     float psi = mod(ph + 3.14159265, 6.2831853) - 3.14159265;
     float c = 0.5 + 0.5 * cos(ph), s = sin(ph);
     float cp = pow(max(c, 0.0), 0.6); // P - 1, P = 1.6: sharper crests, wider troughs
@@ -129,8 +151,8 @@ vec3 w3Coast(vec2 p, float depth, float cell) {
     // the lip leans furthest just before it collapses; over the next half radian the crest gives up to 48% of its
     // height to the whitewater running ahead
     float collapse = breaking * smoothstep(-0.75, -0.12, psi) * (1.0 - smoothstep(0.05, 0.7, psi));
-    float body = 1.0 - (i == 0 ? 0.48 : 0.12) * collapse;
-    float pitch = i == 0 ? 2.0 * uSurf.w * a * smoothstep(0.16, 0.28, rel) * (1.0 - smoothstep(0.4, 0.6, rel)) : 0.0;
+    float body = 1.0 - (i != 1 ? 0.48 : 0.12) * collapse;
+    float pitch = i != 1 ? 2.0 * uSurf.w * a * smoothstep(0.16, 0.28, rel) * (1.0 - smoothstep(0.4, 0.6, rel)) : 0.0;
     pitch = min(pitch, 0.35 / (1.08 * k));
     pitch *= 1.0 - smoothstep(0.03, 0.1, k * cell / 6.2831853);
     pitch *= 1.0 - 0.65 * smoothstep(-0.05, 0.55, psi);
@@ -140,8 +162,8 @@ vec3 w3Coast(vec2 p, float depth, float cell) {
     float c5 = c * c * c * c * c;
     float bl = 1.0 - smoothstep(0.1, 0.3, k * cell / 6.2831853);
     d.y += bl * a * body * (2.0 * cp * c - 0.78);
-    d.xz += bl * gDir * ((qak / k) * s + pitch * c5 * c);
-    sl += bl * gDir * (a * body * k * 1.6 * cp * s / max(1.0 - qak * cos(ph) + 3.0 * pitch * k * c5 * s, 0.2));
+    d.xz += bl * dr * ((qak / k) * s + pitch * c5 * c);
+    sl += bl * dr * (a * body * k * 1.6 * cp * s / max(1.0 - qak * cos(ph) + 3.0 * pitch * k * c5 * s, 0.2));
     // the crest's whitewater and its tail
     float big = smoothstep(0.2, 0.5, a);
     float tail = max(exp(-max(psi, 0.0) * mix(0.45, 1.0, big)), 0.65 * smoothstep(0.3, 0.55, rel) * smoothstep(2.4, 0.3, psi));
