@@ -14,7 +14,13 @@ namespace Sting.Core
     public sealed class Caterpillar { public Num x, y, z; }
     public sealed class Fly { public Num x, y, z, r, w1, w2, w3, p1, p2, p3; }
     public sealed class HumanSlot { public int slot; public Num x, z, fx, fz, exit; public string posture; public string act; public Num[] path; public bool evening; }
-    public sealed class Box { public Num minx, maxx, miny, maxy, minz, maxz; public bool wood, hive, shed, fence, mall, shop, bench, garage, porch, hedge; }
+    public sealed class Box { public Num minx, maxx, miny, maxy, minz, maxz; public bool wood, hive, shed, fence, mall, shop, bench, garage, porch, hedge, row, wall, retain, step, back; }
+    /// an urban building (S6, world.js addUrban): its frontage, front and back lines, side of the street, height and look
+    public sealed class Row { public Num x0, x1, zF, zB, h; public int s, storeys, c; public bool shop, mid; }
+    /// a flight of stairs down from a lot's pad into its court: its middle, its top's line, its side, steps, rise each, drop
+    public sealed class Stair { public Num x, z, rise, drop; public int s, n; }
+    /// an urban chunk's planned building (world.js urbanBuildings)
+    public sealed class UrbanBuilding { public Num x0, x1; public int s, storeys, c; public bool shop, mid; }
     /// a house's garage (S4, world.js garageOf): its walls' extent, the line of its door, its side of the street, its height and siding
     public sealed class Garage { public Num x0, x1, z0, z1, zf, h; public int s, c; }
     /// the porch before a house's front door: the door's middle on the wall, and the house's side of the street
@@ -66,6 +72,7 @@ namespace Sting.Core
         public Rival rival; public List<Shed> sheds = new List<Shed>(); public List<Patrol> dragonflies = new List<Patrol>();
         public List<Garage> garages = new List<Garage>(); public List<Rect> drives = new List<Rect>(); public List<Porch> porches = new List<Porch>();
         public List<Rect> lanes = new List<Rect>(), farmyards = new List<Rect>();
+        public List<Row> rows = new List<Row>(); public List<Stair> stairs = new List<Stair>();
         /// land use and the suburban layout (T1-12)
         public string use = "park"; public List<Rect> roads = new List<Rect>(), lots = new List<Rect>(); public List<Loop> loops = new List<Loop>(); public List<Mall> malls = new List<Mall>();
         /// birdbaths (T2-1)
@@ -296,6 +303,17 @@ namespace Sting.Core
                 Add(0, 5, "#4e4b52", mx, g.h + 0.06, mz, w + 0.2, 0.12, d + 0.2, false);
                 Add(0, 5, "#d9d4c7", mx, 1.1, g.zf - g.s * 0.02, w - 0.8, 2.2, 0.06, false);
             }
+            foreach (var r in c.rows) // an urban building (S6): plastered with a shopfront below, or sided with a door; a flat roof and cornice
+            {
+                Num w = r.x1 - r.x0 - 0.1, d = Abs(r.zB - r.zF), xm = (r.x0 + r.x1) / 2, zm = (r.zF + r.zB) / 2; string col = UrbanColors[r.c];
+                Add(0, r.shop ? 1 : 0, col, xm, r.h / 2, zm, w, r.h, d, false, top: r.h, wb: new[] { xm, zm, w / 2, d / 2 });
+                Add(0, 5, "#5a5652", xm, r.h + 0.06, zm, w, 0.12, d, false);
+                Add(0, 5, "#77706a", xm, r.h - 0.15, zm, w + 0.12, 0.3, d + 0.12, false);
+                if (r.shop) Add(0, 5, Awnings[r.c % Awnings.Length], xm, 2.75, r.zF - r.s * 0.45, w - 0.4, 0.12, 0.9, false);
+                else Add(0, 5, "#4a3328", xm, 1.05, r.zF - r.s * 0.02, 1.0, 2.1, 0.06, false);
+            }
+            foreach (var b in c.boxes) if (b.wall || b.step)
+                Add(0, 5, b.step ? "#b9b4a8" : b.back ? "#8f5a46" : b.retain ? "#9a9284" : "#a39b8e", (b.minx + b.maxx) / 2, b.maxy / 2, (b.minz + b.maxz) / 2, b.maxx - b.minx, b.maxy, b.maxz - b.minz, !b.back && !b.retain);
             string[] hedgeShades = { "#3b5a2a", "#46652f", "#355024" };
             foreach (var b in c.boxes) if (b.hedge) // a hedgerow section: a blocky bush (world.js)
                 Add(0, 5, hedgeShades[(int)Abs(Floor(b.minx * 0.37 + b.minz * 0.61)) % 3], (b.minx + b.maxx) / 2, b.maxy / 2, (b.minz + b.maxz) / 2, b.maxx - b.minx, b.maxy, b.maxz - b.minz, false);
@@ -425,7 +443,10 @@ namespace Sting.Core
             }
             var R = RegionOf(cx, cz);
             if (TownQuarter(seed, cx, cz, st) != null) return "town";
-            return BaseUse(Region(seed, R.rx, R.rz, st), R.lx, R.lz);
+            string bu = BaseUse(Region(seed, R.rx, R.rz, st), R.lx, R.lz);
+            // the urban blocks round a town square (S6): yards beside a town centre, never beside the home park
+            if (bu == "yards" && (System.Math.Abs(cx) > 1 || System.Math.Abs(cz) > 1)) for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++) if ((dx != 0 || dz != 0) && TownQuarter(seed, cx + dx, cz + dz, st) != null) return "urban";
+            return bu;
         }
         // ---------------------------------------------------------------- terrain (T2-6, ground v2 GDD 20 G1; see world.js groundAt)
         static readonly Num[] lat = new Num[65536];
@@ -513,8 +534,34 @@ namespace Sting.Core
         {
             public List<Rect> roads = new List<Rect>(), lots = new List<Rect>(), plazas = new List<Rect>();
             public List<Loop> loops = new List<Loop>(); public List<Mall> malls = new List<Mall>(); public List<Shop> shops = new List<Shop>(); public List<Shed> houses = new List<Shed>();
-            public List<Pond> ponds = new List<Pond>(); public List<Rect> drives = new List<Rect>();
+            public List<Pond> ponds = new List<Pond>(); public List<Rect> drives = new List<Rect>(); public List<UrbanBuilding> rows = new List<UrbanBuilding>();
         }
+        /// urban blocks (world.js URBAN, S6)
+        public static readonly Num UrbLot = 7.5, UrbSetback = 1, UrbDepth = 11, UrbRear = 2.2, UrbM = 0.6, UrbMr = 0.05, UrbWall = 0.3, UrbStep = 0.18, UrbRun = 0.28, UrbStairW = 1.2, UrbLow = 0.45, UrbBack = 2.2, UrbMid = 0.6, UrbShop = 0.25;
+        public const int UrbLots = 8;
+        public static readonly string[] UrbanColors = { "#b5654a", "#c9b49a", "#a8553f", "#d8cdb8", "#8f5a46", "#cfc2a6" };
+        static bool Streets(string u) => u == "yards" || u == "urban";
+        public static List<UrbanBuilding> UrbanBuildings(System.Func<long, ulong> H, Num ox, bool main)
+        {
+            var o = new List<UrbanBuilding>();
+            foreach (int s in new[] { -1, 1 })
+            {
+                long b = s < 0 ? 8000 : 8500; int mid = Unit(H(b)) < UrbMid ? RangeInt(H(b + 1), 0, UrbLots - 2) : -1;
+                for (int k = 0; k < UrbLots; k++)
+                {
+                    bool big = k == mid; int n = big ? 3 : 1; Num x0 = ox - UrbLot * UrbLots / 2 + k * UrbLot, x1 = x0 + n * UrbLot;
+                    o.Add(new UrbanBuilding { x0 = x0, x1 = x1, s = s, storeys = big ? RangeInt(H(b + 10 + k), 4, 6) : RangeInt(H(b + 10 + k), 2, 4), c = RangeInt(H(b + 30 + k), 0, UrbanColors.Length), shop = main || Unit(H(b + 50 + k)) < UrbShop, mid = big });
+                    if (big) k += 2;
+                }
+            }
+            return o;
+        }
+        public static (Num zA, Num zF, Num zB, Num zD, Num zE) UrbanLines(Num oz, int s)
+        {
+            Num a = 4 + T.terrain.grade.walk, f = a + UrbSetback, b = f + UrbDepth, e = b + UrbRear;
+            return (oz + s * a, oz + s * f, oz + s * b, oz + s * e, oz + s * 32);
+        }
+        static bool UrbanMain(ulong seed, int cx, int cz, Settings st) => TownQuarter(seed, cx + 1, cz, st) != null || TownQuarter(seed, cx - 1, cz, st) != null || TownQuarter(seed, cx, cz + 1, st) != null || TownQuarter(seed, cx, cz - 1, st) != null;
         /// A house's garage and drive (world.js garageOf, driveOf; GDD 21.2, S4)
         public static readonly Num GarageShare = 0.8, GarageW = 3.6, GarageD = 6.5, GarageH = 2.8, GarageInset = 0.3, GarageGap = 1.2, PorchRun = 1.6;
         public static Garage GarageOf(System.Func<long, ulong> H, long b, Num x, Num z, Num hw, Num hd, int s)
@@ -578,12 +625,16 @@ namespace Sting.Core
             if (cx == 0 && cz == 0) return o;
             o.ponds = PondsOf(seed, cx, cz, st);
             string use = LandUse(seed, cx, cz, st);
-            if (use == "yards")
+            if (use == "yards" || use == "urban")
             {
-                bool endW = LandUse(seed, cx - 1, cz, st) != "yards", endE = LandUse(seed, cx + 1, cz, st) != "yards";
+                bool endW = !Streets(LandUse(seed, cx - 1, cz, st)), endE = !Streets(LandUse(seed, cx + 1, cz, st));
                 o.roads.Add(new Rect { minx = ox + (endW ? -22 : -32), maxx = ox + (endE ? 22 : 32), minz = oz - 4, maxz = oz + 4 });
                 if (endW) o.loops.Add(new Loop { x = ox - 22, z = oz, r = 11 });
                 if (endE) o.loops.Add(new Loop { x = ox + 22, z = oz, r = 11 });
+            }
+            if (use == "urban") o.rows = UrbanBuildings(H, ox, UrbanMain(seed, cx, cz, st));
+            else if (use == "yards")
+            {
                 for (int li = 0; li < 4; li++)
                 {
                     int s = li < 2 ? -1 : 1; Num lx = ox + (li % 2 != 0 ? 16 : -16); long b = 3000 + li * 2000;
@@ -620,7 +671,7 @@ namespace Sting.Core
             public int k; public Num minx, maxx, minz, maxz, x, z, r, m, hx, hz, h; public bool hSet; public Shed src;
             // a house pad (5) and its front-yard ramp (6), a street (0) or cul-de-sac (2), a footing: worked out per step of the
             // modifier (GDD 21.2): height, shoulder, the ramp's start height
-            public Num z0, run, zw, zf, cap, xd; public int sg; public bool road, @fixed, drv; public Pad pad, ramp;
+            public Num z0, run, zw, zf, cap, xd; public int sg; public bool road, @fixed, drv; public Pad pad, ramp; public List<Pad> rows;
             public readonly Num[] hT = new Num[4], mT = new Num[4], hwT = new Num[4]; public readonly bool[] tSet = new bool[4];
         }
         static readonly Dictionary<long, List<Pad>> pads = new Dictionary<long, List<Pad>>(); static string padTag;
@@ -655,6 +706,18 @@ namespace Sting.Core
                     if (road != null) ramps.Add(pad.ramp = new Pad { k = 6, minx = x0, maxx = x1, minz = Min(zw, zf), maxz = Max(zw, zf), m = T.terrain.grade.house, zw = zw, zf = zf, sg = sg, z0 = rz, pad = pad });
                 }
                 P.AddRange(ramps);
+                // an urban block (S6): each side's court (8) at its lowest building pad, then each building's pad (7) at the street's height
+                if (c.rows.Count > 0)
+                {
+                    Num z0 = (c.roads[0].minz + c.roads[0].maxz) / 2, oxu = cx * CS;
+                    foreach (int s in new[] { -1, 1 })
+                    {
+                        var L = UrbanLines(z0, s); var rows = new List<Pad>();
+                        foreach (var b in c.rows) if (b.s == s) rows.Add(new Pad { k = 7, minx = b.x0, maxx = b.x1, minz = Min(L.zA, L.zD), maxz = Max(L.zA, L.zD), m = UrbMr, hx = (b.x0 + b.x1) / 2, hz = (L.zA + L.zD) / 2, z0 = z0 });
+                        P.Add(new Pad { k = 8, minx = oxu - UrbLot * UrbLots / 2, maxx = oxu + UrbLot * UrbLots / 2, minz = Min(L.zD, L.zE), maxz = Max(L.zD, L.zE), m = UrbM, hx = oxu, hz = (L.zD + L.zE) / 2, rows = rows });
+                        P.AddRange(rows);
+                    }
+                }
                 pads[key] = P;
                 return P;
             }
@@ -831,6 +894,11 @@ namespace Sting.Core
             }
         }
         /// a house's pad within its drive's grade of the street, its banks 2:1 at most (world.js housePad)
+        /// an urban building's pad: the street's height before it (S6)
+        static void UrbanPad(ulong seed, Pad p, Settings st, int terrain)
+        {
+            lock (p) { if (p.tSet[terrain]) return; p.hT[terrain] = StreetAt(seed, p.hx, p.z0, st, terrain); p.tSet[terrain] = true; }
+        }
         static void HousePad(ulong seed, Pad p, Settings st, int terrain)
         {
             lock (p)
@@ -869,13 +937,18 @@ namespace Sting.Core
             Num h = NaturalGround(seed, x, z, st, terrain, T.terrain.octaves);
             Num M = T.terrain.grade.reach; int GO = T.terrain.grade.oct;
             int c0x = ChunkOf(x - M), c1x = ChunkOf(x + M), c0z = ChunkOf(z - M), c1z = ChunkOf(z + M);
-            for (int cz = c0z; cz <= c1z; cz++) for (int cx = c0x; cx <= c1x; cx++)
+            bool late = false; // urban courts and lots (S6) go last, whatever chunk they are in (world.js)
+            for (int pass = 0; pass < 2 && (pass == 0 || late); pass++)
+                for (int cz = c0z; cz <= c1z; cz++) for (int cx = c0x; cx <= c1x; cx++)
                     foreach (var p in PadsOf(seed, cx, cz, st))
                     {
-                        if (p.k >= 5) HousePad(seed, p.k == 6 ? p.pad : p, st, terrain);
+                        if ((p.k == 7 || p.k == 8) != (pass == 1)) { if (pass == 0) late = true; continue; }
+                        if (p.k == 5 || p.k == 6) HousePad(seed, p.k == 6 ? p.pad : p, st, terrain);
                         else if (p.k == 0 || p.k == 2) StreetBank(seed, p, st, terrain);
-                        Num pm = p.k >= 5 || p.k == 0 || p.k == 2 ? p.mT[terrain] : p.m;
-                        if (p.k >= 5 && p.sg * (z - p.zw) < 0) continue; // not past the sidewalk
+                        else if (p.k == 7) UrbanPad(seed, p, st, terrain);
+                        else if (p.k == 8) { lock (p) { if (!p.tSet[terrain]) { Num lo = Num.MaxValue; foreach (var r in p.rows) { UrbanPad(seed, r, st, terrain); lo = Min(lo, r.hT[terrain]); } p.hT[terrain] = lo; p.tSet[terrain] = true; } } }
+                        Num pm = p.k == 5 || p.k == 6 || p.k == 0 || p.k == 2 ? p.mT[terrain] : p.m;
+                        if ((p.k == 5 || p.k == 6) && p.sg * (z - p.zw) < 0) continue; // not past the sidewalk
                         Num d;
                         if (p.k == 2 || p.k == 4) d = Max(0, Sqrt((x - p.x) * (x - p.x) + (z - p.z) * (z - p.z)) - p.r);
                         else { Num dx = Max(Max(p.minx - x, 0), x - p.maxx), dz = Max(Max(p.minz - z, 0), z - p.maxz); d = Sqrt(dx * dx + dz * dz); }
@@ -883,7 +956,7 @@ namespace Sting.Core
                         Num hp;
                         if (p.k == 0 || p.k == 2) hp = StreetAt(seed, x, p.hz, st, terrain);
                         else if (p.k == 3) hp = NaturalGround(seed, x, z, st, terrain, GO);
-                        else if (p.k == 5) hp = p.hT[terrain];
+                        else if (p.k == 5 || p.k == 7 || p.k == 8) hp = p.hT[terrain];
                         else if (p.k == 6) { Num f = Max(0, Min(1, (z - p.zw) / (p.zf - p.zw))), w0 = StreetAt(seed, x, p.z0, st, terrain); hp = w0 + (p.pad.hT[terrain] - w0) * f; }
                         else { lock (p) { if (!p.hSet) { p.h = NaturalGround(seed, p.hx, p.hz, st, 1, GO); p.hSet = true; } } hp = p.h * terrain; }
                         Num w = 1 - Smooth(d / pm);
@@ -1042,6 +1115,59 @@ namespace Sting.Core
                     c.boxes.Add(new Box { minx = Min(x0, x1) - t, maxx = Max(x0, x1) + t, miny = 0, maxy = fh, minz = Min(z0, z1) - t, maxz = Max(z0, z1) + t, wood = true, fence = true });
                 }
             }
+            // an urban block (world.js addUrban, S6): the street, the rows on their pads, walls, stairs, courts
+            void AddUrban()
+            {
+                bool endW = !Streets(LandUse(seed, cx - 1, cz, st)), endE = !Streets(LandUse(seed, cx + 1, cz, st));
+                c.roads.Add(new Rect { minx = ox + (endW ? -22 : -32), maxx = ox + (endE ? 22 : 32), minz = oz - 4, maxz = oz + 4 });
+                if (endW) c.loops.Add(new Loop { x = ox - 22, z = oz, r = 11 });
+                if (endE) c.loops.Add(new Loop { x = ox + 22, z = oz, r = 11 });
+                occupied.Add(new Occ { x = ox, z = oz, r = 4 });
+                int terrain = st != null ? st.terrain : 0;
+                Num Gb(Num x, Num z) => terrain != 0 ? GroundBase(seed, x, z, st, terrain) : 0;
+                void Bx(Num minx, Num maxx, Num miny, Num maxy, Num minz, Num maxz, bool row = false, bool wall = false, bool retain = false, bool step = false, bool back = false)
+                    => c.boxes.Add(new Box { minx = Min(minx, maxx), maxx = Max(minx, maxx), miny = miny, maxy = maxy, minz = Min(minz, maxz), maxz = Max(minz, maxz), wood = false, row = row, wall = wall, retain = retain, step = step, back = back });
+                var plan = UrbanBuildings(H, ox, UrbanMain(seed, cx, cz, st));
+                foreach (int s in new[] { -1, 1 })
+                {
+                    var L = UrbanLines(oz, s); Num court = Gb(ox, (L.zD + L.zE) / 2), xa = ox - UrbLot * UrbLots / 2, xb = ox + UrbLot * UrbLots / 2;
+                    foreach (var b in plan)
+                    {
+                        if (b.s != s) continue;
+                        Num h = b.storeys * 3 + 0.4, xm = (b.x0 + b.x1) / 2;
+                        c.rows.Add(new Row { x0 = b.x0, x1 = b.x1, zF = L.zF, zB = L.zB, s = s, h = h, storeys = b.storeys, c = b.c, shop = b.shop, mid = b.mid });
+                        Bx(b.x0 + 0.05, b.x1 - 0.05, 0, h, L.zF, L.zB, row: true);
+                        Bx(b.x0 + 0.05, xm - 0.8, 0, UrbLow, L.zA + s * 0.05, L.zA + s * 0.35, wall: true);
+                        Bx(xm + 0.8, b.x1 - 0.05, 0, UrbLow, L.zA + s * 0.05, L.zA + s * 0.35, wall: true);
+                        var ends = b.x1 >= xb - 1e-9 ? new[] { (b.x0 + 0.05, b.x0 + 0.3), (b.x1 - 0.3, b.x1 - 0.05) } : new[] { (b.x0 + 0.05, b.x0 + 0.3) };
+                        foreach (var (xw0, xw1) in ends)
+                        {
+                            Bx(xw0, xw1, 0, UrbLow, L.zA + s * 0.35, L.zF, wall: true);
+                            Bx(xw0, xw1, 0, 1.2, L.zB, L.zD - s * 0.05, wall: true);
+                        }
+                        Num drop = Gb(xm, (L.zF + L.zB) / 2) - court;
+                        if (drop > 0.3)
+                        {
+                            int n = (int)Ceil(drop / UrbStep); Num rise = drop / n, zw0 = L.zD + s * 0.1, zw1 = zw0 + s * UrbWall, half = UrbStairW / 2;
+                            Bx(b.x0 + 0.05, xm - half, 0, drop + 1, zw0, zw1, wall: true, retain: true);
+                            Bx(xm + half, b.x1 - 0.05, 0, drop + 1, zw0, zw1, wall: true, retain: true);
+                            Bx(xm - half, xm + half, 0, drop, L.zD + s * 0.05, zw1, step: true);
+                            for (int k = 1; k < n; k++) Bx(xm - half, xm + half, 0, drop - k * rise, zw1 + s * (k - 1) * UrbRun, zw1 + s * k * UrbRun, step: true);
+                            c.stairs.Add(new Stair { x = xm, z = zw1, s = s, n = n, rise = rise, drop = drop });
+                        }
+                    }
+                    Bx(ox - 32, ox + 32, 0, UrbBack, L.zE - s * 0.35, L.zE - s * 0.05, wall: true, back: true);
+                    Num cm = (L.zD + L.zE) / 2 + s * 1.5; long slot = s < 0 ? 8100 : 8600;
+                    occupied.Add(new Occ { x = ox, z = (L.zD + L.zE) / 2, r = 1 });
+                    foreach (var q in c.stairs) if (q.s == s) occupied.Add(new Occ { x = q.x, z = q.z + s * q.n * UrbRun / 2, r = q.n * UrbRun / 2 + 1 });
+                    for (int k = 0; k < 2; k++) { Num x = ox + Range(H(slot + k * 2), -26, 26), z = cm + Range(H(slot + 1 + k * 2), -2.5, 2.5); if (Free(x, z, 3)) { AddTree(x, z, slot + 20 + k * 4); occupied.Add(new Occ { x = x, z = z, r = 2 }); } }
+                    if (Unit(H(slot + 40)) < 0.6) { Num x = ox + Range(H(slot + 41), -20, 20); if (Free(x, cm, 2.5)) AddPicnic(x, cm, true, RangeInt(H(slot + 42), 1, 64) | 1, slot + 60); }
+                    if (Unit(H(slot + 200)) < 0.7) { Num x = ox + Range(H(slot + 201), -24, 24); if (Free(x, cm - s * 3, 1.5)) AddFlowers(x, cm - s * 3, slot + 210); }
+                }
+                Num x0s = ox + (endW ? -18 : -30), x1s = ox + (endE ? 18 : 30);
+                if (Unit(H(8900)) < 0.8) AddActor(8910, x0s, oz - 5.2, 1, 0, "stand", "stroll", new[] { x0s, oz - 5.2, x1s, oz - 5.2, x1s, oz + 5.2, x0s, oz + 5.2 });
+                if (Unit(H(8950)) < 0.5) AddActor(8960, x1s, oz + 5.2, -1, 0, "stand", "stroll", new[] { x1s, oz + 5.2, x0s, oz + 5.2, x0s, oz - 5.2, x1s, oz - 5.2 });
+            }
             // farmland (world.js addFarm, S5): fields in hedgerows, a gravel lane through every other row, now and then a farmstead
             void AddFarm()
             {
@@ -1106,7 +1232,7 @@ namespace Sting.Core
             // suburban yards (see world.js addYards)
             void AddYards()
             {
-                bool endW = LandUse(seed, cx - 1, cz, st) != "yards", endE = LandUse(seed, cx + 1, cz, st) != "yards";
+                bool endW = !Streets(LandUse(seed, cx - 1, cz, st)), endE = !Streets(LandUse(seed, cx + 1, cz, st));
                 c.roads.Add(new Rect { minx = ox + (endW ? -22 : -32), maxx = ox + (endE ? 22 : 32), minz = oz - 4, maxz = oz + 4 });
                 if (endW) c.loops.Add(new Loop { x = ox - 22, z = oz, r = 11 });
                 if (endE) c.loops.Add(new Loop { x = ox + 22, z = oz, r = 11 });
@@ -1263,6 +1389,7 @@ namespace Sting.Core
             }
             else if ((c.use = LandUse(seed, cx, cz, st)) == "yards") AddYards();
             else if (c.use == "farm") AddFarm();
+            else if (c.use == "urban") AddUrban();
             else if (c.use == "mall") AddMall();
             else if (c.use == "town") AddTown();
             else if (c.use == "wild") // wild land past the settled area (GDD 21.6): trees where the wild forest stands, meadow flowers
@@ -1320,7 +1447,7 @@ namespace Sting.Core
             }
             // trees: a few in a park, yard trees, dense at the forest edge, hardly any by a mall
             bool forest = c.use == "forest";
-            int nt = c.use == "wild" ? 0 : c.use == "farm" ? RangeInt(H(2004), 1, 5) : forest ? RangeInt(H(2000), 16, 26) : c.use == "yards" ? RangeInt(H(2001), 1, 4) : c.use == "mall" ? RangeInt(H(2002), 0, 3) : c.use == "town" ? RangeInt(H(2003), 0, 3) : RangeInt(H(11), isOrigin ? 3 : 2, isOrigin ? 6 : 8);
+            int nt = c.use == "wild" || c.use == "urban" ? 0 : c.use == "farm" ? RangeInt(H(2004), 1, 5) : forest ? RangeInt(H(2000), 16, 26) : c.use == "yards" ? RangeInt(H(2001), 1, 4) : c.use == "mall" ? RangeInt(H(2002), 0, 3) : c.use == "town" ? RangeInt(H(2003), 0, 3) : RangeInt(H(11), isOrigin ? 3 : 2, isOrigin ? 6 : 8);
             for (int i = 0; i < nt; i++)
             {
                 Num x = ox + Range(H(150 + i * 4), -30, 30), z = oz + Range(H(151 + i * 4), -30, 30);

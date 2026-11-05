@@ -50,7 +50,7 @@ namespace Sting.Core
     {
         public const int TICK_RATE = 60;
         public static readonly Num DT = 1.0 / TICK_RATE;
-        public const int GEN_VERSION = 16; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11); 6: birdbaths (T2-1); 7: town centres (T2-5); 8: ponds; 9: a pond beside the home park; 10: lobed ponds with a path, benches and a walker; 11: footings under small things; 12: streets, house pads and front yards graded to code; 13: wild land round a settled area; 14: no hive near the first nest; 15: garages, drives and porch steps; 16: farmland round a village
+        public const int GEN_VERSION = 17; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11); 6: birdbaths (T2-1); 7: town centres (T2-5); 8: ponds; 9: a pond beside the home park; 10: lobed ponds with a path, benches and a walker; 11: footings under small things; 12: streets, house pads and front yards graded to code; 13: wild land round a settled area; 14: no hive near the first nest; 15: garages, drives and porch steps; 16: farmland round a village; 17: urban blocks round a town square
 
         public static Num population = 8200000000;
         public static class chunk { public static Num size = 64; public static int activeRadius = 1, discoverRadius = 2; }
@@ -220,7 +220,7 @@ namespace Sting.Core
             public static Num amp = 1.9, cell = 60, warp = 0.5, ridge = 0, terrace = 0, terraceStep = 0.5, flatR = 14, rise = 24, sightStep = 4;
             public static int octaves = 5, poolTries = 3;
             public static class grade { public static int oct = 2; public static Num walk = 1.6, road = 3, lot = 3, house = 2.5, shed = 1, apron = 0.3, pond = 3, reach = 3, street = 0.1, node = 8, window = 64, drive = 0.15, bank = 9; }
-            public static class roll { public static Num park = 1, forest = 1, yards = 0.45, mall = 0.12, town = 0.1, farm = 1; }
+            public static class roll { public static Num park = 1, forest = 1, yards = 0.45, mall = 0.12, town = 0.1, farm = 1, urban = 0.1; }
         }
         public static class fruit { public static Num treeShare = 0.3, startFrac = 0.55, rate = 0.8, spread = 1.6; public static int perTree = 6, rotDays = 6; }
         public static class muni

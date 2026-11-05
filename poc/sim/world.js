@@ -213,6 +213,16 @@ export function buildList(c) {
     part(0, 5, '#4e4b52', mx, g.h + 0.06, mz, w + 0.2, 0.12, d + 0.2, false);
     part(0, 5, '#d9d4c7', mx, 1.1, g.zf - g.s * 0.02, w - 0.8, 2.2, 0.06, false);
   }
+  for (const r of c.rows) { // an urban building (S6): plastered with a shopfront below, or sided with a door; a flat roof and cornice
+    const w = r.x1 - r.x0 - 0.1, d = Math.abs(r.zB - r.zF), xm = (r.x0 + r.x1) / 2, zm = (r.zF + r.zB) / 2, col = URBAN_COLORS[r.c];
+    part(0, r.shop ? 1 : 0, col, xm, r.h / 2, zm, w, r.h, d, false, { top: r.h, wb: [xm, zm, w / 2, d / 2] });
+    part(0, 5, '#5a5652', xm, r.h + 0.06, zm, w, 0.12, d, false);
+    part(0, 5, '#77706a', xm, r.h - 0.15, zm, w + 0.12, 0.3, d + 0.12, false);
+    if (r.shop) part(0, 5, AWNINGS[r.c % AWNINGS.length], xm, 2.75, r.zF - r.s * 0.45, w - 0.4, 0.12, 0.9, false);
+    else part(0, 5, '#4a3328', xm, 1.05, r.zF - r.s * 0.02, 1.0, 2.1, 0.06, false);
+  }
+  for (const b of c.boxes) if (b.wall || b.step) // walls (low garden walls, retaining walls, a court's back wall) and stairs
+    part(0, 5, b.step ? '#b9b4a8' : b.back ? '#8f5a46' : b.retain ? '#9a9284' : '#a39b8e', (b.minx + b.maxx) / 2, b.maxy / 2, (b.minz + b.maxz) / 2, b.maxx - b.minx, b.maxy, b.maxz - b.minz, !b.back && !b.retain);
   for (const b of c.boxes) if (b.hedge) { // a hedgerow section: a blocky bush, its shade varying along the row
     const k = Math.abs(Math.floor(b.minx * 0.37 + b.minz * 0.61)) % 3;
     part(0, 5, ['#3b5a2a', '#46652f', '#355024'][k], (b.minx + b.maxx) / 2, b.maxy / 2, (b.minz + b.maxz) / 2, b.maxx - b.minx, b.maxy, b.maxz - b.minz, false);
@@ -403,6 +413,17 @@ function padsOf(seed, cx, cz, settings) {
     if (road) ramps.push(pad.ramp = { k: 6, minx: x0, maxx: x1, minz: Math.min(zw, zf), maxz: Math.max(zw, zf), m: Gr.house, zw, zf, sg: s, z0: pad.z0, pad, t: 0 });
   }
   P.push(...ramps); // the front yards last; neither a pad nor a ramp reaches past the sidewalk, which stays level across
+  // an urban block (S6): each side's courtyard (8) level at its lowest building pad, then each building's pad (7) at the
+  // street's height before it, last so it is level to its edges (a court's shoulder never reaches into a lot)
+  if (c.rows.length) {
+    const z0 = (c.roads[0].minz + c.roads[0].maxz) / 2, U = URBAN, ox = cx * CS;
+    for (const s of [-1, 1]) {
+      const L = urbanLines(z0, s), rows = [];
+      for (const b of c.rows) if (b.s === s) rows.push({ k: 7, minx: b.x0, maxx: b.x1, minz: Math.min(L.zA, L.zD), maxz: Math.max(L.zA, L.zD), m: U.mr, hx: (b.x0 + b.x1) / 2, hz: (L.zA + L.zD) / 2, z0, h: null, t: 0 });
+      P.push({ k: 8, minx: ox - U.lot * U.lots / 2, maxx: ox + U.lot * U.lots / 2, minz: Math.min(L.zD, L.zE), maxz: Math.max(L.zD, L.zE), m: U.m, hx: ox, hz: (L.zD + L.zE) / 2, rows, h: null, t: 0 });
+      P.push(...rows);
+    }
+  }
   pads.set(key, P);
   return P;
 }
@@ -473,15 +494,18 @@ export function pavingOf(seed, cx, cz, settings) {
 }
 function makePaving(seed, cx, cz, settings) {
   const H = (slot) => hash(seed, Domain.WorldGen, u64(cx), u64(cz), BigInt(slot)), ox = cx * CS, oz = cz * CS;
-  const out = { roads: [], loops: [], lots: [], plazas: [], malls: [], shops: [], houses: [], ponds: [], drives: [] };
+  const out = { roads: [], loops: [], lots: [], plazas: [], malls: [], shops: [], houses: [], ponds: [], drives: [], rows: [] };
   if (cx === 0 && cz === 0) return out;
   out.ponds = pondsOf(seed, cx, cz, settings);
   const use = landUse(seed, cx, cz, settings);
-  if (use === 'yards') {
-    const endW = landUse(seed, cx - 1, cz, settings) !== 'yards', endE = landUse(seed, cx + 1, cz, settings) !== 'yards';
+  if (use === 'yards' || use === 'urban') {
+    const endW = !streets(landUse(seed, cx - 1, cz, settings)), endE = !streets(landUse(seed, cx + 1, cz, settings));
     out.roads.push({ minx: ox + (endW ? -22 : -32), maxx: ox + (endE ? 22 : 32), minz: oz - 4, maxz: oz + 4 });
     if (endW) out.loops.push({ x: ox - 22, z: oz, r: 11 });
     if (endE) out.loops.push({ x: ox + 22, z: oz, r: 11 });
+  }
+  if (use === 'urban') out.rows = urbanBuildings(H, ox, urbanMain(seed, cx, cz, settings));
+  else if (use === 'yards') {
     for (let li = 0; li < 4; li++) {
       const s = li < 2 ? -1 : 1, lx = ox + (li % 2 ? 16 : -16), base = 3000 + li * 2000;
       if (unit(H(base)) < 0.9) {
@@ -670,11 +694,15 @@ function footing(seed, p, settings, terrain) {
 function groundBase(seed, x, z, settings, terrain) {
   let h = naturalGround(seed, x, z, settings, terrain, T.terrain.octaves);
   const Gr = T.terrain.grade, M = Gr.reach, c0x = chunkOf(x - M), c1x = chunkOf(x + M), c0z = chunkOf(z - M), c1z = chunkOf(z + M);
-  for (let cz = c0z; cz <= c1z; cz++) for (let cx = c0x; cx <= c1x; cx++) {
+  let late = null; // urban courts and lots (S6) go last, whatever chunk they are in: no other pad's shoulder reaches into them
+  for (let pass = 0; pass < 2 && (pass === 0 || late); pass++) for (let cz = c0z; cz <= c1z; cz++) for (let cx = c0x; cx <= c1x; cx++) {
     for (const p of padsOf(seed, cx, cz, settings)) {
-      if (p.k >= 5 && p.t !== terrain) housePad(seed, p.k === 6 ? p.pad : p, settings, terrain); // a house's pad and its ramp, worked out once per step of the modifier
+      if ((p.k === 7 || p.k === 8) !== (pass === 1)) { if (pass === 0) late = true; continue; }
+      if ((p.k === 5 || p.k === 6) && p.t !== terrain) housePad(seed, p.k === 6 ? p.pad : p, settings, terrain); // a house's pad and its ramp, worked out once per step of the modifier
+      else if (p.k === 7 && p.t !== terrain) { p.h = streetAt(seed, p.hx, p.z0, settings, terrain); p.t = terrain; } // an urban building's pad: the street's height before it
+      else if (p.k === 8 && p.t !== terrain) { let lo = Infinity; for (const r of p.rows) { if (r.t !== terrain) { r.h = streetAt(seed, r.hx, r.z0, settings, terrain); r.t = terrain; } lo = Math.min(lo, r.h); } p.h = lo; p.t = terrain; } // a court: at its side's lowest pad
       else if ((p.k === 0 || p.k === 2) && p.t !== terrain) streetBank(seed, p, settings, terrain);
-      if (p.k >= 5 && p.sg * (z - p.zw) < 0) continue; // not past the sidewalk
+      if ((p.k === 5 || p.k === 6) && p.sg * (z - p.zw) < 0) continue; // not past the sidewalk
       let d;
       if (p.k === 2 || p.k === 4) d = Math.max(0, Math.sqrt((x - p.x) * (x - p.x) + (z - p.z) * (z - p.z)) - p.r);
       else { const dx = Math.max(p.minx - x, 0, x - p.maxx), dz = Math.max(p.minz - z, 0, z - p.maxz); d = Math.sqrt(dx * dx + dz * dz); }
@@ -682,7 +710,7 @@ function groundBase(seed, x, z, settings, terrain) {
       let hp;
       if (p.k === 0 || p.k === 2) hp = streetAt(seed, x, p.hz, settings, terrain); // a street and its cul-de-sac, within their grade
       else if (p.k === 3) hp = naturalGround(seed, x, z, settings, terrain, Gr.oct);
-      else if (p.k === 5) hp = p.h;
+      else if (p.k === 5 || p.k === 7 || p.k === 8) hp = p.h;
       else if (p.k === 6) { const f = Math.max(0, Math.min(1, (z - p.zw) / (p.zf - p.zw))), w0 = streetAt(seed, x, p.z0, settings, terrain); hp = w0 + (p.pad.h - w0) * f; } // the front yard: a straight ramp from the sidewalk
       else { if (p.h === null) p.h = naturalGround(seed, p.hx, p.hz, settings, 1, Gr.oct); hp = p.h * terrain; } // kept per step of the modifier
       let w = 1 - smooth(d / p.m);
@@ -750,6 +778,35 @@ export function landUse(seed, cx, cz, settings) {
   const m = worldTables(seed, settings).use, k = cellKey(cx, cz), v = m.get(k);
   return v !== undefined ? v : keep(m, k, makeLandUse(seed, cx, cz, settings));
 }
+// Urban blocks (GDD 21.2 urban, S6): round a town square, a street along x through each chunk (continuing the yards'),
+// lined both sides by row houses and now and then a mid-rise, at the sidewalk with party walls; shops on the ground floor
+// along a main street (a block beside the square); a courtyard behind each row. Each building stands on its own level
+// pad at the street's height before it, so a row steps down a sloping street; a courtyard is level at its side's lowest
+// pad, and every pad above it is held by a retaining wall with stairs down into the court; a low wall fronts each lot.
+export const URBAN = { lot: 7.5, lots: 8, setback: 1, depth: 11, rear: 2.2, m: 0.6, mr: 0.05, wall: 0.3, step: 0.18, run: 0.28, stairW: 1.2, low: 0.45, back: 2.2, main: 1, mid: 0.6, shop: 0.25 };
+const URBAN_COLORS = ['#b5654a', '#c9b49a', '#a8553f', '#d8cdb8', '#8f5a46', '#cfc2a6'];
+export { URBAN_COLORS };
+const streets = (u) => u === 'yards' || u === 'urban'; // a street runs on through these
+// the buildings of an urban chunk's two rows: x0..x1 along the street, side s, storeys, colour, a shop on the ground floor
+export function urbanBuildings(H, ox, main) {
+  const U = URBAN, out = [];
+  for (const s of [-1, 1]) {
+    const base = s < 0 ? 8000 : 8500, mid = unit(H(base)) < U.mid ? rangeInt(H(base + 1), 0, U.lots - 2) : -1;
+    for (let k = 0; k < U.lots; k++) {
+      const big = k === mid, n = big ? 3 : 1, x0 = ox - U.lot * U.lots / 2 + k * U.lot, x1 = x0 + n * U.lot;
+      out.push({ x0, x1, s, storeys: big ? rangeInt(H(base + 10 + k), 4, 6) : rangeInt(H(base + 10 + k), 2, 4), c: rangeInt(H(base + 30 + k), 0, URBAN_COLORS.length),
+        shop: main || unit(H(base + 50 + k)) < U.shop, mid: big });
+      if (big) k += 2;
+    }
+  }
+  return out;
+}
+// the z lines of an urban row on side s: the sidewalk's outer edge, the building's front and back, the pad's back edge
+export function urbanLines(oz, s) {
+  const U = URBAN, a = 4 + T.terrain.grade.walk, f = a + U.setback, b = f + U.depth, e = b + U.rear;
+  return { zA: oz + s * a, zF: oz + s * f, zB: oz + s * b, zD: oz + s * e, zE: oz + s * 32 };
+}
+const urbanMain = (seed, cx, cz, settings) => [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => townQuarter(seed, cx + dx, cz + dz, settings));
 // Farmland (GDD 21.2 rural, S5): the outer RURAL.ring m of a settled area, never nearer the home tree than RURAL.inner
 // m; fields in hedgerows, a gravel lane along every other row of chunks, now and then a farmstead off it
 export const RURAL = { ring: 128, inner: 192, lane: 5.5, hedge: 1.2, hedgeH: 1.7, gate: 4, stead: 0.35, plinth: 1.5, steep: 1 / 3, max: 0.35 };
@@ -762,7 +819,10 @@ function makeLandUse(seed, cx, cz, settings) {
   }
   const R = regionOf(cx, cz);
   if (townQuarter(seed, cx, cz, settings)) return 'town';
-  return baseUse(regionLayout(seed, R.rx, R.rz, settings), R.lx, R.lz);
+  const base = baseUse(regionLayout(seed, R.rx, R.rz, settings), R.lx, R.lz);
+  // the urban blocks round a town square (S6): yards beside a town centre, never beside the home park
+  if (base === 'yards' && (Math.abs(cx) > 1 || Math.abs(cz) > 1)) for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) if ((dx || dz) && townQuarter(seed, cx + dx, cz + dz, settings)) return 'urban';
+  return base;
 }
 // which way a strip mall faces out of its region: 0 -z, 1 +x, 2 +z, 3 -x
 export function mallSide(seed, cx, cz, settings) {
@@ -776,7 +836,7 @@ export function generateChunk(seed, cx, cz, settings) {
   const c = {
     cx, cz, tint: unit(H(0)), trees: [], tables: [], benches: [], cans: [], flowers: [], caterpillars: [], flies: [],
     humans: [], boxes: [], cylinders: [], sugar: [], hives: [], traps: [], nest: null,
-    webs: [], birds: [], rival: null, sheds: [], dragonflies: [], garages: [], drives: [], porches: [], lanes: [], farmyards: [],
+    webs: [], birds: [], rival: null, sheds: [], dragonflies: [], garages: [], drives: [], porches: [], lanes: [], farmyards: [], rows: [], stairs: [],
     use: 'park', roads: [], loops: [], lots: [], malls: [], // T1-12: land use, streets, cul-de-sacs, parking lots, mall buildings
     baths: [], // T2-1: birdbaths
     plazas: [], shops: [], gardens: [], // T2-5: a town centre's paving, its shop buildings, its beer garden
@@ -892,7 +952,7 @@ export function generateChunk(seed, cx, cz, settings) {
   // lots each side, a house set back from the sidewalk, a fenced backyard with maybe a patio table, a flower bed, a
   // shed, a tree, a bee box
   const addYards = () => {
-    const endW = landUse(seed, cx - 1, cz, settings) !== 'yards', endE = landUse(seed, cx + 1, cz, settings) !== 'yards';
+    const endW = !streets(landUse(seed, cx - 1, cz, settings)), endE = !streets(landUse(seed, cx + 1, cz, settings));
     c.roads.push({ minx: ox + (endW ? -22 : -32), maxx: ox + (endE ? 22 : 32), minz: oz - 4, maxz: oz + 4 });
     if (endW) c.loops.push({ x: ox - 22, z: oz, r: 11 });
     if (endE) c.loops.push({ x: ox + 22, z: oz, r: 11 });
@@ -938,6 +998,57 @@ export function generateChunk(seed, cx, cz, settings) {
     const x0 = ox + (endW ? -18 : -30), x1 = ox + (endE ? 18 : 30);
     if (unit(H(2500)) < 0.6) addActor(2510, x0, oz - 5.2, 1, 0, 'stand', 'stroll', [x0, oz - 5.2, x1, oz - 5.2, x1, oz + 5.2, x0, oz + 5.2]);
     if (unit(H(2600)) < 0.3) addActor(2610, x1, oz + 5.2, -1, 0, 'stand', 'stroll', [x1, oz + 5.2, x0, oz + 5.2, x0, oz - 5.2, x1, oz - 5.2]);
+  };
+  // An urban block (GDD 21.2 urban, S6; URBAN): the street, the two rows on their pads, the low front walls, the
+  // retaining walls and stairs down to each courtyard, the court's back wall, and what the courts hold
+  const addUrban = () => {
+    const U = URBAN, endW = !streets(landUse(seed, cx - 1, cz, settings)), endE = !streets(landUse(seed, cx + 1, cz, settings));
+    c.roads.push({ minx: ox + (endW ? -22 : -32), maxx: ox + (endE ? 22 : 32), minz: oz - 4, maxz: oz + 4 });
+    if (endW) c.loops.push({ x: ox - 22, z: oz, r: 11 });
+    if (endE) c.loops.push({ x: ox + 22, z: oz, r: 11 });
+    occupied.push({ x: ox, z: oz, r: 4 });
+    const terrain = settings ? settings.terrain || 0 : 0, gb = (x, z) => terrain ? groundBase(seed, x, z, settings, terrain) : 0;
+    const box = (minx, maxx, miny, maxy, minz, maxz, o) => c.boxes.push({ minx: Math.min(minx, maxx), maxx: Math.max(minx, maxx), miny, maxy, minz: Math.min(minz, maxz), maxz: Math.max(minz, maxz), wood: false, ...o });
+    for (const s of [-1, 1]) {
+      const L = urbanLines(oz, s), court = gb(ox, (L.zD + L.zE) / 2), xa = ox - U.lot * U.lots / 2, xb = ox + U.lot * U.lots / 2;
+      for (const b of urbanBuildings(H, ox, urbanMain(seed, cx, cz, settings))) {
+        if (b.s !== s) continue;
+        const h = b.storeys * 3 + 0.4, xm = (b.x0 + b.x1) / 2;
+        c.rows.push({ x0: b.x0, x1: b.x1, zF: L.zF, zB: L.zB, s, h, storeys: b.storeys, c: b.c, shop: b.shop, mid: b.mid });
+        box(b.x0 + 0.05, b.x1 - 0.05, 0, h, L.zF, L.zB, { row: true });
+        // the low wall at the sidewalk, open at the door; walls between the lots' front gardens and back yards, each on
+        // its own pad (a lot steps from the next at their party wall); the row's ends walled the same
+        box(b.x0 + 0.05, xm - 0.8, 0, U.low, L.zA + s * 0.05, L.zA + s * 0.35, { wall: true });
+        box(xm + 0.8, b.x1 - 0.05, 0, U.low, L.zA + s * 0.05, L.zA + s * 0.35, { wall: true });
+        for (const [xw0, xw1] of b.x1 >= xb - 1e-9 ? [[b.x0 + 0.05, b.x0 + 0.3], [b.x1 - 0.3, b.x1 - 0.05]] : [[b.x0 + 0.05, b.x0 + 0.3]]) {
+          box(xw0, xw1, 0, U.low, L.zA + s * 0.35, L.zF, { wall: true });
+          box(xw0, xw1, 0, 1.2, L.zB, L.zD - s * 0.05, { wall: true });
+        }
+        // the pad above the court: a retaining wall at its edge on the court's side, a flight of stairs down through it
+        const drop = gb(xm, (L.zF + L.zB) / 2) - court;
+        if (drop > 0.3) {
+          const n = Math.ceil(drop / U.step), rise = drop / n, zw0 = L.zD + s * 0.1, zw1 = zw0 + s * U.wall, half = U.stairW / 2;
+          box(b.x0 + 0.05, xm - half, 0, drop + 1, zw0, zw1, { wall: true, retain: true });
+          box(xm + half, b.x1 - 0.05, 0, drop + 1, zw0, zw1, { wall: true, retain: true });
+          box(xm - half, xm + half, 0, drop, L.zD + s * 0.05, zw1, { step: true }); // the landing through the wall, at the pad's height
+          for (let k = 1; k < n; k++) box(xm - half, xm + half, 0, drop - k * rise, zw1 + s * (k - 1) * U.run, zw1 + s * k * U.run, { step: true });
+          c.stairs.push({ x: xm, z: zw1, s, n, rise, drop });
+        }
+      }
+      // the court: its back wall, a tree or two, a table, flowers, someone sitting out
+      box(ox - 32, ox + 32, 0, U.back, L.zE - s * 0.35, L.zE - s * 0.05, { wall: true, back: true });
+      const cm = (L.zD + L.zE) / 2 + s * 1.5, slot = s < 0 ? 8100 : 8600;
+      occupied.push({ x: ox, z: (L.zD + L.zE) / 2, r: 1 });
+      for (const q of c.stairs) if (q.s === s) occupied.push({ x: q.x, z: q.z + s * q.n * U.run / 2, r: q.n * U.run / 2 + 1 });
+      for (let k = 0; k < 2; k++) { const x = ox + range(H(slot + k * 2), -26, 26), z = cm + range(H(slot + 1 + k * 2), -2.5, 2.5); if (free(x, z, 3)) { addTree(x, z, slot + 20 + k * 4); occupied.push({ x, z, r: 2 }); } }
+      if (unit(H(slot + 40)) < 0.6) { const x = ox + range(H(slot + 41), -20, 20); if (free(x, cm, 2.5)) addPicnic(x, cm, true, rangeInt(H(slot + 42), 1, 64) | 1, slot + 60); }
+      if (unit(H(slot + 200)) < 0.7) { const x = ox + range(H(slot + 201), -24, 24); if (free(x, cm - s * 3, 1.5)) addFlowers(x, cm - s * 3, slot + 210); }
+      void xa; void xb;
+    }
+    // people out along the street, both sidewalks
+    const x0 = ox + (endW ? -18 : -30), x1 = ox + (endE ? 18 : 30);
+    if (unit(H(8900)) < 0.8) addActor(8910, x0, oz - 5.2, 1, 0, 'stand', 'stroll', [x0, oz - 5.2, x1, oz - 5.2, x1, oz + 5.2, x0, oz + 5.2]);
+    if (unit(H(8950)) < 0.5) addActor(8960, x1, oz + 5.2, -1, 0, 'stand', 'stroll', [x1, oz + 5.2, x0, oz + 5.2, x0, oz - 5.2, x1, oz - 5.2]);
   };
   // Farmland (GDD 21.2 rural, S5): fields in hedgerows (blocky bushes 1.7 m high along each chunk's west and north edges,
   // a gate gap in each, open where a lane passes), a gravel lane along x through every other row of chunks, and in about
@@ -1089,6 +1200,7 @@ export function generateChunk(seed, cx, cz, settings) {
     addFlowers(3, -5, 480);
   } else if ((c.use = landUse(seed, cx, cz, settings)) === 'yards') addYards();
   else if (c.use === 'farm') addFarm();
+  else if (c.use === 'urban') addUrban();
   else if (c.use === 'mall') addMall();
   else if (c.use === 'town') addTown();
   else if (c.use === 'wild') { // wild land past the settled area (GDD 21.6): trees where the wild forest stands, meadow flowers, nothing built
@@ -1134,7 +1246,7 @@ export function generateChunk(seed, cx, cz, settings) {
     for (let i = 0; i < np; i++) addFlowers(ox + range(H(20 + i), -28, 28), oz + range(H(40 + i), -28, 28), 400 + i * 80);
   }
   // trees: a few in a park, yard trees, dense at the forest edge, hardly any by a mall
-  const nt = c.use === 'wild' ? 0 : c.use === 'farm' ? rangeInt(H(2004), 1, 5) : c.use === 'forest' ? rangeInt(H(2000), 16, 26) : c.use === 'yards' ? rangeInt(H(2001), 1, 4) : c.use === 'mall' ? rangeInt(H(2002), 0, 3) : c.use === 'town' ? rangeInt(H(2003), 0, 3) : rangeInt(H(11), isOrigin ? 3 : 2, isOrigin ? 6 : 8);
+  const nt = c.use === 'wild' || c.use === 'urban' ? 0 : c.use === 'farm' ? rangeInt(H(2004), 1, 5) : c.use === 'forest' ? rangeInt(H(2000), 16, 26) : c.use === 'yards' ? rangeInt(H(2001), 1, 4) : c.use === 'mall' ? rangeInt(H(2002), 0, 3) : c.use === 'town' ? rangeInt(H(2003), 0, 3) : rangeInt(H(11), isOrigin ? 3 : 2, isOrigin ? 6 : 8);
   for (let i = 0; i < nt; i++) {
     const x = ox + range(H(150 + i * 4), -30, 30), z = oz + range(H(151 + i * 4), -30, 30);
     if (free(x, z, c.use === 'forest' ? 1.5 : 3)) { addTree(x, z, 200 + i * 4); occupied.push({ x, z, r: c.use === 'forest' ? 1 : 2 }); }

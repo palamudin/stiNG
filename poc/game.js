@@ -758,7 +758,7 @@ function buildChunk(rec) {
   // follows the ground
   const shapes = new Map();
   c.boxes.forEach((b, bi) => {
-    if (b.hive || b.shed || b.mall || b.shop || b.garage || b.porch || b.hedge) return; // drawn with their own shapes (a shop's box drawn again over its walls fought them)
+    if (b.hive || b.shed || b.mall || b.shop || b.garage || b.porch || b.hedge || b.row || b.wall || b.step) return; // drawn with their own shapes (a shop's box drawn again over its walls fought them)
     const len = Math.max(b.maxx - b.minx, b.maxz - b.minz), geo = len > 1.5 ? segBox(b.maxx - b.minx > b.maxz - b.minz, Math.ceil(len)) : geoBox;
     if (!shapes.has(geo)) shapes.set(geo, []);
     shapes.get(geo).push([b, bi]);
@@ -2888,7 +2888,7 @@ function mapTile(rec, cell, detail, dpr) {
   const g = cv.getContext('2d'), CSZ = T.chunk.size, sc = px / CSZ, ex = (rec.cx + 0.5) * CSZ, ez = (rec.cz + 0.5) * CSZ, c = rec.content;
   const L = (x, z) => [(ex - x) * sc, (ez - z) * sc]; // the map's own mirror: x and z run right to left and down to up
   const use = c.use || 'park';
-  g.fillStyle = use === 'yards' ? 'hsla(95, 22%, 31%, 0.92)' : use === 'farm' ? 'hsla(62, 30%, 34%, 0.92)' : use === 'forest' ? 'hsla(100, 35%, 14%, 0.95)' : use === 'mall' ? 'hsla(40, 6%, 30%, 0.92)' : use === 'town' ? 'hsla(30, 18%, 42%, 0.95)' : `hsla(${88 + c.tint * 20}, 30%, ${21 + c.tint * 8}%, 0.92)`;
+  g.fillStyle = use === 'yards' ? 'hsla(95, 22%, 31%, 0.92)' : use === 'farm' ? 'hsla(62, 30%, 34%, 0.92)' : use === 'urban' ? 'hsla(20, 14%, 36%, 0.94)' : use === 'forest' ? 'hsla(100, 35%, 14%, 0.95)' : use === 'mall' ? 'hsla(40, 6%, 30%, 0.92)' : use === 'town' ? 'hsla(30, 18%, 42%, 0.95)' : `hsla(${88 + c.tint * 20}, 30%, ${21 + c.tint * 8}%, 0.92)`;
   g.fillRect(dpr, dpr, px - 2 * dpr, px - 2 * dpr);
   if (use === 'wild') { // the wild land (GDD 21.6): water, wood or meadow in a 6 x 6 grid of samples
     const o = [0, 0, 0, 0, 0], n = 6;
@@ -3080,7 +3080,7 @@ function drawAtlas() {
   atlasCtx.setTransform(r, 0, 0, r, 0, 0);
   drawMapTo(atlasCtx, W, H, atlas.ox, atlas.oz, atlas.cell, { detail: atlas.cell >= 24, sel: atlas.sel });
 }
-const USE_NAME = { farm: 'Farmland', yards: 'Backyards', forest: 'Woods', mall: 'Strip mall', town: 'Town square', park: 'Park', wild: 'Wild land' };
+const USE_NAME = { urban: 'Town blocks', farm: 'Farmland', yards: 'Backyards', forest: 'Woods', mall: 'Strip mall', town: 'Town square', park: 'Park', wild: 'Wild land' };
 // A card on the area under the pointer (or the tap): what it is, and how much of what is there, as low, mid or high
 const lvl = (v, a, b) => v <= 0 ? '<span class="lv low">none</span>' : `<span class="lv ${v < a ? 'low' : v < b ? 'mid' : 'high'}">${v < a ? 'low' : v < b ? 'mid' : 'high'}</span>`;
 function atlasCard(key, px, py, card = $('atlasCard'), box = $('atlas').getBoundingClientRect(), top = 46) {

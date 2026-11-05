@@ -2471,6 +2471,37 @@ function seated(sim, pred) {
   ok(porchLevel === houses && doors === houses, `every front door has a level stoop and a step before it, the door at the stoop's height (${porchLevel} of ${houses})`);
 }
 
+// 67. Urban blocks (GDD 21.2 urban, S6, GEN_VERSION 17): round a town square, rows on terraced pads along a street within
+// grade; every step between levels is a wall or stairs (a retaining wall with a flight down to the court, walls between
+// the lots' gardens, a low wall at the sidewalk); people walk the sidewalks; and a block draws in few batches
+{
+  const st = { terrain: 2 }, S = 1234n, g = (x, z) => groundAt(S, x, z, st);
+  let chunks = 0, buildings = 0, level = 0, street = 0, high = 0, stairs = 0, courtLow = true, fronts = 0, dividers = 0, joins = 0, walkers = 0, batches = 0;
+  for (let cz = -8; cz <= 8; cz++) for (let cx = -8; cx <= 8; cx++) {
+    if (landUse(S, cx, cz, st) !== 'urban') continue;
+    chunks++;
+    const c = generateChunk(S, cx, cz, st), oz = cz * 64;
+    for (const r of c.roads) { const zc = (r.minz + r.maxz) / 2; for (let x = r.minx; x + 1 <= r.maxx; x += 1) street = Math.max(street, Math.abs(g(x + 1, zc) - g(x, zc))); }
+    const walls = c.boxes.filter((b) => b.wall), side = (b, r) => Math.sign((b.minz + b.maxz) / 2 - oz) === r.s;
+    for (const r of c.rows) {
+      buildings++;
+      const z0 = Math.min(r.zF, r.zB) + 0.1, z1 = Math.max(r.zF, r.zB) - 0.1, h0 = g(r.x0 + 0.1, z0);
+      if ([[r.x1 - 0.1, z0], [r.x1 - 0.1, z1], [r.x0 + 0.1, z1], [(r.x0 + r.x1) / 2, (z0 + z1) / 2]].every(([x, z]) => Math.abs(g(x, z) - h0) < 1e-9)) level++;
+      const zC = oz + r.s * 26, court = groundNatural(S, (r.x0 + r.x1) / 2, zC, st), hp = groundNatural(S, (r.x0 + r.x1) / 2, (z0 + z1) / 2, st); // before the court's footings (a table)
+      if (court > hp + 1e-9) courtLow = false;
+      if (hp - court > 0.3) { high++; if (c.stairs.some((q) => Math.abs(q.x - (r.x0 + r.x1) / 2) < 1e-9 && q.s === r.s) && walls.filter((b) => b.retain && side(b, r) && b.minx >= r.x0 - 1e-9 && b.maxx <= r.x1 + 1e-9).length === 2) stairs++; }
+      if (walls.filter((b) => side(b, r) && !b.retain && !b.back && b.maxy < 0.5 && b.minx >= r.x0 && b.maxx <= r.x1 && Math.abs(b.maxz - b.minz - 0.3) < 1e-6).length === 2) fronts++;
+      if (walls.some((b) => side(b, r) && b.maxy > 1 && !b.retain && !b.back && Math.abs(b.minx - (r.x0 + 0.05)) < 1e-9 && b.maxx - b.minx < 0.3)) dividers++;
+    }
+    for (const r of c.rows) if (c.rows.some((q) => q.s === r.s && Math.abs(q.x1 - r.x0) < 1e-9)) joins++;
+    walkers += c.humans.filter((h) => h.act === 'stroll' && h.path.every((v, i) => i % 2 === 0 || Math.abs(Math.abs(v - oz) - 5.2) < 1e-9)).length;
+    batches = Math.max(batches, new Set(buildList(c).map((q) => q.m + '|' + q.s + '|' + q.near)).size);
+  }
+  ok(chunks > 20 && buildings > 250 && level === buildings && street <= 0.1 + 1e-9, `${chunks} urban blocks round the town squares: all ${buildings} buildings level on their pads, the streets at most ${(street * 100).toFixed(1)}% (10% allowed)`);
+  ok(courtLow && high > 20 && stairs === high && fronts === buildings && dividers === buildings, `every step is a wall or stairs: no court above a pad; all ${high} pads more than 30 cm above their court held by a retaining wall with a flight down; a low wall at the sidewalk before each of ${buildings} lots and a garden wall at each lot's side`);
+  ok(walkers > 10 && batches <= 14, `${walkers} people walk the sidewalks; the busiest block draws in at most ${batches} batches (surface kinds, near or far)`);
+}
+
 // 66. Farmland (GDD 21.2 rural, S5, GEN_VERSION 16): the outer ring of a settled area is farmed: fields in hedgerows,
 // gravel lanes, farmsteads. No farm building stands within a slope setback, each stands level on its footing, no
 // footing's fill or cut is over 1.5 m, hedgerows leave the lanes open, and people walk the lanes and the yards.

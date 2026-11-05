@@ -2483,6 +2483,43 @@ On a jump the CPU path no longer blurs a level out to its parent: the window it 
 
 The game now asks for a square at least 16 m across (`causticsMin`), pushed 30% of its size ahead along the view (`causticsAhead`), on a 512 texture with a 384 grid. That is about the old detail (3 cm texels, 7 cm cells, against 2.3 and 5 cm) over 2.7 times the width. Water seen at a slant still clouds with distance: that is the water, not the caustics.
 
+### 18.91 Urban blocks round a town square (S6, GEN_VERSION 17)
+
+**Where.** A yards chunk beside a town centre's 2×2 square (any of its eight neighbours) becomes an urban block, land use `urban`, unless it is beside the home park. With the default one town per region that makes about a dozen blocks round each square, 86 in the 25×25 chunks round home on seed 1234. A block whose side touches the square is on a main street.
+
+**The street.** A street runs along x through each block's middle, as the yards' does, and carries on through yards and urban blocks alike. A cul-de-sac is left only where neither continues. It is graded as the yards' street is, within 10%.
+
+**The rows.** Each side has eight lots of 7.5 m along the street:
+- the lot runs from the sidewalk's outer edge to 2.2 m behind its building;
+- the building stands 1 m back, 11 m deep, with party walls;
+- on each side, six times in ten, three lots make one mid-rise (four or five storeys); the rest are row houses of two or three storeys, 3 m a storey;
+- a building on a main street, and one in four elsewhere, has a shop on its ground floor: plastered with a shopfront and an awning;
+- the others are sided, with a front door;
+- each has a flat roof with a cornice.
+
+**Terraced.** Each building's lot is a level pad (kind 7) at the street's height before it, so a row steps down a sloping street. Each side's court, from the back of its lots to the chunk's edge, is a level pad (kind 8) at the side's lowest building pad, so no court is above a lot. The urban pads are applied after every other pad, whatever chunk they are in, so nothing else's shoulder reaches into them: a lot is level to its edges. Every step between levels is a wall or stairs:
+- **At the sidewalk:** a low wall (45 cm) before each lot, open at its door.
+- **Between neighbouring lots:** walls in the front gardens (45 cm) and back yards (1.2 m) at each party line; the row's ends are walled the same.
+- **At the court:** where a lot's pad is more than 30 cm above its court, a retaining wall at the pad's edge on the court's side, standing 1 m above the pad. A flight of stairs (18 cm risers, 28 cm treads, 1.2 m wide) leads down through it from a landing at the pad's height into the court.
+- **The court's back wall** is brick, 2.2 m.
+
+**The courts** have a tree or two, often a table with people at it, and flowers. People walk the sidewalks. Nothing else is placed over the stairs.
+
+**Drawn** from the build list:
+- rows, walls and stairs (walls in stone, retaining walls darker, the court's back wall in brick, stairs in concrete);
+- paving under the buildings and on the paths to their doors in World v3;
+- on the map, `Town blocks`.
+
+**Tests.** Behaviour block 67 (JS and C#) on a hilly world:
+- 30 blocks and 416 buildings, every one level on its pad;
+- streets at most 6.5%;
+- no court above a pad;
+- all 32 pads more than 30 cm above their court with a retaining wall and a flight down;
+- a front wall and a garden wall at every lot;
+- people on the sidewalks.
+
+**The frame.** The busiest block's build list falls into at most 5 batches (surface kind, shape, near or far), since buildings merge per material. The frame itself is for the GPU to show. The chunk digest covers rows, stairs and the new boxes.
+
 ### 18.90 Farmland round a village (S5, GEN_VERSION 16)
 
 **Where.** On a settled world, the outer 128 m of the settled area is farmland (land use `farm`, `RURAL`), never nearer the home tree than 192 m. A village (wild beyond 400 m) is ringed by farms from 272 to 400 m, then wild land; a town (1 km) from 872 m. The sim's ground rolls there as in a park (`terrain.roll.farm` 1).
@@ -2995,7 +3032,7 @@ Each is built, tested in JS and both C# builds where the sim is touched, documen
   - every plinth's downhill wall is at most its limit;
   - people walk lanes and yards.
 
-**S6. Urban.**
+**S6. Urban. Built (18.91): urban blocks round a town square; the frame on the low setting is to check on a GPU.**
 - **What.** Row houses and mid-rises on terraced lots, shops on main streets, courtyards, steps and retaining walls.
 - **Done when:**
   - every terrace step is a wall or stairs;

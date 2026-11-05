@@ -1861,6 +1861,36 @@ namespace Sting.Core.Tests
                 Ok(D(I.site.h) >= 10 && D(I.site.h) <= 90 && inside && beyond && step < 3 && wild > 400 && settledChunks > 30 && built == 0 && trees > 300 && wet == 0 && s.wasp.y >= 0 && st.RulesHash() != t1.RulesHash() && st.WorldTag().Contains("wild beyond 400 m"),
                     $"the settled area sits on the wild land {D(I.site.h):0.0} m above the sea at ({D(I.site.x):0}, {D(I.site.z):0}); {settledChunks} settled chunks, {wild} wild ones with nothing built and {trees} trees, none in the water; no step over 3 m across the band ({step:0.00} per 2 m); a sim runs over it");
             }
+            // 67. urban blocks (GDD 21.2 urban, S6, GEN_VERSION 17; sim.test.mjs)
+            {
+                var st = new Settings { terrain = 2 }; ulong S = 1234; Num G(Num x, Num z) => World.GroundAt(S, x, z, st);
+                int chunks = 0, buildings = 0, level = 0, high = 0, stairs = 0, fronts = 0, dividers = 0, walkers = 0, batches = 0; double street = 0; bool courtLow = true;
+                for (int cz = -8; cz <= 8; cz++) for (int cx = -8; cx <= 8; cx++)
+                    {
+                        if (World.LandUse(S, cx, cz, st) != "urban") continue;
+                        chunks++;
+                        var c = World.GenerateChunk(S, cx, cz, st); Num oz = cz * 64;
+                        foreach (var r in c.roads) { Num zc = (r.minz + r.maxz) / 2; for (Num x = r.minx; x + 1 <= r.maxx; x += 1) street = Math.Max(street, D(Abs(G(x + 1, zc) - G(x, zc)))); }
+                        var walls = c.boxes.Where(b => b.wall).ToList();
+                        bool Side(Box b, Row r) => ((b.minz + b.maxz) / 2 - oz > 0 ? 1 : -1) == r.s;
+                        foreach (var r in c.rows)
+                        {
+                            buildings++;
+                            Num z0 = Min(r.zF, r.zB) + 0.1, z1 = Max(r.zF, r.zB) - 0.1, h0 = G(r.x0 + 0.1, z0), xm = (r.x0 + r.x1) / 2;
+                            if (Abs(G(r.x1 - 0.1, z0) - h0) < 1e-9 && Abs(G(r.x1 - 0.1, z1) - h0) < 1e-9 && Abs(G(r.x0 + 0.1, z1) - h0) < 1e-9 && Abs(G(xm, (z0 + z1) / 2) - h0) < 1e-9) level++;
+                            Num court = World.GroundNatural(S, xm, oz + r.s * 26, st), hp = World.GroundNatural(S, xm, (z0 + z1) / 2, st);
+                            if (court > hp + 1e-9) courtLow = false;
+                            if (hp - court > 0.3) { high++; if (c.stairs.Any(q => Abs(q.x - xm) < 1e-9 && q.s == r.s) && walls.Count(b => b.retain && Side(b, r) && b.minx >= r.x0 - 1e-9 && b.maxx <= r.x1 + 1e-9) == 2) stairs++; }
+                            if (walls.Count(b => Side(b, r) && !b.retain && !b.back && b.maxy < 0.5 && b.minx >= r.x0 && b.maxx <= r.x1 && Abs(b.maxz - b.minz - 0.3) < 1e-6) == 2) fronts++;
+                            if (walls.Any(b => Side(b, r) && b.maxy > 1 && !b.retain && !b.back && Abs(b.minx - (r.x0 + 0.05)) < 1e-9 && b.maxx - b.minx < 0.3)) dividers++;
+                        }
+                        foreach (var hm in c.humans) if (hm.act == "stroll") { bool on = true; for (int i = 1; i < hm.path.Length; i += 2) if (Abs(Abs(hm.path[i] - oz) - 5.2) >= 1e-9) on = false; if (on) walkers++; }
+                        batches = Math.Max(batches, World.BuildList(c).Select(q => q.m + "|" + q.s + "|" + q.near).Distinct().Count());
+                    }
+                Ok(chunks > 20 && buildings > 250 && level == buildings && street <= 0.1 + 1e-9, $"{chunks} urban blocks round the town squares: all {buildings} buildings level on their pads, the streets at most {street * 100:0.0}% (10% allowed)");
+                Ok(courtLow && high > 20 && stairs == high && fronts == buildings && dividers == buildings, $"every step is a wall or stairs: no court above a pad; all {high} pads more than 30 cm above their court held by a retaining wall with a flight down; a low wall at the sidewalk before each of {buildings} lots and a garden wall at each lot's side");
+                Ok(walkers > 10 && batches <= 14, $"{walkers} people walk the sidewalks; the busiest block draws in at most {batches} batches (surface kinds, near or far)");
+            }
             // 66. farmland (GDD 21.2 rural, S5, GEN_VERSION 16; sim.test.mjs)
             {
                 var st = new Settings { settled = 400, terrain = 2 }; ulong S = 1234; Num G(Num x, Num z) => World.GroundAt(S, x, z, st); Num Nn(Num x, Num z) => World.GroundNatural(S, x, z, st);

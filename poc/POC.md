@@ -169,6 +169,7 @@ Run the tests from this folder with `node test/sim.test.mjs`, `node test/net.tes
 | 139 | No ground in the wasp's flight: drawn on the sim's ground and lifted whole, never leaning or rippling with the slope, the wind no stronger on a rise; rough water: the wind whips a pond rough by its fetch and its surface takes a wasp under, to fight its way out or drown; dev teleports made ready behind a curtain | 18.87 | 25 |
 | 140 | Garages beside four houses in five, a concrete drive from the sidewalk to each, a stoop and step at every front door, all on the house's level pad (S4) | 18.88 | 25 |
 | 141 | Farmland in the outer ring of a settled area: fields in hedgerows, gravel lanes, farmsteads (farmhouse, wooden barn, shed, yard) on footings to code on slopes, people on the lanes and in the yards (S5) | 18.90 | 25 |
+| 142 | Urban blocks round a town square: rows of houses and mid-rises with shops on main streets, terraced pads stepping down the street, retaining walls with stairs down to courtyards, garden and front walls (S6) | 18.91 | 25 |
 
 ## Verified
 

@@ -11,11 +11,11 @@
 // Where people are comes from the chunk itself: picnic tables and their seats, the spots where people stand about,
 // door steps, flower beds (bare earth round each plant), the foot of every trunk, and hives. Each land use also has a
 // little wear of its own (a park is walked all over, a yard much less, a wood not at all).
-import { groundAt, landUse, pavingOf, pondsOf, pondEdge, POND_PATH, chunkOf, chunkKey, generateChunk, T, hash, Domain } from '../../sim/index.js';
+import { groundAt, landUse, pavingOf, urbanLines, pondsOf, pondEdge, POND_PATH, chunkOf, chunkKey, generateChunk, T, hash, Domain } from '../../sim/index.js';
 
-const MOIST = { park: 0.62, yards: 0.72, forest: 0.8, mall: 0.3, town: 0.42, farm: 0.58 };
-const FOREST = { park: 0.12, yards: 0.08, forest: 1, mall: 0, town: 0, farm: 0.04 };
-const WEAR = { park: 0.14, yards: 0.05, forest: 0, mall: 0.35, town: 0.3, farm: 0.02 };
+const MOIST = { park: 0.62, yards: 0.72, forest: 0.8, mall: 0.3, town: 0.42, farm: 0.58, urban: 0.55 };
+const FOREST = { park: 0.12, yards: 0.08, forest: 1, mall: 0, town: 0, farm: 0.04, urban: 0.02 };
+const WEAR = { park: 0.14, yards: 0.05, forest: 0, mall: 0.35, town: 0.3, farm: 0.02, urban: 0.2 };
 // wear round things people use: radius in metres, strength at the centre (falls off smoothly to the edge)
 const W = { table: [2.4, 0.9], tableAcross: 3.1, // a table's worn ground: its length, and across it its benches and the feet under them
    stand: [1.5, 0.6], door: [1.6, 0.55], flower: [0.38, 1], trunk: [0.4, 0.75], hive: [1.3, 0.5] };
@@ -56,6 +56,10 @@ export function stingSource(sim) {
     }
     for (const l of p.plazas) if (x >= l.minx && x <= l.maxx && z >= l.minz && z <= l.maxz) return 0.9;
     for (const b of [...p.houses, ...p.shops, ...p.malls]) if (Math.abs(x - b.x) <= b.hw + 0.3 && Math.abs(z - b.z) <= b.hd + 0.3) v = Math.max(v, 0.5);
+    if (p.rows && p.rows.length && p.roads.length) { // an urban row (S6): paved under its buildings and the path to each door
+      const oz = (p.roads[0].minz + p.roads[0].maxz) / 2;
+      for (const b of p.rows) { const L = urbanLines(oz, b.s), z0 = Math.min(L.zA, L.zB), z1 = Math.max(L.zA, L.zB); if (x >= b.x0 && x <= b.x1 && z >= z0 && z <= z1 && (Math.abs(x - (b.x0 + b.x1) / 2) <= 0.7 || (z - L.zF) * b.s >= -0.3)) v = Math.max(v, 0.5); }
+    }
     // a walk from each house's door (the long side facing its street, as game.js puts the door) to the sidewalk
     if (!v && p.roads.length) for (const h of p.houses) {
       const ds = Math.sign(chunkOf(h.z) * CS - h.z) || 1, z0 = h.z + ds * h.hd, z1 = chunkOf(h.z) * CS - ds * 4;
