@@ -19,9 +19,11 @@ import { Post } from './post.js';
 import { Forest } from './trees.js';
 import { Grass } from './grass.js';
 import { WaveField } from './wavegpu.js';
+import { ShoreField, shoreLive } from './shorefield.js';
+import { WaterSurface } from './water3/surface.js';
 import { Caustics } from './caustics.js';
-import { WATER } from './water.js';
-import { WAVES } from './waves.js';
+import { WATER, WATER_PRESETS } from './water.js';
+import { WAVES, swellState } from './waves.js';
 import { weatherAt, seasonAt } from './seasons.js';
 import { Rain } from './rain.js';
 import { GpuTimer } from './gputimer.js';
@@ -60,18 +62,41 @@ export class World {
     this.shadowMin = opts.shadowBox ?? 3; // the shadow box's least half-width (the game wants the people round the wasp)
     this.shadowAhead = opts.shadowAhead ?? 0; // the box's centre pushed this many half-widths ahead along the view (the game's: what is in front)
     if (opts.shadowMap) this.q.shadow = opts.shadowMap; // the caller's shadow map size, over the tier's
-    // the caustics' square: at least causticsMin metres across (the square follows the focus distance, and a game camera
-    // a few centimetres behind a wasp made it 6 m, past which the floor went flat and murky), pushed causticsAhead of its
-    // size along the view; caustics: [texture, grid] over the tier's, to keep the detail over a bigger square
-    this.causMin = opts.causticsMin ?? 6; this.causAhead = opts.causticsAhead ?? 0;
-    if (opts.caustics && this.q.caustics) this.q.caustics = opts.caustics;
+    if (opts.caustics && this.q.caustics) this.q.caustics = opts.caustics; // the caller's caustic tile [texels], over the tier's
     this.time = 0;
     // day: the day of the year (0 is the first of spring); auto: the weather and season follow the clock (seasons.js)
     this.env = { hour: 16.5, day: 100, auto: false, haze: 1, mist: 1, wet: 0, wind: [0.8, 0.3], cloud: 0.35, cloudDens: 1, rain: 0, snow: 0, flash: 0 }; // auto is the template's; the game keeps its own weather
     this.season = seasonAt(100); this.weather = null;
+    this.waterMode = 3; // the water (water3/): the surface as a mesh; the post pass draws only the game's still bodies
     this.clip = new Clipmap(renderer, source, { levels: this.q.levels, ...(opts.clip || {}) });
     const wet = source.sea > -1e5; // a source without water: no beaches, no mud, no snow line; heights count from 0
-    this.terrain = makeTerrain(this.clip, { sea: wet ? source.sea : 0, paving: source.kind === 'sting', shore: wet ? 1 : 0, snowLine: wet ? 215 : 1e9 });
+    // the shore table (shorefield.js): baked from the clipmap when its levels move; the water and the beach read it
+    const floatRT = renderer.capabilities.isWebGL2 && !!renderer.extensions.get('EXT_color_buffer_float');
+    // opts.shore 'live': no table, the shore computed per pixel (the comparison; shorefield.js shoreLive)
+    this.shoreMode = opts.shore === 'live' ? 'live' : opts.shore === 'none' ? 'none' : 'table'; // 'none': as a device without float targets (the fallback band)
+    this.shore = wet && floatRT && this.shoreMode === 'table' ? new ShoreField(renderer, this.clip, source) : null;
+    this.uShoreWave = { value: new THREE.Vector4(0, 8, 0, 8) }; // the swell's and the wind sea's (Hs, Tp): set from the wave field each frame
+    this.uShoreSea = { value: source.sea };
+
+    this.sky = new Sky(renderer);
+    this.clouds = new Clouds(renderer, this.sky);
+    if (wet && floatRT && this.shoreMode === 'live') this.shore = shoreLive(this.clouds);
+    this.uSwDir = { value: new THREE.Vector2(1, 0) }; // the far swell's direction (the wave field's), for the coast's trains and the sand
+    // the water's controls (the template's water panel, after Ultra-Water's): the sea state and the surf. windDir null:
+    // the weather's; shoreAuto: the surf from the swell (its height and period), else the panel's values
+    const fetch0 = (source.water && source.water.fetch) || 120000;
+    // the panel's 'Water' (after Ultra-Water's): colour preset, clarity, roughness, refraction, crest glow, whitecaps,
+    // shore foam band, caustics, glitter; and the foam's size and amount
+    this.uLook = { value: new THREE.Vector4(1, 0, 0.06, 1.6) }; this.uLook2 = { value: new THREE.Vector4(0.06, 0.05, 1.3, 0.2) }; this.uLook3 = { value: new THREE.Vector4(1, 1, 0.75, 0) };
+    this.uLace = { value: new THREE.Vector4(0.9, 0.6, 0.5, 0) }; // the lace's scale, its variation, the foam's patchiness
+    this.uAbs = { value: new THREE.Vector3(...WATER.absorb) }; this.uSca = { value: new THREE.Vector3(...WATER.scatter) };
+    const ctl0 = { preset: 'ours', clarity: 1, roughness: 0, refraction: 0.06, sssPeak: 1.6, sssView: 0.06, foamBias: 0.05, foamScale: 1.3, shoreBand: 0.2, caustics: 1, glitter: WATER.glint, foamSize: 0.9, foamAmount: 0.47, linger: 4, curl: 0, lace: 0.9, laceVar: 0.6, patches: 0.5,
+      windDir: null, fetchKm: fetch0 / 1000, waveScale: 1, spread: WAVES.spread, swellScale: 1, swellDir: Math.round(WAVES.swellTurn * 180 / Math.PI), chop: WAVES.chop, timeScale: 1, shoreAuto: true, amplitude: 0.8, wavelength: 30, speed: 1, steepness: 1, foam: 1.6, shoreLead: 0.3 };
+    this.waterCtl = opts.waterCtl || {}; for (const k in ctl0) if (!(k in this.waterCtl)) this.waterCtl[k] = ctl0[k]; // the caller's object, kept across rebuilds
+    this.uSurf = { value: new THREE.Vector4(0.8, 30, 1, 1) }; this.uSurfX = { value: new THREE.Vector4(1, 0, 0, 0) };
+    this.uWTime = { value: 0 }; this.waterTime = 0; // the water's clock: the panel's time scale
+    this.uWave = { value: new THREE.Vector4(1, fetch0, 0, 0) };
+    this.terrain = makeTerrain(this.clip, { sea: wet ? source.sea : 0, paving: source.kind === 'sting', shore: wet ? 1 : 0, snowLine: wet ? 215 : 1e9, shoreField: this.shore, uShoreWave: this.uShoreWave, uShoreSea: this.uShoreSea, swash3: this.waterMode === 3 && this.shore && !this.shore.live, uSwDir: this.uSwDir, uSurf: this.uSurf, uSurfX: this.uSurfX, uWTime: this.uWTime });
     this.group = new THREE.Group(); this.group.name = 'world2';
     this.group.add(this.terrain.mesh);
     this.uniforms = this.terrain.uniforms;
@@ -84,9 +109,8 @@ export class World {
     this.hemi = opts.hemi || new THREE.HemisphereLight(0xffffff, 0x404030, 1);
     if (!opts.sun) this.group.add(this.sun, this.sun.target);
     if (!opts.hemi) this.group.add(this.hemi);
-    this.sky = new Sky(renderer);
-    this.clouds = new Clouds(renderer, this.sky);
     this.uniforms.tCloudShadow.value = this.clouds.rtShadow.texture; this.uniforms.uCloudRect = this.clouds.U.uShadowRect;
+    if (this.shore && !this.shore.live) { this.shore.uniforms.uShoreCloudRect = this.clouds.U.uShadowRect; this.clouds.onShadow = (tex) => this.shore.copyInto(tex, this.shore.cloud); }
     this.forest = new Forest(this, { range: this.q.trees, far: this.q.far });
     this.group.add(this.forest.group);
     this.uniforms.uTreeFar.value = this.forest.farOn ? this.forest.cfg.far[1] : this.forest.bands[3];
@@ -95,7 +119,7 @@ export class World {
     this.group.add(this.grass.group);
     this.rain = new Rain(this); this.group.add(this.rain.mesh);
     this.post = new Post(renderer, this.sky, { msaa: this.q.msaa, scale: this.q.scale });
-    this.post.U.uSea.value = source.sea;
+    this.post.U.uSea.value = source.sea; this.post.U.uShoreWave = this.uShoreWave; this.post.U.uShoreSea = this.uShoreSea;
     if (opts.lens) { const L = opts.lens, U = this.post.U; if (L.fstop) U.uFstop.value = L.fstop; if (L.maxCoc) U.uMaxCoc.value = L.maxCoc; if (L.focal) U.uFocal.value = L.focal; if (L.sensor) U.uSensor.value = L.sensor; }
     if (source.sea < -1e5) this.post.U.uWaterOn.value = 0;
     this._water();
@@ -117,16 +141,16 @@ export class World {
     if (W) {
       const float = gl.extensions.has('EXT_color_buffer_float');
       this.waves = new WaveField(gl, { cascades: W.cascades, fetch: W.fetch, N: this.q.waveN, salt: this.source.cosmetic | 0, float });
-      if (this.source.sea > -1e5 && this.q.caustics) this.caustics = new Caustics(gl, this.waves, this.clip.glsl(), this.clip.uniforms, { res: this.q.caustics[0], grid: this.q.caustics[1], msaa: this.q.msaa ? 4 : 0 });
+      if (this.source.sea > -1e5 && this.q.caustics) this.caustics = new Caustics(gl, this.waves, { res: this.q.caustics[0], msaa: this.q.msaa ? 4 : 0 });
     }
-    this.post.setWater(this.waves, this.caustics, this.source.sea > -1e5 ? this.clip : null);
-    // the shore reads the first two cascades for its swash (terrain.js)
-    const TU = this.terrain.uniforms;
-    if (this.waves && this.source.sea > -1e5) {
-      TU.tWave0.value = this.waves.disp[0].texture; TU.tWave1.value = this.waves.disp[Math.min(1, this.waves.C - 1)].texture;
-      TU.uWaveL.value.set(this.waves.cascades[0], this.waves.cascades[Math.min(1, this.waves.C - 1)]);
-    } else TU.uRun.value.set(0, 0);
+    this.post.setWater(this.waves, this.caustics, this.source.sea > -1e5 ? this.clip : null, this.shore);
     this.drawsWater = !!(this.waves && this.source.waters); // the caller can stop drawing its own water bodies
+    // the water: the surface as a mesh, drawn after the scene (post.js); the post pass's own sea is off
+    if (this.surface) { this.surface.dispose(); this.surface = null; }
+    if (this.waterMode === 3 && this.waves && this.source.sea > -1e5) {
+      this.surface = new WaterSurface(this); // drawn by the post chain after the scene (it reads the scene under it)
+      this.post.U.uWaterOn.value = 0;
+    }
     this._dtAvg = 1 / 60;
   }
   // the water bodies the source has round the eye (the game's birdbaths, fountains and puddles), nearest first, as
@@ -162,8 +186,8 @@ export class World {
   setSource(source, x = 0, z = 0) {
     this.source = source;
     this._bodyMemo = null; // a new world: its water bodies afresh
-    this.clip.setSource(source);
-    this.post.U.uSea.value = source.sea; this.post.U.uWaterOn.value = source.sea < -1e5 ? 0 : 1;
+    this.clip.setSource(source); if (this.shore) this.shore.setSource(source);
+    this.post.U.uSea.value = source.sea; this.post.U.uWaterOn.value = source.sea < -1e5 ? 0 : 1; this.uShoreSea.value = source.sea;
     this._water();
     this.group.remove(this.forest.group);
     this.forest = new Forest(this, { range: this.q.trees, far: this.q.far });
@@ -175,12 +199,13 @@ export class World {
   // twice; userData.ring is the flag game.js already skips
   _mark() { this.group.traverse((o) => { o.userData.ring = true; o.userData.world2 = true; }); }
   set(o) { Object.assign(this.env, o); }
-  build(x, z) { this.clip.build(x, z); }
+  build(x, z) { this.clip.build(x, z); if (this.shore) this.shore.update(TMPV.set(x, 0, z), true); }
   update(dt, eye, focusDist = 10) {
     const E = this.env, U = this.post.U;
     this.time += dt;
     this.eye.copy(eye); this.focusDist = focusDist;
     this.clip.update(eye.x, eye.z, dt, this.source.glsl ? 0 : 3);
+    if (this.shore) { this.timer.begin('shore'); this.shore.update(eye); this.timer.end(); }
     // the weather and the season from the clock (the template); the game sets these fields itself (auto: false)
     const S = this.season = seasonAt(E.day ?? 100);
     if (E.auto) {
@@ -226,31 +251,55 @@ export class World {
     this.uniforms.uShadowFar.value = box * (1 + this.shadowAhead); // the map reaches this far ahead
     this.uniforms.uWet.value = E.wet;
     this.uniforms.uTime.value = this.time; // the grass and the trees sway on this clock (the post chain has its own)
-    this.forest.update(eye, dt);
+    this.forest.update(eye, dt, box);
     this.grass.update(eye, Math.max(this.heightAt(eye.x, eye.z), this.waterAt(eye.x, eye.z)));
     this.rain.update(this.time, eye, this.camera, E.wind10 || [E.wind[0] * 8, E.wind[1] * 8], E.rain || 0, E.snow, this.sky.skyUp);
     this.uniforms.uGrassR.value = this.grass.reach;
     // clouds: the weather's cover, drifting with the wind
     this.clouds.set(E.cloud ?? 0.35, E.cloudDens ?? 1, this.time, E.wind);
     // post
-    U.uTime.value = this.time; U.uWet.value = E.wet; U.uWind.value.set(E.wind[0], E.wind[1]); U.uFlash.value = E.flash || 0;
+    U.uTime.value = this.time; U.uWet.value = E.wet; U.uRain.value = E.rain || 0; U.uWind.value.set(E.wind[0], E.wind[1]); U.uFlash.value = E.flash || 0;
     // water: the wind at 10 m (the game's own, else the drawing wind scaled to a breeze), waves past the frame rate faded
     this.timer.begin('waves');
     if (this.waves) {
       this._dtAvg += (Math.min(Math.max(dt, 1 / 240), 0.2) - this._dtAvg) * 0.05;
-      const w10 = E.wind10 || [E.wind[0] * 8, E.wind[1] * 8];
-      this.waves.update(this.time, w10, Math.PI / this._dtAvg);
+      const ctl = this.waterCtl;
+      this.waterTime += Math.min(Math.max(dt, 0), 0.25) * ctl.timeScale; this.uWTime.value = this.waterTime;
+      const w10 = (E.wind10 || [E.wind[0] * 8, E.wind[1] * 8]).slice();
+      { const m = Math.hypot(w10[0], w10[1]); if (m < WAVES.residual) { const d = m > 1e-3 ? [w10[0] / m, w10[1] / m] : [0.8, 0.6]; w10[0] = d[0] * WAVES.residual; w10[1] = d[1] * WAVES.residual; } } // never flat
+      if (ctl.windDir !== null) { const m = Math.hypot(w10[0], w10[1]), a = ctl.windDir * Math.PI / 180; w10[0] = m * Math.cos(a); w10[1] = m * Math.sin(a); }
+      this.waves.fetch = ctl.fetchKm * 1000; this.waves.U.uChop.value = ctl.chop; this.waves.U.uSpread.value = ctl.spread;
+      this.uWave.value.set(ctl.waveScale, ctl.fetchKm * 1000, 0, 0);
+      // the swell from far away (the sea only): its height from the long fetch, its period long and growing with it, so
+      // a bigger swell runs slower crests and longer splashes; the same swell drives the wave field and the shore trains
+      const seaSw = this.source.sea > -1e5 ? swellState(Math.max(Math.hypot(w10[0], w10[1]), WAVES.swellMin), this.source.water.swellFetch || this.source.water.fetch) : null;
+      const swell = seaSw ? { Hs: Math.max(WAVES.swellHmin, seaSw.Hs) * ctl.swellScale, T: Math.min(10.5, Math.max(WAVES.swellT - 1, WAVES.swellT - 1 + 2.5 * seaSw.Hs)), turn: ctl.swellDir * Math.PI / 180 } : null;
+      this.swell = swell;
+      this.waves.update(this.waterTime, w10, Math.PI / this._dtAvg, swell);
+      // the surf (water3/swash.js): from the swell (its height, and its period as a wavelength in deep water, held to
+      // the surf's range), or the panel's values
+      if (swell && ctl.shoreAuto) { ctl.amplitude = Math.min(1.5, Math.max(0.2, 0.35 + 0.55 * swell.Hs)); ctl.wavelength = Math.min(60, Math.max(12, 0.45 * 9.81 * swell.T * swell.T / (2 * Math.PI))); ctl.speed = 1; ctl.steepness = 1; }
+      this.uSurf.value.set(swell ? ctl.amplitude : 0, ctl.wavelength, ctl.speed, ctl.steepness); this.uSurfX.value.x = ctl.foam; this.uSurfX.value.y = ctl.shoreLead;
+      const pr = WATER_PRESETS[ctl.preset] || WATER_PRESETS.ours;
+      this.uAbs.value.set(...pr.absorb); this.uSca.value.set(...pr.scatter);
+      this.uLook.value.set(ctl.clarity, ctl.roughness, ctl.refraction, ctl.sssPeak); this.uLook2.value.set(ctl.sssView, ctl.foamBias, ctl.foamScale, ctl.shoreBand);
+      this.uLook3.value.set(ctl.caustics, ctl.foamSize, ctl.foamAmount, ctl.curl); this.uLace.value.set(ctl.lace, ctl.laceVar, ctl.patches, 0); U.uGlint.value = ctl.glitter;
+      this.uSwDir.value.copy(this.waves.U.uSwDir.value);
       const st = this.waves.state;
       // the run-up's sea state: significant height H0 and the deep-water wavelength L0 of the peak period (2 pi g / w^2)
-      if (this.source.sea > -1e5) { const wp = Math.sqrt(9.81 * st.kp + WAVES.T * st.kp ** 3); this.terrain.uniforms.uRun.value.set(this.waves.stats.Hs * 2 * Math.PI * 9.81 / (wp * wp), this.waves.stats.Hs); }
+      if (this.source.sea > -1e5) {
+        const wp = Math.sqrt(9.81 * st.kp + WAVES.T * st.kp ** 3);
+        // the shore waves (shorefield.js): the sea's swell from the long fetch, a lake's from the local wind sea
+        this.uShoreWave.value.set(swell.Hs, swell.T, this.waves.stats.Hs, Math.max(1.5, 2 * Math.PI / wp));
+        this.terrain.uniforms.uRunup.value.set(this.uShoreWave.value.x, this.uShoreWave.value.y, this.shore ? 0 : 1, 0); // the fallback band, when there is no shore table
+      }
       U.uWLost.value = this.waves.lostSlope; U.uWPeak.value = Math.min(2 * Math.PI / WAVES.km, 2 * Math.PI / st.kp); // the ripples at the gravity-capillary minimum, or the peak if shorter
       if (this.caustics) {
-        const size = THREE.MathUtils.clamp(focusDist * 2.2, this.causMin, 96), ah = Math.max(focusDist, size * this.causAhead);
-        const fx2 = eye.x + TMPV.x * ah, fz2 = eye.z + TMPV.z * ah;
-        this.caustics.update(fx2, fz2, size, this.source.sea, this.sunDir);
-        U.uCaus.value.set(this.caustics.U.uCenter.value.x, this.caustics.U.uCenter.value.y, size, this.caustics.on ? 1 : 0);
+        this.caustics.update(this.sunDir); // the tile: everywhere on the water, wherever the camera looks
+        U.uCaus.value.set(this.caustics.L, this.caustics.on ? 1 : 0, this.caustics.res, 0);
       }
       this._bodies(eye);
+      if (this.surface) this.surface.update(this.camera, this.time, w10);
     }
     this.timer.end();
     U.uMist.value = 0.0012 * E.mist; U.uMistH.value = 40;
@@ -265,7 +314,7 @@ export class World {
   render() {
     // count the whole frame (shadows, scene, post), not just its last pass
     const info = this.renderer.info; info.autoReset = false; info.reset();
-    if (this.q.post) this.post.render(this.scene, this.camera, { dof: this.q.dof, rays: this.q.rays, clouds: this.q.clouds ? this.clouds : null, skyUp: this.sky.skyUp, timer: this.timer });
+    if (this.q.post) this.post.render(this.scene, this.camera, { dof: this.q.dof, rays: this.q.rays, clouds: this.q.clouds ? this.clouds : null, skyUp: this.sky.skyUp, timer: this.timer, water: this.surface });
     else this.renderer.render(this.scene, this.camera);
     this.timer.frame();
     this.frameInfo = { calls: info.render.calls, tris: info.render.triangles };

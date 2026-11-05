@@ -10,7 +10,8 @@ import { T } from '../../sim/tuning.js';
 import { applyTuning } from '../../sim/tunefile.js';
 import { stingSource } from '../sources/sting.js';
 import { u64, DEFAULT_SETTINGS } from '../../sim/index.js';
-import { WAVES, omega, seaState, fieldStats, integralVar, ifftStockham, fieldAtCPU, downwindShare } from '../waves.js';
+import { WAVES, omega, seaState, fieldStats, integralVar, ifftStockham, fieldAtCPU, downwindShare, swellState } from '../waves.js';
+import { POISSON, poissonTableData } from '../water.js';
 import { lakeAt } from '../sources/wild.js';
 import { treeDesign as cardDesign, meshTreeCards, leafAtlas, TREE_KINDS as CARD_KINDS } from '../treecards.js';
 import { dayWeather, weatherAt, seasonAt, seasonName, YEAR } from '../seasons.js';
@@ -199,6 +200,33 @@ const ok = (c, msg) => { console.log((c ? 'PASS ' : 'FAIL ') + msg); if (!c) fai
   const pl = new Places(wd, { cell: 220, radius: 3000 }); while (pl.scan(0, 0, 1e9)) { /* until done */ }
   const by = {}; for (const p of pl.list) by[p.kind] = (by[p.kind] || 0) + 1;
   ok(pl.list.length > 5 && by.water && by.nest, `map: ${pl.list.length} places within 3 km of the wild origin (${Object.entries(by).map(([k, v]) => k + ' ' + v).join(', ')})`);
+}
+
+// ---- W3.1: the shore
+{
+  // the beach profile: the water line is where it was (the scaling keeps the sign), the slope at the line is the
+  // land's times WILD.beach, and the floor stays shallow for metres before the shelf
+  const P = wildParams({ seed: 7 }), o = [0, 0, 0, 0, 0];
+  // the template's start finder: a meadow by the sea with open water for 300 m in front (demo.js findStart)
+  let x0 = 0, z0 = 0, a = 0, found = false;
+  for (let r = 0; r < 12000 && !found; r += 60) for (let b = 0; b < 6.283 && !found; b += 0.3) {
+    const x = Math.cos(b) * r, z = Math.sin(b) * r; wildSample(P, x, z, o);
+    if (o[0] > 2 && o[0] < 7 && o[2] < 0.3 && o[4] <= P.sea) { let okk = true; for (let k = 1; k <= 5 && okk; k++) { wildSample(P, x + 60 * k * Math.cos(b), z + 60 * k * Math.sin(b), o); okk = o[0] < P.sea - 1; } if (okk) { x0 = x; z0 = z; a = b; found = true; } }
+  }
+  let cross = null, prev = null;
+  for (let t = 0; t < 400 && cross === null; t += 0.5) { wildSample(P, x0 + Math.cos(a) * t, z0 + Math.sin(a) * t, o); const under = o[0] < o[4]; if (prev !== null && under !== prev) cross = t; prev = under; }
+  if (cross !== null) {
+    const at = (t) => { wildSample(P, x0 + Math.cos(a) * t, z0 + Math.sin(a) * t, o); return o[0] - o[4]; };
+    const d2 = -at(cross + 2), d10 = -at(cross + 10), d4 = -at(cross + 4);
+    ok(d2 > 0 && d2 < 0.5 && d10 < 2.5 && d4 < 1.0, `beach: ${d2.toFixed(2)} m deep 2 m out, ${d4.toFixed(2)} at 4 m, ${d10.toFixed(2)} at 10 m (a shallow shelf, not a step)`);
+  } else ok(false, 'beach: a coast is found near the wild start');
+  // the swell: grows with fetch and wind, under the fully developed limits
+  const s1 = swellState(12, 600), s2 = swellState(12, 40000), s3 = swellState(25, 40000), pm = 0.21 * 25 * 25 / 9.81;
+  ok(s1.Hs < s2.Hs && s2.Hs < s3.Hs && s3.Hs <= pm + 1e-9 && s2.Tp > s1.Tp && s2.Hs > 0.8 && s2.Hs < 1.6, `swell: Hs ${s1.Hs.toFixed(2)} m over 600 m, ${s2.Hs.toFixed(2)} m over 40 km (Tp ${s2.Tp.toFixed(1)} s) at 12 m/s; ${s3.Hs.toFixed(2)} m at 25 m/s under the PM limit ${pm.toFixed(2)}`);
+  // the glints' Poisson table: each row's mean is its lambda (the inverse distribution sampled evenly in u)
+  const tab = poissonTableData(); let worst = 0;
+  for (let r = 8; r < POISSON.rows; r += 17) { const lam = POISSON.lamMax * (r / (POISSON.rows - 1)) ** 2; let m = 0; for (let c = 0; c < POISSON.cols; c++) m += tab[r * POISSON.cols + c]; m /= POISSON.cols; worst = Math.max(worst, Math.abs(m - lam) / Math.max(lam, 0.05)); }
+  ok(worst < 0.06, `glints: the Poisson table's row means are within ${(worst * 100).toFixed(1)}% of their lambda`);
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');

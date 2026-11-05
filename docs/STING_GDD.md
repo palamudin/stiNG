@@ -2483,6 +2483,20 @@ On a jump the CPU path no longer blurs a level out to its parent: the window it 
 
 The game now asks for a square at least 16 m across (`causticsMin`), pushed 30% of its size ahead along the view (`causticsAhead`), on a 512 texture with a 384 grid. That is about the old detail (3 cm texels, 7 cm cells, against 2.3 and 5 cm) over 2.7 times the width. Water seen at a slant still clouds with distance: that is the water, not the caustics.
 
+### 18.89 Water 3 in the game (World v3, from world/w3)
+
+The world thread's Water 3 is merged into the game: 93 commits on `world/w3` since the seasonal sun track. They bring:
+- the water surface as a real mesh, depth-tested against the terrain;
+- a swell from far off crossing the wind sea, turning to the coast;
+- the shore field (`shorefield.js`): the shore's two wave trains, breaking and foam, and the swash up the sand and back with its own foam;
+- lace foam detiled in patches;
+- rivers carrying their own foam downstream, white water only at rapids;
+- caustics as one periodic tile over the whole sea, with no window round the view and no edge.
+
+The post pass's own sea is retired; it draws only the game's still bodies (birdbaths, fountains, puddles).
+
+The one conflict was in `world/index.js`, the caustics. The tile replaces the square the game had asked for (18.87's caustics paragraph): its 16 m square, pushed ahead of the view, is gone with it, and the game asks only for a 512-texel tile. The game's other World v3 options (`shadowAhead`, `shadowMap`) and the clipmap's held-window drawing (18.87) carried through the merge.
+
 ### 18.88 Garages, drives and porch steps (S4, GEN_VERSION 15)
 
 **Garages.** Four houses in five have a one-car garage beside them (`GARAGE`):

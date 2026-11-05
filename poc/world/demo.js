@@ -27,13 +27,16 @@ renderer.toneMapping = THREE.NoToneMapping; // the post chain tone-maps
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(55, 1, 0.005, 60000);
 
+// the shore by table (the default) or by live calculation per pixel, for the comparison: ?shore=live, or a page that
+// sets window.__SHORE_MODE before this script
+const SHORE_MODE = ((m) => (m === 'live' || m === 'none' ? m : 'table'))(new URLSearchParams(location.search).get('shore') || window.__SHORE_MODE || 'table');
 const state = { source: 'wild', seed: 7, tod: 16.6, day: 100, weather: 'auto', zoom: 0.42, blocky: 0.6, fog: 1, wet: 0, wind: 5, fstop: 2.8, quality: 'high', ui: true };
 let world = null, src = null;
 
 // ------------------------------------------------------------ camera: orbit a focus point on the ground
 // zoom 0..1 maps the distance from the focus logarithmically from 6 cm to 9 km. Pitch flattens as you come down, so
 // the far view is a map and the near view looks along the grass.
-const cam = { fx: 0, fz: 0, yaw: 0.8, pitch: 0.5, dist: 120, target: null, tour: null, map: 0, yawMap: 0 };
+const cam = { fx: 0, fz: 0, yaw: 0.8, pitch: 0.5, dist: 120, target: null, tour: null, map: 0, yawMap: 0, look: 0, invert: false }; // look: the view tilted up (+) or down from the focus, radians
 // the map comes in with the distance (map.js): 0 below MAP.from, 1 past MAP.to
 const mapFor = (d) => THREE.MathUtils.smoothstep(Math.log(d), Math.log(MAP.from), Math.log(MAP.to));
 const zoomToDist = (z) => 0.06 * Math.pow(9000 / 0.06, z);
@@ -53,7 +56,7 @@ async function makeWorld() {
     // the game's world set down in the wild one (sources/composite.js): the settled area's radius is the start's kind
     if (state.source !== 'sting') src = compositeSource(src, wildSource({ seed: state.seed, blocky: state.blocky }), { radius: state.source === 'town' ? 420 : 150 });
   }
-  world = new World(renderer, scene, camera, src, { quality: state.quality });
+  world = new World(renderer, scene, camera, src, { quality: state.quality, shore: SHORE_MODE, waterCtl: WCTL });
   world.build(cam.fx, cam.fz);
   standIns();
 }
@@ -113,6 +116,7 @@ function step(dt) {
   cy = Math.max(cy, world.surfaceAt(cx, cz) + Math.min(0.02 + cam.dist * 0.15, 2));
   camera.position.set(cx, cy, cz);
   camera.lookAt(focus);
+  if (cam.look) camera.rotateX(cam.look); // the view tilted from the focus: up to the sky, down to the ground
   camera.near = THREE.MathUtils.clamp(cam.dist * 0.02, 0.003, 20);
   camera.far = 60000;
   camera.updateProjectionMatrix();
@@ -140,18 +144,21 @@ function showStats() {
   if (!world) return;
   const i = world.frameInfo || { calls: 0, tris: 0 }; i.triangles = i.tris;
   const d = cam.dist, ds = d < 1 ? (d * 100).toFixed(0) + ' cm' : d < 1000 ? d.toFixed(d < 10 ? 1 : 0) + ' m' : (d / 1000).toFixed(2) + ' km';
-  const g = world.timer.ms, gpu = world.timer.on ? (g.total ? `gpu ${g.total.toFixed(1)} ms: ` + ['scene', 'clouds', 'composite', 'rays', 'dof', 'bloom', 'final', 'waves'].filter((k) => g[k] !== undefined).map((k) => `${k} ${g[k].toFixed(1)}`).join(' · ') : 'gpu timing…') : 'gpu timing: not given by this browser';
+  const g = world.timer.ms, gpu = world.timer.on ? (g.total ? `gpu ${g.total.toFixed(1)} ms: ` + ['scene', 'water', 'shore', 'clouds', 'composite', 'rays', 'dof', 'bloom', 'final', 'waves'].filter((k) => g[k] !== undefined).map((k) => `${k} ${g[k].toFixed(1)}`).join(' · ') : 'gpu timing…') : 'gpu timing: not given by this browser';
   const w = world.weather, wx = w ? `${w.kind}, ${w.temp.toFixed(0)} °C, wind ${Math.hypot(...w.wind).toFixed(0)} m/s` : state.weather;
-  $('stats').textContent = `${fps.toFixed(0)} fps · ${i.calls} draws · ${(i.triangles / 1000).toFixed(0)}k tris · ${(world.forest.stats.far / 1000).toFixed(0)}k far cells\n${gpu}\nview ${ds} · ${seasonName(state.day)} day ${state.day} · ${wx} · ${world.forest.stats.trees} near trees`;
+  const sm = world.post.samplers, dbg = world.post.U.uDebug.value, smt = (sm ? ` · samplers ${sm.composite}/${sm.max}` : '') + ` · shore by ${world.shoreMode}` + (world.surface ? ` · water ${(world.surface.stats.verts / 1000).toFixed(0)}k verts` : '') + (dbg ? " · DEBUG water's kinds: blue large, green river, bands its flow" : '');
+  $('stats').textContent = `${fps.toFixed(0)} fps · ${i.calls} draws · ${(i.triangles / 1000).toFixed(0)}k tris · ${(world.forest.stats.far / 1000).toFixed(0)}k far cells${smt}\n${gpu}\nview ${ds} · ${seasonName(state.day)} day ${state.day} · ${wx} · ${world.forest.stats.trees} near trees`;
 }
 
 // ------------------------------------------------------------ input
 let drag = null;
-canvas.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY, yaw: cam.yaw, id: e.pointerId }; canvas.setPointerCapture(e.pointerId); });
-canvas.addEventListener('pointermove', (e) => { if (drag && drag.id === e.pointerId) { cam.yaw = drag.yaw - (e.clientX - drag.x) * 0.005; } });
+canvas.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY, yaw: cam.yaw, look: cam.look, id: e.pointerId }; canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener('pointermove', (e) => { if (drag && drag.id === e.pointerId) { cam.yaw = drag.yaw - (e.clientX - drag.x) * 0.005; cam.look = THREE.MathUtils.clamp(drag.look + (e.clientY - drag.y) * 0.005 * (cam.invert ? 1 : -1), -1.45, 1.45); } }); // across: round the focus; up and down: the view tilts (a wasp looks anywhere)
 canvas.addEventListener('pointerup', () => { drag = null; });
 canvas.addEventListener('wheel', (e) => { e.preventDefault(); setZoom(state.zoom + e.deltaY * 0.0006); }, { passive: false });
 addEventListener('keydown', (e) => keys.add(e.code));
+// L toggles the water's debug view: its kinds (blue large, green a river) and the river's flow
+addEventListener('keydown', (e) => { if (e.code === 'KeyL' && world) { const U = world.post.U.uDebug; U.value = U.value === 0 ? 8 : 0; } });
 addEventListener('keyup', (e) => keys.delete(e.code));
 function setZoom(z) { state.zoom = THREE.MathUtils.clamp(z, 0, 1); $('zoom').value = state.zoom; $('oZoom').textContent = fmtDist(zoomToDist(state.zoom)); }
 const fmtDist = (d) => (d < 1 ? (d * 100).toFixed(0) + ' cm' : d < 1000 ? d.toFixed(0) + ' m' : (d / 1000).toFixed(1) + ' km');
@@ -183,6 +190,85 @@ function segment(id, key, on) {
 segment('segSource', 'source', () => { if (state.source !== 'wild') { cam.fx = 0; cam.fz = 0; } else { const s = findStart(); cam.fx = s.x; cam.fz = s.z; } makeWorld(); });
 segment('segQ', 'quality', () => makeWorld());
 segment('segWeather', 'weather');
+// ---- the water's controls (after Ultra-Water's panel): the sea state and the surf, read by the world each frame. The
+// wind's direction follows the weather until its slider is moved; the surf follows the swell until one of its sliders
+// is moved ('from the swell' gives it back)
+const WCTL = {};
+{
+  const rows = [
+    ['Waves'],
+    ['windDir', 'Wind dir', -180, 180, 1, (v) => (v === null ? 'weather' : v.toFixed(0) + '°')],
+    ['fetchKm', 'Fetch', 1, 1000, 1, (v) => v.toFixed(0) + ' km'],
+    ['waveScale', 'Wave scale', 0, 3, 0.01],
+    ['spread', 'Spread', 0, 1, 0.01],
+    ['swellScale', 'Swell', 0, 3, 0.01],
+    ['swellDir', 'Swell dir', -180, 180, 1, (v) => v.toFixed(0) + '° off wind'],
+    ['chop', 'Choppiness', 0, 2, 0.01],
+    ['timeScale', 'Time scale', 0, 3, 0.01],
+    ['Shore waves'],
+    ['amplitude', 'Amplitude', 0, 1.5, 0.01, (v) => v.toFixed(2) + ' m'],
+    ['wavelength', 'Wavelength', 8, 60, 0.5, (v) => v.toFixed(1) + ' m'],
+    ['speed', 'Speed', 0.3, 2, 0.01],
+    ['steepness', 'Steepness', 0, 1.5, 0.01],
+    ['foam', 'Foam charge', 0, 2, 0.01],
+    ['shoreLead', 'Shore water lead', -1, 1.5, 0.01, (v) => v.toFixed(2) + ' s'],
+    ['foamSize', 'Foam size', 0.02, 4, 0.01],
+    ['foamAmount', 'Foam amount', 0, 1, 0.01],
+    ['linger', 'Foam linger', 0.2, 15, 0.1, (v) => v.toFixed(1) + ' s'],
+    ['lace', 'Lace scale', 0.05, 4, 0.01],
+    ['laceVar', 'Lace variation', 0, 1, 0.01],
+    ['patches', 'Foam patches', 0, 1, 0.01],
+    ['Water'],
+    ['clarity', 'Clarity', 0.2, 4, 0.01],
+    ['roughness', 'Roughness', 0, 0.2, 0.001, (v) => v.toFixed(3)],
+    ['refraction', 'Refraction', 0, 0.2, 0.001, (v) => v.toFixed(3)],
+    ['sssPeak', 'Crest glow', 0, 6, 0.01],
+    ['sssView', 'Glow to view', 0, 0.5, 0.001, (v) => v.toFixed(3)],
+    ['foamBias', 'Whitecap bias', -0.5, 1.5, 0.01],
+    ['foamScale', 'Whitecap scale', 0, 6, 0.01],
+    ['shoreBand', 'Shore foam band', 0, 2, 0.01],
+    ['caustics', 'Caustics', 0, 2, 0.01],
+    ['glitter', 'Glitter', 0, 1, 0.01],
+  ];
+  const shoreKeys = ['amplitude', 'wavelength', 'speed', 'steepness'], outs = {}, ins = {};
+  const box = document.createElement('div'); box.style.display = 'grid'; box.style.gap = '8px';
+  for (const r of rows) {
+    if (r.length === 1) { const h = document.createElement('div'); h.className = 'hint'; h.style.cssText = 'color: var(--yellow); letter-spacing: .12em; text-transform: uppercase; font-size: 10px; margin-top: 4px'; h.textContent = r[0]; box.appendChild(h); continue; }
+    const [key, label, lo, hi, step, fmt = (v) => v.toFixed(2)] = r;
+    const row = document.createElement('div'); row.className = 'row';
+    row.innerHTML = `<label for="w_${key}">${label}</label><input id="w_${key}" type="range" min="${lo}" max="${hi}" step="${step}"><output id="ow_${key}"></output>`;
+    box.appendChild(row);
+    const el = row.querySelector('input'); ins[key] = el; outs[key] = [row.querySelector('output'), fmt];
+    el.addEventListener('input', () => { WCTL[key] = parseFloat(el.value); if (shoreKeys.includes(key)) WCTL.shoreAuto = false; });
+  }
+  const bt = document.createElement('div'); bt.className = 'seg';
+  bt.innerHTML = '<button id="wWindAuto">Wind dir from weather</button><button id="wShoreAuto">Surf from the swell</button>';
+  box.appendChild(bt);
+  const ps = document.createElement('div'); ps.className = 'seg'; ps.id = 'wPreset';
+  ps.innerHTML = ['ours', 'clear', 'tropical', 'toxic green', 'purple', 'rust orange', 'murky brown'].map((p) => `<button data-v="${p}"${p === 'ours' ? ' class="on"' : ''}>${p}</button>`).join('');
+  box.appendChild(ps);
+  ps.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; for (const x of ps.querySelectorAll('button')) x.classList.toggle('on', x === b); WCTL.preset = b.dataset.v; });
+  const note = document.createElement('p'); note.className = 'note';
+  note.textContent = 'Foam size and amount: the breakers\' puffs and streaks. Water: the colour preset, clarity (absorption divided by it), roughness, refraction, the glow through steep crests, whitecaps where the surface folds, the width of the shore\'s foam line, caustics, glitter. The sea state: fetch is the open water the wind has blown over (a lake uses its own width), the swell comes from weather far away, choppiness pinches the crests, time scale runs the water faster or slower. The surf: its first train, by its wavelength in deep water, its speed and its steepness; it follows the swell until a slider here is moved.';
+  box.appendChild(note);
+  $('segQ').before(box);
+  // the view: tilt it by dragging up and down; inverted at will; level again
+  const lk = document.createElement('div'); lk.className = 'seg';
+  lk.innerHTML = '<label style="display:flex;gap:6px;align-items:center;color:var(--muted);font-size:10px;letter-spacing:.08em;text-transform:uppercase"><input type="checkbox" id="wInvert"> Invert pitch</label><button id="wLevel">Level view</button>';
+  $('segQ').before(lk);
+  $('wInvert').addEventListener('change', (e) => { cam.invert = e.target.checked; });
+  $('wLevel').addEventListener('click', () => { cam.look = 0; });
+  $('wWindAuto').addEventListener('click', () => { WCTL.windDir = null; });
+  $('wShoreAuto').addEventListener('click', () => { WCTL.shoreAuto = true; });
+  // the panel follows the values (the weather's and the swell's set some of them)
+  setInterval(() => {
+    for (const k in outs) {
+      const v = WCTL[k]; if (v === undefined) continue;
+      const [o, fmt] = outs[k]; o.textContent = fmt(v);
+      if (v !== null && document.activeElement !== ins[k]) ins[k].value = v;
+    }
+  }, 300);
+}
 // ---- tours: a continuous zoom from the whole region down into the grass and back, turning slowly
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 function tween(from, to, secs, onDone) {
@@ -295,5 +381,5 @@ window.__w2 = {
     renderer.setRenderTarget(rt); renderer.render(sc, new THREE.Camera()); const px = new Float32Array(n * 4); renderer.readRenderTargetPixels(rt, 0, 0, n, 1, px); renderer.setRenderTarget(null);
     return pts.map((p, i) => ({ x: p[0], z: p[1], src: +src.height(p[0], p[1]).toFixed(3), drawn: +px[i * 4].toFixed(3), level: px[i * 4 + 1], lvlH: +px[i * 4 + 2].toFixed(3), l0: +px[i * 4 + 3].toFixed(3) }));
   },
-  stats() { const i = world ? world.frameInfo || {} : {}; return { calls: i.calls, tris: i.tris, fps, sharp: world && world.clip.sharpness(), clipMs: world && world.clip.stats.ms, forest: world && world.forest.stats }; },
+  stats() { const i = world ? world.frameInfo || {} : {}; return { calls: i.calls, tris: i.tris, fps, sharp: world && world.clip.sharpness(), clipMs: world && world.clip.stats.ms, forest: world && world.forest.stats, samplers: world && world.post.samplers, shore: world && world.shore && world.shore.stats }; },
 };

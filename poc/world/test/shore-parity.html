@@ -1,0 +1,86 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>World v3.1 shore table: the GPU bake against a brute-force distance on the CPU</title>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
+<pre id="out">running</pre>
+<script type="module">
+// The shore table's fine window (shorefield.js, baked by jump flooding on the GPU) against the exact nearest water-line
+// crossing computed on the CPU from the same texel grid (the source sampled at the texels' points): the signed
+// distance, the share within half a texel, the signs of distance and travel time, the direction's agreement, and the
+// travel time against a 64-step straight-line integral. Jump flooding misses the nearest seed in a few cells (a known property); the share says how
+// many.
+import * as THREE from 'three';
+import { World } from '../index.js';
+import { wildSource } from '../sources/wild.js';
+import { SHORE } from '../shorefield.js';
+const renderer = new THREE.WebGLRenderer();
+const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(55, 1, 0.1, 60000);
+const src = wildSource({ seed: 7 });
+const world = new World(renderer, scene, camera, src, { quality: 'low', clip: { levels: 12 } });
+// a shore: the demo's start finder, in short
+let X0 = 0, Z0 = 0;
+outer: for (let r = 0; r < 12000; r += 60) for (let a = 0; a < 6.283; a += 0.3) {
+  const x = Math.cos(a) * r, z = Math.sin(a) * r, o = src.sample(x, z);
+  if (o[0] > 2 && o[0] < 7 && o[2] < 0.3 && o[4] <= src.sea) { X0 = x; Z0 = z; break outer; }
+}
+world.build(X0, Z0);
+const L = world.shore.levels[0], cx = Math.floor(X0 / L.chunk), cz = Math.floor(Z0 / L.chunk);
+const si = L.slots.findIndex((S) => S.cx === cx && S.cz === cz), slot = L.slotBase + si, W = SHORE.tex, s = L.s, ox = cx * L.chunk, oz = cz * L.chunk;
+if (si < 0) throw new Error('the chunk under the start is not held');
+// the GPU table: the chunk's layer
+const px = new Float32Array(W * W * 4);
+renderer.setRenderTarget(world.shore.rt, slot); renderer.readRenderTargetPixels(world.shore.rt, 0, 0, W, W, px); renderer.setRenderTarget(null);
+// the CPU: e per texel of the window (the source at the texel's point), then every crossing, then the nearest per texel
+const e = new Float32Array(W * W), o = [0, 0, 0, 0, 0];
+const P = (i, j) => [ox + (i + 0.5) * s, oz + (j + 0.5) * s];
+for (let j = 0; j < W; j++) for (let i = 0; i < W; i++) { const [x, z] = P(i, j); src.sample(x, z, o); e[j * W + i] = o[0] - o[4]; }
+// the crossings, over the chunk and the level's margin round it (what the bake saw)
+const M = Math.ceil(L.margin / s), WM = W + 2 * M, eM = new Float32Array(WM * WM);
+for (let j = 0; j < WM; j++) for (let i = 0; i < WM; i++) { src.sample(ox + (i - M + 0.5) * s, oz + (j - M + 0.5) * s, o); eM[j * WM + i] = o[0] - o[4]; }
+const seeds = [];
+for (let j = 0; j < WM; j++) for (let i = 0; i < WM; i++) {
+  const e0 = eM[j * WM + i], x = ox + (i - M + 0.5) * s, z = oz + (j - M + 0.5) * s;
+  if (i < WM - 1) { const e1 = eM[j * WM + i + 1]; if ((e0 < 0) !== (e1 < 0)) { const f = e0 / (e0 - e1); seeds.push([x + f * s, z]); } }
+  if (j < WM - 1) { const e1 = eM[(j + 1) * WM + i]; if ((e0 < 0) !== (e1 < 0)) { const f = e0 / (e0 - e1); seeds.push([x, z + f * s]); } }
+}
+// a grid of the seeds for the nearest search
+const cell = 8 * s, grid = new Map(); const gk = (x, z) => Math.floor(x / cell) + ',' + Math.floor(z / cell);
+for (const q of seeds) { const k = gk(q[0], q[1]); if (!grid.has(k)) grid.set(k, []); grid.get(k).push(q); }
+function nearest(x, z) {
+  let bd = Infinity, bx = 0, bz = 0;
+  const ci = Math.floor(x / cell), cj = Math.floor(z / cell);
+  for (let ring = 0; ring < 80; ring++) {
+    if ((ring - 1) * cell > bd) break; // every seed nearer than the best found lies within the rings searched
+    for (let dj = -ring; dj <= ring; dj++) for (let di = -ring; di <= ring; di++) {
+      if (Math.max(Math.abs(di), Math.abs(dj)) !== ring) continue;
+      const b = grid.get((ci + di) + ',' + (cj + dj)); if (!b) continue;
+      for (const q of b) { const d = Math.hypot(q[0] - x, q[1] - z); if (d < bd) { bd = d; bx = q[0]; bz = q[1]; } }
+    }
+  }
+  return [bd, bx, bz];
+}
+let n = 0, within = 0, maxErr = 0, dirOk = 0, dirN = 0, tauErr = 0, tauN = 0, signOk = 0, tauSign = 0; const tauErrs = [], errs = []; let tauBound = 0;
+const step = 4; // every fourth texel each way (a 128 x 128 sample of the 512 x 512)
+for (let j = 1; j < W - 1; j += step) for (let i = 1; i < W - 1; i += step) {
+  const k = j * W + i, [x, z] = P(i, j), g = k * 4;
+  if (!seeds.length) continue;
+  const [bd, bx, bz] = nearest(x, z); if (bd === Infinity || bd > L.margin * 0.95 || Math.abs(px[g]) > 9e3) continue;
+  const sg = e[k] < 0 ? -1 : 1, want = sg * bd, got = px[g];
+  n++; const err = Math.abs(got - want); errs.push(err); maxErr = Math.max(maxErr, err); if (err < 0.5 * s) within++;
+  if (Math.sign(got) === sg) signOk++;
+  if (Math.sign(px[g + 3]) === -sg) tauSign++; // the travel time: positive on the water, negative on land
+  if (bd > 2 * s) { dirN++; const dx = (bx - x) / bd, dz = (bz - z) / bd, dl = Math.hypot(px[g + 1], px[g + 2]) || 1; if ((dx * px[g + 1] + dz * px[g + 2]) / dl > 0.9) dirOk++; }
+  if (e[k] < 0 && bd > s && bd < 200) {
+    let tau = 0; const M = 64;
+    for (let m = 0; m < M; m++) { const t = (m + 0.5) / M; src.sample(x + (bx - x) * t, z + (bz - z) * t, o); const dep = Math.min(SHORE.dMax, Math.max(SHORE.dMin, o[4] - o[0])); tau += bd / M / Math.sqrt(9.81 * dep); }
+    // the eikonal's time is the fastest path's: never slower than the straight line (within the grid's error), never
+    // faster than the straight line at the greatest speed
+    const te = (px[g + 3] - tau) / tau; tauErrs.push(te); tauErr = Math.max(tauErr, te); tauN++;
+    if (px[g + 3] >= bd / Math.sqrt(9.81 * SHORE.dMax) * 0.98) tauBound++;
+  }
+}
+renderer.render(scene, camera); renderer.render(scene, camera); // (the composite is not run here: the sampler count is for the world's post, below)
+const pct = (a, q) => { const b = a.slice().sort((x, y) => x - y); return b[Math.min(b.length - 1, Math.floor(q * b.length))]; };
+window.__result = { texelsKnown: n, errP50: pct(errs, 0.5), errP90: pct(errs, 0.9), tauVsStraightP50: pct(tauErrs, 0.5), tauVsStraightP90: pct(tauErrs, 0.9), tauNotFasterThanLight: tauN ? tauBound / tauN : 1, texel: s, span: W * s, texelsChecked: n, seeds: seeds.length, withinHalfTexel: within / n, maxErrM: maxErr, signAgree: signOk / n, tauSignAgree: tauSign / n, dirAgree: dirOk / Math.max(1, dirN), tauVsStraightMax: tauErr, tauChecked: tauN, bakes: world.shore.stats.bakes, held: world.shore.stats.held, chunk: [cx, cz, L.chunk] };
+document.getElementById('out').textContent = JSON.stringify(window.__result, null, 1);
+</script>

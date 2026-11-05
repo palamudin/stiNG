@@ -27,8 +27,15 @@ export const WILD = {
   mountains: 780,  // metres at the top of a full ridge (W3: a fjord coast, the ridges rise from the sea)
   ridgeCell: 3400,
   roll: 22, rollCell: 520, // rolling hills: metres, cell
-  beach: 0.8,      // metres the shore is pushed away from the water line either side
-  shelf: 2.4,      // metres a lake drops past its shallow shelf
+  beach: 0.3,      // the shore's slope at the water line, as a share of the land's own: the sand runs out under the water
+  beachBand: 2.5,  // metres above and below the line over which the slope comes back to the land's
+  shelf: 2.4,      // metres a lake's floor drops past its shallows
+  shelfAt: 1.5,    // metres of depth where that drop begins (over 2 m more)
+  // the sea's surf platform (W3.1): a dissipative nearshore — the floor shelves at surfK of the land's slope for the
+  // first surfD metres of depth, then rejoins it smoothly, so a coast of 1:30 has a platform of about 1:100 some 180 m
+  // wide where the waves spill and stay broken all the way in; a sandbar on it at barAt metres, up to bar metres high,
+  // with gaps along the shore (rip channels) where it fades
+  surfK: 0.3, surfD: 6, bar: 0.5, barAt: 1.1, barW: 0.35, barCell: 110,
   contCell: 9000,
   step: 5,         // metres between ledges on mountains
   riverCell: 2600,
@@ -121,10 +128,22 @@ export function wildSample(P, x, z, out = [0, 0, 0, 0, 0]) {
     band = 1 - smoothstep(R * (1 + 0.6 * W.lakeRim), R * (1 + W.lakeRim), d);
     if (d < R * (1 + 0.4 * W.lakeRim)) wl = lake.level;
   }
-  // beaches: waves smooth the ground near the water, so the fine octaves give way to the broad shape there, and the
-  // shore crosses the water line with a definite slope instead of a plain of puddles
+  // beaches: waves smooth the ground near the water, so the fine octaves give way to the broad shape there; and the
+  // shore crosses the water line at a fraction of the land's slope (the height above the line is scaled by a factor
+  // that grows back to 1 over the band), so the sand slopes gently into the shallows, where the floor shows through,
+  // and the floor drops away only past them. The scaling keeps the sign of the height, so the water line itself is
+  // where it was and no puddles appear
   h += (hlo - h) * (1 - smoothstep(1.5, 5, Math.abs(hlo - wl)));
-  { const e = h - wl; h += W.beach * e / Math.sqrt(e * e + 0.36); if (e < 0) h -= W.shelf * smoothstep(0.2, 1.8, -e); }
+  {
+    const e = h - wl;
+    if (wl === P.sea && e < 0) { // the sea's floor: the surf platform and its bar
+      const d = -e, K = W.surfK, sm = (q) => 0.5 * (q + Math.sqrt(q * q + 4));
+      let d2 = K * d + (1 - K) * (sm(d - W.surfD) - sm(-W.surfD));
+      vnoised(x / W.barCell, z / W.barCell, ss(S, 81), N); const bar = W.bar * smoothstep(-0.25, 0.35, N[0]);
+      const d3 = d2 - bar * Math.exp(-(((d2 - W.barAt) / W.barW) ** 2));
+      h = wl - Math.max(d3, Math.min(d2, 0.3)); // the bar's crest stays under water
+    } else { const k = W.beach + (1 - W.beach) * smoothstep(0, W.beachBand, Math.abs(e)); h = wl + e * k; if (e < 0) h -= W.shelf * smoothstep(W.shelfAt, W.shelfAt + 2, -e * k); }
+  }
   // mountains: ridged noise on a continental mask
   const cont = smoothstep(-0.2, 0.45, B1[4]) * (1 - inLake);
   let r = 0, rb = 0.55, rx = (0.6 * x + 0.8 * z + 611 * w1) / W.ridgeCell, rz = (-0.8 * x + 0.6 * z - 577 * w2) / W.ridgeCell, prev = 1;
@@ -146,8 +165,8 @@ export function wildSample(P, x, z, out = [0, 0, 0, 0, 0]) {
   const low = 1 - smoothstep(18, 55, h);
   const river = (1 - smoothstep(W.riverW, W.riverW + W.riverBank, rd)) * low * P.rivers * (1 - inLake) * (1 - band);
   h += (Math.min(h, P.sea - W.riverDepth * (1 - smoothstep(0, W.riverW, rd) * 0.4)) - h) * river;
-  // the lake's bowl: a basin under its level, blended into the land over the outer part of the radius
-  if (inLake > 0) { const q = lake.d / lake.R; vnoised(x / 90, z / 90, ss(S, 76), N); const bowl = lake.level - lake.depth * (1 - q * q) * (0.85 + 0.15 * N[0]); h += (bowl - h) * inLake; }
+  // the lake's bowl: a basin under its level, shallow over its outer third, blended into the land over the outer part of the radius
+  if (inLake > 0) { const q = lake.d / lake.R; vnoised(x / 90, z / 90, ss(S, 76), N); const bowl = lake.level - lake.depth * (1 - q * q) * (1 - q * q) * (0.85 + 0.15 * N[0]); h += (bowl - h) * inLake; } // (1 - q^2)^2: shallow for the outer third
   // moisture
   vnoised(x / W.moistCell + 9.1, z / W.moistCell - 2.3, ss(S, 5), N);
   const moist = clamp(0.5 + 0.45 * N[0] + 0.4 * (1 - smoothstep(wl, wl + 14, h)) - 0.3 * smoothstep(300, 600, h - P.sea), 0, 1);
@@ -227,6 +246,9 @@ bool wLake(vec2 xz, out vec4 L, out float depth, out float d) {
   L = vec4(c, R, level);
   return true;
 }
+// the water's kind and flow (W3, the clipmap's water layer): (the river's share of the water here, its velocity x, z),
+// worked out only when asked (wildWaterFlow), as it reads the broad shape twice more
+bool wWantFlow = false; vec3 wFlow = vec3(0.0);
 void wildSampleW(vec2 xz, out vec4 S, out float wlOut) {
   float x = xz.x, z = xz.y;
   float cn; vec4 B = wBroad(xz, cn);
@@ -240,7 +262,18 @@ void wildSampleW(vec2 xz, out vec4 S, out float wlOut) {
     if (d < R * ${f(1 + 0.4 * W.lakeRim)}) wl = L.w;
   }
   h += (hlo - h) * (1.0 - wsmooth(1.5, 5.0, abs(hlo - wl)));
-  { float e = h - wl; h += ${f(W.beach)} * e / sqrt(e * e + 0.36); if (e < 0.0) h -= ${f(W.shelf)} * wsmooth(0.2, 1.8, -e); }
+  {
+    float e = h - wl;
+    if (wl == wSea && e < 0.0) {
+      float d = -e, K = ${f(W.surfK)};
+      float q1 = d - ${f(W.surfD)}, q0 = -${f(W.surfD)};
+      float d2 = K * d + (1.0 - K) * (0.5 * (q1 + sqrt(q1 * q1 + 4.0)) - 0.5 * (q0 + sqrt(q0 * q0 + 4.0)));
+      float bar = ${f(W.bar)} * wsmooth(-0.25, 0.35, w2noised(vec2(x, z) / ${f(W.barCell)}, wss(81)).x);
+      float br = (d2 - ${f(W.barAt)}) / ${f(W.barW)};
+      float d3 = d2 - bar * exp(-br * br);
+      h = wl - max(d3, min(d2, 0.3));
+    } else { float k = ${f(W.beach)} + ${f(1 - WILD.beach)} * wsmooth(0.0, ${f(W.beachBand)}, abs(e)); h = wl + e * k; if (e < 0.0) h -= ${f(W.shelf)} * wsmooth(${f(W.shelfAt)}, ${f(W.shelfAt + 2)}, -e * k); }
+  }
   float cont = wsmooth(-0.2, 0.45, cn) * (1.0 - inLake);
   float r = 0.0, rb = 0.55, prev = 1.0;
   vec2 rp = vec2((0.6 * x + 0.8 * z + 611.0 * w1) / ${f(W.ridgeCell)}, (-0.8 * x + 0.6 * z - 577.0 * w2) / ${f(W.ridgeCell)});
@@ -259,8 +292,22 @@ void wildSampleW(vec2 xz, out vec4 S, out float wlOut) {
   float rd = abs(rn.x) / max(length(rn.yz), 0.08) * ${f(W.riverCell)};
   float low = 1.0 - wsmooth(18.0, 55.0, h);
   float river = (1.0 - wsmooth(${f(W.riverW)}, ${f(W.riverW + W.riverBank)}, rd)) * low * wRivers * (1.0 - inLake) * (1.0 - band);
+  wFlow = vec3(0.0);
+  if (wWantFlow && river > 0.0) {
+    // flowing water: the channel's share (fading where the land round it drops into the sea), its direction along the
+    // channel (the noise's zero line), downhill on the broad land over 80 m, faster for a steeper fall, fastest
+    // mid-channel and slow at the banks; where the land is level along it the flow slows to nothing (no flip)
+    float share = river * wsmooth(-0.5, 1.5, h - wl);
+    vec2 g = rn.yz; float gl = length(g);
+    if (share > 0.0 && gl > 1e-6) {
+      vec2 t = vec2(-g.y, g.x) / gl; float cc2;
+      float dh = wBroad(xz + t * 40.0, cc2).y - wBroad(xz - t * 40.0, cc2).y; // the rise along t over 80 m
+      float v = (0.3 * clamp(dh / 0.4, -1.0, 1.0) + clamp(dh * 0.75, -1.5, 1.5)) * (0.3 + 0.7 * (1.0 - wsmooth(0.0, ${f(W.riverW + W.riverBank * 0.5)}, rd)));
+      wFlow = vec3(share, -t * v * share); // the jet slows as it spreads into the sea
+    }
+  }
   h += (min(h, wSea - ${f(W.riverDepth)} * (1.0 - wsmooth(0.0, ${f(W.riverW)}, rd) * 0.4)) - h) * river;
-  if (inLake > 0.0) { float q = d / L.z; float bowl = L.w - depth * (1.0 - q * q) * (0.85 + 0.15 * w2noise(xz / 90.0, wss(76))); h += (bowl - h) * inLake; }
+  if (inLake > 0.0) { float q = d / L.z; float bowl = L.w - depth * (1.0 - q * q) * (1.0 - q * q) * (0.85 + 0.15 * w2noise(xz / 90.0, wss(76))); h += (bowl - h) * inLake; }
   float moist = clamp(0.5 + 0.45 * w2noise(vec2(x / ${f(W.moistCell)} + 9.1, z / ${f(W.moistCell)} - 2.3), wss(5)) + 0.4 * (1.0 - wsmooth(wl, wl + 14.0, h)) - 0.3 * wsmooth(300.0, 600.0, h - wSea), 0.0, 1.0);
   float fo = w2noise(vec2((0.8 * x - 0.6 * z + 340.0 * w1) / ${f(W.forestCell)}, (0.6 * x + 0.8 * z + 360.0 * w2) / ${f(W.forestCell)}), wss(6));
   fo += 0.45 * w2noise(vec2((0.6 * x + 0.8 * z) / ${f(W.forestCell * 0.31)} + 2.2 * w2, (-0.8 * x + 0.6 * z) / ${f(W.forestCell * 0.31)} - 1.7 * w1), wss(60));
@@ -276,6 +323,7 @@ void wildSampleW(vec2 xz, out vec4 S, out float wlOut) {
 }
 vec4 wildSample(vec2 xz) { vec4 S; float wl; wildSampleW(xz, S, wl); return S; }
 float wildWater(vec2 xz) { vec4 S; float wl; wildSampleW(xz, S, wl); return wl; }
+vec4 wildWaterFlow(vec2 xz) { wWantFlow = true; vec4 S; float wl; wildSampleW(xz, S, wl); wWantFlow = false; return vec4(wl, wFlow); }
 `;
 }
 
@@ -303,8 +351,10 @@ export function wildSource(opts = {}) {
     objects: null,
     grassHeight: [0.1, 0.42], // a wild meadow: ankle-high where dry, knee-high where wet
     cosmetic: hash3(P.seed | 0, 0xc05, 77) & 0xfffff, // decoration's salt, from the world's seed
-    // lakes and the sea: wind over 600 m of open water; tiles of 48 m down to 14 cm, from metre chop to millimetre ripples
-    water: { fetch: 600, cascades: [48, 6.9, 1.0, 0.14] },
+    // the sea: wind over 120 km of open water (the panel's fetch); tiles as Ultra-Water's: 600 m holds the swell and the
+    // long wind sea, 85 m its peak, 12 m the chop, 2.1 m the ripples (their capillary band); lakes are scaled down from it
+    // by their own width (water3/surface.js w3Rough)
+    water: { swellFetch: 40000, fetch: 120000, cascades: [600, 85, 12, 2.1] },
   };
 }
 const TMP = [0, 0, 0, 0, 0];

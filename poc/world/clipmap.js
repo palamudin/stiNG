@@ -67,7 +67,7 @@ void main() {
 void main() {
   ivec2 t = ivec2(gl_FragCoord.xy); ivec2 w = ivec2(uWin);
   ivec2 idx = w + ((t - w) & 127);
-  outColor = vec4(wildWater(vec2(idx) * uCell), 0.0, 0.0, 1.0);
+  outColor = wildWaterFlow(vec2(idx) * uCell); // the level, the river's share, its velocity
 }`,
         depthTest: false, depthWrite: false,
       });
@@ -92,7 +92,7 @@ void main() {
   _clearW() {
     if (this.gpu) return;
     const r = this.renderer, prev = r.getRenderTarget(), cc = r.getClearColor(new THREE.Color()), ca = r.getClearAlpha();
-    for (let l = 0; l < this.cfg.levels; l++) { r.setRenderTarget(this.rtW, l); r.setClearColor(new THREE.Color(this.sea, 0, 0), 1); r.clear(true, false, false); }
+    for (let l = 0; l < this.cfg.levels; l++) { r.setRenderTarget(this.rtW, l); r.setClearColor(new THREE.Color(this.sea, 0, 0), 0); r.clear(true, false, false); } // no rivers: share and flow 0
     r.setClearColor(cc, ca); r.setRenderTarget(prev);
   }
 
@@ -225,6 +225,13 @@ float clipWater(vec2 p) {
   int l = clipFinest(p); float s = uClipLv[l].z; vec2 g = p / s; vec2 g0 = floor(g); vec2 f = g - g0; int i = int(g0.x), j = int(g0.y);
   float a = texelFetch(uClipW, ivec3(i & 127, j & 127, l), 0).x, b = texelFetch(uClipW, ivec3((i + 1) & 127, j & 127, l), 0).x;
   float c = texelFetch(uClipW, ivec3(i & 127, (j + 1) & 127, l), 0).x, d = texelFetch(uClipW, ivec3((i + 1) & 127, (j + 1) & 127, l), 0).x;
+  return f.x > f.y ? a + (b - a) * f.x + (d - b) * f.y : a + (d - c) * f.x + (c - a) * f.y;
+}
+// the water's kind and flow (W3): (the river's share of the water, its velocity x, z), interpolated like the level
+vec3 clipFlow(vec2 p) {
+  int l = clipFinest(p); float s = uClipLv[l].z; vec2 g = p / s; vec2 g0 = floor(g); vec2 f = g - g0; int i = int(g0.x), j = int(g0.y);
+  vec3 a = texelFetch(uClipW, ivec3(i & 127, j & 127, l), 0).yzw, b = texelFetch(uClipW, ivec3((i + 1) & 127, j & 127, l), 0).yzw;
+  vec3 c = texelFetch(uClipW, ivec3(i & 127, (j + 1) & 127, l), 0).yzw, d = texelFetch(uClipW, ivec3((i + 1) & 127, (j + 1) & 127, l), 0).yzw;
   return f.x > f.y ? a + (b - a) * f.x + (d - b) * f.y : a + (d - c) * f.x + (c - a) * f.y;
 }
 vec3 clipNormal(vec2 p) {

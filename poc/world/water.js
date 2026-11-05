@@ -23,6 +23,7 @@
 //   - single scattering from the water itself, foam where the surface folds and at the very edge, rain rings.
 import { WAVES } from './waves.js';
 
+export const CAUSTIC_DEPTHS = [0.5, 1.5, 4.0]; // metres: the floors of the caustics' three slices (caustics.js)
 export const WATER = {
   absorb: [0.45, 0.075, 0.035], // per metre: a clear lake with a little dissolved matter
   scatter: [0.025, 0.04, 0.045],
@@ -34,7 +35,39 @@ export const WATER = {
   glint: 0.75,
 };
 
+// the water's colour presets (the panel's 'Water', water 3): absorption per metre (the channel absorbed least is the
+// colour seen through shallow water) and scattering per metre (the deep water's glow). 'ours' is WATER's; the others
+// are the reference pack's (Ultra-Water, MIT; its scatter, an in-scatter colour there, used as the scattering here)
+export const WATER_PRESETS = {
+  ours: { absorb: WATER.absorb, scatter: WATER.scatter },
+  clear: { absorb: [0.40, 0.062, 0.032], scatter: [0.0, 0.05, 0.08] },
+  tropical: { absorb: [0.36, 0.045, 0.06], scatter: [0.0, 0.085, 0.085] },
+  'toxic green': { absorb: [0.45, 0.1, 1.1], scatter: [0.05, 0.1, 0.004] },
+  purple: { absorb: [0.22, 0.85, 0.1], scatter: [0.05, 0.0, 0.09] },
+  'rust orange': { absorb: [0.1, 0.34, 1.2], scatter: [0.11, 0.035, 0.004] },
+  'murky brown': { absorb: [0.55, 0.62, 0.9], scatter: [0.045, 0.045, 0.022] },
+};
+
 const f = (v) => (Number.isInteger(v) ? v.toFixed(1) : String(v));
+
+// The glints' Poisson table (W3.1): count = the inverse distribution function at u for the mean of the row, rows on a
+// square-root scale of the mean (small means, where a cell draws none or one, get the fine rows), columns over u.
+// Built once; the GPU reads a texel instead of summing the series per cell per pixel. 512 rows: the row's mean is
+// within 0.1% of the pixel's past a mean of 1, columns of u at 1/512.
+export const POISSON = { rows: 256, cols: 1024, lamMax: 12 };
+export function poissonTableData() {
+  const { rows, cols, lamMax } = POISSON, data = new Float32Array(rows * cols);
+  for (let r = 0; r < rows; r++) {
+    const lam = lamMax * (r / (rows - 1)) ** 2;
+    let p = Math.exp(-lam), c = p, n = 0;
+    for (let k = 0; k < cols; k++) {
+      const u = (k + 0.5) / cols; // the column's midpoint, so u never reaches 1 (the series would run on)
+      while (u > c && n < 60) { n += 1; p *= lam / n; c += p; }
+      data[r * cols + k] = n;
+    }
+  }
+  return data; // rows x cols, row-major; post.js makes the texture
+}
 
 // C: cascades; B: bodies
 export function waterGLSL(C, B = WATER.bodies) {
@@ -52,16 +85,24 @@ float wBodyR(vec4 b, vec4 l, vec2 d) { if (l.z < 0.5) return b.z; float a = atan
 const float W_N = ${f(WATER.n)};
 const vec3 W_ABS = vec3(${WATER.absorb.map(f).join(', ')});
 const vec3 W_SCA = vec3(${WATER.scatter.map(f).join(', ')});
+// shallow water (W3.1): the open water's waves fade as the floor comes up, the long ones first (a swell cannot live
+// in a metre of water; the chop reaches the beach), and the shore waves of the table take over. wDamp is set per
+// pixel before the field is read (wShallow), 1 on deep water and on bodies
+vec4 wDamp = vec4(1.0);
+void wShallow(float depth) {
+  float swell = smoothstep(1.5, 8.0, depth), mid = smoothstep(0.3, 3.0, depth), chop = smoothstep(-0.2, 1.0, depth);
+  wDamp = vec4(swell, mid, chop, chop);
+}
 // the displacement (Dx, h, Dz) and fold (J) summed over cascades, filtered to the footprint (gx, gy: metres per pixel)
 vec4 wDisp(vec2 x, vec2 gx, vec2 gy) {
   vec4 d = vec4(0.0, 0.0, 0.0, 1.0);
-  ${cs.map((c) => `{ vec4 s = textureGrad(tWD${c}, x / uWL[${c}], gx / uWL[${c}], gy / uWL[${c}]); d.xyz += s.xyz; d.w += s.w - 1.0; }`).join('\n  ')}
+  ${cs.map((c) => `{ vec4 s = textureGrad(tWD${c}, x / uWL[${c}], gx / uWL[${c}], gy / uWL[${c}]); d.xyz += s.xyz * wDamp[${Math.min(c, 3)}]; d.w += (s.w - 1.0) * wDamp[${Math.min(c, 3)}]; }`).join('\n  ')}
   return d;
 }
 // mean slope and slope variance (x, z) of the footprint
 void wSlope(vec2 x, vec2 gx, vec2 gy, out vec2 m, out vec2 v) {
   m = vec2(0.0); v = vec2(0.0);
-  ${cs.map((c) => `{ vec4 s = textureGrad(tWS${c}, x / uWL[${c}], gx / uWL[${c}], gy / uWL[${c}]); m += s.xy; v += max(s.zw - s.xy * s.xy, 0.0); }`).join('\n  ')}
+  ${cs.map((c) => `{ vec4 s = textureGrad(tWS${c}, x / uWL[${c}], gx / uWL[${c}], gy / uWL[${c}]); float k = wDamp[${Math.min(c, 3)}]; m += s.xy * k; v += max(s.zw - s.xy * s.xy, 0.0) * k * k; }`).join('\n  ')}
   v += vec2(uWLost * 0.5);
 }
 // slope at a point, finest detail (for curvature)
@@ -76,7 +117,7 @@ vec2 wRain(vec2 p, float t, float amt) {
     if (w2hash01(ci, cj, 94 + int(floor(t * 0.9 + ph))) > amt) continue;
     vec2 ctr = c + vec2(w2hash01(ci, cj, 95), w2hash01(ci, cj, 96));
     vec2 d = g - ctr; float r = length(d);
-    float ring = sin((r - r0 * 1.6) * 28.0) * exp(-pow((r - r0 * 1.6) * 6.0, 2.0)) * (1.0 - r0);
+    float rr = (r - r0 * 1.6) * 6.0; float ring = sin((r - r0 * 1.6) * 28.0) * exp(-rr * rr) * (1.0 - r0); // squared by hand: pow of a negative base is undefined
     s += r > 1e-3 ? d / r * ring * 0.25 : vec2(0.0);
   }
   return s;
@@ -92,19 +133,45 @@ float wLambda(float cosT, float s2) {
   float a = cosT / max(sqrt(max(1.0 - cosT * cosT, 1e-6)) * sqrt(2.0 * s2), 1e-6);
   return a < 1.6 ? (1.0 - 1.259 * a + 0.396 * a * a) / (3.535 * a + 2.181 * a * a) : 0.0;
 }
-// a Poisson count with mean lam from a uniform number u
+// a Poisson count with mean lam from a uniform number u: a table (poissonTableData below: the inverse of the
+// distribution, rows by the mean on a square-root scale, columns by u) up to a mean of ${POISSON.lamMax}, the normal
+// approximation past it. The table is computed once and rides in a layer of the shore table (shorefield.js); a pixel
+// reads one texel where it summed a series. Without the shore table (W_SHORE undefined) the series is summed
 float wPoisson(float lam, float u, float u2) {
-  if (lam > 12.0) { float g = sqrt(-2.0 * log(max(u, 1e-7))) * cos(6.2831853 * u2); return max(0.0, floor(lam + sqrt(lam) * g + 0.5)); }
+  if (lam > ${POISSON.lamMax.toFixed(1)}) { float g = sqrt(-2.0 * log(max(u, 1e-7))) * cos(6.2831853 * u2); return max(0.0, floor(lam + sqrt(lam) * g + 0.5)); }
+#ifdef W_SHORE
+  int r = int(sqrt(lam / ${POISSON.lamMax.toFixed(1)}) * ${(POISSON.rows - 1).toFixed(1)} + 0.5), c = min(int(u * ${POISSON.cols.toFixed(1)}), ${POISSON.cols - 1});
+  return shorePoisson(r, c);
+#else
   float p = exp(-lam), c = p, n = 0.0;
   for (int i = 0; i < 40; i++) { if (u <= c) break; n += 1.0; p *= lam / n; c += p; }
   return n;
+#endif
 }
 `;
 }
 
+// the caustics' reader (also water3/surface.js): needs uSun and W_N
+export const WATER_CAUSTIC_GLSL = /* glsl */ `
+uniform sampler2D tCaus; uniform vec4 uCaus; // the caustics tile (caustics.js): tile size, on, texels a side
+// the caustic brightness at floor point Pb under depth D, at footprint fp metres a pixel: the tile looked up where the
+// point's sunlight entered the surface, at the mip for the footprint (far and high views blur to an even light), the
+// depth slices blended, faded in over the first decimetres and out with depth
+float wCaustic(vec2 Pb, float D, float fp) {
+  if (uCaus.y < 0.5 || D <= 0.0005) return 1.0;
+  vec3 rs = refract(-uSun, vec3(0.0, 1.0, 0.0), 1.0 / W_N);
+  vec2 entry = Pb + rs.xz / rs.y * D;
+  float lod = log2(max(fp * uCaus.z / uCaus.x, 1.0));
+  vec3 c = min(textureLod(tCaus, entry / uCaus.x, lod).rgb, vec3(64.0));
+  float d0 = ${CAUSTIC_DEPTHS[0].toFixed(2)}, d1 = ${CAUSTIC_DEPTHS[1].toFixed(2)}, d2 = ${CAUSTIC_DEPTHS[2].toFixed(2)};
+  float cd = D < d0 ? mix(1.0, c.r, smoothstep(0.0, d0, D)) : D < d1 ? mix(c.r, c.g, (D - d0) / (d1 - d0)) : D < d2 ? mix(c.g, c.b, (D - d1) / (d2 - d1)) : mix(c.b, 1.0, smoothstep(d2, 3.0 * d2, D));
+  return max(cd, 0.0);
+}
+`;
+
 // placed after the composite's helpers (viewRay, rayDist, skyAt, uViewProj, tColor, tDepth, uSun, ...)
 export const WATER_SHADE_GLSL = /* glsl */ `
-uniform sampler2D tCaus; uniform vec4 uCaus; // centre x, z, size, on
+${WATER_CAUSTIC_GLSL}
 // screen-space reflection: march the reflected ray, compare with the depth buffer; 0 alpha when it misses
 vec4 wSSR(vec3 P, vec3 R, float yb) {
   float t = min(0.4 + 0.02 * length(P - uCamPos), 0.02 + 0.05 * length(P - uCamPos)), tp = 0.0; vec3 q; bool front = true;
@@ -130,6 +197,23 @@ vec3 wPlaneHit(vec2 uv, vec3 c, vec2 g) {
   vec3 v = viewRay(uv); vec3 n = vec3(-g.x, 1.0, -g.y);
   float t = dot(c - uCamPos, n) / dot(v, n); return uCamPos + v * t;
 }
+#ifdef W_SHORE
+// the shore wave at an undisplaced point of the open water (the table's travel time and direction, the clipmap's
+// depth), and the cascades' damping for that depth, set as a side effect
+ShoreWave wShoreAt(vec2 x0, float fp) {
+  float lv = clipWater(x0), dep = lv - clipHeight(x0); wShallow(dep); vec4 sh = shoreAt(x0); vec2 st = shoreState(lv);
+  ShoreWave sw = shoreWaves(x0, sh, dep, uTime, fp, st);
+  // the sea's edge is the tongue's foot: over the last decimetres of depth the surface takes the tongue's level at
+  // the line, so sea and sheet are one surface on one clock
+#if SHORE_BEACH
+  if (dep < 0.35) { vec3 nG = clipNormal(x0); float tb = sqrt(max(1.0 - nG.y * nG.y, 0.0)) / max(nG.y, 0.05); float lift = shoreEdgeLift(x0, sh, uTime, st, tb); float k = 1.0 - smoothstep(0.0, 0.35, dep); sw.y = mix(sw.y, lift, k); }
+#endif
+  return sw;
+}
+float gClamped = 0.0; // debug 7: the surface held over the bed on the sea hit's last step
+ShoreWave gSW; vec4 gDampSea = vec4(1.0); // the sea hit's shore wave and damping, kept for the shading of the same pixel
+vec3 gSheet = vec3(0.0); // the swash sheet under a sand pixel (shoreSheet), set by the composite before it shades the sheet as water
+#endif
 // light under the water: what the floor sends back through it, plus the water's own scattering; D = depth of the
 // floor below the surface where the refracted ray meets it, L = the path's length through the water
 vec3 wUnder(vec3 floorCol, float D, float L, float cz) {
@@ -151,10 +235,26 @@ vec3 wUnder(vec3 floorCol, float D, float L, float cz) {
 // bodyK: 0 the sea (floor from the scene), 1 bowl, 2 flat basin, 3 a puddle (floor from the scene); bodyD: basin depth
 vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, float dist, vec3 sceneCol, float bodyK, float bodyD, vec3 bodyC, float bodyR) {
   vec3 V = -v; float tw = length(P - uCamPos);
-  vec2 m, sv; wSlope(x0, gx, gy, m, sv);
   float fp = sqrt(max(length(gx) * length(gy), 1e-12));
-  vec2 rs = wRain(P.xz, uTime, uWet) * (1.0 - smoothstep(0.02, 0.08, fp));
-  m += rs + g; // the plane's own tilt is part of the mean slope
+  wDamp = vec4(1.0); float swFoam = 0.0, swLace = 0.0, swSurf = 0.0, cloud = 1.0; vec2 swSlope = vec2(0.0);
+  // a puddle, a birdbath, a fountain's basin (the water's kinds: still water): glass. No waves of its own, only a
+  // faint shiver from the wind, more on a wider body; the rain marks it with sharp rings
+  float still = 0.0;
+#ifdef W_SHORE
+  if (bodyK > 0.5 && bodyK < 2.5) still = 1.0; // (3 is the sea's swash sheet here)
+#else
+  if (bodyK > 0.5) still = 1.0;
+#endif
+  float shiver = 0.04 + 0.12 * smoothstep(0.5, 6.0, bodyR) * clamp(length(uWind), 0.0, 1.5);
+  if (still > 0.5) wDamp = vec4(shiver);
+#ifdef W_SHORE
+  if (bodyK == 0.0) { wDamp = gDampSea; swSlope = gSW.slope; swFoam = gSW.foam; swLace = gSW.lace; swSurf = gSW.surf; }
+  if (bodyK == 3.0) { wDamp = gDampSea; float fade = smoothstep(0.0, 0.03, gSheet.x); swFoam = gSW.foam * fade; swLace = gSW.lace * fade; swSurf = gSW.surf * fade; } // the swash sheet: glassy, the chop damped for its thickness; the sea's foam on it, thinning with it
+  cloud = shoreCloud(P.xz); // the clouds' shadow: the sun's share of the light here
+#endif
+  vec2 m, sv; wSlope(x0, gx, gy, m, sv);
+  vec2 rs = wRain(P.xz, uTime, uRain) * (1.0 - smoothstep(0.02, 0.08, fp)) * (1.0 + 1.2 * still); // rings while rain falls (uRain), not while the ground is still wet (uWet); sharper on still water
+  m += rs + g + swSlope; // the plane's own tilt and the shore wave's are part of the mean slope
   vec3 n = normalize(vec3(-m.x, 1.0, -m.y));
   float nv = max(dot(n, V), 1e-3);
   float F = wFresnel(nv);
@@ -183,18 +283,19 @@ vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, floa
     if (Pb.y > yAt - 0.0005) { ruv = uv; Pb = uCamPos + v * min(dist, tw + 400.0); }
     floorCol = texture(tColor, ruv).rgb;
     D = max(P.y + dot(g, Pb.xz - P.xz) - Pb.y, 0.0); L = D / max(-T.y, 0.05);
+#ifdef W_SHORE
+    if (bodyK == 3.0) { D = gSheet.x; L = D / max(-T.y, 0.05); } // the sheet's thickness is known exactly; the depth buffer's would step
+#endif
   }
   // ---- caustics: splatted for the sea, from the ripples' curvature for bodies
   float cz = 1.0;
-  if (bodyK == 0.0) {
-    vec2 cu = (Pb.xz - uCaus.xy) / uCaus.z + 0.5;
-    float edge = min(min(cu.x, 1.0 - cu.x), min(cu.y, 1.0 - cu.y));
-    if (uCaus.w > 0.5 && edge > 0.0) cz = mix(1.0, min(texture(tCaus, cu).r, 400.0), smoothstep(0.0, 0.08, edge)); // a focus can sum past half-float range
+  if (bodyK == 0.0 || bodyK == 3.0) {
+    cz = wCaustic(Pb.xz, D, fp); // the sea and the swash sheet: the tiled pattern (caustics.js)
   } else if (D > 0.0005) {
     // the sun's refracted offset on the floor as a function of slope, linearised; with the slope's derivative (the
     // curvature) this is the Jacobian of the map from the surface to the floor; brightness = 1 / |det J|
     vec2 q = Pb.xz; float e = 0.004;
-    vec2 s0 = wSlopeAt(q), sxp = wSlopeAt(q + vec2(e, 0.0)), szp = wSlopeAt(q + vec2(0.0, e));
+    vec2 s0 = wSlopeAt(q) * shiver, sxp = wSlopeAt(q + vec2(e, 0.0)) * shiver, szp = wSlopeAt(q + vec2(0.0, e)) * shiver; // still water: its caustics from its shiver only
     mat2 H = mat2((sxp - s0) / e, (szp - s0) / e);
     vec3 L0 = -uSun; float de = 0.01;
     vec3 r0 = refract(L0, normalize(vec3(-s0.x, 1.0, -s0.y)), 1.0 / W_N), rx = refract(L0, normalize(vec3(-s0.x - de, 1.0, -s0.y)), 1.0 / W_N), rz = refract(L0, normalize(vec3(-s0.x, 1.0, -s0.y - de)), 1.0 / W_N);
@@ -205,7 +306,10 @@ vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, floa
     mat2 J = mat2(1.0) + min(D, 0.12) * M * H;
     cz = mix(1.0, clamp(1.0 / max(abs(determinant(J)), 0.35), 0.0, 2.5), exp(-tw * 0.2));
   }
-  vec3 under = wUnder(floorCol, D, L, cz);
+  vec3 under = wUnder(floorCol, D, L, cz * cloud);
+  // the surf zone's water is churned: sand held up in it, the colour of the bottom it was lifted from, lit through
+  // the water (green-grey), by how much the waves work there
+  { float tb = clamp(swSurf, 0.0, 1.0) * 0.5; vec3 turb = vec3(0.32, 0.4, 0.27) * (uSkyUp * 0.8 + uSunColor * max(uSun.y, 0.0) * 0.6 * cloud); under = mix(under, turb, tb); }
   // ---- reflection: the scene where SSR finds it, else the sky
   vec3 R = reflect(v, n); R.y = abs(R.y);
   vec4 ss = wSSR(P, R, P.y);
@@ -220,7 +324,7 @@ vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, floa
   float sav = 0.5 * (s2.x + s2.y);
   float G = 1.0 / (1.0 + wLambda(max(V.y, 1e-3), sav) + wLambda(max(Lsun.y, 1e-3), sav));
   float Fh = wFresnel(dot(V, Hh));
-  vec3 spec = uSunColor * Fh * Dm * G / (4.0 * max(V.y, 1e-3)) * sunOn;
+  vec3 spec = uSunColor * Fh * Dm * G / (4.0 * max(V.y, 1e-3)) * sunOn * cloud;
   // glints: facets of size l (the short ripples that carry most of the curvature) in square cells anchored to the
   // world, at the two power-of-two sizes round the footprint, blended by the fraction between them; each cell redraws
   // its Poisson count about three times a second from its own start, fading between draws, so it twinkles; uGlint
@@ -244,17 +348,37 @@ vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, floa
   if (uIce > 0.0) { float ic = smoothstep(0.0, 0.6, uIce) * (1.0 - 0.5 * step(0.5, bodyK) * step(bodyK, 2.5)); vec3 iceCol = vec3(0.72, 0.8, 0.88) * (uSkyUp * 0.7 + uSunColor * max(uSun.y, 0.0) * 0.25) * (0.9 + 0.1 * w2noise(x0 / 1.5, 302)); col = mix(col, iceCol + skyAt(R) * 0.08, ic); }
   // ---- foam: where the surface folds, and at the very edge of the sea
   vec4 dsp = wDisp(x0, gx, gy);
-  float fold = 1.0 - smoothstep(0.15, 0.55, dsp.w);
+  float fold = (1.0 - smoothstep(0.15, 0.55, dsp.w)) * (1.0 - still); // still water never folds
   float sunUp = max(uSun.y, 0.0);
   vec3 amb = uSkyUp / 3.14159 * 0.8 + uSunColor * sunUp / 3.14159 * 0.6;
   float fm = fold * smoothstep(-0.2, 0.6, w2noise(x0 / 0.3, 99));
-  if (bodyK == 0.0) {
-    float fz = 1.0 - smoothstep(0.0, 0.05 + 0.04 * w2noise(P.xz / 0.4 + uTime * 0.1, 97), D);
-    fm = max(fm, fz * smoothstep(-0.2, 0.6, w2noise(P.xz / 0.12 - uTime * 0.05, 98)));
+#ifdef W_SHORE
+  if (bodyK == 3.0) { fm = max(fm, max(gSheet.y, gSheet.z)); } // the swash sheet: its lace edge, the white behind it
+#endif
+  if (bodyK == 0.0 || bodyK == 3.0) { // the sea, and the sheet carrying its foam
+    // whitewater on the breakers' faces and the lace they leave behind: one pattern of three scales, covered to a
+    // share set by the foam's strength (a crest nearly solid, the surf zone behind it in patches, the lace sparse)
+    float pat = 0.5 + 0.5 * (w2noise(x0 / 0.7, 615) * 0.45 + w2noise(x0 / 3.0 + uTime * 0.03, 616) * 0.35 + w2noise(x0 / 0.18 - uTime * 0.1, 619) * 0.2);
+    float wf = clamp(swFoam, 0.0, 1.0), lf = clamp(swLace, 0.0, 1.0);
+    fm = max(fm, smoothstep(1.0 - 0.75 * wf, 1.15 - 0.75 * wf, pat) * (0.6 + 0.4 * wf));
+    fm = max(fm, smoothstep(1.0 - 0.5 * lf, 1.1 - 0.5 * lf, pat) * 0.45);
+    // the surf zone's standing foam: patches of bubbles and thin scum that never quite clear between crests, drifting
+    // slowly, a bed under the crests' own white
+    float sp = 0.5 + 0.5 * (w2noise(x0 / 2.4 + vec2(uTime * 0.03, -uTime * 0.02), 626) * 0.55 + w2noise(x0 / 0.6 - vec2(uTime * 0.06, 0.0), 627) * 0.3 + w2noise(x0 / 0.15, 628) * 0.15);
+    float sf = clamp(swSurf, 0.0, 1.0);
+    fm = max(fm, smoothstep(0.95 - 0.45 * sf, 1.05 - 0.45 * sf, sp) * (0.25 + 0.3 * sf));
   }
-  col = mix(col, amb * 0.9 + uSunColor * sunUp * 0.25, fm * 0.7);
-  if (uDebug > 1.5) col = vec3(D / 3.0, F, ss.a) * 2.0;
-  if (uDebug > 2.5) col = vec3(clamp(L / 5.0, 0.0, 1.0), sqrt(sv.x + sv.y) * 4.0, cz / 3.0) * 2.0;
+  col = mix(col, amb * 0.9 + uSunColor * sunUp * 0.25 * cloud, fm * 0.7);
+  if (uDebug > 1.5 && uDebug < 5.5) col = vec3(D / 3.0, F, ss.a) * 2.0;
+#ifdef W_SHORE
+  if (uDebug > 3.5 && uDebug < 5.5) { vec4 shd = shoreAt(x0); col = vec3(fract(-shd.x / 10.0) * 0.8, clamp(swFoam, 0.0, 1.0), 0.5 + 2.0 * swSlope.x); }
+#endif
+  // debug 7: red where the surface is held over the bed, green the water's depth over the first 25 cm, blue where
+  // the shore table knows the point
+#ifdef W_SHORE
+  if (uDebug > 6.5 && uDebug < 7.5) { vec4 shd = shoreAt(x0); col = vec3(gClamped, clamp(D * 4.0, 0.0, 1.0), gShoreKnow) * (0.25 + 0.75 * clamp(dot(sceneCol, vec3(0.33)) * 3.0, 0.0, 1.0)); }
+#endif
+  if (uDebug > 2.5 && uDebug < 5.5) col = vec3(clamp(L / 5.0, 0.0, 1.0), sqrt(sv.x + sv.y) * 4.0, cz / 3.0) * 2.0;
   return col;
 }
 // the sea: the plane hit, then iterated onto the displaced surface (near the camera, where the waves are larger than
@@ -267,11 +391,18 @@ float wSeaHit(vec2 uv, vec3 v, float yb, out vec2 x0, out vec2 gx, out vec2 gy) 
   gx = clamp(gx, vec2(-50.0), vec2(50.0)); gy = clamp(gy, vec2(-50.0), vec2(50.0));
   x0 = P.xz;
   float near = 1.0 - smoothstep(0.08, 0.6, sqrt(length(gx) * length(gy)) / max(uWL.x, 1e-3) * 8.0);
-  if (near > 0.0) {
+  float swY = 0.0;
+#ifdef W_SHORE
+  gSW = wShoreAt(P.xz, sqrt(length(gx) * length(gy))); gDampSea = wDamp; swY = gSW.y; // the breakers lift the surface; the damping is set for this depth
+#else
+  wDamp = vec4(1.0);
+#endif
+  if (near > 0.0 || abs(swY) > 0.005) {
     for (int i = 0; i < 4; i++) {
       vec3 q = uCamPos + v * t;
       vec4 d = wDisp(x0, gx, gy); x0 = q.xz - d.xz * near; d = wDisp(x0, gx, gy);
-      float f = q.y - (yb + d.y * near);
+      float ys = yb + d.y * near + swY;
+      float f = q.y - ys;
       t += clamp(f / max(-v.y, 0.02), -2.0, 2.0) * 0.85;
     }
   }

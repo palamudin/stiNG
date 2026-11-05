@@ -1,11 +1,12 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>World v2 caustics: energy kept</title>
+<title>World v3.1 caustics: energy kept, every slice</title>
 <script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
 <pre id="out">running</pre>
 <script type="module">
-// The splatted caustics (caustics.js) over a flat floor 2 m down: on still water every pixel reads 1, and under waves
-// the light is moved about but not made or lost, so the mean over the floor stays 1.
+// The tiled caustics (caustics.js): over one tile of the cascade, at each of the three floor depths, on still water
+// every texel reads 1, and under waves the light is moved about but not made or lost, so the mean over the tile stays 1
+// in every slice (the margin catches the light that leaves the tile on one side as it comes in on the other).
 import * as THREE from 'three';
 import { WaveField } from '../wavegpu.js';
 import { Caustics } from '../caustics.js';
@@ -15,16 +16,16 @@ const sun = new THREE.Vector3(0.4, 0.8, 0.3).normalize();
 for (const [name, U] of [['still', 0], ['breeze', 3], ['wind', 6.8], ['gale', 12]]) {
   const wf = new WaveField(renderer, { cascades: [48, 6.9, 1.0, 0.14], fetch: 600, salt: 3 });
   wf.update(12.5, [U * 0.8, U * 0.6], 1e9);
-  const ca = new Caustics(renderer, wf, 'float clipHeight(vec2 p) { return -2.0; }', {}, { res: 256, grid: 384, msaa: 0 });
-  ca.update(0, 0, 16, 0, sun);
+  const ca = new Caustics(renderer, wf, { res: 256, msaa: 0 });
+  ca.update(sun);
   const n = ca.res, a = new Uint16Array(n * n * 4); renderer.readRenderTargetPixels(ca.rt, 0, 0, n, n, a);
-  // the inside of the square (the grid's margin covers the edge for any landing offset up to its width)
-  let s = 0, m = 0, lo = 1e9, hi = 0, k = 0, g = 0;
-  for (let j = Math.floor(n * 0.1); j < Math.ceil(n * 0.9); j++) for (let i = Math.floor(n * 0.1); i < Math.ceil(n * 0.9); i++) {
-    const v = THREE.DataUtils.fromHalfFloat(a[(j * n + i) * 4]); g += THREE.DataUtils.fromHalfFloat(a[(j * n + i) * 4 + 1]); s += v; m += v * v; lo = Math.min(lo, v); hi = Math.max(hi, v); k++;
+  const out = { tile: ca.L, Hs: +wf.stats.Hs.toFixed(3) };
+  for (let c = 0; c < 3; c++) {
+    let s = 0, m = 0, hi = 0;
+    for (let i = 0; i < n * n; i++) { const v = THREE.DataUtils.fromHalfFloat(a[i * 4 + c]); s += v; m += v * v; hi = Math.max(hi, v); }
+    const mean = s / (n * n); out['d' + c] = { mean: +mean.toFixed(4), contrast: +Math.sqrt(Math.max(m / (n * n) - mean * mean, 0)).toFixed(3), max: +hi.toFixed(2) };
   }
-  const mean = s / k;
-  res[name] = { meanGeometry: +(g / k).toFixed(4), mean: +mean.toFixed(4), contrast: +Math.sqrt(m / k - mean * mean).toFixed(3), min: +lo.toFixed(3), max: +hi.toFixed(2), Hs: +wf.stats.Hs.toFixed(3) };
+  res[name] = out;
   ca.dispose(); wf.dispose();
 }
 window.__result = res;

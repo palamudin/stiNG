@@ -14,6 +14,7 @@
 import * as THREE from 'three';
 import { SKY_GLSL } from './sky.js';
 import { waterGLSL, WATER_SHADE_GLSL, WATER } from './water.js';
+import { SHORE_WAVE_GLSL } from './shorefield.js';
 import { NOISE_GLSL } from './noise.js';
 import { MAP_GLSL } from './map.js';
 
@@ -38,7 +39,7 @@ export class Post {
       tColor: { value: null }, tDepth: { value: null }, tPrev: { value: null }, tBlur: { value: null }, tRays: { value: null }, tBloom: { value: null },
       uInvProj: { value: new THREE.Matrix4() }, uCamWorld: { value: new THREE.Matrix4() }, uViewProj: { value: new THREE.Matrix4() }, uCamPos: { value: new THREE.Vector3() },
       uLogF: { value: 1 }, uRes: { value: new THREE.Vector2(1, 1) }, uTime: { value: 0 },
-      uSea: { value: 0 }, uDebug: { value: 0 }, uMist: { value: 0.0025 }, uMistH: { value: 45 }, uWet: { value: 0 }, uWaterOn: { value: 1 },
+      uSea: { value: 0 }, uDebug: { value: 0 }, uMist: { value: 0.0025 }, uMistH: { value: 45 }, uWet: { value: 0 }, uRain: { value: 0 }, uWaterOn: { value: 1 }, uShoreWave: { value: new THREE.Vector4(0, 8, 0, 8) }, uShoreSea: { value: 0 },
       uSkyUp: { value: new THREE.Color() }, uSkyHz: { value: new THREE.Color() },
       uSunUV: { value: new THREE.Vector2() }, uSunVis: { value: 0 }, uRays: { value: 0.6 },
       uFocus: { value: 10 }, uFocal: { value: 0.045 }, uFstop: { value: 2.8 }, uSensor: { value: 0.024 }, uMaxCoc: { value: 14 }, uBlurIn: { value: 0 },
@@ -46,7 +47,7 @@ export class Post {
       uTexel: { value: new THREE.Vector2() }, uBloomMax: { value: 1e4 }, uWind: { value: new THREE.Vector2(0.8, 0.3) },
       uWL: { value: new THREE.Vector4(1, 1, 1, 1) }, uWLost: { value: 0 }, uWPeak: { value: 0.05 }, uGlint: { value: WATER.glint },
       uBody: { value: Array.from({ length: WATER.bodies }, () => new THREE.Vector4()) }, uBodyB: { value: Array.from({ length: WATER.bodies }, () => new THREE.Vector4()) }, uBodyC: { value: Array.from({ length: WATER.bodies }, () => new THREE.Vector4()) }, uBodies: { value: 0 },
-      tCaus: { value: null }, uCaus: { value: new THREE.Vector4(0, 0, 1, 0) },
+      tCaus: { value: null }, uCaus: { value: new THREE.Vector4(1, 0, 1, 0) },
       tCloud: { value: null }, uCloudOn: { value: 0 }, uCloudBase: { value: 1000 }, uIce: { value: 0 }, uFlash: { value: 0 },
       uMap: { value: 0 }, uSnowLine: { value: 1e9 },
       ...sky.uniforms,
@@ -131,6 +132,8 @@ void main() {
   c += (h12(vUv * uRes + fract(uTime) * 91.7) - 0.5) * uGrain + (h12(vUv * uRes + 7.1) - 0.5) / 255.0;
   oColor = vec4(c, 1.0);
 }`, U);
+    // a copy of the scene's colour for the water (water3/surface.js) to read, when there is no MSAA resolve to read
+    this.copy = pass('uniform sampler2D tColor; void main() { oColor = texture(tColor, vUv); }', U);
     this.size = new THREE.Vector2();
     this._alloc(1, 1);
   }
@@ -146,9 +149,9 @@ void main() {
 }`, this.U);
   }
   _composite(C) {
-    return pass(`${SKY_GLSL}\n${NOISE_GLSL}\n${this.clipGLSL ? this.clipGLSL + '\n#define W_CLIP' : ''}\n#define W_CASCADES ${C}\n${C ? waterGLSL(C) : ''}
+    return pass(`${SKY_GLSL}\n${NOISE_GLSL}\n${this.clipGLSL ? this.clipGLSL + '\n#define W_CLIP' : ''}\n${C && this.shoreGLSL ? this.shoreGLSL + '\n#define W_SHORE' : ''}\n#define W_CASCADES ${C}\n${C ? waterGLSL(C) : ''}
 uniform sampler2D tColor, tDepth, uSkyView; uniform mat4 uInvProj, uCamWorld, uViewProj; uniform vec3 uCamPos, uSun, uSunColor, uSkyUp, uSkyHz;
-uniform float uLogF, uSea, uMist, uMistH, uTime, uWet, uWaterOn, uDebug, uCloudOn, uCloudBase, uFlash; uniform vec2 uRes; uniform sampler2D tCloud;
+uniform float uLogF, uSea, uMist, uMistH, uTime, uWet, uRain, uWaterOn, uDebug, uCloudOn, uCloudBase, uFlash; uniform vec2 uRes; uniform sampler2D tCloud;
 #if W_CASCADES == 0
 uniform float uIce;
 #endif
@@ -188,7 +191,7 @@ void main() {
   vec3 col = texture(tColor, uv).rgb;
   float dist = d0 >= 1.0 ? 1e9 : rayDist(uv, d0);
   if (d0 >= 1.0) col = skyAt(v) + sunDisc(v) + uFlash * uSkyUp * 4.0; // lightning: the whole sky lights
-  float outDist = dist; bool wet = false;
+  float outDist = dist; bool wet = false; float layer = 0.0; // debug: 0 ground, 1 sea, 2 sheet, 3 body
 #if W_CASCADES > 0
   // the nearest water: the sea (iterated onto its waves), then the bodies (discs on the ground's plane)
   float tw = 1e10, kind = -1.0; vec2 x0 = vec2(0.0), gx = vec2(0.0), gy = vec2(0.0); vec4 bA = vec4(0.0), bB = vec4(0.0), bC = vec4(0.0);
@@ -213,6 +216,35 @@ void main() {
     vec3 q = uCamPos + v * t; if (length(q.xz - c.xz) > wBodyR(b, uBodyC[i], q.xz - c.xz)) continue;
     tw = t; kind = c2.w; bA = b; bB = c2; bC = uBodyC[i];
   }
+#if defined(W_SHORE) && SHORE_BEACH
+  // the swash sheet (shorefield.js shoreSheet): a sand pixel the run-up stands over is water a few centimetres deep
+  if (kind < 0.0 && d0 < 1.0 && uWaterOn > 0.5) {
+    vec3 Pg = uCamPos + v * dist; float Wg = clipWater(Pg.xz);
+    // the sand's height from the clipmap (exact and smooth), not from the depth buffer's reconstruction, whose steps
+    // of a fraction of a millimetre would draw contour lines in a sheet a few centimetres thick
+    float hgt = clipHeight(Pg.xz) - Wg;
+    // only the ground itself takes a sheet: a pixel standing above the clipmap's ground is a rock, a tree, a person
+    if (hgt >= -0.002 && hgt < 5.0 && abs(Pg.y - Wg - hgt) < 0.04) {
+      vec4 shg = shoreAt(Pg.xz);
+      if (shg.x < 40.0) {
+        vec3 nG = clipNormal(Pg.xz);
+        gSheet = shoreSheet(Pg.xz, shg, hgt, nG, uTime, shoreState(Wg));
+        if (gSheet.x > 0.0005) {
+          vec3 P = vec3(Pg.x, Wg + hgt + gSheet.x, Pg.z); vec2 gG = vec2(-nG.x, -nG.z) / max(nG.y, 0.2);
+          gx = wPlaneHit(uv + vec2(1.0 / uRes.x, 0.0), P, gG).xz - P.xz; gy = wPlaneHit(uv + vec2(0.0, 1.0 / uRes.y), P, gG).xz - P.xz;
+          wShallow(gSheet.x); gDampSea = wDamp;
+          // the sea's own foam carried onto the sheet: the shore train read at the nearest point of the water line, in
+          // the shallowest water, so the crest's white, the lace and the surf's standing foam run on up the sand with
+          // the tongue instead of stopping at the still-water line (laid with the same pattern, in the same coordinates)
+          { float cohg = length(shg.yz); vec2 pl = Pg.xz + (cohg > 1e-4 ? shg.yz / cohg : vec2(0.0)) * max(shg.x, 0.0);
+            vec4 shl = shoreAt(pl); gSW = shoreWaves(pl, shl, 0.05, uTime, length(gx), shoreState(Wg)); }
+          col = waterShade(uv, v, P, P.xz, gG, gx, gy, dist, col, 3.0, 0.0, vec3(0.0), 0.0);
+          outDist = dist; wet = true; layer = 2.0;
+        }
+      }
+    }
+  }
+#endif
   if (kind >= 0.0 && tw < dist) {
     vec3 P = uCamPos + v * tw;
     if (kind == 0.0) col = waterShade(uv, v, P, x0, vec2(0.0), gx, gy, dist, col, 0.0, 0.0, vec3(0.0), 1.0);
@@ -224,7 +256,7 @@ void main() {
       col = waterShade(uv, v, P, P.xz, bB.xy, gx, gy, dist, col, kind, bB.z, c, bC.z > 0.5 ? eR : bA.z);
       if (bC.z > 0.5) col = mix(bank, col, smoothstep(0.0, 0.3, eD));
     }
-    outDist = tw; wet = true;
+    outDist = tw; wet = true; layer = kind == 0.0 ? 1.0 : 3.0;
   }
 #endif
   if (d0 < 1.0 || wet) { vec3 ins; vec3 T = airT(min(outDist, 2e5), v, ins); col = col * T + ins; }
@@ -238,17 +270,27 @@ void main() {
       col = col * cl.a + (cl.rgb * T + ins * (1.0 - cl.a));
     }
   }
+  // debug 6: which path drew the pixel — ground untouched, sea tinted blue, the swash sheet red, a water body green
+  if (uDebug > 5.5 && uDebug < 6.5) { vec3 tc = layer == 1.0 ? vec3(0.2, 0.4, 1.0) : layer == 2.0 ? vec3(1.0, 0.15, 0.1) : layer == 3.0 ? vec3(0.1, 1.0, 0.2) : vec3(1.0); col = layer > 0.5 ? mix(col, tc * dot(col, vec3(0.33)) * 2.0, 0.65) : col; }
   if (uDebug > 0.5 && uDebug < 1.5) { vec3 Pg = uCamPos + v * dist; col = vec3(wet ? 1.0 : 0.0, Pg.y < 0.0 ? 1.0 : 0.0, d0 >= 1.0 ? 1.0 : 0.0) * 2.0; }
-  // half floats end at 65504: the sun's disc is brighter than that, and an infinity here turns into NaN in the passes after
+  // half floats end at 65504: the sun's disc is brighter than that, and an infinity here turns into NaN in the passes after;
+  // and a NaN from any pixel's shading would spread over the whole frame through the depth of field's kernel (a close
+  // focus blurs the far ground widely), so none leaves this pass
+  if (any(isnan(col)) || any(isinf(col))) col = vec3(0.0);
+  if (isnan(outDist)) outDist = dist;
   oColor = vec4(min(col, vec3(6.0e4)), min(outDist, 60000.0));
 }`, this.U);
   }
 
   // the wave field (wavegpu.js) and the sea's caustics (caustics.js); null for none
   // clip: the clipmap (its GLSL and uniforms), so the composite can read the water level where a ray lands
-  setWater(field, caustics, clip) {
+  // shore: the shore table (shorefield.js: its GLSL, the shore waves' GLSL and uniforms), for breakers and shore foam
+  setWater(field, caustics, clip, shore) {
     const C = field ? field.C : 0, U = this.U;
-    if (clip && !this.clipGLSL) { this.clipGLSL = clip.glsl(); Object.assign(U, clip.uniforms); this.composite.dispose(); this.composite = this._composite(C); this.C = C; this.mapPass = this._mapPass(); }
+    let rebuild = false;
+    if (clip && !this.clipGLSL) { this.clipGLSL = clip.glsl(); Object.assign(U, clip.uniforms); rebuild = true; }
+    if (shore && !this.shoreGLSL) { this.shoreGLSL = shore.glsl() + '\n' + (shore.compositeGLSL || '') + '\n' + SHORE_WAVE_GLSL; Object.assign(U, shore.uniforms); rebuild = true; }
+    if (rebuild) { this.composite.dispose(); this.composite = this._composite(C); this.C = C; this.mapPass = this._mapPass(); }
     else if (C !== this.C) { this.composite.dispose(); this.C = C; this.composite = this._composite(C); }
     if (field) {
       U.uWL.value = field.U.uL.value;
@@ -259,9 +301,10 @@ void main() {
   }
   _alloc(w, h) {
     this.w = w; this.h = h;
-    for (const t of [this.rtScene, this.rtA, this.rtB, this.rtHalf, this.rtHalf2, this.rtQ, this.rtQ2, ...(this.mips || [])]) t && t.dispose();
+    for (const t of [this.rtScene, this.rtCopy, this.rtA, this.rtB, this.rtHalf, this.rtHalf2, this.rtQ, this.rtQ2, ...(this.mips || [])]) t && t.dispose();
     const dt = new THREE.DepthTexture(w, h, THREE.UnsignedIntType);
     this.rtScene = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, samples: this.msaa, depthTexture: dt, depthBuffer: true });
+    this.rtCopy = this.msaa ? null : target(w, h);
     this.rtA = target(w, h); this.rtB = target(w, h);
     const hw = Math.max(1, w >> 1), hh = Math.max(1, h >> 1), qw = Math.max(1, w >> 2), qh = Math.max(1, h >> 2);
     this.rtHalf = target(hw, hh); this.rtHalf2 = target(hw, hh);
@@ -273,8 +316,24 @@ void main() {
   setSize(w, h) { w = Math.max(1, Math.round(w * this.scaleRes)); h = Math.max(1, Math.round(h * this.scaleRes)); if (w !== this.w || h !== this.h) this._alloc(w, h); }
   _run(mat, out) { this.quad.material = mat; this.renderer.setRenderTarget(out); this.renderer.render(this.scene, this.cam); }
 
+  // The samplers a pass's program actually uses, against the card's limit (16 in Chrome on Windows): counted from the
+  // linked program, so a pass that silently fails on a real card for one sampler too many is caught and said. The
+  // composite is the one at the limit (eight wave textures, the clipmap's two, the shore table, the sky, the clouds,
+  // the caustics, colour and depth); anything new it reads must ride in a layer of a texture it already has.
+  samplerCheck() {
+    const r = this.renderer, gl = r.getContext(), out = {}, max = gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS);
+    for (const [name, m] of [['composite', this.composite], ['dof', this.dofPass], ['final', this.final], ['map', this.mapPass]]) {
+      const p = m && r.properties.get(m).currentProgram; if (!p || !p.program) continue;
+      const prog = p.program, n = gl.getProgramParameter(prog, gl.ACTIVE_UNIFORMS); let count = 0;
+      for (let i = 0; i < n; i++) { const u = gl.getActiveUniform(prog, i); if (u && (u.type === gl.SAMPLER_2D || u.type === gl.SAMPLER_2D_ARRAY || u.type === gl.SAMPLER_3D || u.type === gl.SAMPLER_CUBE || u.type === gl.SAMPLER_2D_SHADOW)) count += u.size; }
+      out[name] = count;
+      if (count > max) console.error(`world: the ${name} pass uses ${count} samplers; this card allows ${max} per shader, so the pass fails`);
+    }
+    out.max = max; this.samplers = out; return out;
+  }
   render(scene, camera, opts = {}) {
     const r = this.renderer, U = this.U, size = r.getDrawingBufferSize(this.size), T = opts.timer || NOTIMER;
+    if (!this.samplers && this._frames > 1) this.samplerCheck(); this._frames = (this._frames || 0) + 1;
     this.setSize(size.x, size.y);
     camera.updateMatrixWorld();
     U.uInvProj.value.copy(camera.projectionMatrixInverse);
@@ -286,6 +345,17 @@ void main() {
     // the scene
     const prevTM = r.toneMapping; r.toneMapping = THREE.NoToneMapping;
     T.begin('scene'); r.setRenderTarget(this.rtScene); r.clear(); r.render(scene, camera); T.end();
+    // the water (water3/surface.js): drawn over the scene with its depth test, reading the scene's colour under it. With
+    // MSAA the scene was resolved into its texture while the drawing goes on in the multisampled buffers, so the
+    // texture can be read as it is; without, it is copied first (a target cannot be read while drawn into)
+    if (opts.water) {
+      T.begin('water');
+      let src = this.rtScene.texture;
+      if (!this.msaa) { U.tColor.value = this.rtScene.texture; this._run(this.copy, this.rtCopy); src = this.rtCopy.texture; }
+      opts.water.U.tScene.value = src; opts.water.U.tDepth.value = this.msaa ? this.rtScene.depthTexture : null;
+      r.setRenderTarget(this.rtScene); const ac = r.autoClear; r.autoClear = false; r.render(opts.water.scene, camera); r.autoClear = ac;
+      T.end();
+    }
     U.tDepth.value = this.rtScene.depthTexture;
     // the clouds at quarter resolution, before the composite blends them in
     T.begin('clouds'); if (opts.clouds) { opts.clouds.render(this.rtQ, this.rtScene.depthTexture, camera, U.uLogF.value, this.rtQ.width, this.rtQ.height, camera.position, opts.skyUp); U.tCloud.value = this.rtQ.texture; U.uCloudOn.value = 1; } else U.uCloudOn.value = 0; T.end();

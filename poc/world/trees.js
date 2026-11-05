@@ -72,6 +72,7 @@ export class Forest {
     this.bands = this.cfg.bands.map((b) => b * scale);
     this.group = new THREE.Group(); this.group.name = 'world2-forest';
     this.tiles = new Map(); this.queue = [];
+    this._frustum = new THREE.Frustum(); this._lastDir = new THREE.Vector3(); this._shadowR = 1e9;
     const atlas = leafAtlas();
     this.atlas = new THREE.DataTexture(atlas.data, atlas.size, atlas.size, THREE.RGBAFormat, THREE.UnsignedByteType);
     this.atlas.minFilter = THREE.LinearMipmapLinearFilter; this.atlas.magFilter = THREE.NearestFilter; this.atlas.generateMipmaps = true; this.atlas.needsUpdate = true;
@@ -249,8 +250,15 @@ export class Forest {
   // ---- placement (scatter.js, pure, tested)
   _genTile(ti, tj) { return placeTile(this.source, ti, tj, this.kinds, this.cfg, this.design); }
 
-  update(eye, dt) {
+  // shadowR: the sun's shadow box round the focus (index.js); a tile outside the view is still binned when it lies
+  // within that box, so its trees keep casting into the frame
+  update(eye, dt, shadowR = 1e9) {
     const T = this.cfg.tile, R = this.bands[3] + this.cfg.fade * 3;
+    // the view, 5% wider than the frame, for the tiles' culling; a turn of the camera past a few degrees rebins
+    const cam = this.world.camera; cam.updateMatrixWorld();
+    TMPM.copy(cam.projectionMatrix); TMPM.elements[0] /= 1.05; TMPM.elements[5] /= 1.05; TMPM.multiply(cam.matrixWorldInverse);
+    this._frustum.setFromProjectionMatrix(TMPM); this._shadowR = shadowR;
+    cam.getWorldDirection(TMPV3); const turned = TMPV3.dot(this._lastDir) < Math.cos(0.06); this._lastDir.copy(TMPV3);
     const ci = Math.floor(eye.x / T), cj = Math.floor(eye.z / T), rt = Math.ceil(R / T) + 1;
     const t0 = performance.now();
     if (!this._q || this._qc !== ci + ',' + cj) {
@@ -268,7 +276,7 @@ export class Forest {
       this.tiles.set(i + ',' + j, { i, j, items: this._genTile(i, j) });
       this._dirty = true;
     }
-    if (this._dirty || this._lastBin.distanceTo(TMP2.set(eye.x, eye.z)) > 8 || Math.abs(eye.y - (this._lastY ?? 0)) > Math.max(4, Math.abs(eye.y) * 0.1)) this._bin(eye);
+    if (this._dirty || turned || this._lastBin.distanceTo(TMP2.set(eye.x, eye.z)) > 8 || Math.abs(eye.y - (this._lastY ?? 0)) > Math.max(4, Math.abs(eye.y) * 0.1)) this._bin(eye);
     this.uniforms.uWind.value.set(...this.world.env.wind);
     this.uniforms.uSkyUp.value.copy(this.world.sky.skyUp);
     if (this.farMeshes) {
@@ -283,9 +291,13 @@ export class Forest {
     const alt = Math.max(0, eye.y - this.source.height(eye.x, eye.z));
     const counts = this.meshes.map((pv) => pv.map((pl) => pl.map(() => 0)));
     const lists = this.meshes.map((pv) => pv.map((pl) => pl.map(() => [])));
-    let trees = 0;
+    let trees = 0, culled = 0;
     for (const t of this.tiles.values()) {
       const d = Math.hypot((t.i + 0.5) * T - eye.x, (t.j + 0.5) * T - eye.z, alt);
+      // out of the view and out of the shadow box: not drawn (the tile's box: its ground's range plus the trees' height)
+      if (t.y0 === undefined) { let lo = 1e9, hi = -1e9; for (let q = 0; q < 9; q++) { const h = this.source.height((t.i + 0.5 * (q % 3)) * T, (t.j + 0.5 * Math.floor(q / 3)) * T); lo = Math.min(lo, h); hi = Math.max(hi, h); } t.y0 = lo - 12; t.y1 = hi + 30; } // the ground at nine points, with slack for what lies between and the trees' height
+      TMPB.min.set(t.i * T, t.y0, t.j * T); TMPB.max.set((t.i + 1) * T, t.y1, (t.j + 1) * T);
+      if (!this._frustum.intersectsBox(TMPB) && Math.hypot((t.i + 0.5) * T - eye.x, (t.j + 0.5) * T - eye.z) > this._shadowR + half) { culled++; continue; }
       for (let l = 0; l < 3; l++) {
         if (d + half < B[l] - F || d - half > B[l + 1] + F) continue;
         for (let k = 0; k < this.kinds.length; k++) for (let v = 0; v < this.cfg.variants; v++) { const a = t.items[k][v]; if (a.length) { lists[k][v][l].push(a); counts[k][v][l] += a.length / 8; if (l === 0) trees += a.length / 8; } }
@@ -306,10 +318,10 @@ export class Forest {
       mesh.geometry.instanceCount = n; ud.count = n;
       mesh.visible = n > 0;
     }
-    this.stats.trees = trees; this.stats.tiles = this.tiles.size;
+    this.stats.trees = trees; this.stats.tiles = this.tiles.size; this.stats.culled = culled;
   }
 }
-const TMP2 = new THREE.Vector2();
+const TMP2 = new THREE.Vector2(), TMPM = new THREE.Matrix4(), TMPV3 = new THREE.Vector3(), TMPB = new THREE.Box3();
 
 // The far ring's vertex shader: scatter.js's wild placement again in GLSL (the same grid, hashes and rules), then the
 // impostor quad billboarded about its trunk, culled against the view, dithered in where the meshes end.

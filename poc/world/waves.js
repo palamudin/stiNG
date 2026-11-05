@@ -37,13 +37,39 @@ export const WAVES = {
   loop: 256,    // s
   chop: 0.85,
   onset: [0.02, 0.04], // friction velocity: no waves below, the full spectrum above (m/s)
+  // the water never lies flat (W3.1): the wind sea is raised by at least this wind (a residual chop from the last
+  // breeze and the air that is never quite still), and the swell by at least swellMin, weather elsewhere; the wind
+  // adds to these, it does not switch them on
+  residual: 1.5, swellMin: 4.5, // m/s
+  swellTmin: 3.5,               // s: the sea's swell is never shorter in period than this (the reference beach runs at 4.4 s)
+  swellHmin: 0.35,              // m: nor lower than this
+  // the swell in the wave field (water 3, step 1b): long waves from a storm far away, crossing the local wind sea —
+  // a narrow peak at swellT, its own direction swellTurn radians off the wind, a narrow spread cos^(2 swellS)(dtheta/2)
+  swellT: 9, swellTurn: 0.7, swellS: 20, swellWidth: 0.08, // s, rad, spreading exponent, peak width (share of k)
+  // the wind sea's spreading, broadened: short waves run at many angles, not all downwind
+  spread: 0.6,                  // share of Elfouhaily's directional term kept (1: as published, narrow)
+  upwind: 0.25,                 // share of the downwind split given back to an even split (more waves crossing and against the wind)
 };
+// the swell's directional normalisation: N(s) = Gamma(s + 1) / (2 sqrt(pi) Gamma(s + 1/2)), so N cos^(2s)(d/2) integrates to
+// 1 over the circle (log-gamma by Stirling's series, ample for s >= 1)
+const lgamma = (x) => (x - 0.5) * Math.log(x) - x + 0.5 * Math.log(2 * Math.PI) + 1 / (12 * x) - 1 / (360 * x ** 3);
+export const swellNorm = (sS) => Math.exp(lgamma(sS + 1) - lgamma(sS + 0.5)) / (2 * Math.sqrt(Math.PI));
 
 const TAU = Math.PI * 2;
 export function omega(k) { return Math.sqrt(WAVES.g * k + WAVES.T * k * k * k); }
 export function phaseSpeed(k) { return Math.sqrt(WAVES.g / k * (1 + (k / WAVES.km) ** 2)); }
 const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
+// The swell that reaches a coast from a long fetch (W3.1): the open sea's significant height and peak period for a wind
+// U10 over a fetch, from the JONSWAP fetch relations (Hasselmann et al. 1973: Hs = 1.6e-3 X^1/2 U^2/g, Tp = 0.286 X^1/3
+// U/g, X = g F/U^2), held under the fully developed limits (Pierson and Moskowitz 1964: Hs = 0.21 U^2/g, Tp = 7.14 U/g).
+// The wave field itself (wavegpu.js) holds the local chop; the shore waves of the table ride this.
+export function swellState(U10, fetch) {
+  const g = WAVES.g, U = Math.max(U10, 0.05), X = g * fetch / (U * U);
+  const Hs = Math.min(1.6e-3 * Math.sqrt(X) * U * U / g, 0.21 * U * U / g);
+  const Tp = Math.min(0.286 * Math.cbrt(X) * U / g, 7.14 * U / g);
+  return { Hs, Tp };
+}
 // Everything of the spectrum that depends on the wind and fetch only
 export function seaState(U10, fetch) {
   const g = WAVES.g, U = Math.max(U10, 0.05);
