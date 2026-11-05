@@ -134,7 +134,7 @@ void curlEvent(vec2 xz, float level, float depth) {
   // more of them, quicker); between, the lip is thrown further the bigger the wave
   float s = dot(gcCx, vec2(-gDir.y, gDir.x)); gcBig = smoothstep(0.7, 1.5, a0);
   float plunge = smoothstep(0.5 + 0.12 * gcBig, 0.66 + 0.12 * gcBig, 0.5 + 0.5 * w2noise(vec2(s / mix(90.0, 260.0, gcBig), cyc * 2.71), 618));
-  float delay = mix(1.5, 4.0, gcBig) * (0.5 + 0.5 * w2noise(vec2(s / mix(22.0, 60.0, gcBig), cyc * 1.37), 617));
+  float delay = mix(1.0, 2.0, gcBig) * (0.5 + 0.5 * w2noise(vec2(s / mix(22.0, 60.0, gcBig), cyc * 1.37), 617));
   // the event itself: a little over a second (more for a bigger wave): thrown and landed by 0.55, the lip dropping
   // into the bore from 0.7, gone by 1
   float te = mix(0.6, 1.1, gcBig) + 0.3 * clamp(a0, 0.0, 1.5); gcEv = (tSince - delay) / te;
@@ -162,7 +162,7 @@ export class CurlMesh {
     this.table = curlTable();
     const U = {
       ...world.clip.uniforms, ...shore.uniforms,
-      uSurf: world.uSurf, uSurfX: world.uSurfX, uWTime: world.uWTime, uSwDir: world.uSwDir, uLook3: world.uLook3,
+      uSurf: world.uSurf, uSurfX: world.uSurfX, uWTime: world.uWTime, uSwDir: world.uSwDir, uLook3: world.uLook3, uCurl: world.uCurl,
       uCam: S.uCam, uSeaLevel: S.uSeaLevel, tCurl: { value: this.table },
       uSun: world.sky.uniforms.uSun, uSunColor: world.sky.uniforms.uSunColor, uSkyUp: S.uSkyUp, tFoam: S.tFoam,
       uDebug: world.post.U.uDebug, uSkyView: world.sky.uniforms.uSkyView, uMS: world.sky.uniforms.uMS, uHaze: world.sky.uniforms.uHaze, uAbs: world.uAbs, uSca: world.uSca, uLook: world.uLook, uLook2: world.uLook2,
@@ -180,7 +180,7 @@ ${world.clip.glsl()}
 ${shore.glsl()}
 ${SWASH_GLSL}
 ${SURF_GLSL}
-uniform vec3 uCam; uniform float uSeaLevel; uniform vec4 uLook3; uniform highp sampler2D tCurl;
+uniform vec3 uCam; uniform float uSeaLevel; uniform vec4 uLook3, uCurl; uniform highp sampler2D tCurl;
 ${CURL_EVENT_GLSL}
 out vec3 vW, vN; out vec4 vLip; out float vIn, vTh; out vec2 vPsi; // vN: the outward normal; vLip: (along the lip: 0 root .. 1 tip, < 0 underside; stage; shown; -); vTh: girth (m); vPsi: (phase, |phase|) for the seam
 // the table, bilinear by hand
@@ -204,6 +204,7 @@ void main() {
       vec2 sc = vec2(H * gcXs, H), o = T.xy * sc;
       vec2 t = (curlAt(min(v + dv, 1.0), gcStage).xy - curlAt(max(v - dv, 0.0), gcStage).xy) * sc; t /= max(length(t), 1e-6);
       o.y -= gcFall * H * 0.8; // the lip dropping into the bore
+      o += uCurl.xy * gcH0; // the panel's nudge, forward and up, in face heights
       vec3 d = w3Coast(gcCx, gcDC, 0.25); // the root on the water's own crest (both trains, its lean, its collapse)
       vec2 dir = gDir;
       P = vec3(gcCx.x + d.x, level + d.y, gcCx.y + d.z) + vec3(dir.x, 0.0, dir.y) * o.x + vec3(0.0, o.y, 0.0);

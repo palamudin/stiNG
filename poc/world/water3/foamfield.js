@@ -25,7 +25,7 @@ export class FoamField {
     this.a = rt(); this.b = rt(); this.world = world; this.W = W;
     this.U = {
       ...world.clip.uniforms, ...(shore ? shore.uniforms : {}),
-      uSurf: world.uSurf, uSurfX: world.uSurfX, uWTime: world.uWTime, uSwDir: world.uSwDir, uLook2: world.uLook2, uLook3: world.uLook3,
+      uSurf: world.uSurf, uSurfX: world.uSurfX, uWTime: world.uWTime, uSwDir: world.uSwDir, uLook2: world.uLook2, uLook3: world.uLook3, uCurl: world.uCurl,
       uSeaLevel: surface.U.uSeaLevel, uWL: surface.U.uWL,
       tWD1: { value: field.disp[1].texture }, tWD2: { value: field.disp[2].texture },
       tPrev: { value: null }, uOrigin: { value: new THREE.Vector2() }, uPrevOrigin: { value: new THREE.Vector2() }, uDt: { value: 0 }, uLinger: { value: 4 }, uDrift: { value: new THREE.Vector2() },
@@ -40,7 +40,7 @@ export class FoamField {
 ${NOISE_GLSL}
 ${world.clip.glsl()}
 ${coast}
-uniform sampler2D tPrev, tWD1, tWD2; uniform vec2 uOrigin, uPrevOrigin, uDrift; uniform float uDt, uLinger, uSeaLevel; uniform vec4 uWL, uLook2, uLook3;
+uniform sampler2D tPrev, tWD1, tWD2; uniform vec2 uOrigin, uPrevOrigin, uDrift; uniform float uDt, uLinger, uSeaLevel; uniform vec4 uWL, uLook2, uLook3, uCurl;
 out vec4 oColor;
 const float N = ${n}.0, TX = ${C.texel.toFixed(3)}, W = ${W.toFixed(1)};
 float prevAt(vec2 p) { vec2 uv = (p - uPrevOrigin) / W; if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return 0.0; return texture(tPrev, uv).r; }
@@ -67,7 +67,7 @@ void main() {
     // ahead of it, then along the lip as it drops into the bore, by how big the wave is; what it leaves is the lace
     if (uLook3.w > 0.0) {
       curlEvent(p, level, depth);
-      float Lt = max(gcH0 * uLook3.w * gcXs * 1.64, 0.1), xa = -gcPsi / gcK / Lt; // this texel ahead of its crest, in the lip's reach
+      float Lt = max(gcH0 * uLook3.w * gcXs * 1.0 + uCurl.x * gcH0, 0.1), xa = -gcPsi / gcK / Lt; // this texel ahead of its crest, in the lip's reach
       float land = smoothstep(0.4, 0.55, gcEv) * smoothstep(0.75, 0.95, xa) * (1.0 - smoothstep(1.3, 1.9, xa));
       float drop = gcFall * smoothstep(0.1, 0.4, xa) * (1.0 - smoothstep(1.2, 1.6, xa));
       make = max(make, gcShow * max(land, drop) * smoothstep(0.05, 0.4, gcA0) * 1.2);
