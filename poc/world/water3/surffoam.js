@@ -202,10 +202,26 @@ void main() {
       blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
     };
     this.billows = new THREE.Mesh(pool(B.n, B.per), new THREE.ShaderMaterial({ ...common, vertexShader: billowVert, fragmentShader: billowFrag }));
+    // the pieces as data points (water3/foamfield.js): not drawn as sprites (cotton balls, flying) but splatted into the
+    // foam field where they are, a soft cloud a few times their size, so the surface draws the surge's foam as one
+    // bubbling body through its lace, carried and lingering with the rest of the field's foam
+    U.uFieldWin = { value: new THREE.Vector3(0, 0, 128) }; U.uSplatK = { value: 0 };
+    const toField = (vert, xzExpr, radius) => vert
+      .replace(/gl_Position = projectionMatrix \* viewMatrix \* vec4\([^;]*\);\n  #include <logdepthbuf_vertex>/, `vec2 fxz = ${xzExpr}; gl_Position = vec4(((fxz - uFieldWin.xy) / uFieldWin.z) * 2.0 - 1.0, 0.0, 1.0);`)
+      .replace('uniform vec3 uCam;', 'uniform vec3 uCam, uFieldWin; uniform float uSplatK;');
+    const splatFrag = (body) => `precision highp float; uniform float uSplatK; in vec2 vUv; in float vAlpha; out vec4 oColor; void main() { ${body} }`;
+    const add = { glslVersion: THREE.GLSL3, uniforms: U, depthTest: false, depthWrite: false, transparent: true, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor };
+    const bv = toField(billowVert.replace('vec3 P = C + right * position.x * size + up * position.y * size * stretch;', 'vec3 P = C + vec3(position.x, 0.0, position.y) * size * 3.0;'), 'P.xz');
+    const sv = toField(streakVert, 'xz');
+    this.splats = new THREE.Scene();
+    for (const [g, v, body] of [[pool(B.n, B.per), bv, 'vec2 p = (vUv - 0.5) * 2.0; float r = max(0.0, 1.0 - dot(p, p)); oColor = vec4(r * r * vAlpha * uSplatK, 0.0, 0.0, 0.0);'],
+      [pool(S.n, S.per), sv, 'float sides = smoothstep(0.5, 0.08, abs(vUv.x - 0.5)), ends = smoothstep(0.0, 0.18, vUv.y) * smoothstep(1.0, 0.72, vUv.y); oColor = vec4(sides * ends * vAlpha * uSplatK, 0.0, 0.0, 0.0);']]) {
+      const m = new THREE.Mesh(g, new THREE.ShaderMaterial({ ...add, vertexShader: v, fragmentShader: splatFrag(body) })); m.frustumCulled = false; this.splats.add(m);
+    }
     this.streaks = new THREE.Mesh(pool(S.n, S.per), new THREE.ShaderMaterial({ ...common, vertexShader: streakVert, fragmentShader: streakFrag, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
     for (const m of [this.billows, this.streaks]) m.frustumCulled = false;
     this.streaks.renderOrder = 3; this.billows.renderOrder = 4;
     this.stats = { billows: B.n * B.n * B.per, streaks: S.n * S.n * S.per };
   }
-  dispose() { for (const m of [this.billows, this.streaks]) { m.geometry.dispose(); m.material.dispose(); } }
+  dispose() { for (const m of [this.billows, this.streaks, ...this.splats.children]) { m.geometry.dispose(); m.material.dispose(); } }
 }

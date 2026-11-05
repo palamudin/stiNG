@@ -85,6 +85,11 @@ void main() {
     U.tPrev.value = this.a.texture;
     const prev = renderer.getRenderTarget(); renderer.setRenderTarget(this.b); renderer.render(this.scene, this.cam); renderer.setRenderTarget(prev);
     [this.a, this.b] = [this.b, this.a];
+    // the foam pieces' splats (water3/surffoam.js), added into the new state
+    if (this.splat) {
+      const SU = this.splat.U; SU.uFieldWin.value.set(U.uOrigin.value.x, U.uOrigin.value.y, this.W); SU.uSplatK.value = U.uDt.value * 1.5;
+      const ac = renderer.autoClear; renderer.autoClear = false; renderer.setRenderTarget(this.a); renderer.render(this.splat.splats, this.cam); renderer.setRenderTarget(prev); renderer.autoClear = ac;
+    }
     this.read[this.names[0]].value = this.a.texture; this.read[this.names[1]].value.set(U.uOrigin.value.x, U.uOrigin.value.y, this.W);
   }
   dispose() { this.a.dispose(); this.b.dispose(); this.mat.dispose(); this.quad.geometry.dispose(); }

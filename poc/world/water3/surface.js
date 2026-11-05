@@ -485,12 +485,12 @@ void main() {
     this.foamRT = bakeFoamTexture(world.renderer); U.tFoam.value = this.foamRT.texture; // baked once
     this.foam = shore ? new SurfFoam(world, this) : null;
     // the foam that lasts and travels (water3/foamfield.js): made by whitecaps and breakers, carried in, lingering
-    this.field = new FoamField(world, this); Object.assign(U, this.field.read);
+    this.field = new FoamField(world, this); Object.assign(U, this.field.read); this.field.splat = this.foam;
     this.fieldFar = new FoamField(world, this, FOAM_FIELD.far, ['tFoamFar', 'uFoamFarWin']); Object.assign(U, this.fieldFar.read); // the open sea's whitecaps, 2 km round
     // the breakers' curl over it (water3/curl.js): a mesh of its own, where there is a shore table
     this.curl = shore ? new CurlMesh(world, this) : null;
     if (this.curl) this.scene.add(this.curl.mesh);
-    if (this.foam) this.scene.add(this.foam.streaks, this.foam.billows);
+    // (the foam pieces are not drawn: they splat into the near foam field, which the surface draws)
     this._t = null;
   }
   // once a frame: the camera, the light, the gusts' drift
