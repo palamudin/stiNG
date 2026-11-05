@@ -157,6 +157,8 @@ canvas.addEventListener('pointermove', (e) => { if (drag && drag.id === e.pointe
 canvas.addEventListener('pointerup', () => { drag = null; });
 canvas.addEventListener('wheel', (e) => { e.preventDefault(); setZoom(state.zoom + e.deltaY * 0.0006); }, { passive: false });
 addEventListener('keydown', (e) => keys.add(e.code));
+addEventListener('keydown', (e) => { if (e.code === 'KeyK' && !e.repeat && world) world.waterLog(); }); // the water's log (world/index.js)
+window.waterLog = (x, z) => (world ? world.waterLog(x, z) : 'no world');
 // L toggles the water's debug view: its kinds (blue large, green a river) and the river's flow
 addEventListener('keydown', (e) => { if (e.code === 'KeyL' && world) { const U = world.post.U.uDebug; U.value = U.value === 0 ? 8 : 0; } });
 addEventListener('keyup', (e) => keys.delete(e.code));

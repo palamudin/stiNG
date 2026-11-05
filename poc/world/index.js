@@ -133,6 +133,53 @@ export class World {
   heightAt(x, z) { return this.source.height(x, z); }
   waterAt(x, z) { return this.source.waterAt ? this.source.waterAt(x, z) : this.source.sea; } // the water level there (W3)
   surfaceAt(x, z) { return Math.max(this.heightAt(x, z), this.waterAt(x, z)); }
+  // the water's log (K in the template and the game; window.waterLog()): at a 5 x 5 grid 2 m apart round (x, z), what
+  // the GPU reads (the clipmap's ground and water level, the shore table, the river share, the four cascades' heights)
+  // against the source's exact answer on the CPU, and the state that depends on where the eye is (the snapped origin,
+  // the clipmap's and the shore table's windows). For chasing what goes wrong far from the origin: a float holds a world
+  // position only to about a centimetre per 100 km
+  waterLog(x = this.camera.position.x, z = this.camera.position.z) {
+    const r = this.renderer, N = 25, step = 2, lines = [];
+    const f = (v, d = 3) => (typeof v === 'number' ? (Math.abs(v) >= 1e4 ? v.toExponential(2) : v.toFixed(d)) : String(v));
+    if (!this._probe) {
+      const U = { ...this.clip.uniforms, ...(this.shore ? this.shore.uniforms : {}), uP: { value: new THREE.Vector2() }, uStep: { value: step }, uWL: { value: new THREE.Vector4(1, 1, 1, 1) } };
+      for (let c = 0; c < 4; c++) U['tD' + c] = { value: null };
+      const mat = new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, uniforms: U, depthTest: false, depthWrite: false,
+        vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }',
+        fragmentShader: `precision highp float; precision highp int;
+${this.clip.glsl()}
+${this.shore ? this.shore.glsl() : ''}
+uniform vec2 uP; uniform float uStep; uniform vec4 uWL; uniform sampler2D tD0, tD1, tD2, tD3; out vec4 o;
+void main() {
+  ivec2 q = ivec2(gl_FragCoord.xy); vec2 p = uP + vec2(float(q.x % 5 - 2), float(q.x / 5 - 2)) * uStep;
+  if (q.y == 0) o = vec4(clipHeight(p), clipWater(p), clipFlow(p).x, 0.0);
+${this.shore ? '  else if (q.y == 1) { vec4 sh = shoreAt(p); o = vec4(sh.x, sh.w, gShoreKnow, length(sh.yz)); }' : '  else if (q.y == 1) o = vec4(0.0);'}
+  else o = vec4(texture(tD0, p / uWL.x).y, texture(tD1, p / uWL.y).y, texture(tD2, p / uWL.z).y, texture(tD3, p / uWL.w).y);
+}` });
+      const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat); quad.frustumCulled = false;
+      this._probe = { mat, scene: new THREE.Scene().add(quad), cam: new THREE.Camera(), rt: new THREE.WebGLRenderTarget(N, 3, { type: THREE.FloatType, format: THREE.RGBAFormat, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: false }) };
+    }
+    const P = this._probe, U = P.mat.uniforms;
+    U.uP.value.set(x, z);
+    if (this.waves) { for (let c = 0; c < 4; c++) U['tD' + c].value = this.waves.disp[Math.min(c, this.waves.disp.length - 1)].texture; if (this.surface) U.uWL.value.copy(this.surface.U.uWL.value); }
+    const prev = r.getRenderTarget(); r.setRenderTarget(P.rt); r.render(P.scene, P.cam); r.setRenderTarget(prev);
+    const px = new Float32Array(N * 3 * 4); r.readRenderTargetPixels(P.rt, 0, 0, N, 3, px);
+    const cam = this.camera.position;
+    lines.push(`water log @ ${new Date().toISOString()}  eye (${f(cam.x, 2)}, ${f(cam.y, 2)}, ${f(cam.z, 2)})  probe at (${f(x, 2)}, ${f(z, 2)})  |eye| ${f(Math.hypot(cam.x, cam.z) / 1000, 2)} km`);
+    lines.push(`  float32 step at the eye: ${f(Math.max(Math.abs(Math.fround(cam.x) - cam.x), 2 ** (Math.floor(Math.log2(Math.max(Math.abs(cam.x), Math.abs(cam.z), 1))) - 23)), 5)} m   sea level ${f(this.source.sea ?? 0)}`);
+    if (this.surface) { const S = this.surface.U; lines.push(`  surface: uCam (${f(S.uCam.value.x, 2)}, ${f(S.uCam.value.z, 2)})  uCamL (${f(S.uCamL ? S.uCamL.value.x : NaN, 3)}, ${f(S.uCamL ? S.uCamL.value.y : NaN, 3)})  grid scale ${f(S.uGridScale.value)}  sea ${f(S.uSeaLevel.value)}  cascades ${[0, 1, 2, 3].map((i) => f(S.uWL.value.getComponent(i), 1)).join('/')} m`); }
+    if (this.shore && this.shore.uniforms.uShoreLv) lines.push(`  shore table: ${this.shore.uniforms.uShoreLv.value.map((v, i) => `L${i} texel ${f(v.x, 1)} chunk ${f(v.y, 0)} dir@(${v.z},${v.w})`).join('  ')}  held ${this.shore.stats.held} bakes ${this.shore.stats.bakes}`);
+    const cu = this.clip.uniforms; for (const k of Object.keys(cu)) { const v = cu[k].value; if (v && v.isVector4) lines.push(`  clip ${k}: (${f(v.x, 2)}, ${f(v.y, 2)}, ${f(v.z, 2)}, ${f(v.w, 2)})`); else if (Array.isArray(v) && v[0] && v[0].isVector4) lines.push(`  clip ${k}[0..2]: ${v.slice(0, 3).map((u) => `(${f(u.x, 1)}, ${f(u.y, 1)}, ${f(u.z, 1)}, ${f(u.w, 1)})`).join(' ')} ... [${v.length}]`); else if (typeof v === 'number') lines.push(`  clip ${k}: ${f(v)}`); }
+    lines.push('  i   dx  dz | GPU ground  CPU ground   diff  | GPU water CPU water | depth | river | shore dist   tau   know  coh | cascade y 0/1/2/3');
+    let worst = 0;
+    for (let i = 0; i < N; i++) {
+      const dx = (i % 5 - 2) * step, dz = (Math.floor(i / 5) - 2) * step, a = px.subarray(i * 4, i * 4 + 4), b = px.subarray((N + i) * 4, (N + i) * 4 + 4), c = px.subarray((2 * N + i) * 4, (2 * N + i) * 4 + 4);
+      const hc = this.heightAt(x + dx, z + dz), wc = this.waterAt(x + dx, z + dz), d = a[0] - hc; worst = Math.max(worst, Math.abs(d));
+      lines.push(`  ${String(i).padStart(2)} ${String(dx).padStart(3)} ${String(dz).padStart(3)} | ${f(a[0]).padStart(10)} ${f(hc).padStart(10)} ${f(d).padStart(7)} | ${f(a[1]).padStart(8)} ${f(wc).padStart(8)} | ${f(a[1] - a[0], 2).padStart(5)} | ${f(a[2], 2)} | ${f(b[0], 1).padStart(10)} ${f(b[1], 1).padStart(7)} ${f(b[2], 2)} ${f(b[3], 2)} | ${[0, 1, 2, 3].map((k) => f(c[k], 3)).join(' ')}`);
+    }
+    lines.push(`  worst GPU-CPU ground difference: ${f(worst)} m`);
+    const out = lines.join('\n'); console.log(out); return out;
+  }
   // the wave field and the sea's caustics for this source (source.water: fetch and cascades), or none
   _water() {
     const W = this.source.water, gl = this.renderer;

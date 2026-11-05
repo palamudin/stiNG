@@ -45,6 +45,7 @@ const canvas = $('view');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true });
 const W2on = !!W2M && renderer.capabilities.isWebGL2; // World v2 needs WebGL2 (array textures, texelFetch)
 let world2 = null; // the World, made with the first game world (w2Attach)
+window.waterLog = (x, z) => (world2 ? world2.waterLog(x, z) : 'no world v2');
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -2452,6 +2453,7 @@ let pickOnce = 0; // a colony-view pick goes out in exactly one command
 addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   if (e.code === 'Tab') { e.preventDefault(); toggleLab(); return; }
+  if (e.code === 'KeyK' && !e.repeat && world2) { world2.waterLog(); return; } // the water's log: what the GPU reads round the eye against the CPU (world/index.js)
   if (e.code === 'KeyN' && !e.repeat) { toggleNest(); return; }
   if (e.code === 'Escape' && ui.nest) { toggleNest(); return; } // Esc closes the colony view first
   if (e.code === 'KeyT' && !e.repeat && ui.nest && solo()) { setSpeed(SPEEDS[(SPEEDS.indexOf(ui.speed) + 1) % SPEEDS.length]); return; }
