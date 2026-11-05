@@ -32,7 +32,7 @@ export const CURL = { cell: 4, cells: 80, along: 14, around: 48, sweep: 12 };
 // raw clock gcEv (s since it broke here); the tube being drawn: its own clock gcE (0 .. 0.8 landed .. 1 crashed and
 // gone), its size gcSc (1, or the second tube's), its rise gcRise and fall gcFall (0..1 each), the lip's flight gcP (0..1, the tip's share of its flight to the trough), its growth gcS, gcGate0 (whether this stretch plunges at all) and gcVis (shown now)
 export const CURL_EVENT_GLSL = /* glsl */ `
-vec2 gcCx = vec2(0.0); float gcPsi = 0.0, gcK = 1.0, gcDC = 1.0, gcA0 = 0.0, gcH0 = 0.0, gcBig = 0.0, gcEv = 0.0, gcE = 0.0, gcSc = 1.0, gcS = 0.0, gcRise = 0.0, gcFall = 0.0, gcP = 0.0, gcGate0 = 0.0, gcVis = 0.0;
+vec2 gcCx = vec2(0.0); float gcPsi = 0.0, gcK = 1.0, gcDC = 1.0, gcA0 = 0.0, gcH0 = 0.0, gcBig = 0.0, gcEv = 0.0, gcE = 0.0, gcSc = 1.0, gcS = 0.0, gcRise = 0.0, gcFall = 0.0, gcUnf = 0.0, gcP = 0.0, gcGate0 = 0.0, gcVis = 0.0;
 const float CG = 9.81;
 // the lip's throw for a face of height H (m), in the crest's frame (forward, up from the crest's top): launched up and
 // forward so it tops out 0.35 H above the crest and comes down 1.3 H ahead at the trough (H below the top): (vx, vy)
@@ -74,12 +74,12 @@ void curlEvent(vec2 xz, float level, float depth) {
   // (the throw's own flight time: about half a second for a metre's face); then it crashes into foam and is gone
   // (0.4 s). On some stretches of a big wave a second tube follows, about half the size, quicker
   float tl = curlLand(max(gcH0, 0.05)), ta = curlLaunch(max(gcH0, 0.05)).y / CG;
-  float tr = mix(2.2, 2.8, gcBig), tf = tl - ta, tc = 0.4, g2 = 1.0; gcSc = 1.0;
+  float tr = mix(2.2, 2.8, gcBig), tf = tl - ta, tc = 0.9, g2 = 1.0; gcSc = 1.0;
   if (t > tr + tf + tc + 0.1) {
     t -= tr + tf + tc + 0.2; gcSc = 0.55; tr *= 0.6; tf *= 0.75; tc *= 0.8;
     g2 = smoothstep(0.3, 0.7, gcBig) * smoothstep(0.45, 0.55, 0.5 + 0.5 * w2noise(vec2(s / 80.0, cyc * 4.1), 619));
   }
-  gcRise = smoothstep(0.0, tr, t); gcFall = clamp((t - tr) / tf, 0.0, 1.0);
+  gcRise = smoothstep(0.0, tr, t); gcFall = clamp((t - tr) / tf, 0.0, 1.0); gcUnf = clamp((t - tr - tf) / tc, 0.0, 1.0);
   gcP = (ta / tl) * gcRise + (1.0 - ta / tl) * gcFall; // the tip's flight: rising to the throw's top, then on at the water's pace
   gcE = t < tr + tf ? 0.8 * max(t, -1.0) / (tr + tf) : 0.8 + 0.2 * (t - tr - tf) / tc; // 0.8 landed, 1 gone
   gcS = 0.5 * gcRise + 0.5 * gcFall;
