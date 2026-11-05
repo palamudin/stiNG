@@ -12,6 +12,7 @@
 import * as THREE from 'three';
 import { NOISE_GLSL } from '../noise.js';
 import { SWASH_GLSL, SURF_GLSL } from './swash.js';
+import { CURL_EVENT_GLSL } from './curl.js';
 
 export const FOAM_FIELD = { near: { n: 256, texel: 0.5 }, far: { n: 256, texel: 8.0 } }; // 128 m and 2 km round the camera
 
@@ -31,7 +32,7 @@ export class FoamField {
     };
     // what the surface reads: the field, its window's corner and size
     this.names = names; this.read = { [names[0]]: { value: this.a.texture }, [names[1]]: { value: new THREE.Vector3(0, 0, W) } };
-    const coast = shore ? `${shore.glsl()}\n#define FF_COAST\n${SWASH_GLSL}\n${SURF_GLSL}` : '';
+    const coast = shore ? `${shore.glsl()}\n#define FF_COAST\n${SWASH_GLSL}\n${SURF_GLSL}\n${CURL_EVENT_GLSL}` : '';
     this.mat = new THREE.ShaderMaterial({
       glslVersion: THREE.GLSL3, uniforms: this.U, depthTest: false, depthWrite: false,
       vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }',
@@ -62,6 +63,15 @@ void main() {
     // foam left behind stays where it was made and only drifts in slowly; the bore's own white is made afresh at its
     // front each frame (the crest's whitewater and charge), so it keeps up with the wave without the field dragging
     v += gDir * 0.25 * gNear;
+    // the curl's landing (water3/curl.js, the same event): white where the lip comes down on the face and the splash
+    // ahead of it, then along the lip as it drops into the bore, by how big the wave is; what it leaves is the lace
+    if (uLook3.w > 0.0) {
+      curlEvent(p, level, depth);
+      float Lt = max(gcH0 * uLook3.w * gcXs * 1.64, 0.1), xa = -gcPsi / gcK / Lt; // this texel ahead of its crest, in the lip's reach
+      float land = smoothstep(0.55, 0.7, gcEv) * smoothstep(0.75, 0.95, xa) * (1.0 - smoothstep(1.3, 1.9, xa));
+      float drop = gcFall * smoothstep(0.1, 0.4, xa) * (1.0 - smoothstep(1.2, 1.6, xa));
+      make = max(make, gcShow * max(land, drop) * smoothstep(0.05, 0.4, gcA0) * 1.2);
+    }
   }
 #endif
   float prev = prevAt(p - v * uDt); // carried from upstream
