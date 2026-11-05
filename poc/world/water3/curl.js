@@ -96,7 +96,7 @@ function curlGrid() {
 
 // the curl event of the main train's crest a point belongs to (sw3Ctx(xz) already called): the crest gcCx, the phase
 // gcPsi (> 0 behind the crest), k at the point gcK; the event gcEv (0 starting .. 0.55 landed .. 1 gone), gcStage,
-// gcFall (the lip dropping), gcShow; the face's height gcH0 (2a) and the forward stretch gcXs; the depth at the crest gcDC.
+// gcFall (the lip dropping), gcShow; gcBig how much of a tube-making wave it is; the face's height gcH0 (2a) and the forward stretch gcXs; the depth at the crest gcDC.
 //
 // A plunge is local and brief (field and lab: the lip's throw to its landing within about half a second, the tube
 // closing within a second; a crest breaks first where it meets shallow water first and the curl runs along it, a
@@ -106,7 +106,7 @@ function curlGrid() {
 // runs along the crest at a few metres a second and only the stretch it is passing has a tube; behind it the lip
 // has landed and is gone into the bore, ahead of it the crest has yet to throw.
 export const CURL_EVENT_GLSL = /* glsl */ `
-vec2 gcCx = vec2(0.0); float gcPsi = 0.0, gcK = 1.0, gcEv = 0.0, gcStage = 0.0, gcFall = 0.0, gcShow = 0.0, gcH0 = 0.0, gcXs = 1.0, gcDC = 1.0, gcA0 = 0.0;
+vec2 gcCx = vec2(0.0); float gcBig = 0.0, gcPsi = 0.0, gcK = 1.0, gcEv = 0.0, gcStage = 0.0, gcFall = 0.0, gcShow = 0.0, gcH0 = 0.0, gcXs = 1.0, gcDC = 1.0, gcA0 = 0.0;
 float curlCel(float d) { return sqrt(9.81 * clamp(d, ${SHORE.dMin.toFixed(2)}, ${SHORE.dMax.toFixed(1)})); }
 void curlEvent(vec2 xz, float level, float depth) {
   // the coast context (sw3Ctx's) is the caller's again on return: this looks at the crest's own
@@ -130,13 +130,15 @@ void curlEvent(vec2 xz, float level, float depth) {
   // along the crest (s): which stretches of this wave plunge (more of a bigger wave's), and the peel: the delay before
   // it breaks here, 0 at the stretch's starting points to 4 s between them (60 m apart or so: the curl runs at 5 to
   // 15 m/s), a new layout every wave
-  float s = dot(gcCx, vec2(-gDir.y, gDir.x)), big = smoothstep(0.3, 1.2, a0);
-  float plunge = smoothstep(0.62 - 0.2 * big, 0.78 - 0.2 * big, 0.5 + 0.5 * w2noise(vec2(s / 260.0, cyc * 2.71), 618));
-  float delay = 4.0 * (0.5 + 0.5 * w2noise(vec2(s / 60.0, cyc * 1.37), 617));
+  // only a big wave makes a tube: a small one's peaks just pitch over and crash into its own face (shorter stretches,
+  // more of them, quicker); between, the lip is thrown further the bigger the wave
+  float s = dot(gcCx, vec2(-gDir.y, gDir.x)); gcBig = smoothstep(0.7, 1.5, a0);
+  float plunge = smoothstep(0.5 + 0.12 * gcBig, 0.66 + 0.12 * gcBig, 0.5 + 0.5 * w2noise(vec2(s / mix(90.0, 260.0, gcBig), cyc * 2.71), 618));
+  float delay = mix(1.5, 4.0, gcBig) * (0.5 + 0.5 * w2noise(vec2(s / mix(22.0, 60.0, gcBig), cyc * 1.37), 617));
   // the event itself: a little over a second (more for a bigger wave): thrown and landed by 0.55, the lip dropping
   // into the bore from 0.7, gone by 1
-  float te = 1.0 + 0.4 * clamp(a0, 0.0, 1.5); gcEv = (tSince - delay) / te;
-  gcStage = clamp(smoothstep(0.0, 0.55, gcEv), 0.0, 1.0); gcFall = smoothstep(0.7, 1.0, gcEv);
+  float te = mix(0.6, 1.1, gcBig) + 0.3 * clamp(a0, 0.0, 1.5); gcEv = (tSince - delay) / te;
+  gcStage = clamp(smoothstep(0.0, 0.55, gcEv), 0.0, 1.0) * mix(0.45, 1.0, gcBig); // a small wave's lip only leaves the face gcFall = smoothstep(0.7, 1.0, gcEv);
   gcShow = smoothstep(0.0, 0.1, gcEv) * (1.0 - smoothstep(0.88, 1.05, gcEv)) * smoothstep(0.05, 0.25, a0) * smoothstep(0.1, 0.35, dC) * plunge;
   gcH0 = 2.0 * a;
   // forward: about a face's height, further on a long, gentle wave
@@ -150,7 +152,7 @@ vec2 curlScoop(vec2 xz, float level, float depth, float scale) {
   curlEvent(xz, level, depth);
   if (gcPsi >= 0.0 || gcShow <= 0.0) return vec2(0.0);
   float xr = -gcPsi / gcK / max(gcH0 * scale * gcXs, 0.05); // ahead of the crest, in the lip's reach
-  return vec2(smoothstep(0.1, 0.45, xr) * smoothstep(0.25, 0.55, gcStage) * (1.0 - gcFall) * clamp(gcShow * 1.5, 0.0, 1.0), -0.39 * gcH0);
+  return vec2(smoothstep(0.1, 0.45, xr) * smoothstep(0.55, 0.85, gcStage) * gcBig * (1.0 - gcFall) * clamp(gcShow * 1.5, 0.0, 1.0), -0.39 * gcH0);
 }
 `;
 
