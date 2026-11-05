@@ -475,15 +475,15 @@ void main() {
   // (patches over a fifth of the zone at most, broken into bubbles: a bed under the crests' own white, not a sheet)
   fm = max(fm, smoothstep(0.98 - 0.3 * sf, 1.08 - 0.3 * sf, spf) * smoothstep(-0.35, 0.45, w2noise(vXZ / 0.22 + uTime * 0.05, 629)) * (0.15 + 0.25 * sf));
   fm = max(fm, smoothstep(1.0 - 0.7 * swLace, 1.12 - 0.7 * swLace, pat) * 0.85 * swLace);
-  // a river's foam: where it runs fast over shallows (the Froude number toward 1: rapids) white water, and faint streaks
-  // of scum wherever it flows, both carried downstream by the same two phases as its ripples, drawn out along the flow
+  // a river's foam
   if (fl > 0.01 && sp > 0.02) {
-    float fr = sp / sqrt(9.81 * max(depth, 0.05)), rap = fl * smoothstep(0.4, 0.9, fr), scum = fl * smoothstep(0.2, 1.2, sp) * 0.3;
-    vec2 fa2 = fv / sp, fn2 = vec2(-fa2.y, fa2.x); mat2 sM = 0.5 * outerProduct(fa2, fa2) + outerProduct(fn2, fn2); // the streaks: twice as long along the flow
-    float q = fph.z, pf = (w2noise(sM * (vXZ - fv * fph.x) / 0.5, 721) * q + w2noise(sM * (vXZ - fv * fph.y) / 0.5, 721) * (1.0 - q)) * inversesqrt(q * q + (1.0 - q) * (1.0 - q));
-    float pf2 = 0.5 + 0.5 * (0.7 * pf + 0.3 * w2noise(vXZ / 0.15 - fv * uTime, 722));
-    fm = max(fm, smoothstep(1.0 - 0.7 * rap, 1.12 - 0.7 * rap, pf2) * 0.85 * rap);
-    fm = max(fm, smoothstep(0.62, 0.7, pf2) * scum);
+    // white water only where it runs fast over shallows (the Froude number toward 1: rapids), a faint scum elsewhere
+    // where it is quick; both the water's own lace, carried downstream by the ripples' two phases (not stretched
+    // noise: that drew streaks running down the river)
+    float fr = sp / sqrt(9.81 * max(depth, 0.05)), rap = fl * smoothstep(0.7, 1.1, fr), scum = fl * smoothstep(0.5, 1.6, sp) * 0.12;
+    float q = fph.z, pf2 = mix(laceTap((vXZ - fv * fph.y) / (1.3 * ls)), laceTap((vXZ - fv * fph.x) / (1.3 * ls)), q);
+    fm = max(fm, smoothstep(1.0 - 0.6 * rap, 1.1 - 0.6 * rap, pf2 + 0.1) * 0.8 * rap);
+    fm = max(fm, smoothstep(0.75, 0.85, pf2) * scum);
   }
   fm = max(fm, smoothstep(1.0 - 0.6 * swWhite, 1.12 - 0.6 * swWhite, spf) * 0.6 * swWhite);
   c = mix(c, (uSkyUp * 0.8 + uSunColor * sunUp * 0.55 * cloud) * 0.92, fm * 0.85); // foam on top: white, lit by the sky and the sun

@@ -57,8 +57,8 @@ void main() {
   // foam behind carried shoreward at the bore's speed
   if (depth > 0.0 && level <= uSeaLevel + 0.5 && uSurf.x > 0.0 && sw3Ctx(p)) {
     w3Coast(p, depth, TX);
-    float big = smoothstep(0.1, 0.9, uSurf.x * gNear * gExpo);
-    make = max(make, gCoastFoam.x * mix(0.55, 1.0, big));
+    float big = smoothstep(0.1, 0.9, uSurf.x * gNear * gExpo), rv = 1.0 - clamp(clipFlow(p).x, 0.0, 1.0); // a river carries no surf (as the surface's)
+    make = max(make, gCoastFoam.x * mix(0.55, 1.0, big) * rv);
     // foam left behind stays where it was made and only drifts in slowly; the bore's own white is made afresh at its
     // front each frame (the crest's whitewater and charge), so it keeps up with the wave without the field dragging
     v += gDir * 0.25 * gNear;
@@ -68,7 +68,7 @@ void main() {
   bool wet = depth > 0.0;
   if (depth < 0.8 && level <= uSeaLevel + 0.5 && uSurf.x > 0.0) {
     vec3 cn = clipNormal(p); vec2 grad = -cn.xz / max(cn.y, 0.05);
-    sw3Beach(p, grad);
+    sw3Beach(p, grad); gExpo *= 1.0 - clamp(clipFlow(p).x, 0.0, 1.0); // no swash up a river's banks
     float s, th = level + sw3Shore(p, length(grad), uWTime, s) - bed;
     if (th > 0.0) { wet = true; make = max(make, 0.9 * sw3ShoreFoam(depth, th, s, depth > 0.0 ? gCoastFoam.x : 0.0)); }
   }
