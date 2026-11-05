@@ -650,7 +650,7 @@ namespace Sting.Core.Tests
             {
                 var uses = new Dictionary<string, int>();
                 for (int z = -4; z < 4; z++) for (int x = -4; x < 4; x++) { var u = World.LandUse(1234, x, z); uses[u] = (uses.TryGetValue(u, out var n0) ? n0 : 0) + 1; }
-                Ok(World.LandUse(1234, 0, 0) == "park" && new[] { -4, -1, 1, 3 }.All(x => World.LandUse(1234, x, 0) == "park") && uses["yards"] >= 40 && uses["mall"] == 3 && uses["forest"] >= 3,
+                Ok(World.LandUse(1234, 0, 0) == "park" && new[] { -4, -1, 1, 3 }.All(x => World.LandUse(1234, x, 0) == "park") && uses["yards"] + (uses.TryGetValue("urban", out var nu) ? nu : 0) >= 40 && uses["mall"] == 3 && uses["forest"] >= 3,
                     $"the home region: a park strip through home, a strip mall, a forest corner, yards everywhere else ({string.Join(", ", uses.Select(kv => kv.Key + " " + kv.Value))})");
                 var c = World.GenerateChunk(1234, 0, 1);
                 var houses = c.sheds.Where(q => q.house).ToList(); int fences = c.boxes.Count(q => q.fence);

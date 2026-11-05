@@ -514,7 +514,7 @@ namespace Sting.Core
                 if (rolls.TryGetValue(k, out var v)) return v;
                 if (rolls.Count > 4096) rolls.Clear();
                 string u = LandUse(seed, cx, cz, st);
-                v = u == "park" ? T.terrain.roll.park : u == "forest" ? T.terrain.roll.forest : u == "yards" ? T.terrain.roll.yards : u == "mall" ? T.terrain.roll.mall : u == "town" ? T.terrain.roll.town : u == "farm" ? T.terrain.roll.farm : 1;
+                v = u == "park" ? T.terrain.roll.park : u == "forest" ? T.terrain.roll.forest : u == "yards" ? T.terrain.roll.yards : u == "mall" ? T.terrain.roll.mall : u == "town" ? T.terrain.roll.town : u == "farm" ? T.terrain.roll.farm : u == "urban" ? T.terrain.roll.urban : 1;
                 rolls[k] = v;
                 return v;
             }
@@ -713,7 +713,7 @@ namespace Sting.Core
                     foreach (int s in new[] { -1, 1 })
                     {
                         var L = UrbanLines(z0, s); var rows = new List<Pad>();
-                        foreach (var b in c.rows) if (b.s == s) rows.Add(new Pad { k = 7, minx = b.x0, maxx = b.x1, minz = Min(L.zA, L.zD), maxz = Max(L.zA, L.zD), m = UrbMr, hx = (b.x0 + b.x1) / 2, hz = (L.zA + L.zD) / 2, z0 = z0 });
+                        foreach (var b in c.rows) if (b.s == s) rows.Add(new Pad { k = 7, minx = b.x0, maxx = b.x1, minz = Min(L.zA + s * 0.06, L.zD), maxz = Max(L.zA + s * 0.06, L.zD), m = UrbMr, hx = (b.x0 + b.x1) / 2, hz = (L.zA + L.zD) / 2, z0 = z0 });
                         P.Add(new Pad { k = 8, minx = oxu - UrbLot * UrbLots / 2, maxx = oxu + UrbLot * UrbLots / 2, minz = Min(L.zD, L.zE), maxz = Max(L.zD, L.zE), m = UrbM, hx = oxu, hz = (L.zD + L.zE) / 2, rows = rows });
                         P.AddRange(rows);
                     }
@@ -1137,12 +1137,12 @@ namespace Sting.Core
                         Num h = b.storeys * 3 + 0.4, xm = (b.x0 + b.x1) / 2;
                         c.rows.Add(new Row { x0 = b.x0, x1 = b.x1, zF = L.zF, zB = L.zB, s = s, h = h, storeys = b.storeys, c = b.c, shop = b.shop, mid = b.mid });
                         Bx(b.x0 + 0.05, b.x1 - 0.05, 0, h, L.zF, L.zB, row: true);
-                        Bx(b.x0 + 0.05, xm - 0.8, 0, UrbLow, L.zA + s * 0.05, L.zA + s * 0.35, wall: true);
-                        Bx(xm + 0.8, b.x1 - 0.05, 0, UrbLow, L.zA + s * 0.05, L.zA + s * 0.35, wall: true);
+                        Bx(b.x0 + 0.05, xm - 0.8, 0, UrbLow, L.zA + s * 0.08, L.zA + s * 0.38, wall: true);
+                        Bx(xm + 0.8, b.x1 - 0.05, 0, UrbLow, L.zA + s * 0.08, L.zA + s * 0.38, wall: true);
                         var ends = b.x1 >= xb - 1e-9 ? new[] { (b.x0 + 0.05, b.x0 + 0.3), (b.x1 - 0.3, b.x1 - 0.05) } : new[] { (b.x0 + 0.05, b.x0 + 0.3) };
                         foreach (var (xw0, xw1) in ends)
                         {
-                            Bx(xw0, xw1, 0, UrbLow, L.zA + s * 0.35, L.zF, wall: true);
+                            Bx(xw0, xw1, 0, UrbLow, L.zA + s * 0.38, L.zF, wall: true);
                             Bx(xw0, xw1, 0, 1.2, L.zB, L.zD - s * 0.05, wall: true);
                         }
                         Num drop = Gb(xm, (L.zF + L.zB) / 2) - court;

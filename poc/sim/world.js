@@ -419,7 +419,7 @@ function padsOf(seed, cx, cz, settings) {
     const z0 = (c.roads[0].minz + c.roads[0].maxz) / 2, U = URBAN, ox = cx * CS;
     for (const s of [-1, 1]) {
       const L = urbanLines(z0, s), rows = [];
-      for (const b of c.rows) if (b.s === s) rows.push({ k: 7, minx: b.x0, maxx: b.x1, minz: Math.min(L.zA, L.zD), maxz: Math.max(L.zA, L.zD), m: U.mr, hx: (b.x0 + b.x1) / 2, hz: (L.zA + L.zD) / 2, z0, h: null, t: 0 });
+      for (const b of c.rows) if (b.s === s) rows.push({ k: 7, minx: b.x0, maxx: b.x1, minz: Math.min(L.zA + s * 0.06, L.zD), maxz: Math.max(L.zA + s * 0.06, L.zD), m: U.mr, hx: (b.x0 + b.x1) / 2, hz: (L.zA + L.zD) / 2, z0, h: null, t: 0 });
       P.push({ k: 8, minx: ox - U.lot * U.lots / 2, maxx: ox + U.lot * U.lots / 2, minz: Math.min(L.zD, L.zE), maxz: Math.max(L.zD, L.zE), m: U.m, hx: ox, hz: (L.zD + L.zE) / 2, rows, h: null, t: 0 });
       P.push(...rows);
     }
@@ -1018,10 +1018,10 @@ export function generateChunk(seed, cx, cz, settings) {
         box(b.x0 + 0.05, b.x1 - 0.05, 0, h, L.zF, L.zB, { row: true });
         // the low wall at the sidewalk, open at the door; walls between the lots' front gardens and back yards, each on
         // its own pad (a lot steps from the next at their party wall); the row's ends walled the same
-        box(b.x0 + 0.05, xm - 0.8, 0, U.low, L.zA + s * 0.05, L.zA + s * 0.35, { wall: true });
-        box(xm + 0.8, b.x1 - 0.05, 0, U.low, L.zA + s * 0.05, L.zA + s * 0.35, { wall: true });
+        box(b.x0 + 0.05, xm - 0.8, 0, U.low, L.zA + s * 0.08, L.zA + s * 0.38, { wall: true }); // on the lot's pad, which stops short of the sidewalk
+        box(xm + 0.8, b.x1 - 0.05, 0, U.low, L.zA + s * 0.08, L.zA + s * 0.38, { wall: true });
         for (const [xw0, xw1] of b.x1 >= xb - 1e-9 ? [[b.x0 + 0.05, b.x0 + 0.3], [b.x1 - 0.3, b.x1 - 0.05]] : [[b.x0 + 0.05, b.x0 + 0.3]]) {
-          box(xw0, xw1, 0, U.low, L.zA + s * 0.35, L.zF, { wall: true });
+          box(xw0, xw1, 0, U.low, L.zA + s * 0.38, L.zF, { wall: true });
           box(xw0, xw1, 0, 1.2, L.zB, L.zD - s * 0.05, { wall: true });
         }
         // the pad above the court: a retaining wall at its edge on the court's side, a flight of stairs down through it

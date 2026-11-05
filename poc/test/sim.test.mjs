@@ -1258,8 +1258,8 @@ function seated(sim, pred) {
 {
   const uses = {};
   for (let z = -4; z < 4; z++) for (let x = -4; x < 4; x++) { const u = landUse(1234n, x, z); uses[u] = (uses[u] || 0) + 1; }
-  ok(landUse(1234n, 0, 0) === 'park' && [-4, -1, 1, 3].every((x) => landUse(1234n, x, 0) === 'park') && uses.yards >= 40 && uses.mall === 3 && uses.forest >= 3,
-    `the home region: a park strip through home, a strip mall, a forest corner, yards everywhere else (${Object.entries(uses).map(([k, n]) => k + ' ' + n).join(', ')})`);
+  ok(landUse(1234n, 0, 0) === 'park' && [-4, -1, 1, 3].every((x) => landUse(1234n, x, 0) === 'park') && uses.yards + (uses.urban || 0) >= 40 && uses.mall === 3 && uses.forest >= 3,
+    `the home region: a park strip through home, a strip mall, a forest corner, yards (or urban blocks by a town square) everywhere else (${Object.entries(uses).map(([k, n]) => k + ' ' + n).join(', ')})`);
   let yx = 0, yz = 1;
   const c = generateChunk(1234n, yx, yz);
   const houses = c.sheds.filter((h) => h.house), fences = c.boxes.filter((b) => b.fence);
@@ -1270,7 +1270,7 @@ function seated(sim, pred) {
   for (let x = -4; x < 4 && !loop; x++) for (let z = -4; z < 4 && !loop; z++) {
     if (landUse(1234n, x, z) !== 'yards') continue;
     const k = generateChunk(1234n, x, z);
-    if (landUse(1234n, x + 1, z) !== 'yards') loop = { k, x, z };
+    if (!['yards', 'urban'].includes(landUse(1234n, x + 1, z))) loop = { k, x, z }; // a street carries on into an urban block (S6)
   }
   ok(loop && loop.k.loops.length >= 1 && loop.k.roads[0].maxx < loop.x * 64 + 32, 'a street that meets a park, a mall or the woods ends in a cul-de-sac');
   // houses block the view between people on either side (GDD 8.9)
