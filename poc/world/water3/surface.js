@@ -77,6 +77,7 @@ function polarGrid() {
 
 const f = (v) => (Number.isInteger(v) ? v.toFixed(1) : String(v));
 
+const _vr = new THREE.Matrix4();
 export class WaterSurface {
   // world: the World (its clipmap, wave field, sky, shore table, caustics)
   constructor(world) {
@@ -152,11 +153,12 @@ ${SURF_GLSL}
 #include <logdepthbuf_pars_vertex>
 ${head}
 ${coast}
-out vec3 vW; out vec2 vXZ, vLoc; out float vCell, vNear, vJ; out vec2 vCoastSlope; out vec3 vCoast, vFlow; out vec4 vRough;
+out vec3 vW, vRel; out vec2 vXZ, vLoc; out float vCell, vNear, vJ; out vec2 vCoastSlope; out vec3 vCoast, vFlow; out vec4 vRough;
 void main() {
   bool skirt = position.y > 0.5;
   float r = length(position.xz);
-  vec2 xz = skirt ? uCam.xz + position.xz * ${S.skirt.toFixed(1)} : uCam.xz + position.xz * uGridScale;
+  vec2 off = position.xz * (skirt ? ${S.skirt.toFixed(1)} : uGridScale); // the point from the camera, exact
+  vec2 xz = uCam.xz + off;
   float level = clipWater(xz);
   float dc = distance(xz, uCam.xz);
   // the floor, read only where it can matter
@@ -209,8 +211,11 @@ void main() {
   }
 #endif
   vW = P; vXZ = xz; vCell = cell;
-  vLoc = uCamL + position.xz * (skirt ? ${S.skirt.toFixed(1)} : uGridScale); // the same point from the snapped origin, exact (the fine patterns read it)
-  gl_Position = projectionMatrix * viewMatrix * vec4(P, 1.0);
+  vLoc = uCamL + off; // the same point from the snapped origin, exact (the fine patterns read it)
+  // GDD 18.94: placed and projected from the eye, never from absolute positions: viewMatrix * P in 32 bits loses
+  // centimetres far from home, in depth too, and the shoreline's 1 cm sheet then fought the sand in patches
+  vRel = vec3(off.x + d.x, P.y - uCam.y, off.y + d.z); // (P.xz is xz + d.xz; only its height is changed after)
+  gl_Position = projectionMatrix * vec4(mat3(viewMatrix) * vRel, 1.0);
   #include <logdepthbuf_vertex>
 }`,
       fragmentShader: /* glsl */ `precision highp float; precision highp int;
@@ -241,7 +246,7 @@ float laceD(vec2 x, vec2 xl, float s, vec2 drift) {
   float t = gLaceT * 2.0;
   return t < 1.0 ? mix(lacePat(x, xl, 0.25 * s, drift), lacePat(x, xl, 0.8 * s, drift), t) : mix(lacePat(x, xl, 0.8 * s, drift), lacePat(x, xl, 2.5 * s, drift), t - 1.0);
 } uniform mat4 uVP; uniform float uWLost, uRain, uIce, uGlint, uWPeak;
-in vec3 vW; in vec2 vXZ, vLoc; in float vCell, vNear, vJ; in vec2 vCoastSlope; in vec3 vCoast, vFlow; in vec4 vRough; out vec4 oColor;
+in vec3 vW, vRel; in vec2 vXZ, vLoc; in float vCell, vNear, vJ; in vec2 vCoastSlope; in vec3 vCoast, vFlow; in vec4 vRough; out vec4 oColor;
 uniform float uDebug;
 const float W_N = ${f(WATER.n)};
 // the panel's 'Water' (index.js waterCtl): uAbs absorption and uSca scattering per metre (the colour preset), uLook
@@ -292,15 +297,15 @@ vec2 wRain(vec2 p, float t, float amt) {
 // the scene's reflection: the reflected ray marched against the scene's depth (resolved before the water was drawn);
 // 0 alpha where it misses (the sky shows)
 uniform sampler2D tDepth; uniform float uLogF;
-vec4 wSSR(vec3 P, vec3 R) {
-  float dP = length(P - cameraPosition), t = min(0.4 + 0.02 * dP, 0.02 + 0.05 * dP), tp = 0.0; bool front = true;
+vec4 wSSR(vec3 P, vec3 R) { // P: from the eye (vRel), as uVP takes it
+  float dP = length(P), t = min(0.4 + 0.02 * dP, 0.02 + 0.05 * dP), tp = 0.0; bool front = true;
   for (int i = 0; i < 24; i++) {
     vec3 q = P + R * t;
     vec4 c = uVP * vec4(q, 1.0); if (c.w <= 0.0) break;
     vec2 uv = c.xy / c.w * 0.5 + 0.5; if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) break;
     float d = texture(tDepth, uv).r; if (d >= 1.0) { front = true; tp = t; t *= 1.35; continue; }
     float sw = exp2(d * uLogF) - 1.0;                              // the scene's view depth at that pixel
-    vec3 S = cameraPosition + (q - cameraPosition) * (sw / c.w);    // the scene's point on the same pixel ray
+    vec3 S = q * (sw / c.w);    // the scene's point on the same pixel ray (from the eye)
     // a hit: the ray went from in front of the scene to behind it within this step, on something above the water
     if (c.w > sw && front && c.w - sw < (t - tp) * 1.5 + 0.02 && S.y > P.y + 0.002) {
       float e = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
@@ -340,7 +345,7 @@ void main() {
   float fp = sqrt(max(length(gx) * length(gy), 1e-12));
   m += wRain(vXZ, uTime, uRain) * (1.0 - smoothstep(0.02, 0.08, fp)); // rings while rain falls
   vec3 n = normalize(vec3(-m.x, 1.0, -m.y));
-  vec3 V = normalize(cameraPosition - vW); float tw = length(cameraPosition - vW);
+  vec3 V = normalize(-vRel); float tw = length(vRel); // from the eye, exact far from home
   vec2 suv = gl_FragCoord.xy / vec2(textureSize(tScene, 0));
   // the shoreline, per pixel: no water where its height is under this pixel's sand (the triangles cannot put water on
   // the sand at the wrong moment); its sheet's foam
@@ -353,7 +358,7 @@ void main() {
     if (depth < 0.0 && th <= 0.0) discard;
     // a bubbly band behind the tip while it climbs; sparse remnants in the backwash, thinning as it drains; the
     // bore's white over the sheet, fresh as it arrives
-    float aa = 0.004 + 4e-5 * length(cameraPosition - vW);
+    float aa = 0.004 + 4e-5 * tw;
     // the lace along the sheet's edge, up with it and back down with it to the line (thinner as it drains); the bore's
     // white over the sheet thinning as the water goes back, never gone before the next bore (the ebb and flow repeats)
     float band = smoothstep(-aa, aa, th) * (1.0 - smoothstep(0.0, 0.3 * uLook2.w + aa, th));
@@ -365,7 +370,7 @@ void main() {
   }
 #endif
   float edge = smoothstep(0.0, thin, D); // the water thinning to nothing at its edge
-  bool under = cameraPosition.y < vW.y;
+  bool under = vRel.y > 0.0;
   if (under) n = -n;
   vec3 ext = W_ABS + W_SCA;
   float sunUp = max(uSun.y, 0.0);
@@ -380,7 +385,7 @@ void main() {
   float nv = max(dot(n, V), 1e-3), F = wFresnel(nv);
   vec3 Tr = refract(-V, n, 1.0 / W_N);
   float Lp = D / max(-Tr.y, 0.15); // the path down to the floor
-  vec3 Pf = vW + Tr * min(Lp, 8.0);
+  vec3 Pf = vRel + Tr * min(Lp, 8.0); // from the eye (uVP takes it so)
   vec4 cf = uVP * vec4(Pf, 1.0); vec2 ruv = cf.w > 0.0 ? clamp(cf.xy / cf.w * 0.5 + 0.5, vec2(0.001), vec2(0.999)) : suv;
   ruv = mix(suv, ruv, edge * uLook.z / 0.06); // the refraction's strength (0.06: as drawn)
   vec3 floorCol = texture(tScene, ruv).rgb;
@@ -404,7 +409,7 @@ void main() {
   vec3 Rv = reflect(-V, n); Rv.y = abs(Rv.y);
   vec3 refl = skyAt(Rv);
 #ifdef W3_SSR
-  { vec4 ss = wSSR(vW, Rv); refl = mix(refl, ss.rgb, ss.a); }
+  { vec4 ss = wSSR(vRel, Rv); refl = mix(refl, ss.rgb, ss.a); }
 #endif
   vec3 Hh = normalize(V + uSun);
   vec2 sh = vec2(-Hh.x, -Hh.z) / max(Hh.y, 1e-3) - m;
@@ -504,7 +509,8 @@ void main() {
     });
     this.mesh = new THREE.Mesh(grid.geo, this.mat);
     this.mesh.frustumCulled = false; this.mesh.castShadow = false; this.mesh.receiveShadow = false;
-    this.mesh.onBeforeRender = (r, s, cam) => { U.uVP.value.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse); };
+    // uVP: the projection of a point given from the eye (the view's rotation only: exact far from home)
+    this.mesh.onBeforeRender = (r, s, cam) => { _vr.copy(cam.matrixWorldInverse).setPosition(0, 0, 0); U.uVP.value.multiplyMatrices(cam.projectionMatrix, _vr); };
     // drawn on its own after the scene (post.js), reading the scene's colour under it
     this.scene = new THREE.Scene(); this.scene.add(this.mesh);
     // the breakers' whitewater over it (water3/surffoam.js): where there is a shore table to find the surf with

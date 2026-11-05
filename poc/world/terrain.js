@@ -42,6 +42,12 @@ const vec3 T_EARTH = L(0.47, 0.40, 0.31);  // trodden earth, dry and packed
 `;
 
 
+// GDD 18.94: the terrain projected from the eye, so it keeps its centimetres (and its depth) far from home
+const PROJECT_REL = `
+// projected from the eye: viewMatrix * p in 32 bits cancels two large numbers (its translation and R p) and far from
+// home loses centimetres, in depth too; p - cameraPosition is exact for points this close, then only rotated
+#define W_PROJECT_REL vec4 mvPosition = vec4(mat3(viewMatrix) * (transformed - cameraPosition), 1.0); gl_Position = projectionMatrix * mvPosition;
+`;
 export function makeTerrain(clip, opts = {}) {
   const C = clip.cfg, g = clipGrid(C.cells);
   const geo = new THREE.InstancedBufferGeometry();
@@ -75,7 +81,7 @@ export function makeTerrain(clip, opts = {}) {
   // water 3: the sand wet where and since the water's own shoreline was over it (water3/swash.js)
   if (shore && opts.swash3) Object.assign(U, { uSwDir: opts.uSwDir, uSurf: opts.uSurf, uSurfX: opts.uSurfX, uWTime: opts.uWTime });
   const SHORE = shore ? shore.glsl() + '\n' + SHORE_WAVE_GLSL + '\n#define T_SHORE\n' + (opts.swash3 ? SWASH_GLSL + '\n#define T_SWASH3\n' : '') : '';
-  const VERT_HEAD = `${CLIP}\nattribute float aLevel;\nvarying vec3 vW;\n`;
+  const VERT_HEAD = `${CLIP}\nattribute float aLevel;\nvarying vec3 vW;\n${PROJECT_REL}`;
   const VERT_BODY = /* glsl */ `
   int lvl = int(aLevel);
   vec4 LV = uClipLv[lvl];
@@ -89,7 +95,7 @@ export function makeTerrain(clip, opts = {}) {
   const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92, metalness: 0 });
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, U);
-    sh.vertexShader = VERT_HEAD + sh.vertexShader.replace('#include <begin_vertex>', VERT_BODY);
+    sh.vertexShader = VERT_HEAD + sh.vertexShader.replace('#include <begin_vertex>', VERT_BODY).replace('#include <project_vertex>', 'W_PROJECT_REL');
     sh.fragmentShader = `${CLIP}\n${NOISE_GLSL}\n${SHORE}\n${WEAR_GLSL}\n${TERRAIN_SHADE_GLSL}
 uniform float uSea, uShadowFar, uTreeFar, uPaving, uTime, uWet, uShore, uSnowLine, uGrassR, uSnowOn; uniform vec3 uSunDir, uGrassTint;
 uniform vec4 uRunup; // the fallback run-up band (no shore table): swell height, period, on
@@ -236,7 +242,7 @@ float hfShadow(vec2 p, float h0, float dist) {
   const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
   depth.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, U);
-    sh.vertexShader = VERT_HEAD + sh.vertexShader.replace('#include <begin_vertex>', VERT_BODY);
+    sh.vertexShader = VERT_HEAD + sh.vertexShader.replace('#include <begin_vertex>', VERT_BODY).replace('#include <project_vertex>', 'W_PROJECT_REL');
   };
   depth.customProgramCacheKey = () => 'w2terrain-depth' + C.levels;
 

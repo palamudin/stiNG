@@ -112,7 +112,7 @@ void main() {
     }
   }
   vW = P;
-  gl_Position = projectionMatrix * viewMatrix * vec4(P, 1.0);
+  gl_Position = projectionMatrix * vec4(mat3(viewMatrix) * (P - uCam), 1.0); // from the eye: exact far from home (GDD 18.94)
   #include <logdepthbuf_vertex>
 }`,
       fragmentShader: /* glsl */ `precision highp float; precision highp int;
