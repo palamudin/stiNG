@@ -44,16 +44,23 @@ void curlEvent(vec2 xz, float level, float depth) {
   // one step more onto the crest itself (its own phase, its own depth there)
   if (sw3Ctx(c0)) { float p0 = mod(sw3Phase(0, uWTime, gTau, gPn) + 3.14159265, 6.2831853) - 3.14159265; c0 += gDir * (p0 * curlCel(level - clipHeight(c0)) / w); sw3Ctx(c0); }
   gcCx = c0;
+  float tauC = gTau; // the crest's travel time to the line (s): it falls at one second a second as the crest comes in
   float dC = max(level - clipHeight(gcCx), 0.02); gcDC = dC;
+  vec2 pp = vec2(-gDir.y, gDir.x);
+  // the depth there over the bed's small bumps (12 m across), for when it breaks
+  float dS = max(level - 0.2 * (clipHeight(gcCx) + clipHeight(gcCx + gDir * 6.0) + clipHeight(gcCx - gDir * 6.0) + clipHeight(gcCx + pp * 6.0) + clipHeight(gcCx - pp * 6.0)), 0.05);
   float shoal = pow(clamp(max(dC, 0.6) / ${SHORE.dMax.toFixed(1)}, 0.04, 1.0), -0.25);
   float a0 = uSurf.x * gNear * gExpo * shoal * sw3Group(gcCx, uWTime), a = min(a0, 0.42 * dC + 0.02); gcA0 = a0; gcH0 = 2.0 * a;
-  float early = 0.5 + 0.5 * w2noise(gcCx / 33.0 + vec2(cyc * 7.3, cyc * 3.1), 614);
+  float s = dot(gcCx, pp);
+  float early = 0.5 + 0.5 * w2noise(vec2(s / 33.0, cyc * 3.1), 614); // along the crest only: it does not change as the crest comes in
   float rb = 0.3 + 0.09 * early, db = a0 / rb; // the breaking limit, early or late along the crest (water3/swash.js)
-  vec3 cn = clipNormal(gcCx); float tb = max(sqrt(max(1.0 - cn.y * cn.y, 0.0)) / max(cn.y, 0.05), 0.004);
-  float tSince = (db - dC) / tb / sqrt(9.81 * max(dC, 0.1)); // seconds since the crest reached its break line
+  // the time since the crest passed its break line, on the water's own clock: on a plane beach tau = 2 sqrt(d) /
+  // (slope sqrt g), so the line where the depth is db lies at tau sqrt(db / d); tau is the table's smooth travel time,
+  // which the crest follows exactly, so this runs at one second a second with no jumps from the bed's bumps
+  float tSince = tauC * (sqrt(db / dS) - 1.0);
   // along the crest (s): which stretches of this wave plunge, and the peel (the delay before it breaks here after its
   // break line, 0 at the stretch's starting points); a big wave's stretches long and fewer, a small one's short
-  float s = dot(gcCx, vec2(-gDir.y, gDir.x)); gcBig = smoothstep(0.7, 1.5, a0);
+  gcBig = smoothstep(0.7, 1.5, a0);
   float plunge = smoothstep(0.5 + 0.12 * gcBig, 0.66 + 0.12 * gcBig, 0.5 + 0.5 * w2noise(vec2(s / mix(90.0, 260.0, gcBig), cyc * 2.71), 618));
   // the stretch breaks nearly together (it rides with the wave as one), its ends a little later
   float delay = 0.5 * (0.5 + 0.5 * w2noise(vec2(s / 70.0, cyc * 1.37), 617));
