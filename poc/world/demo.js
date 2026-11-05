@@ -146,7 +146,7 @@ function showStats() {
   const d = cam.dist, ds = d < 1 ? (d * 100).toFixed(0) + ' cm' : d < 1000 ? d.toFixed(d < 10 ? 1 : 0) + ' m' : (d / 1000).toFixed(2) + ' km';
   const g = world.timer.ms, gpu = world.timer.on ? (g.total ? `gpu ${g.total.toFixed(1)} ms: ` + ['scene', 'water', 'shore', 'clouds', 'composite', 'rays', 'dof', 'bloom', 'final', 'waves'].filter((k) => g[k] !== undefined).map((k) => `${k} ${g[k].toFixed(1)}`).join(' · ') : 'gpu timing…') : 'gpu timing: not given by this browser';
   const w = world.weather, wx = w ? `${w.kind}, ${w.temp.toFixed(0)} °C, wind ${Math.hypot(...w.wind).toFixed(0)} m/s` : state.weather;
-  const sm = world.post.samplers, dbg = world.post.U.uDebug.value, smt = (sm ? ` · samplers ${sm.composite}/${sm.max}` : '') + ` · shore by ${world.shoreMode}` + (world.surface ? ` · water ${(world.surface.stats.verts / 1000).toFixed(0)}k verts` : '') + (dbg ? (dbg === 9 ? ' · DEBUG meshes: water blue, the curl fold red, crest line yellow, breaking orange' : " · DEBUG water's kinds: blue large, green river, bands its flow") : '');
+  const sm = world.post.samplers, dbg = world.post.U.uDebug.value, smt = (sm ? ` · samplers ${sm.composite}/${sm.max}` : '') + ` · shore by ${world.shoreMode}` + (world.surface ? ` · water ${(world.surface.stats.verts / 1000).toFixed(0)}k verts` : '') + (dbg ? (dbg === 9 ? ' · DEBUG meshes: water blue, crest line yellow, breaking orange' : " · DEBUG water's kinds: blue large, green river, bands its flow") : '');
   $('stats').textContent = `${fps.toFixed(0)} fps · ${i.calls} draws · ${(i.triangles / 1000).toFixed(0)}k tris · ${(world.forest.stats.far / 1000).toFixed(0)}k far cells${smt}\n${gpu}\nview ${ds} · ${seasonName(state.day)} day ${state.day} · ${wx} · ${world.forest.stats.trees} near trees`;
 }
 
@@ -157,7 +157,7 @@ canvas.addEventListener('pointermove', (e) => { if (drag && drag.id === e.pointe
 canvas.addEventListener('pointerup', () => { drag = null; });
 canvas.addEventListener('wheel', (e) => { e.preventDefault(); setZoom(state.zoom + e.deltaY * 0.0006); }, { passive: false });
 addEventListener('keydown', (e) => keys.add(e.code));
-// L cycles the water's debug views: its kinds (blue large, green a river, the river's flow), then the meshes (water blue, curl red, crest line yellow, breaking orange), then off
+// L cycles the water's debug views: its kinds (blue large, green a river, the river's flow), then the meshes (water blue, crest line yellow, breaking orange), then off
 addEventListener('keydown', (e) => { if (e.code === 'KeyL' && world) { const U = world.post.U.uDebug; U.value = U.value === 0 ? 8 : U.value === 8 ? 9 : 0; } });
 addEventListener('keyup', (e) => keys.delete(e.code));
 function setZoom(z) { state.zoom = THREE.MathUtils.clamp(z, 0, 1); $('zoom').value = state.zoom; $('oZoom').textContent = fmtDist(zoomToDist(state.zoom)); }
@@ -210,9 +210,6 @@ const WCTL = {};
     ['wavelength', 'Wavelength', 8, 60, 0.5, (v) => v.toFixed(1) + ' m'],
     ['speed', 'Speed', 0.3, 2, 0.01],
     ['steepness', 'Steepness', 0, 1.5, 0.01],
-    ['curl', 'Curl size', 0, 2, 0.01],
-    ['curlFwd', 'Curl forward', -1.5, 1.5, 0.01, (v) => v.toFixed(2) + ' × face'],
-    ['curlUp', 'Curl up', -1.5, 1.5, 0.01, (v) => v.toFixed(2) + ' × face'],
     ['foam', 'Foam charge', 0, 2, 0.01],
     ['foamSize', 'Foam size', 0.02, 4, 0.01],
     ['foamAmount', 'Foam amount', 0, 1, 0.01],

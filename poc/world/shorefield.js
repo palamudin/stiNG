@@ -17,9 +17,6 @@
 // computes a shoreline. A level answers where the line is within its margin; past that the next level does. Floats,
 // not halves: the travel time is a phase, and a half's step across a 5 s wave is a visible terrace. The precision is
 // the row count: the reader addresses a texel; finer texels cost memory and bake time, nothing per pixel.
-// A second line is baked into its own set of slots the same way: the isobath at the edge's depth (cfg.edge), its
-// distance, direction and travel time (the speed from the real depth either side), for the waves that come in over
-// deep water and break at a reef's edge with fronts of their own (shoreAtE).
 // Two more layers ride in the same array texture, read through the one sampler the composite can spare (it is at the
 // fragment sampler limit of Chrome on Windows, 16): the glints' Poisson table (water.js), and a copy of the clouds'
 // shadow map each frame (clouds.js), so the sea darkens under a cloud like the ground does.
@@ -35,7 +32,6 @@ export const SHORE = {
   sweeps: 110,                    // Jacobi passes of the eikonal solve: the travel time reaches that many texels from the line
   gradM: 8,                       // metres of the stencil the direction and coherence are taken over
   dMin: 0.3, dMax: 14,
-  edge: 0,                        // off for now (0: not baked); 2.9 metres: the second line baked, the isobath at a reef's edge (sources/wild.js reefAt), for the reef's own waves (water3/swash.js)
   perFrame: 2,                    // bakes a frame at most once running
 };
 
@@ -50,8 +46,8 @@ export class ShoreField {
     this.renderer = renderer; this.clip = clip; this.source = source; this.W = W; this.M = M;
     this.levels = C.levels.map((L, k) => ({ ...L, k, chunk: L.s * T, slotBase: C.levels.slice(0, k).reduce((a, l) => a + l.slots, 0), slots: Array.from({ length: L.slots }, () => ({ cx: null, cz: null, used: 0 })) }));
     const nSlots = C.levels.reduce((a, L) => a + L.slots, 0);
-    this.nSlots = nSlots; this.tables = 2 * nSlots; this.cloud = 2 * nSlots + 1; // the line's slots, the edge's, the tables, the clouds
-    this.rt = new THREE.WebGLArrayRenderTarget(T, T, 2 * nSlots + 2, { depthBuffer: false });
+    this.tables = nSlots; this.cloud = nSlots + 1;
+    this.rt = new THREE.WebGLArrayRenderTarget(T, T, nSlots + 2, { depthBuffer: false });
     Object.assign(this.rt.texture, { type: THREE.FloatType, format: THREE.RGBAFormat, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, generateMipmaps: false });
     const o = { type: THREE.FloatType, format: THREE.RGBAFormat, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: false, generateMipmaps: false };
     this.rtH = new THREE.WebGLRenderTarget(W, W, o); this.rtS = new THREE.WebGLRenderTarget(W, W, o); this.ping = new THREE.WebGLRenderTarget(W, W, o); this.pong = new THREE.WebGLRenderTarget(W, W, o); this.rtT = new THREE.WebGLRenderTarget(W, W, o);
@@ -64,15 +60,15 @@ export class ShoreField {
       uShoreCloudRect: { value: new THREE.Vector4(0, 0, 1, 0) }, // index.js points this at the clouds' own
     };
     const exact = !!source.glsl;
-    const U = { ...clip.uniforms, ...(exact ? source.uniforms : {}), uOrg: { value: new THREE.Vector2() }, uCell: { value: 1 }, uStep: { value: 1 }, uSrc: { value: null }, uSrc2: { value: null }, uMargin: { value: 0 }, uOff: { value: 0 } };
-    const head = `precision highp float; precision highp int;\n${clip.glsl()}\n${exact ? source.glsl : ''}\nuniform vec2 uOrg; uniform float uCell, uStep, uMargin, uOff; uniform highp sampler2D uSrc, uSrc2; out vec4 o; // uOff: the line's depth (0 the water line)
+    const U = { ...clip.uniforms, ...(exact ? source.uniforms : {}), uOrg: { value: new THREE.Vector2() }, uCell: { value: 1 }, uStep: { value: 1 }, uSrc: { value: null }, uSrc2: { value: null }, uMargin: { value: 0 } };
+    const head = `precision highp float; precision highp int;\n${clip.glsl()}\n${exact ? source.glsl : ''}\nuniform vec2 uOrg; uniform float uCell, uStep, uMargin; uniform highp sampler2D uSrc, uSrc2; out vec4 o;
 vec2 shoreP(ivec2 u) { return uOrg + (vec2(u) + 0.5) * uCell; }
 float shoreEAt(ivec2 u) { return texelFetch(uSrc, u, 0).x; }`;
     const mat = (frag) => new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, uniforms: U, vertexShader: VS, fragmentShader: head + '\n' + frag, depthTest: false, depthWrite: false });
     // the window's heights above the water, once per texel (the source itself, or the clipmap)
     this._height = mat(exact
-      ? `void main() { vec2 p = shoreP(ivec2(gl_FragCoord.xy)); vec4 S; float wl; wildSampleW(p, S, wl); o = vec4(S.x - wl + uOff, 0.0, 0.0, 1.0); }`
-      : `void main() { vec2 p = shoreP(ivec2(gl_FragCoord.xy)); o = vec4(clipAt(p).x - clipWater(p) + uOff, 0.0, 0.0, 1.0); }`);
+      ? `void main() { vec2 p = shoreP(ivec2(gl_FragCoord.xy)); vec4 S; float wl; wildSampleW(p, S, wl); o = vec4(S.x - wl, 0.0, 0.0, 1.0); }`
+      : `void main() { vec2 p = shoreP(ivec2(gl_FragCoord.xy)); o = vec4(clipAt(p).x - clipWater(p), 0.0, 0.0, 1.0); }`);
     // the seed: texel u holds the nearest water-line crossing with its four neighbours, if any
     this._seed = mat(`
 void main() {
@@ -104,7 +100,7 @@ void main() {
 }`);
     // the eikonal: seeds at the crossings (uSrc: the seed pass; uSrc2: the heights) start the time at their distance
     // to the line over the local speed, everything else at infinity
-    const slow = `float slowAt(ivec2 v) { float e = texelFetch(uSrc2, clamp(v, ivec2(0), ivec2(${W - 1})), 0).x; float dep = clamp(uOff - e, ${C.dMin.toFixed(2)}, ${C.dMax.toFixed(1)}); return uCell / sqrt(${G.toFixed(2)} * dep); }`; // the real depth either side of the line
+    const slow = `float slowAt(ivec2 v) { float e = texelFetch(uSrc2, clamp(v, ivec2(0), ivec2(${W - 1})), 0).x; float dep = clamp(e < 0.0 ? -e : ${C.dMin.toFixed(2)}, ${C.dMin.toFixed(2)}, ${C.dMax.toFixed(1)}); return uCell / sqrt(${G.toFixed(2)} * dep); }`;
     this._eikInit = mat(`${slow}
 void main() { ivec2 u = ivec2(gl_FragCoord.xy); vec4 sd = texelFetch(uSrc, u, 0);
   o = vec4(sd.z > 0.5 ? distance(sd.xy, shoreP(u)) / uCell * slowAt(u) : 1.0e9, 0.0, 0.0, 1.0); }`);
@@ -126,7 +122,7 @@ void main() {
   float T = texelFetch(uSrc2, u, 0).x;
   if (s.z < 0.5 || distance(s.xy, p) > uMargin || T > 1.0e8) { o = vec4(water ? -1.0e4 : 1.0e4, 0.0, 0.0, water ? 1.0e4 : -1.0e4); return; } // the line is past the margin: this level does not know
   float dist = distance(s.xy, p);
-  float dep0 = clamp(uOff - e, ${C.dMin.toFixed(2)}, ${C.dMax.toFixed(1)});
+  float dep0 = clamp(water ? -e : ${C.dMin.toFixed(2)}, ${C.dMin.toFixed(2)}, ${C.dMax.toFixed(1)});
   o = vec4(water ? -dist : dist, dep0, 0.0, water ? T : -T);
 }`);
     // the direction and coherence from the travel time's gradient over a wide stencil (uSrc: the final), and the
@@ -207,12 +203,6 @@ void main() {
   // another source of the same kind (a new seed): its uniforms, and every chunk baked again
   setSource(source) { this.source = source; if (source.glsl) Object.assign(this.U, source.uniforms); this.rebake(); }
   _bake(L, slot, cx, cz) {
-    const layer = L.slotBase + L.slots.indexOf(slot);
-    this.U.uOff.value = 0; this._bakeLine(L, cx, cz, layer);
-    if (this.cfg.edge > 0) { this.U.uOff.value = this.cfg.edge; this._bakeLine(L, cx, cz, layer + this.nSlots); }
-    this.U.uOff.value = 0;
-  }
-  _bakeLine(L, cx, cz, layer) {
     const r = this.renderer, prev = r.getRenderTarget(), U = this.U, W = this.W, M = this.M, mt = Math.ceil(L.margin / L.s);
     // the window: the chunk plus the level's margin, inside the common window size (the rest unused)
     U.uOrg.value.set(cx * L.chunk - M * L.s, cz * L.chunk - M * L.s); U.uCell.value = L.s; U.uMargin.value = M;
@@ -229,7 +219,7 @@ void main() {
     for (let i = 0; i < this.cfg.sweeps; i++) { U.uSrc.value = ea.texture; draw(this._eik, eb); [ea, eb] = [eb, ea]; }
     U.uSrc.value = flood.texture; U.uSrc2.value = ea.texture; U.uMargin.value = mt * L.s; draw(this._final, eb);
     const fin = eb;
-    U.uSrc.value = fin.texture; U.uMargin.value = M; draw(this._pack, this.rt, layer);
+    U.uSrc.value = fin.texture; U.uMargin.value = M; draw(this._pack, this.rt, L.slotBase + L.slots.indexOf(slot));
     r.setRenderTarget(prev);
     this.stats.bakes++;
   }
@@ -243,7 +233,6 @@ void main() {
 #define SHORE_LEVELS ${n}
 #define SHORE_TABLES ${this.tables}
 #define SHORE_CLOUD ${this.cloud}
-#define SHORE_EDGE ${this.nSlots}
 uniform highp sampler2DArray uShoreTab; uniform vec4 uShoreLv[SHORE_LEVELS]; uniform vec4 uShoreDir[${n * D * D / 4}]; uniform float uShoreOn;
 const vec4 SHORE_FAR = vec4(1.0e4, 0.0, 0.0, 1.0e4);
 const float SHORE_HAND[SHORE_LEVELS] = float[SHORE_LEVELS](${C.levels.map((L) => L.margin.toFixed(1)).join(', ')});
@@ -253,14 +242,13 @@ int shoreSlotC(int l, ivec2 c) { // the slot holding chunk c of level l, -1 for 
   int i = c.y * ${D} + c.x; vec4 v = uShoreDir[l * ${D * D / 4} + (i >> 2)]; int q = i & 3;
   return int(q == 0 ? v.x : q == 1 ? v.y : q == 2 ? v.z : v.w);
 }
-int gShoreOff = 0; // 0: the water line's slots; SHORE_EDGE: the edge's (shoreAtE)
 int shoreSlot(int l, vec2 p) { return shoreSlotC(l, ivec2(floor(p / uShoreLv[l].y))); }
 // a texel of chunk c, index i which may step over the chunk's edge into the neighbour's slot (so a read across a
 // chunk border interpolates the same texels from either side)
 vec4 shoreTap(int l, int slot, ivec2 c, ivec2 i) {
   ivec2 step = ivec2(i.x < 0 ? -1 : i.x >= ${T} ? 1 : 0, i.y < 0 ? -1 : i.y >= ${T} ? 1 : 0);
   if (step != ivec2(0)) { slot = shoreSlotC(l, c + step); if (slot < 0) return SHORE_FAR; i -= step * ${T}; }
-  return texelFetch(uShoreTab, ivec3(i, slot + gShoreOff), 0);
+  return texelFetch(uShoreTab, ivec3(i, slot), 0);
 }
 vec4 shoreRead(int l, int slot, vec2 p) {
   vec4 L = uShoreLv[l]; ivec2 cc = ivec2(floor(p / L.y)); vec2 o = vec2(cc) * L.y; vec2 g = (p - o) / L.x - 0.5; vec2 g0 = floor(g); vec2 f = g - g0; ivec2 i = ivec2(g0);
@@ -286,8 +274,6 @@ vec4 shoreAt(vec2 p) {
   }
   return v;
 }
-// the same for the edge's isobath: (signed distance, direction to it times the coherence, travel time to it)
-vec4 shoreAtE(vec2 p) { gShoreOff = SHORE_EDGE; vec4 v = shoreAt(p); gShoreOff = 0; return v; }
 // the glints' Poisson table (water.js wPoisson): row r, column c
 float shorePoisson(int r, int c) { vec4 t = texelFetch(uShoreTab, ivec3(c >> 2, r, SHORE_TABLES), 0); int q = c & 3; return q == 0 ? t.x : q == 1 ? t.y : q == 2 ? t.z : t.w; }
 uniform vec4 uShoreCloudRect; // the clouds' shadow map's centre x, z and half span (clouds.js uShadowRect)
@@ -329,7 +315,6 @@ vec4 shoreAt(vec2 p) {
   float tau = best / sqrt(9.81 * dep);
   return vec4(water ? -best : best, bdir, water ? tau : -tau);
 }
-vec4 shoreAtE(vec2 p) { gShoreKnow = 0.0; return SHORE_FAR; } // live: no edge line
 float shorePoisson(int r, int c) {
   float lam = 12.0 * pow(float(r) / ${(POISSON.rows - 1).toFixed(1)}, 2.0), u = (float(c) + 0.5) / ${POISSON.cols.toFixed(1)};
   float p = exp(-lam), cc = p, n = 0.0; for (int i = 0; i < 40; i++) { if (u <= cc) break; n += 1.0; p *= lam / n; cc += p; } return n;

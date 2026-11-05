@@ -41,7 +41,6 @@ import { SWASH_GLSL, SURF_GLSL } from './swash.js';
 import { SurfFoam } from './surffoam.js';
 import { bakeFoamTexture } from './foamtex.js';
 import { FoamField, FOAM_FIELD } from './foamfield.js';
-import { CurlMesh, CURL_EVENT_GLSL } from './curl.js';
 import { SHORE } from '../shorefield.js';
 
 export const SURFACE = {
@@ -152,14 +151,7 @@ ${SURF_GLSL}
 #include <logdepthbuf_pars_vertex>
 ${head}
 ${coast}
-uniform vec4 uLook3, uCurl;
-#ifdef W3_COAST
-${CURL_EVENT_GLSL}
-#endif
 out vec3 vW; out vec2 vXZ; out float vCell, vNear, vJ; out vec2 vCoastSlope; out vec3 vCoast, vFlow; out vec4 vRough;
-#ifdef W3_COAST
-out vec4 vCurlN; // the folded surface's normal, and how much of the surface is folded
-#endif
 void main() {
   bool skirt = position.y > 0.5;
   float r = length(position.xz);
@@ -215,57 +207,6 @@ void main() {
     P.y = depth < 0.0 ? sheet : max(P.y, sheet);
   }
 #endif
-#ifdef W3_COAST
-  // the breaker's curl: this surface itself, folded (the event: water3/curl.js). Round a plunging crest, from a third of
-  // a half-wave behind it to six tenths ahead, the surface is laid along a curl instead of the wave: up the back, over
-  // a top dragged forward, out along the lip to its tip, back under the lip (the tube's ceiling), down the hollowed
-  // face, along the trough under the tip and on; one sheet, nothing cut or added. It leans as the crest rises, curls
-  // as the lip falls; then it is covered with the crash's foam while the fold sinks into it and unfurls back into
-  // the wave it is after breaking
-  vCurlN = vec4(0.0);
-  if (coast && depth > 0.0 && uLook3.w > 0.0 && sw3Ctx(xz)) {
-    curlEvent(xz, level, depth);
-    if (gcVis > 0.002 || (gcGate0 > 0.002 && gcUnf > 0.0 && gcUnf < 1.0)) {
-      float H = gcH0 * uLook3.w * gcSc, Lh = 3.14159265 * curlCel(gcDC) / sw3Omega(0);
-      float ab = 0.35 * Lh, af = 0.6 * Lh, sg = -gcPsi / gcK; // this point ahead of its crest (m), unfolded
-      if (sg > -ab && sg < af && H > 0.03) {
-        float u = (sg + ab) / (ab + af), wb = smoothstep(0.0, 0.12, u) * (1.0 - smoothstep(0.85, 1.0, u));
-        float W = gcVis * smoothstep(0.0, 0.5, gcRise) * wb, f = gcFall;
-        // the curl: thirteen points, (forward, up) from the crest's top; leaning (risen) to curled (fallen)
-        vec2 K[13];
-        K[0] = vec2(-ab, -0.45 * H); K[1] = vec2(-0.6 * ab, -0.2 * H); K[2] = vec2(-0.25 * ab, 0.0);
-        K[3] = vec2(mix(0.05, 0.1, f), mix(0.22, 0.3, f)) * H;   // the top
-        K[4] = vec2(mix(0.35, 0.55, f), mix(0.3, 0.5, f)) * H;   // dragged forward
-        K[5] = vec2(mix(0.6, 1.05, f), mix(0.15, 0.35, f)) * H;  // the lip
-        K[6] = vec2(mix(0.7, 1.2, f), mix(-0.1, -0.45, f)) * H;  // its tip
-        K[7] = vec2(mix(0.55, 0.95, f), mix(-0.2, -0.15, f)) * H; // under it, back
-        K[8] = vec2(mix(0.35, 0.5, f), mix(-0.25, 0.1, f)) * H;  // the tube's ceiling
-        K[9] = vec2(mix(0.3, 0.2, f), mix(-0.5, -0.25, f)) * H;  // the hollowed face
-        K[10] = vec2(mix(0.45, 0.35, f), -0.85) * H;
-        K[11] = vec2(mix(0.9, 1.0, f), -1.0) * H;                 // the trough, under the tip
-        K[12] = vec2(af, -0.95 * H);
-        float g = u * 12.0; int k = min(int(floor(g)), 11); float v = g - float(k);
-        vec2 p0 = K[max(k - 1, 0)], p1 = K[k], p2 = K[k + 1], p3 = K[min(k + 2, 12)];
-        float v2 = v * v, v3 = v2 * v;
-        vec2 T = 0.5 * (2.0 * p1 + (-p0 + p2) * v + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * v2 + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * v3);
-        vec2 tg = 0.5 * ((-p0 + p2) + 2.0 * (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * v + 3.0 * (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * v2);
-        tg = length(tg) > 1e-6 ? normalize(tg) : vec2(1.0, 0.0);
-        T += uCurl.xy * gcH0; // the panel's nudge, forward and up, in face heights
-        vec2 cx = gcCx; sw3Ctx(cx); sw3CtxE(cx); vec2 dir = gDirE; // the reef's wave's way
-        vec3 dt = w3Coast(cx, gcDC, cell); // the crest's top, as the surface has it
-        vec3 top = vec3(cx.x + dt.x, level + dt.y, cx.y + dt.z);
-        vec3 Pc = top + vec3(dir.x, 0.0, dir.y) * T.x + vec3(0.0, T.y, 0.0);
-        P = mix(P, Pc, W);
-        // the crash: the fold sinks into it as it unfurls
-        P.y -= 0.45 * H * sin(3.14159265 * gcUnf) * gcGate0 * wb;
-        vCurlN = vec4(vec3(dir.x, 0.0, dir.y) * -tg.y + vec3(0.0, tg.x, 0.0), W);
-        // its white: the lip's edge as it is thrown, then the crash's foam over the whole fold
-        float lip = smoothstep(0.3, 1.0, f) * (1.0 - smoothstep(0.03, 0.12, abs(u - 0.5)));
-        vCoast.x = max(vCoast.x, max(lip * W, sin(3.14159265 * min(gcUnf * 1.6, 1.0)) * gcGate0 * wb));
-      }
-    }
-  }
-#endif
   vW = P; vXZ = xz; vCell = cell;
   gl_Position = projectionMatrix * viewMatrix * vec4(P, 1.0);
   #include <logdepthbuf_vertex>
@@ -289,9 +230,6 @@ float lacePat(vec2 x, float s, vec2 drift) {
   return mix(laceTap(x / s + drift), laceTap(x / (1.7 * s) + drift * 0.6 + 0.43), v);
 } uniform mat4 uVP; uniform float uWLost, uRain, uIce, uGlint, uWPeak;
 in vec3 vW; in vec2 vXZ; in float vCell, vNear, vJ; in vec2 vCoastSlope; in vec3 vCoast, vFlow; in vec4 vRough; out vec4 oColor;
-#ifdef W3_COAST
-in vec4 vCurlN;
-#endif
 uniform float uDebug;
 const float W_N = ${f(WATER.n)};
 // the panel's 'Water' (index.js waterCtl): uAbs absorption and uSca scattering per metre (the colour preset), uLook
@@ -390,9 +328,6 @@ void main() {
   float fp = sqrt(max(length(gx) * length(gy), 1e-12));
   m += wRain(vXZ, uTime, uRain) * (1.0 - smoothstep(0.02, 0.08, fp)); // rings while rain falls
   vec3 n = normalize(vec3(-m.x, 1.0, -m.y));
-#ifdef W3_COAST
-  if (vCurlN.w > 0.001) n = normalize(mix(n, normalize(vCurlN.xyz), clamp(vCurlN.w, 0.0, 1.0))); // the fold's own facing
-#endif
   vec3 V = normalize(cameraPosition - vW); float tw = length(cameraPosition - vW);
   vec2 suv = gl_FragCoord.xy / vec2(textureSize(tScene, 0));
   // the shoreline, per pixel: no water where its height is under this pixel's sand (the triangles cannot put water on
@@ -534,8 +469,8 @@ void main() {
   c = mix(c, (uSkyUp * 0.8 + uSunColor * sunUp * 0.55 * cloud) * 0.92, fm * 0.85); // foam on top: white, lit by the sky and the sun
   // debug 8 (L in water 3): the water's kinds, blue the large water, green a river (by its share), its flow as bands
   // across it moving downstream at its speed
-  // debug 9 (L twice): the meshes. The water flat blue lit by its slope; the first surf train's crest line yellow; where
-  // it breaks orange (the curl mesh draws itself red: water3/curl.js)
+  // debug 9 (L twice): the water flat blue lit by its slope; the first surf train's crest line yellow; where it breaks
+  // orange
   if (uDebug > 8.5 && uDebug < 9.5) {
     vec3 dc = vec3(0.12, 0.3, 0.85) * (0.45 + 0.55 * max(dot(n, normalize(vec3(0.3, 1.0, 0.2))), 0.0));
 #ifdef W3_COAST
@@ -544,9 +479,6 @@ void main() {
       dc = mix(dc, vec3(1.0, 0.55, 0.1), clamp(vCoast.x, 0.0, 1.0) * 0.8);                           // breaking: orange
       dc = mix(dc, vec3(1.0, 0.95, 0.15), (1.0 - smoothstep(0.03, 0.08, abs(psi))) * gNear);         // the crest line: yellow
     }
-#endif
-#ifdef W3_COAST
-    dc = mix(dc, vec3(1.0, 0.1, 0.08) * (0.45 + 0.55 * max(dot(n, normalize(vec3(0.3, 1.0, 0.2))), 0.0)), clamp(vCurlN.w, 0.0, 1.0)); // the fold: red
 #endif
     c = dc * (uSkyUp * 0.6 + uSunColor * sunUp * 0.4) * 3.0;
   }
@@ -569,7 +501,7 @@ void main() {
     // the foam that lasts and travels (water3/foamfield.js): made by whitecaps and breakers, carried in, lingering
     this.field = new FoamField(world, this); Object.assign(U, this.field.read); this.field.splat = this.foam;
     this.fieldFar = new FoamField(world, this, FOAM_FIELD.far, ['tFoamFar', 'uFoamFarWin']); Object.assign(U, this.fieldFar.read); // the open sea's whitecaps, 2 km round
-    this.curl = null; // the breaker's curl is the surface's own fold (W3_COAST in the vertex shader; the event: water3/curl.js)
+    this.curl = null;
     // (the foam pieces are not drawn: they splat into the near foam field, which the surface draws)
     this._t = null;
   }
@@ -582,7 +514,6 @@ void main() {
     U.uSkyUp.value.copy(W.sky.skyUp);
     const wt = W.uWTime.value, wdt = this._wt === undefined ? 0 : wt - this._wt; this._wt = wt;
     this.field.update(W.renderer, wdt, camera, wind || [0, 0], W.waterCtl.linger);
-    if (this.curl) this.curl.update(W.renderer, camera); // the cells a breaking tube runs through
     this.fieldFar.update(W.renderer, wdt, camera, wind || [0, 0], W.waterCtl.linger * 2.0); // open-sea foam lingers longer (the panel's time, doubled)
     U.uTime.value = W.uWTime.value; U.uWLost.value = W.waves.lostSlope || 0;
     const dt = this._t === null ? 0 : Math.min(Math.max(time - this._t, 0), 0.25); this._t = time;
