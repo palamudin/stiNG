@@ -22,11 +22,13 @@ export const CURL = { stages: 32, samples: 32, lipWidth: 0.9 };
 
 // the lip's cross-section at stage s (0..1), at u (0 root .. 1 tip): an arc whose length grows with the stage and
 // whose turn grows to a little past half a circle, thrown forward as it goes
+// thrown ahead of the wave (the lip runs faster than the crest under it), hooking over and falling, so it lands in front
+// of the face: at the full stage the tip is about 1.5 heights ahead of the crest and 1.4 below its top (the water ahead)
 function profile(s, u) {
-  const len = 0.35 + 1.0 * s, turn = 0.15 + 3.15 * s * s;   // arc length (heights) and the angle it turns through
+  const len = 0.35 + 1.0 * s, turn = 0.1 + 1.8 * s;         // arc length (heights) and the angle it turns through (to ~110 degrees)
   const R = len / turn, th = u * turn;
   let x = R * Math.sin(th), y = -R * (1 - Math.cos(th));
-  x += 0.35 * s * u; y -= 0.12 * s * u;                     // thrown forward, drooping
+  x += 0.9 * s * u; y -= 0.5 * s * u * u;                   // thrown forward, falling
   return [x, y];
 }
 function curlTable() {
