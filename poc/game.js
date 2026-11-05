@@ -3570,6 +3570,15 @@ canvas.addEventListener('pointerup', (e) => {
   if (t > 0) { const p = ray.ray.origin.clone().addScaledVector(ray.ray.direction, t); ovEnd(true); devTeleport(p.x, p.z); }
 });
 addEventListener('keydown', (e) => { if (ov.on && (e.code === 'Escape' || e.code === 'KeyM')) { e.preventDefault(); ovEnd(); } });
+// dev tools: J jumps far from home along +x and back (200 km, 1,000 km, 10,000 km, home), to check the world and its
+// drawing hold up there: the generator, the grading, the people, the ground and the water
+const FAR = { k: 0, at: [200e3, 1e6, 1e7, 0] };
+addEventListener('keydown', (e) => {
+  if (e.code !== 'KeyJ' || e.repeat || !devOpts.dev || !sim || !running || paused || TP.hold) return;
+  if (ov.on) ovEnd(true);
+  const d = FAR.at[FAR.k++ % FAR.at.length];
+  devTeleport(d + 3, 4);
+});
 // zoomed well out, the game's own objects (buildings, people, wasps, furniture) are not drawn: World v3 draws the land
 // itself there, and the classic look hands over to the big map; drawn, they would sit on the far ground's coarse heights
 function ovHideGame(hide) {

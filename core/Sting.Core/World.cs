@@ -437,9 +437,10 @@ namespace Sting.Core
             if (cx == 0 && cz == 0) return "park";
             if (st != null && st.settled > 0)
             {
-                Num d = Sqrt((Num)(cx * cx + cz * cz)) * CS;
-                if (d > st.settled) return "wild"; // past the settled area
-                if (d > Max(st.settled - RuralRing, RuralInner)) return "farm"; // its outer ring (S5)
+                // squared, in whole numbers: exact as far from home as a long reaches (a Num or an int overflows past ~46 km, ~3,000 km)
+                long n = (long)cx * cx + (long)cz * cz, csz = (long)(double)CS, m = System.Math.Max(st.settled - (long)(double)RuralRing, (long)(double)RuralInner);
+                if (n * csz * csz > (long)st.settled * st.settled) return "wild"; // past the settled area
+                if (n * csz * csz > m * m) return "farm"; // its outer ring (S5)
             }
             var R = RegionOf(cx, cz);
             if (TownQuarter(seed, cx, cz, st) != null) return "town";
@@ -451,7 +452,7 @@ namespace Sting.Core
         // ---------------------------------------------------------------- terrain (T2-6, ground v2 GDD 20 G1; see world.js groundAt)
         static readonly Num[] lat = new Num[65536];
         static ulong latticeSeed; static bool latticeOn;
-        static long CellKey(long ix, long iz) => (ix + 1048576) * 2097152 + (iz + 1048576);
+        static long CellKey(long ix, long iz) => (ix + 33554432) * 67108864 + (iz + 33554432); // |i| < 2^25 (world.js)
         /// the 256 x 256 lattice from the world seed (a fast 32-bit hash keyed by one full hash of the seed)
         static Num Lattice(ulong seed, long ix, long iz)
         {

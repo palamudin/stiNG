@@ -2483,6 +2483,29 @@ On a jump the CPU path no longer blurs a level out to its parent: the window it 
 
 The game now asks for a square at least 16 m across (`causticsMin`), pushed 30% of its size ahead along the view (`causticsAhead`), on a 512 texture with a 384 grid. That is about the old detail (3 cm texels, 7 cm cells, against 2.3 and 5 cm) over 2.7 times the width. Water seen at a slant still clouds with distance: that is the water, not the caustics.
 
+### 18.92 Ultra far from home (the lace foam's fix, and the world checked at 200 km, 1,000 km and 10,000 km)
+
+**Water.** The world thread's fix is merged (`world/w3` 4c753ce). Far from the origin the foam's lace had broken into blocks, because its texture was read at world coordinates in 32-bit floats. It is now read from a point measured from a 2048 m-snapped origin, with the camera's offset from it in double precision.
+
+**The world goes on.** A new behaviour test (block 68, JS and both C# builds) generates a 9×9 patch of chunks of a hilly world at 200 km, 1,000 km and 10,000 km from home and compares it with home:
+
+| | yards | town and urban | houses | urban buildings | steepest street |
+|---|---|---|---|---|---|
+| home | 45 | 11 | 153 | 96 | 9.7% |
+| 200 km | 48 | 15 | 174 | 146 | 9.5% |
+| 1,000 km | 40 | 24 | 150 | 240 | 9.9% |
+| 10,000 km | 46 | 16 | 158 | 156 | 9.4% |
+
+At each distance the ground is finite everywhere and every house pad is level. A settled world's wild land goes on finite there, and a wasp set down at each distance flies on, finds its chunks, and has 53 to 76 people about it.
+
+**What it found and fixed.**
+- **C#: farmland and the wild land at 10,000 km.** Land use squared the chunk's distance from home in a 32-bit int, which overflows past about 3,000 km, and then took a Q32.32 root, which saturates past about 46 km. It now compares squares in whole 64-bit numbers. That is exact, and agrees with the JS double comparison bit for bit.
+- **Cache keys (JS and C#).** The tables' cell keys packed indices of up to ±2^20. Street nodes are 8 m apart, so past about 8,000 km street levels would have shared keys. Keys now take ±2^25, enough for 268,000 km.
+
+**Dev: J.** With dev tools on, J jumps 200 km, then 1,000 km, then 10,000 km east of home, and back home, behind the teleport's curtain, so the drawing can be checked there on a GPU.
+
+**What the drawing still has to show.** The sim is in doubles (or Q32.32, good to ±2,100,000 km), and three.js puts objects relative to the camera in double precision before the GPU sees them. Shaders that work in world coordinates are 32-bit, though: the ground's lift, the clipmap and terrain, the walls' siding and windows, and the crowns' leaves. Their step is about 1.5 cm at 200 km, 6 cm at 1,000 km and 1 m at 10,000 km. A wasp is about 1.5 cm long, so close up these can wobble or block out as the lace did. The fix for all of them at once is a floating render origin, snapped like the lace's: everything drawn relative to it, with the world-coordinate patterns read from the offset.
+
 ### 18.91 Urban blocks round a town square (S6, GEN_VERSION 17)
 
 **Where.** A yards chunk beside a town centre's 2×2 square (any of its eight neighbours) becomes an urban block, land use `urban`, unless it is beside the home park. With the default one town per region that makes about a dozen blocks round each square, 86 in the 25×25 chunks round home on seed 1234. A block whose side touches the square is on a main street.

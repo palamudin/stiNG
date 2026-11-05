@@ -2471,6 +2471,39 @@ function seated(sim, pred) {
   ok(porchLevel === houses && doors === houses, `every front door has a level stoop and a step before it, the door at the stoop's height (${porchLevel} of ${houses})`);
 }
 
+// 68. Ultra far from home (200 km, 1,000 km, 10,000 km): the world goes on there as at home: the same mix of land uses
+// and buildings in a 9x9 patch of chunks, the ground finite and graded (streets within 10%, house pads level), the wild
+// land of a settled world finite; and a wasp set down there flies, finds its chunks and the people in them
+{
+  const st = { terrain: 2 }, S = 1234n;
+  const patch = (c0) => {
+    const r = { uses: {}, houses: 0, rows: 0, bad: 0, street: 0, pads: 0, padBad: 0 };
+    for (let cz = -4; cz <= 4; cz++) for (let cx = c0 - 4; cx <= c0 + 4; cx++) {
+      const u = landUse(S, cx, cz, st); r.uses[u] = (r.uses[u] || 0) + 1;
+      const c = generateChunk(S, cx, cz, st); r.houses += c.sheds.filter((q) => q.house).length; r.rows += c.rows.length;
+      if (!Number.isFinite(groundAt(S, cx * 64 + 7.3, cz * 64 - 11.1, st))) r.bad++;
+      const p = pavingOf(S, cx, cz, st);
+      for (const q of p.roads) { const zc = (q.minz + q.maxz) / 2; for (let x = q.minx; x + 1 <= q.maxx; x += 4) r.street = Math.max(r.street, Math.abs(groundAt(S, x + 1, zc, st) - groundAt(S, x, zc, st))); }
+      for (const h of p.houses) { r.pads++; if (Math.abs(groundAt(S, h.x - h.hw, h.z - h.hd, st) - groundAt(S, h.x + h.hw, h.z + h.hd, st)) > 1e-6) r.padBad++; }
+    }
+    return r;
+  };
+  const home = patch(0), far = [200e3, 1e6, 1e7].map((D) => ({ D, ...patch(chunkOf(D)) }));
+  const like = (r) => r.uses.yards >= 30 && (r.uses.park || 0) >= 5 && ((r.uses.town || 0) + (r.uses.urban || 0)) >= 4 && r.houses > home.houses * 0.6 && r.houses < home.houses * 1.6 && r.rows > 0;
+  ok(like(home) && far.every((r) => like(r) && r.bad === 0 && r.street <= 0.1 + 1e-9 && r.padBad === 0 && r.pads > 50),
+    `the world goes on far from home: ${far.map((r) => `${r.D / 1000} km: ${r.uses.yards} yards, ${(r.uses.town || 0) + (r.uses.urban || 0)} town and urban, ${r.houses} houses, ${r.rows} urban buildings, streets at most ${(r.street * 100).toFixed(1)}%`).join('; ')} (home: ${home.houses} houses)`);
+  const ss = { settled: 400, terrain: 1 }, wildOk = [2e5, 1e6, 1e7].every((D) => landUse(S, chunkOf(D), 0, ss) === 'wild' && Number.isFinite(groundAt(S, D + 3.3, -7.7, ss)));
+  let flown = true; const notes = [];
+  for (const D of [2e5, 1e6, 1e7]) {
+    const s = new Sim({ seed: 1234, birds: false, terrain: 2 }, { noAI: true }); run(s, 1);
+    const w = s.wasp; place(w, { x: D + 5, y: 2, z: 3 }); w.state = 'fly'; w.land = null; w.energy = 1;
+    run(s, 600, (sim, i) => idle({ mz: i < 300 ? 60 : 0, yawQ: 15708 }));
+    const ok2 = [w.x, w.y, w.z].every(Number.isFinite) && Math.abs(w.x - D) < 40 && s.activeChunks.some((r) => r.cx === chunkOf(w.x) && r.cz === chunkOf(w.z)) && s.active.length > 0;
+    if (!ok2) flown = false; notes.push(`${D / 1000} km: ${s.active.length} people about, the wasp ${(w.x - D).toFixed(1)} m on`);
+  }
+  ok(wildOk && flown, `a settled world's wild land goes on finite; a wasp set down far off flies and finds its chunks and their people (${notes.join('; ')})`);
+}
+
 // 67. Urban blocks (GDD 21.2 urban, S6, GEN_VERSION 17): round a town square, rows on terraced pads along a street within
 // grade; every step between levels is a wall or stairs (a retaining wall with a flight down to the court, walls between
 // the lots' gardens, a low wall at the sidewalk); people walk the sidewalks; and a block draws in few batches

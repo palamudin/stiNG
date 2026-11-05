@@ -1861,6 +1861,48 @@ namespace Sting.Core.Tests
                 Ok(D(I.site.h) >= 10 && D(I.site.h) <= 90 && inside && beyond && step < 3 && wild > 400 && settledChunks > 30 && built == 0 && trees > 300 && wet == 0 && s.wasp.y >= 0 && st.RulesHash() != t1.RulesHash() && st.WorldTag().Contains("wild beyond 400 m"),
                     $"the settled area sits on the wild land {D(I.site.h):0.0} m above the sea at ({D(I.site.x):0}, {D(I.site.z):0}); {settledChunks} settled chunks, {wild} wild ones with nothing built and {trees} trees, none in the water; no step over 3 m across the band ({step:0.00} per 2 m); a sim runs over it");
             }
+            // 68. ultra far from home (200 km, 1,000 km, 10,000 km; sim.test.mjs): the world goes on there as at home
+            {
+                var st = new Settings { terrain = 2 }; ulong S = 1234;
+                (Dictionary<string, int> uses, int houses, int rows, int bad, double street, int pads, int padBad) Patch(int c0)
+                {
+                    var uses = new Dictionary<string, int>(); int houses = 0, rows = 0, bad = 0, pads = 0, padBad = 0; double street = 0;
+                    for (int cz = -4; cz <= 4; cz++) for (int cx = c0 - 4; cx <= c0 + 4; cx++)
+                        {
+                            string u = World.LandUse(S, cx, cz, st); uses[u] = (uses.TryGetValue(u, out var n) ? n : 0) + 1;
+                            var c = World.GenerateChunk(S, cx, cz, st); houses += c.sheds.Count(q => q.house); rows += c.rows.Count;
+                            double g = D(World.GroundAt(S, (Num)cx * 64 + 7.3, (Num)cz * 64 - 11.1, st)); if (double.IsNaN(g) || double.IsInfinity(g) || Math.Abs(g) > 1e5) bad++;
+                            var p = World.PavingOf(S, cx, cz, st);
+                            foreach (var q in p.roads) { Num zc = (q.minz + q.maxz) / 2; for (Num x = q.minx; x + 1 <= q.maxx; x += 4) street = Math.Max(street, D(Abs(World.GroundAt(S, x + 1, zc, st) - World.GroundAt(S, x, zc, st)))); }
+                            foreach (var h in p.houses) { pads++; if (Abs(World.GroundAt(S, h.x - h.hw, h.z - h.hd, st) - World.GroundAt(S, h.x + h.hw, h.z + h.hd, st)) > 1e-6) padBad++; }
+                        }
+                    return (uses, houses, rows, bad, street, pads, padBad);
+                }
+                int U(Dictionary<string, int> d, string k) => d.TryGetValue(k, out var n) ? n : 0;
+                var home = Patch(0);
+                bool Like((Dictionary<string, int> uses, int houses, int rows, int bad, double street, int pads, int padBad) r) => U(r.uses, "yards") >= 30 && U(r.uses, "park") >= 5 && U(r.uses, "town") + U(r.uses, "urban") >= 4 && r.houses > home.houses * 0.6 && r.houses < home.houses * 1.6 && r.rows > 0;
+                bool allOk = Like(home); var notes = new List<string>();
+                foreach (double Dk in new[] { 200e3, 1e6, 1e7 })
+                {
+                    var r = Patch(World.ChunkOf(Dk));
+                    if (!(Like(r) && r.bad == 0 && r.street <= 0.1 + 1e-9 && r.padBad == 0 && r.pads > 50)) allOk = false;
+                    notes.Add($"{Dk / 1000} km: {U(r.uses, "yards")} yards, {U(r.uses, "town") + U(r.uses, "urban")} town and urban, {r.houses} houses, {r.rows} urban buildings, streets at most {r.street * 100:0.0}% ({r.bad} bad, {r.padBad} unlevel)");
+                }
+                Ok(allOk, $"the world goes on far from home: {string.Join("; ", notes)} (home: {home.houses} houses)");
+                var ss = new Settings { settled = 400, terrain = 1 }; bool wildOk = true, flown = true; var fl = new List<string>();
+                foreach (double Dk in new[] { 2e5, 1e6, 1e7 })
+                {
+                    if (World.LandUse(S, World.ChunkOf(Dk), 0, ss) != "wild") wildOk = false;
+                    double gw = D(World.GroundAt(S, (Num)Dk + 3.3, -7.7, ss)); if (double.IsNaN(gw) || Math.Abs(gw) > 1e5) wildOk = false;
+                    var s = new Sim(new Settings { seed = 1234, birds = false, terrain = 2 }, new SimOpts { noAI = true }); RunS(s, 1);
+                    var w = s.wasp; Place(w, P((Num)Dk + 5, 2, 3)); w.state = "fly"; w.land = null; w.energy = 1;
+                    RunS(s, 600, (sim, i) => Idle(c => { c.mz = i < 300 ? 60 : 0; c.yawQ = 15708; }));
+                    double dx = D(w.x) - Dk;
+                    bool ok2 = !double.IsNaN(D(w.y)) && Math.Abs(dx) < 40 && s.activeChunks.Any(rc => rc.cx == World.ChunkOf(w.x) && rc.cz == World.ChunkOf(w.z)) && s.active.Count > 0;
+                    if (!ok2) flown = false; fl.Add($"{Dk / 1000} km: {s.active.Count} people about, the wasp {dx:0.0} m on");
+                }
+                Ok(wildOk && flown, $"a settled world's wild land goes on finite; a wasp set down far off flies and finds its chunks and their people ({string.Join("; ", fl)})");
+            }
             // 67. urban blocks (GDD 21.2 urban, S6, GEN_VERSION 17; sim.test.mjs)
             {
                 var st = new Settings { terrain = 2 }; ulong S = 1234; Num G(Num x, Num z) => World.GroundAt(S, x, z, st);

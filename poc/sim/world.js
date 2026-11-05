@@ -355,7 +355,7 @@ function groundShape(seed, x, z, oct = T.terrain.octaves) {
 }
 // How much a chunk's land use lets the ground roll: a town square or a mall lot is near level, yards are graded
 // gently, parks and woods roll freely. Blended smoothly between chunk centres.
-const cellKey = (ix, iz) => (ix + 1048576) * 2097152 + (iz + 1048576); // exact in a double for |i| < 2^20
+const cellKey = (ix, iz) => (ix + 33554432) * 67108864 + (iz + 33554432); // exact in a double for |i| < 2^25 (street nodes 8 m apart: 268,000 km)
 function chunkRoll(seed, cx, cz, settings) {
   const m = worldTables(seed, settings).roll, k = cellKey(cx, cz), v = m.get(k);
   return v !== undefined ? v : keep(m, k, T.terrain.roll[landUse(seed, cx, cz, settings)] ?? 1);
