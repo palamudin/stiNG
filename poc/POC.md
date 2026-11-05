@@ -172,6 +172,7 @@ Run the tests from this folder with `node test/sim.test.mjs`, `node test/net.tes
 | 142 | Urban blocks round a town square: rows of houses and mid-rises with shops on main streets, terraced pads stepping down the street, retaining walls with stairs down to courtyards, garden and front walls (S6) | 18.91 | 25 |
 | 143 | Ultra far from home: the world checked at 200 km, 1,000 km and 10,000 km (land uses, buildings, grading, people, a wasp in flight), far-safe land use in C# and wider cache keys; dev J jumps there and back; the lace foam's far fix | 18.92 | 25 |
 | 144 | A floating render origin (classic look): the scene drawn shifted by a snapped origin near the camera, chunk geometry and instances stored from their chunk's middle, the crowds and the ground rings from the origin, so 10,000 km out draws as home does | 18.93 | 25 |
+| 145 | World v3's terrain, water and breakers' curl projected from the eye, so the shoreline's thin water no longer fights the sand far from home; the world thread's water log (K) | 18.94 | 25 |
 
 ## Verified
 

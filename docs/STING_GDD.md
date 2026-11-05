@@ -2483,6 +2483,19 @@ On a jump the CPU path no longer blurs a level out to its parent: the window it 
 
 The game now asks for a square at least 16 m across (`causticsMin`), pushed 30% of its size ahead along the view (`causticsAhead`), on a 512 texture with a 384 grid. That is about the old detail (3 cm texels, 7 cm cells, against 2.3 and 5 cm) over 2.7 times the width. Water seen at a slant still clouds with distance: that is the water, not the caustics.
 
+### 18.94 World v3's water projected from the eye
+
+**What showed.** Far from home, the shallow water over the sand came out as triangle patches: water in some, bare sand in others.
+
+**Why.** Every vertex went to the GPU as `projectionMatrix * viewMatrix * P`, with P in absolute metres. In 32 bits that product cancels two large numbers: the view's translation, and R·P. So each vertex lost about a centimetre per 100 km, in depth as well. The shoreline's water is a sheet 1 cm thick over the sand, so it fought the terrain under it, triangle by triangle.
+
+**The fix.**
+- **Terrain.** It is projected from `transformed - cameraPosition`, which is exact for points this close, and then only rotated.
+- **Water.** Its vertex is placed from the camera offset it is built from (`vRel`), so it never goes through absolute coordinates. The view vector, the under-water test, the refraction and the screen-space reflections use `vRel` too, and `uVP` becomes the projection times the view's rotation alone.
+- **Breakers' curl.** It is projected from `P - uCam`.
+
+**Still to do.** The pattern lookups (wave cascades, clipmap) still read world coordinates. At 10,000 km those are good to about a metre. That is the world thread's render-origin ask (18.93, COLLAB). The world thread's water log (K, `waterLog()`) compares the GPU's reads round the eye with the CPU's, to chase the rest.
+
 ### 18.93 A floating render origin (planet scale, classic look)
 
 **The problem.** The sim is exact anywhere: doubles in JS, Q32.32 in C# (±2,100,000 km). The GPU works in 32-bit floats, though. A position stored in absolute metres has a step of about 1.5 cm at 200 km, 6 cm at 1,000 km and 1 m at 10,000 km, and a wasp is 1.5 cm long. Moving objects were safe, because three.js composes each object's matrix with the camera's in doubles. What broke far out was everything stored in absolute metres:
