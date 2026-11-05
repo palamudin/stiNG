@@ -88,7 +88,7 @@ export class World {
     this.uLace = { value: new THREE.Vector4(0.9, 0.6, 0.5, 0) }; // the lace's scale, its variation, the foam's patchiness
     this.uAbs = { value: new THREE.Vector3(...WATER.absorb) }; this.uSca = { value: new THREE.Vector3(...WATER.scatter) };
     const ctl0 = { preset: 'ours', clarity: 1, roughness: 0, refraction: 0.06, sssPeak: 1.6, sssView: 0.06, foamBias: 0.05, foamScale: 1.3, shoreBand: 0.2, caustics: 1, glitter: WATER.glint, foamSize: 0.9, foamAmount: 0.47, linger: 4, curl: 0, lace: 0.9, laceVar: 0.6, patches: 0.5,
-      windDir: null, fetchKm: fetch0 / 1000, waveScale: 1, spread: WAVES.spread, swellScale: 1, swellDir: Math.round(WAVES.swellTurn * 180 / Math.PI), chop: WAVES.chop, timeScale: 1, shoreAuto: true, amplitude: 0.8, wavelength: 30, speed: 1, steepness: 1, foam: 1.6 };
+      windDir: null, fetchKm: fetch0 / 1000, waveScale: 1, spread: WAVES.spread, swellScale: 1, swellDir: Math.round(WAVES.swellTurn * 180 / Math.PI), chop: WAVES.chop, timeScale: 1, shoreAuto: true, amplitude: 0.8, wavelength: 30, speed: 1, steepness: 1, foam: 1.6, shoreLead: 0.3 };
     this.waterCtl = opts.waterCtl || {}; for (const k in ctl0) if (!(k in this.waterCtl)) this.waterCtl[k] = ctl0[k]; // the caller's object, kept across rebuilds
     this.uSurf = { value: new THREE.Vector4(0.8, 30, 1, 1) }; this.uSurfX = { value: new THREE.Vector4(1, 0, 0, 0) };
     this.uWTime = { value: 0 }; this.waterTime = 0; // the water's clock: the panel's time scale
@@ -276,7 +276,7 @@ export class World {
       // the surf (water3/swash.js): from the swell (its height, and its period as a wavelength in deep water, held to
       // the surf's range), or the panel's values
       if (swell && ctl.shoreAuto) { ctl.amplitude = Math.min(1.5, Math.max(0.2, 0.35 + 0.55 * swell.Hs)); ctl.wavelength = Math.min(60, Math.max(12, 0.45 * 9.81 * swell.T * swell.T / (2 * Math.PI))); ctl.speed = 1; ctl.steepness = 1; }
-      this.uSurf.value.set(swell ? ctl.amplitude : 0, ctl.wavelength, ctl.speed, ctl.steepness); this.uSurfX.value.x = ctl.foam;
+      this.uSurf.value.set(swell ? ctl.amplitude : 0, ctl.wavelength, ctl.speed, ctl.steepness); this.uSurfX.value.x = ctl.foam; this.uSurfX.value.y = ctl.shoreLead;
       const pr = WATER_PRESETS[ctl.preset] || WATER_PRESETS.ours;
       this.uAbs.value.set(...pr.absorb); this.uSca.value.set(...pr.scatter);
       this.uLook.value.set(ctl.clarity, ctl.roughness, ctl.refraction, ctl.sssPeak); this.uLook2.value.set(ctl.sssView, ctl.foamBias, ctl.foamScale, ctl.shoreBand);

@@ -19,7 +19,7 @@ export const SWASH = {
 };
 
 // The uniforms: uSurf = (amplitude m, wavelength m, speed, steepness) of the first train (the panel's 'Shore waves'),
-// uSurfX = (foam charge, -, -, -), uWTime the water's clock (its time scale), uSwDir the far swell's direction.
+// uSurfX = (foam charge, the shoreline's lead in seconds, -, -), uWTime the water's clock (its time scale), uSwDir the far swell's direction.
 // Needs NOISE_GLSL (w2noise) and the shore table's glsl (shoreAt, gShoreKnow).
 export const SWASH_GLSL = /* glsl */ `
 uniform vec4 uSurf, uSurfX; uniform float uWTime; uniform vec2 uSwDir;
@@ -51,7 +51,7 @@ float sw3Group(vec2 p, float t) { return 0.45 + 0.55 * (0.5 + 0.5 * w2noise(p / 
 // gradient), the clock's noise from the point itself, the crest of the first train reaching the line (its phase at
 // travel time 0) starting each climb
 const float SW3_UP = ${SWASH.up.toFixed(2)};
-const float SW3_EARLY = 0.2; // seconds: the shoreline's climb starts this much sooner still (the user's tuning)
+#define SW3_EARLY uSurfX.y // seconds: the shoreline's climb starts this much sooner still (the panel's 'Shore water lead')
 const float SW3_LEAD = 0.58; // radians: the bore (the crest's foam charge, running ahead of it) reaches the line this much before the crest
 void sw3Beach(vec2 p, vec2 grad) {
   gNear = 1.0;
@@ -105,6 +105,18 @@ float sw3EdgeY(vec2 xz, float level, float bed, float py, vec2 grad, float t, fl
   float s, th = level + sw3Shore(xz, length(grad), t, s) - bed;
   float sheet = bed + (th > 0.0 ? min(0.12, 0.012 + 0.3 * th) : max(th, -0.15));
   return depth < 0.0 ? sheet : max(py, sheet);
+}
+// the shoreline's own foam (the water's surface, and the foam field, so it lasts as long as the water's own foam):
+// the bore's foam handed over at the line, up the sand with the swash (from the line to the tip), back down with it
+// as it drains, then on down into the water as far as it has drained back, the shore side going first; never where
+// the incoming bore's foam is. depth: of the still water (< 0 on the sand); th: the water over the floor with the
+// shoreline; s: the swash's clock (sw3Shore); wave: the bore's own foam here
+float sw3ShoreFoam(float depth, float th, float s, float wave) {
+  if (th <= 0.0) return 0.0;
+  float zeta = th - depth, p = s < SW3_UP ? 0.0 : (s - SW3_UP) / (1.0 - SW3_UP);
+  float top = zeta - 0.75 * smoothstep(0.3, 1.0, p), reach = 0.75 * smoothstep(0.15, 1.0, p);
+  return smoothstep(0.0, 0.03, top + depth) * (1.0 - smoothstep(reach - 0.05, reach + 0.02, depth)) * smoothstep(0.0, 0.06, s)
+       * (s < SW3_UP ? 0.9 : mix(0.85, 0.5, p)) * (1.0 - clamp(wave * 1.5, 0.0, 1.0));
 }
 // the waves' sideways shift near the line, faded out: a trough must not pull the water's edge back off the sand
 float sw3EdgeShift(float depth) { return smoothstep(0.4, 2.0, depth); }

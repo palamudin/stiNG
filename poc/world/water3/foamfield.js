@@ -46,7 +46,7 @@ float prevAt(vec2 p) { vec2 uv = (p - uPrevOrigin) / W; if (any(lessThan(uv, vec
 void main() {
   vec2 p = uOrigin + (gl_FragCoord.xy) * TX; // the texel's centre (gl_FragCoord is at .5)
   float level = clipWater(p), bed = clipHeight(p), depth = level - bed;
-  if (depth <= 0.0) { oColor = vec4(0.0); return; } // the sand's foam is the swash's own
+  if (depth <= -2.0) { oColor = vec4(0.0); return; } // the sand past the swash's reach
   vec2 v = uDrift; float make = 0.0;
   // whitecaps: the open water folding (the 85 m and 12 m cascades' Jacobian), by the panel's bias and scale
   float lod1 = max(0.0, log2(TX * ${field.N}.0 / uWL.y)), lod2 = max(0.0, log2(TX * ${field.N}.0 / uWL.z)); // the folds the texel can hold
@@ -55,7 +55,7 @@ void main() {
 #ifdef FF_COAST
   // the surf: its crest's whitewater and the charge it throws ahead, made in proportion to the wave that broke; the
   // foam behind carried shoreward at the bore's speed
-  if (level <= uSeaLevel + 0.5 && uSurf.x > 0.0 && sw3Ctx(p)) {
+  if (depth > 0.0 && level <= uSeaLevel + 0.5 && uSurf.x > 0.0 && sw3Ctx(p)) {
     w3Coast(p, depth, TX);
     float big = smoothstep(0.1, 0.9, uSurf.x * gNear * gExpo);
     make = max(make, gCoastFoam.x * mix(0.55, 1.0, big));
@@ -63,6 +63,18 @@ void main() {
     // front each frame (the crest's whitewater and charge), so it keeps up with the wave without the field dragging
     v += gDir * 0.25 * gNear;
   }
+  // the shoreline's own foam, over the water by the line and the sand the swash covers (water3/swash.js), so it lasts
+  // as long as the water's own; on the sand the surface draws it only while the water is there
+  bool wet = depth > 0.0;
+  if (depth < 0.8 && level <= uSeaLevel + 0.5 && uSurf.x > 0.0) {
+    vec3 cn = clipNormal(p); vec2 grad = -cn.xz / max(cn.y, 0.05);
+    sw3Beach(p, grad);
+    float s, th = level + sw3Shore(p, length(grad), uWTime, s) - bed;
+    if (th > 0.0) { wet = true; make = max(make, 0.9 * sw3ShoreFoam(depth, th, s, depth > 0.0 ? gCoastFoam.x : 0.0)); }
+  }
+  if (!wet) { oColor = vec4(0.0); return; }
+#else
+  if (depth <= 0.0) { oColor = vec4(0.0); return; }
 #endif
   float prev = prevAt(p - v * uDt); // carried from upstream
   // foam builds up where breaking goes on (a surf beach stays foamed), fading over the linger time where it stops
