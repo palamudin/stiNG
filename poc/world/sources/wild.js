@@ -36,6 +36,11 @@ export const WILD = {
   // wide where the waves spill and stay broken all the way in; a sandbar on it at barAt metres, up to bar metres high,
   // with gaps along the shore (rip channels) where it fades
   surfK: 0.3, surfD: 6, bar: 0.5, barAt: 1.1, barW: 0.35, barCell: 110,
+  // reefs (the big waves): here and there along the coast the platform ends in a steep edge at reefAt metres of depth,
+  // the floor dropping reef metres more within a few tens of metres, so the swell comes in over deep water unbroken
+  // and meets a sharp rise: there it breaks big (plunging); inshore of the edge the platform's gentle shallows spill
+  // it smaller and smaller. Where the reefs are: a coarse noise along the coast (about a quarter of it)
+  reef: 7, reefAt: 2.8, reefW: 0.25, reefCell: 520,
   contCell: 9000,
   step: 5,         // metres between ledges on mountains
   riverCell: 2600,
@@ -140,7 +145,8 @@ export function wildSample(P, x, z, out = [0, 0, 0, 0, 0]) {
       const d = -e, K = W.surfK, sm = (q) => 0.5 * (q + Math.sqrt(q * q + 4));
       let d2 = K * d + (1 - K) * (sm(d - W.surfD) - sm(-W.surfD));
       vnoised(x / W.barCell, z / W.barCell, ss(S, 81), N); const bar = W.bar * smoothstep(-0.25, 0.35, N[0]);
-      const d3 = d2 - bar * Math.exp(-(((d2 - W.barAt) / W.barW) ** 2));
+      let d3 = d2 - bar * Math.exp(-(((d2 - W.barAt) / W.barW) ** 2));
+      vnoised(x / W.reefCell, z / W.reefCell, ss(S, 82), N); d3 += W.reef * smoothstep(0.15, 0.45, N[0]) * smoothstep(W.reefAt, W.reefAt + W.reefW, d2); // a reef's edge
       h = wl - Math.max(d3, Math.min(d2, 0.3)); // the bar's crest stays under water
     } else { const k = W.beach + (1 - W.beach) * smoothstep(0, W.beachBand, Math.abs(e)); h = wl + e * k; if (e < 0) h -= W.shelf * smoothstep(W.shelfAt, W.shelfAt + 2, -e * k); }
   }
@@ -271,6 +277,7 @@ void wildSampleW(vec2 xz, out vec4 S, out float wlOut) {
       float bar = ${f(W.bar)} * wsmooth(-0.25, 0.35, w2noised(vec2(x, z) / ${f(W.barCell)}, wss(81)).x);
       float br = (d2 - ${f(W.barAt)}) / ${f(W.barW)};
       float d3 = d2 - bar * exp(-br * br);
+      d3 += ${f(W.reef)} * wsmooth(0.15, 0.45, w2noised(vec2(x, z) / ${f(W.reefCell)}, wss(82)).x) * wsmooth(${f(W.reefAt)}, ${f(W.reefAt + W.reefW)}, d2); // a reef's edge
       h = wl - max(d3, min(d2, 0.3));
     } else { float k = ${f(W.beach)} + ${f(1 - WILD.beach)} * wsmooth(0.0, ${f(W.beachBand)}, abs(e)); h = wl + e * k; if (e < 0.0) h -= ${f(W.shelf)} * wsmooth(${f(W.shelfAt)}, ${f(W.shelfAt + 2)}, -e * k); }
   }

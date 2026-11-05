@@ -88,7 +88,11 @@ void curlEvent(vec2 xz, float level, float depth) {
   // only foams and the foam rides up the beach (the surf model's)
   float Lh = 3.14159265 * curlCel(dC) / w, dAhead = level - clipHeight(gcCx + gDir * 0.6 * Lh);
   float room = smoothstep(1.0, 1.5, dS / max(gcH0, 0.1)) * smoothstep(0.4, 1.0, dAhead / max(gcH0, 0.1)) * smoothstep(0.7 * Lh + 4.0, 0.7 * Lh + 20.0, -gShoreD);
-  gcGate0 = smoothstep(0.05, 0.25, a0) * smoothstep(0.1, 0.35, dC) * plunge * g2 * room;
+  // the floor's rise under the break: the big plunging waves are where deep water meets a sharp rise (a reef's edge:
+  // sources/wild.js); over a gentle shelf the wave spills (whitewater only, the surf model's)
+  float mB = (clipHeight(gcCx + gDir * 8.0) - clipHeight(gcCx - gDir * 8.0)) / 16.0;
+  float steep = smoothstep(0.03, 0.08, mB);
+  gcGate0 = smoothstep(0.05, 0.25, a0) * smoothstep(0.1, 0.35, dC) * mix(1.0, plunge, 0.5) * steep * g2 * room;
   gcVis = gcGate0 * smoothstep(0.0, 0.3, t) * (1.0 - smoothstep(tr + tf + 0.05, tr + tf + tc, t));
   gNear = sN; gExpo = sE; gPn = sP; gTau = sT; gShoreD = sD; gShoreKnow = sK; gDir = sG;
 }
