@@ -185,7 +185,8 @@ namespace Sting.Core
                 if (b.hive) continue; // a wasp robs a bee box from its entrance
                 if (x > b.minx + D && x < b.maxx - D && y > b.miny + D && y < b.maxy - D && z > b.minz + D && z < b.maxz - D) return true;
             }
-            foreach (var cy in CylsOf(rec)) if (cy.r > D && y < cy.h - D && Sq(x - cy.x) + Sq(z - cy.z) < Sq(cy.r - D)) return true;
+            var cyls = CylsOf(rec);
+            foreach (int ck in CylGrid(rec).Near(x, z, 0)) { var cy = cyls[ck]; if (cy.r > D && y < cy.h - D && Sq(x - cy.x) + Sq(z - cy.z) < Sq(cy.r - D)) return true; } // (S7)
             foreach (var f in RoofsOf(rec)) { var r = RoofLocal(f, x, y, z); if (Abs(r.v) < f.half - D && r.y > D && (f.rise * (Abs(r.u) - f.S) + f.S * r.y) / f.L < -D) return true; }
             return false;
         }

@@ -809,6 +809,14 @@ export function urbanLines(oz, s) {
 const urbanMain = (seed, cx, cz, settings) => [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => townQuarter(seed, cx + dx, cz + dz, settings));
 // Farmland (GDD 21.2 rural, S5): the outer RURAL.ring m of a settled area, never nearer the home tree than RURAL.inner
 // m; fields in hedgerows, a gravel lane along every other row of chunks, now and then a farmstead off it
+// Dense woods (S7, GDD 21.5): trees on a jittered grid whose spacing comes from the stand's trunk size (self-thinning:
+// thicker trunks stand further apart), 145 to 220 in a forest chunk. stands: [trunk radius from, to, spacing m];
+// jitter: the share of a cell a trunk may stray; path: half the width kept clear along the walkers' loop (loop: its
+// half extents round the chunk's middle); clearing: the chance of one, clearR its radius; h, cr: height and crown;
+// ref: about the trees a chunk had before, the count the per-tree things (webs, hollows, fruit) are thinned to
+export const WOODS = { stands: [[0.12, 0.22, 3.9], [0.16, 0.28, 4.3], [0.2, 0.34, 4.8]], jitter: 0.7, path: 1.4, loop: [26, 20], clearing: 0.35, clearR: [5, 9], h: [5.5, 9.5], cr: [1.9, 3.1], ref: 22 };
+// the share of the per-tree things a chunk of n trees keeps (1 up to WOODS.ref trees)
+export const woodsThin = (n) => (n > WOODS.ref ? WOODS.ref / n : 1);
 export const RURAL = { ring: 128, inner: 192, lane: 5.5, hedge: 1.2, hedgeH: 1.7, gate: 4, stead: 0.35, plinth: 1.5, steep: 1 / 3, max: 0.35 };
 function makeLandUse(seed, cx, cz, settings) {
   if (cx === 0 && cz === 0) return 'park';
@@ -905,6 +913,27 @@ export function generateChunk(seed, cx, cz, settings) {
     const r = range(H(slot), 0.15, 0.35), h = range(H(slot + 1), 3.2, 6.0), cr = range(H(slot + 2), 1.4, 2.8);
     c.trees.push({ x, z, r, h, cr, shade: unit(H(slot + 3)) });
     c.cylinders.push({ x, z, r, h, wood: true });
+  };
+
+  // dense woods (S7): share(x, z) is the chance a tree stands there (the wild land's forest), null for a whole wood
+  const addWoods = (share) => {
+    const W = WOODS, st = W.stands[rangeInt(H(29900), 0, W.stands.length)], n = Math.floor(T.chunk.size / st[2]), cell = T.chunk.size / n;
+    const clear = unit(H(29901)) < W.clearing, ccx = ox + range(H(29902), -18, 18), ccz = oz + range(H(29903), -18, 18), cr = range(H(29904), W.clearR[0], W.clearR[1]);
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+      const k = j * n + i, s0 = 30000 + k * 8;
+      const x = ox - T.chunk.size / 2 + (i + 0.5 + (unit(H(s0)) - 0.5) * W.jitter) * cell, z = oz - T.chunk.size / 2 + (j + 0.5 + (unit(H(s0 + 1)) - 0.5) * W.jitter) * cell;
+      // the walkers' loop: a path round the chunk's middle, kept clear
+      const ax = Math.abs(x - ox), az = Math.abs(z - oz), lx = W.loop[0], lz = W.loop[1];
+      const dl = ax <= lx && az <= lz ? Math.min(lx - ax, lz - az) : Math.max(ax - lx, az - lz, 0);
+      if (dl < W.path) continue;
+      if (clear && (x - ccx) * (x - ccx) + (z - ccz) * (z - ccz) < cr * cr) continue;
+      if (share && unit(H(s0 + 2)) >= share(x, z)) continue;
+      if (!free(x, z, 0.4) || c.ponds.some((p) => inPond(p, x, z, 1))) continue;
+      const r = range(H(s0 + 3), st[0], st[1]), h = range(H(s0 + 4), W.h[0], W.h[1]), crw = range(H(s0 + 5), W.cr[0], W.cr[1]);
+      c.trees.push({ x, z, r, h, cr: crw, shade: unit(H(s0 + 6)) });
+      c.cylinders.push({ x, z, r, h, wood: true });
+      occupied.push({ x, z, r: 0.6 });
+    }
   };
 
   const addFlowers = (px, pz, slot) => {
@@ -1205,11 +1234,7 @@ export function generateChunk(seed, cx, cz, settings) {
   else if (c.use === 'town') addTown();
   else if (c.use === 'wild') { // wild land past the settled area (GDD 21.6): trees where the wild forest stands, meadow flowers, nothing built
     const o = [0, 0, 0, 0, 0];
-    for (let k = 0; k < 40; k++) { // a tree a try where the forest is thick enough here, never in the water
-      const x = ox + range(H(2200 + k * 2), -30, 30), z = oz + range(H(2201 + k * 2), -30, 30);
-      wildHere(seed, x, z, settings, o);
-      if (o[0] > o[4] + 0.6 && unit(H(2300 + k)) < o[2] * 0.85 && free(x, z, 1.5)) { addTree(x, z, 2400 + k * 4); occupied.push({ x, z, r: 1 }); }
-    }
+    addWoods((x, z) => { wildHere(seed, x, z, settings, o); return o[0] > o[4] + 0.6 ? o[2] * 0.85 : 0; }); // as thick as the forest here, never in the water (S7)
     for (let k = 0; k < 3; k++) {
       const x = ox + range(H(2600 + k * 2), -26, 26), z = oz + range(H(2601 + k * 2), -26, 26);
       wildHere(seed, x, z, settings, o);
@@ -1246,7 +1271,7 @@ export function generateChunk(seed, cx, cz, settings) {
     for (let i = 0; i < np; i++) addFlowers(ox + range(H(20 + i), -28, 28), oz + range(H(40 + i), -28, 28), 400 + i * 80);
   }
   // trees: a few in a park, yard trees, dense at the forest edge, hardly any by a mall
-  const nt = c.use === 'wild' || c.use === 'urban' ? 0 : c.use === 'farm' ? rangeInt(H(2004), 1, 5) : c.use === 'forest' ? rangeInt(H(2000), 16, 26) : c.use === 'yards' ? rangeInt(H(2001), 1, 4) : c.use === 'mall' ? rangeInt(H(2002), 0, 3) : c.use === 'town' ? rangeInt(H(2003), 0, 3) : rangeInt(H(11), isOrigin ? 3 : 2, isOrigin ? 6 : 8);
+  const nt = c.use === 'wild' || c.use === 'urban' ? 0 : c.use === 'farm' ? rangeInt(H(2004), 1, 5) : c.use === 'forest' ? 0 : c.use === 'yards' ? rangeInt(H(2001), 1, 4) : c.use === 'mall' ? rangeInt(H(2002), 0, 3) : c.use === 'town' ? rangeInt(H(2003), 0, 3) : rangeInt(H(11), isOrigin ? 3 : 2, isOrigin ? 6 : 8);
   for (let i = 0; i < nt; i++) {
     const x = ox + range(H(150 + i * 4), -30, 30), z = oz + range(H(151 + i * 4), -30, 30);
     if (free(x, z, c.use === 'forest' ? 1.5 : 3)) { addTree(x, z, 200 + i * 4); occupied.push({ x, z, r: c.use === 'forest' ? 1 : 2 }); }
@@ -1260,6 +1285,7 @@ export function generateChunk(seed, cx, cz, settings) {
       if (free(x, z, 1.5)) { occupied.push({ x, z, r: 1.5 }); addActor(6110 + k * 10, x, z, dsin(a), dcos(a), 'lie', 'sun', null); }
     }
   }
+  if (c.use === 'forest') addWoods(null); // dense woods (S7)
   if (c.use === 'forest' && unit(H(6300)) < 0.3) addActor(6310, ox - 26, oz - 20, 1, 0, 'stand', 'stroll', [ox - 26, oz - 20, ox + 26, oz + 20]);
   // Birdbaths (GDD 6.2, T2-1): a basin on a pedestal in some backyards, now and then in a park, and one in the home
   // park. A solid drum for collision; its top is the water.
@@ -1284,8 +1310,9 @@ export function generateChunk(seed, cx, cz, settings) {
     }
   }
   // Spider webs: vertical discs beside tree trunks (GDD 9.3)
+  const webShare = 0.45 * woodsThin(c.trees.length); // a wood keeps about as many webs as a few trees had (S7)
   c.trees.forEach((t, i) => {
-    if (unit(H(700 + i)) > 0.45) return;
+    if (unit(H(700 + i)) > webShare) return;
     const a = range(H(710 + i), 0, 6.28), d = t.r + range(H(720 + i), 0.15, 0.35);
     const x = t.x + d * dcos(a), z = t.z + d * dsin(a);
     // the web hangs between the trunk and a twig, facing across the line to the trunk

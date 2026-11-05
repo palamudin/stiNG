@@ -186,11 +186,44 @@ namespace Sting.Core
 
     /// a water source (T2-1): a birdbath, or a puddle after rain
     public sealed class WaterSrc { public Num x, y, z, r; public string kind; public int i; public Pond pond; }
+    /// A chunk's trunks (or any discs) on a 4 m grid (sim.js DiscGrid, S7, GDD 21.5), built once: Near gives the indices
+    /// of the discs that can reach within r of (x, z), Box those that can reach a rectangle, both ascending. A loop over
+    /// them meets exactly what a loop over the whole list would have acted on, in the same order, so nothing the sim does
+    /// changes, and a wood of 200 trunks costs a wasp no more than a few trees did. ext: how far a disc reaches from its centre
+    public sealed class DiscGrid
+    {
+        static readonly Num C = 4;
+        readonly int nx, nz; readonly Num x0, z0; public readonly Num m; readonly List<int>[] cells; readonly List<int> outL = new List<int>();
+        public DiscGrid(int n, System.Func<int, Num> X, System.Func<int, Num> Z, System.Func<int, Num> ext)
+        {
+            if (n == 0) return;
+            Num mm = 0, ax = X(0), az = Z(0), bx = ax, bz = az;
+            for (int k = 0; k < n; k++) { mm = R.Max(mm, ext(k)); ax = R.Min(ax, X(k)); az = R.Min(az, Z(k)); bx = R.Max(bx, X(k)); bz = R.Max(bz, Z(k)); }
+            m = mm; x0 = ax; z0 = az; nx = (int)R.Floor((bx - ax) / C) + 1; nz = (int)R.Floor((bz - az) / C) + 1;
+            cells = new List<int>[nx * nz];
+            for (int k = 0; k < n; k++) { int q = (int)R.Floor((Z(k) - z0) / C) * nx + (int)R.Floor((X(k) - x0) / C); (cells[q] ??= new List<int>()).Add(k); }
+        }
+        /// the indices, ascending, of the discs reaching [ax, bx] x [az, bz] (a reused list: read it at once)
+        public List<int> Box(Num ax, Num az, Num bx, Num bz)
+        {
+            outL.Clear();
+            if (nx == 0) return outL;
+            int i0 = System.Math.Max(0, (int)R.Floor((ax - m - x0) / C)), i1 = System.Math.Min(nx - 1, (int)R.Floor((bx + m - x0) / C));
+            int j0 = System.Math.Max(0, (int)R.Floor((az - m - z0) / C)), j1 = System.Math.Min(nz - 1, (int)R.Floor((bz + m - z0) / C));
+            int parts = 0;
+            for (int j = j0; j <= j1; j++) for (int i = i0; i <= i1; i++) { var q = cells[j * nx + i]; if (q != null) { outL.AddRange(q); parts++; } }
+            if (parts > 1) outL.Sort();
+            return outL;
+        }
+        public List<int> Near(Num x, Num z, Num r) => Box(x - r, z - r, x + r, z + r);
+    }
+
     public sealed class ChunkRec
     {
         public int cx, cz, genVersion, discoveredTick; public uint contentHash; public ChunkContent content;
         string _key; public string key => _key ??= World.ChunkKey(cx, cz);
         // caches of pure functions of the seed, the chunk and the clock (never saved, never hashed)
+        internal DiscGrid cylGrid; internal List<Cyl> cylGridOf; // (S7: CylsOf on its grid)
         internal object sites; internal List<Food> fruit; internal long fruitDay = long.MinValue; internal int fruitSeason;
         internal List<Bait> baits; internal int baitsCampaign = -1;
         internal List<Cup> cups; internal int[] beeLoad, flowerIdx; internal List<Hive> hives;

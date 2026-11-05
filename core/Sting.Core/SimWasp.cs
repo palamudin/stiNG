@@ -295,8 +295,10 @@ namespace Sting.Core
                         }
                     }
                 }
-                foreach (var cy in CylsOf(rec))
+                var cyls = CylsOf(rec); var cg = CylGrid(rec);
+                foreach (int ck in cg.Near(w.x, w.z, 2 * R + cg.m)) // (S7: only the trunks near; wide enough for any push out of one into the next)
                 {
+                    var cy = cyls[ck];
                     if (w.y > cy.h) continue;
                     Num dx = w.x - cy.x, dz = w.z - cy.z, rr = cy.r + R, d2 = dx * dx + dz * dz;
                     if (d2 >= rr * rr || d2 == 0) continue;
@@ -689,8 +691,9 @@ namespace Sting.Core
                     Num dx = w.x - qx, dy = w.y - qy, dz = w.z - qz;
                     if (dx * dx + dy * dy + dz * dz <= reach * reach && PulpLeft(rec.key, i) > 0) return new WoodSpot { key = rec.key, i = i };
                 }
-                foreach (var cy in rec.content.cylinders)
+                foreach (int ck in GridsOf(rec.content).c.Near(w.x, w.z, reach)) // (S7)
                 {
+                    var cy = rec.content.cylinders[ck];
                     if (!cy.wood || w.y > cy.h) continue; // a birdbath is not wood (T2-1)
                     Num dx = w.x - cy.x, dz = w.z - cy.z, d = Sqrt(dx * dx + dz * dz) - cy.r;
                     if (d <= reach) return new WoodSpot { key = rec.key, i = -1 };

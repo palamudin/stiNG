@@ -126,7 +126,8 @@ export const AVOID = { clear: 0.03, step: 0.05, lookMin: 0.3, lookMax: 1, lookT:
 function solidAt(sim, recs, x, y, z, c) {
   for (const rec of recs) {
     for (const b of rec.content.boxes) if (x > b.minx - c && x < b.maxx + c && y > b.miny - c && y < b.maxy + c && z > b.minz - c && z < b.maxz + c) return true;
-    for (const cy of sim._cylsOf(rec)) if (y < cy.h + c && sq(x - cy.x) + sq(z - cy.z) < sq(cy.r + c)) return true;
+    const cyls = sim._cylsOf(rec);
+    for (const k of sim._cylGrid(rec).near(x, z, c)) { const cy = cyls[k]; if (y < cy.h + c && sq(x - cy.x) + sq(z - cy.z) < sq(cy.r + c)) return true; } // (S7: the trunks near)
     for (const f of sim._roofsOf(rec)) {
       const r = sim._roofLocal(f, { x, y, z }), au = Math.abs(r.u), av = Math.abs(r.v);
       if (av > f.half + c || au > f.S + c || r.y < -c || r.y > f.rise + c) continue;

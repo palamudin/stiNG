@@ -230,7 +230,7 @@ namespace Sting.Core
                 var c = rec.content;
                 foreach (var b in c.boxes) if (w.x > b.minx && w.x < b.maxx && w.z > b.minz && w.z < b.maxz && b.miny >= w.y) return true;
                 foreach (var f in RoofsOf(rec)) { var r = RoofLocal(f, w.x, w.y, w.z); if (Abs(r.u) < f.S && Abs(r.v) < f.half && r.y < 0) return true; } // under the eaves
-                foreach (var t in c.trees) if (w.y < t.h && Sq(w.x - t.x) + Sq(w.z - t.z) < t.cr * t.cr) return true;
+                foreach (int tk in GridsOf(c).t.Near(w.x, w.z, 0)) { var t = c.trees[tk]; if (w.y < t.h && Sq(w.x - t.x) + Sq(w.z - t.z) < t.cr * t.cr) return true; } // (S7)
             }
             return false;
         }

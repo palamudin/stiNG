@@ -90,6 +90,22 @@ namespace Sting.Core
         internal List<Roof> RoofsOf(ChunkRec rec) => rec.roofs ??= rec.content.sheds.ConvertAll(World.ShedRoof);
         internal static (Num u, Num y, Num v) RoofLocal(Roof f, Num x, Num y, Num z) => f.alongX ? (z - f.z, y - f.y0, x - f.x) : (x - f.x, y - f.y0, z - f.z);
         internal static V3 RoofWorld(Roof f, Num u, Num y, Num v) => f.alongX ? new V3(f.x + v, f.y0 + y, f.z + u) : new V3(f.x + u, f.y0 + y, f.z + v);
+        /// CylsOf(rec) on its grid (S7)
+        internal DiscGrid CylGrid(ChunkRec rec)
+        {
+            var L = CylsOf(rec);
+            if (rec.cylGrid == null || rec.cylGridOf != L) { rec.cylGrid = new DiscGrid(L.Count, k => L[k].x, k => L[k].z, k => L[k].r); rec.cylGridOf = L; }
+            return rec.cylGrid;
+        }
+        /// a chunk's content's trunks (by crown or trunk, whichever reaches further) and cylinders on their grids (S7), kept
+        /// beside it (never in it: the content is hashed); pure functions of the content, so shared by every sim
+        internal sealed class ContentGrids { public DiscGrid t, c; }
+        static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ChunkContent, ContentGrids> contentGrids = new System.Runtime.CompilerServices.ConditionalWeakTable<ChunkContent, ContentGrids>();
+        internal static ContentGrids GridsOf(ChunkContent c) => contentGrids.GetValue(c, cc => new ContentGrids
+        {
+            t = new DiscGrid(cc.trees.Count, k => cc.trees[k].x, k => cc.trees[k].z, k => Max(cc.trees[k].cr, cc.trees[k].r)),
+            c = new DiscGrid(cc.cylinders.Count, k => cc.cylinders[k].x, k => cc.cylinders[k].z, k => cc.cylinders[k].r),
+        });
         internal List<Cyl> CylsOf(ChunkRec rec)
         {
             if (rec.cyls != null) return rec.cyls;

@@ -9,6 +9,7 @@ import {
 import {
   chunkOf, chunkKey, NEST, NEST_ENTRANCE, SPAWN, generateChunk, ticksPerMinute, clockMinutes, dayOf, minuteOfDay,
   isRaining, dayWeather, tempAt, windAt, isDaylight, humanWindow, flyPos, beePos, birdPos, dragonPos, shedSites, shedRoof, groundAt, settledOf, wildHere, makeNest, inPond, pondEdge,
+  WOODS, woodsThin,
 } from './world.js';
 import { newColony, colonyStep, destroyNest, colonyFinished, seasonPhase, reproShare, broodTotal, spOf } from './colony.js';
 
@@ -27,6 +28,39 @@ const byHumanId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 const IMMEDIATE = new Set(['caught', 'claim', 'denied', 'drop', 'sip', 'beeAlarm', 'died', 'fight', 'fightReq', 'fightJoin', 'fightRefuse', 'fightEnd', 'raid', 'fixReq', 'nest', 'praid']);
 // a human's fixed parts, from the world; everything else about it is state a late-event correction carries
 const HUMAN_FIXED = new Set(['id', 'hex', 'short', 'tr', 'chunk', 'home', 'parts']); // wasp-level: never touch humans
+
+// A chunk's trunks (or any discs) on a 4 m grid (S7, GDD 21.5), built once: near(x, z, r) gives the indices of the
+// discs that can reach within r of (x, z), box() those that can reach a rectangle, both in their order in the list.
+// A loop over them meets exactly what a loop over the whole list would have acted on, in the same order, so a wood of
+// 200 trunks costs a wasp no more than a few trees did, and nothing the sim does changes. ext(o): how far o reaches
+// from its centre (a trunk's radius, a crown's)
+export class DiscGrid {
+  constructor(list, ext) {
+    this.nx = 0; this.out = [];
+    if (!list.length) return;
+    let m = 0, x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    for (const o of list) { m = Math.max(m, ext(o)); x0 = Math.min(x0, o.x); z0 = Math.min(z0, o.z); x1 = Math.max(x1, o.x); z1 = Math.max(z1, o.z); }
+    const C = DiscGrid.CELL;
+    this.m = m; this.x0 = x0; this.z0 = z0; this.nx = Math.floor((x1 - x0) / C) + 1; this.nz = Math.floor((z1 - z0) / C) + 1;
+    this.cells = new Array(this.nx * this.nz).fill(null);
+    list.forEach((o, k) => { const q = Math.floor((o.z - z0) / C) * this.nx + Math.floor((o.x - x0) / C); (this.cells[q] || (this.cells[q] = [])).push(k); });
+  }
+  // the indices, ascending, of the discs reaching the rectangle [ax, bx] x [az, bz] (a reused array: read it at once)
+  box(ax, az, bx, bz) {
+    const out = this.out; out.length = 0;
+    if (!this.nx) return out;
+    const C = DiscGrid.CELL, m = this.m;
+    const i0 = Math.max(0, Math.floor((ax - m - this.x0) / C)), i1 = Math.min(this.nx - 1, Math.floor((bx + m - this.x0) / C));
+    const j0 = Math.max(0, Math.floor((az - m - this.z0) / C)), j1 = Math.min(this.nz - 1, Math.floor((bz + m - this.z0) / C));
+    let parts = 0;
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { const q = this.cells[j * this.nx + i]; if (q) { for (const k of q) out.push(k); parts++; } }
+    if (parts > 1) out.sort((a, b) => a - b);
+    return out;
+  }
+  near(x, z, r) { return this.box(x - r, z - r, x + r, z + r); }
+}
+DiscGrid.CELL = 4;
+const DISC_GRIDS = new WeakMap();
 
 export class Sim {
   constructor(settings = {}, opts = {}) {
@@ -179,7 +213,7 @@ export class Sim {
       const c = rec.content;
       for (const b of c.boxes) if (w.x > b.minx && w.x < b.maxx && w.z > b.minz && w.z < b.maxz && b.miny >= w.y) return true;
       for (const f of this._roofsOf(rec)) { const r = this._roofLocal(f, w); if (Math.abs(r.u) < f.S && Math.abs(r.v) < f.half && r.y < 0) return true; } // under the eaves
-      for (const t of c.trees) if (w.y < t.h && sq(w.x - t.x) + sq(w.z - t.z) < t.cr * t.cr) return true;
+      for (const k of this._gridsOf(c).t.near(w.x, w.z, 0)) { const t = c.trees[k]; if (w.y < t.h && sq(w.x - t.x) + sq(w.z - t.z) < t.cr * t.cr) return true; } // (S7)
     }
     return false;
   }
@@ -1222,7 +1256,10 @@ export class Sim {
           if (cov && w.y > C.rim - R) { w.y = C.rim - R; if (w.vy > 0) w.vy = 0; }
         }
       }
-      for (const cy of this._cylsOf(rec)) {
+      const cyls = this._cylsOf(rec);
+      const cg = this._cylGrid(rec);
+      for (const k of cg.near(w.x, w.z, 2 * R + cg.m || 0)) { // (S7: only the trunks near; wide enough for any push out of one into the next)
+        const cy = cyls[k];
         if (w.y > cy.h) continue;
         const dx = w.x - cy.x, dz = w.z - cy.z, rr = cy.r + R, d2 = dx * dx + dz * dz;
         if (d2 >= rr * rr || d2 === 0) continue;
@@ -1594,7 +1631,8 @@ export class Sim {
       if (b.hive) continue; // a wasp robs a bee box from its entrance
       if (p.x > b.minx + D && p.x < b.maxx - D && p.y > b.miny + D && p.y < b.maxy - D && p.z > b.minz + D && p.z < b.maxz - D) return true;
     }
-    for (const cy of this._cylsOf(rec)) if (cy.r > D && p.y < cy.h - D && sq(p.x - cy.x) + sq(p.z - cy.z) < sq(cy.r - D)) return true;
+    const cyls = this._cylsOf(rec);
+    for (const k of this._cylGrid(rec).near(p.x, p.z, 0)) { const cy = cyls[k]; if (cy.r > D && p.y < cy.h - D && sq(p.x - cy.x) + sq(p.z - cy.z) < sq(cy.r - D)) return true; }
     for (const f of this._roofsOf(rec)) { const r = this._roofLocal(f, p); if (Math.abs(r.v) < f.half - D && r.y > D && (f.rise * (Math.abs(r.u) - f.S) + f.S * r.y) / f.L < -D) return true; }
     return false;
   }
@@ -1740,7 +1778,8 @@ export class Sim {
         const dx = w.x - qx, dy = w.y - qy, dz = w.z - qz;
         if (dx * dx + dy * dy + dz * dz <= reach * reach && this.pulpLeft(key, i) > 0) return { key, i };
       }
-      for (const cy of rec.content.cylinders) {
+      for (const k of this._gridsOf(rec.content).c.near(w.x, w.z, reach)) { // (S7)
+        const cy = rec.content.cylinders[k];
         if (!cy.wood || w.y > cy.h) continue; // a birdbath is not wood (T2-1)
         const dx = w.x - cy.x, dz = w.z - cy.z, d = Math.sqrt(dx * dx + dz * dz) - cy.r;
         if (d <= reach) return { key, i: -1 };
@@ -2976,7 +3015,8 @@ export class Sim {
         }
         if (ok) return false;
       }
-      for (const cy of c.cylinders) {
+      for (const k of this._gridsOf(c).c.box(Math.min(ax, bx), Math.min(az, bz), Math.max(ax, bx), Math.max(az, bz))) { // (S7)
+        const cy = c.cylinders[k];
         if (cy.h < H) continue;
         const dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz;
         const t = L2 > 0 ? clamp(((cy.x - ax) * dx + (cy.z - az) * dz) / L2, 0, 1) : 0;
@@ -3435,8 +3475,8 @@ export class Sim {
   // ---------------- founding a nest (GDD 6.6)
 
   _trunkNear(w) {
-    for (const rec of this.activeChunks) for (const t of rec.content.trees) {
-      const dx = w.x - t.x, dz = w.z - t.z, d = Math.sqrt(dx * dx + dz * dz) - t.r;
+    for (const rec of this.activeChunks) for (const k of this._gridsOf(rec.content).t.near(w.x, w.z, 0.06)) { // (S7)
+      const t = rec.content.trees[k], dx = w.x - t.x, dz = w.z - t.z, d = Math.sqrt(dx * dx + dz * dz) - t.r;
       if (d <= 0.06 && w.y > 0.8 && w.y < t.h) return t;
     }
     return null;
@@ -3458,9 +3498,9 @@ export class Sim {
       return { x: t.x + d * dcos(a), y: Math.max(1.8, t.h - t.cr * 0.7), z: t.z + d * dsin(a), t };
     });
     // hollow trees (T1-14): some thick trunks have a hole a wasp can nest in
-    const hollows = [];
+    const hollows = [], hs = S.hollowShare * woodsThin(rec.content.trees.length); // a wood keeps about as many as a few trees had (S7)
     rec.content.trees.forEach((t, i) => {
-      if (t.r < S.hollowMinR || hseq(sd, rec.cx, rec.cz, i, 916) >= S.hollowShare) return;
+      if (t.r < S.hollowMinR || hseq(sd, rec.cx, rec.cz, i, 916) >= hs) return;
       const a = hseq(sd, rec.cx, rec.cz, i, 917) * 6.28318, y = Math.min(t.h - 0.5, 0.7 + hseq(sd, rec.cx, rec.cz, i, 918) * 1.2);
       hollows.push({ x: t.x + (t.r + 0.015) * dcos(a), y, z: t.z + (t.r + 0.015) * dsin(a), t });
     });
@@ -3734,6 +3774,19 @@ export class Sim {
   _roofsOf(rec) { return rec._roofs || (rec._roofs = rec.content.sheds.map(shedRoof)); }
   _roofLocal(f, p) { return f.alongX ? { u: p.z - f.z, y: p.y - f.y0, v: p.x - f.x } : { u: p.x - f.x, y: p.y - f.y0, v: p.z - f.z }; }
   _roofWorld(f, u, y, v) { return f.alongX ? { x: f.x + v, y: f.y0 + y, z: f.z + u } : { x: f.x + u, y: f.y0 + y, z: f.z + v }; }
+  // a chunk's content's trunks (by crown or trunk, whichever reaches further) and cylinders on their grids (S7), kept
+  // beside it (never in it: the content is hashed)
+  _gridsOf(c) {
+    const G = DISC_GRIDS; // (module-wide: a grid is a pure function of the content, and a sim's own fields are copied on load)
+    let g = G.get(c);
+    if (!g) G.set(c, (g = { t: new DiscGrid(c.trees, (t) => Math.max(t.cr, t.r)), c: new DiscGrid(c.cylinders, (cy) => cy.r) }));
+    return g;
+  }
+  _cylGrid(rec) {
+    const L = this._cylsOf(rec);
+    if (!rec._cg || rec._cg.of !== L) { rec._cg = new DiscGrid(L, (cy) => cy.r); rec._cg.of = L; }
+    return rec._cg;
+  }
   _cylsOf(rec) {
     return rec._cyls || (rec._cyls = rec.content.cylinders.concat(this.grillsIn(rec).map((g) => ({ x: g.x, z: g.z, r: T.bbq.r, h: T.bbq.grateY, grill: true }))));
   }
@@ -3778,8 +3831,9 @@ export class Sim {
     const cache = this._fruitCache || (this._fruitCache = new Map()), ck = key + '|' + today + '|' + this.season.n;
     if (cache.has(ck)) return cache.get(ck);
     const out = [], span = 1 - F.startFrac, days = this.settings.seasonDays * span;
+    const fs = F.treeShare * woodsThin(rec.content.trees.length); // (S7)
     rec.content.trees.forEach((t, ti) => {
-      if (hseq(sd, rec.cx, rec.cz, ti, 931) >= F.treeShare) return;
+      if (hseq(sd, rec.cx, rec.cz, ti, 931) >= fs) return;
       for (let k = 0; k < F.perTree; k++) {
         const fall = Math.floor(this.season.startMinute / 1440 + this.settings.seasonDays * (F.startFrac + span * hseq(sd, rec.cx, rec.cz, ti, k, 932)));
         if (today < fall || today >= fall + F.rotDays) continue;
@@ -3879,8 +3933,8 @@ export class Sim {
 
   // Canopy cover: a tree crown overhead hides a wasp from birds
   _underCanopy(w) {
-    for (const rec of this.activeChunks) for (const t of rec.content.trees) {
-      const dx = w.x - t.x, dz = w.z - t.z;
+    for (const rec of this.activeChunks) for (const k of this._gridsOf(rec.content).t.near(w.x, w.z, 0)) { // (S7)
+      const t = rec.content.trees[k], dx = w.x - t.x, dz = w.z - t.z;
       if (dx * dx + dz * dz < t.cr * t.cr && w.y < t.h + t.cr) return true;
     }
     return false;
@@ -3998,7 +4052,9 @@ export class Sim {
           if (dd > 0) take(q.x, q.y, q.z, ex / dd, ey / dd, ez / dd, dd, 'roof');
         }
       }
-      for (const cy of this._cylsOf(rec)) {
+      const cyls = this._cylsOf(rec);
+      for (const k of this._cylGrid(rec).near(p.x, p.z, lim).slice()) { // (S7; bd only shrinks from lim)
+        const cy = cyls[k];
         const hx = p.x - cy.x, hz = p.z - cy.z, hd = Math.sqrt(hx * hx + hz * hz), sk = cy.grill ? 'grill' : 'bark';
         if (hd - cy.r >= bd || p.y > cy.h + bd) continue;
         if (p.y > cy.h && hd <= cy.r) { take(p.x, cy.h, p.z, 0, 1, 0, p.y - cy.h, sk); continue; } // the top

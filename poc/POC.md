@@ -174,6 +174,7 @@ Run the tests from this folder with `node test/sim.test.mjs`, `node test/net.tes
 | 144 | A floating render origin (classic look): the scene drawn shifted by a snapped origin near the camera, chunk geometry and instances stored from their chunk's middle, the crowds and the ground rings from the origin, so 10,000 km out draws as home does | 18.93 | 25 |
 | 145 | World v3's terrain, water and breakers' curl projected from the eye, so the shoreline's thin water no longer fights the sand far from home; the world thread's water log (K) | 18.94 | 25 |
 | 146 | World v3's grass, near and far trees and rain projected from the eye, and the wind's patterns read from a snapped origin, so far from home the grass stays calm | 18.95 | 25 |
+| 147 | Dense woods (S7): 134 to 226 trees a forest chunk on a jittered grid spaced by trunk size, a clear path and clearings, light in patches; webs, hollows and fruit thinned; trunks found through a 4 m grid with the same answers, so a wood ticks no slower | 18.96 | 25 |
 
 ## Verified
 

@@ -252,7 +252,8 @@ namespace Sting.Core
             foreach (var rec in recs)
             {
                 foreach (var b in rec.content.boxes) if (x > b.minx - c && x < b.maxx + c && y > b.miny - c && y < b.maxy + c && z > b.minz - c && z < b.maxz + c) return true;
-                foreach (var cy in sim.CylsOf(rec)) if (y < cy.h + c && Sq(x - cy.x) + Sq(z - cy.z) < Sq(cy.r + c)) return true;
+                var cyls = sim.CylsOf(rec);
+                foreach (int ck in sim.CylGrid(rec).Near(x, z, c)) { var cy = cyls[ck]; if (y < cy.h + c && Sq(x - cy.x) + Sq(z - cy.z) < Sq(cy.r + c)) return true; } // (S7)
                 foreach (var f in sim.RoofsOf(rec))
                 {
                     var r = Sim.RoofLocal(f, x, y, z); Num au = Abs(r.u), av = Abs(r.v);

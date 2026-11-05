@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, humanParts, malesAbout, chunkOf, toLocal, dirToWorld, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, groundSlope, groundNatural, pavingOf, buildList, pondsOf, inPond, pondEdge, settledOf, wildHere, pickTarget, assistPilot, swoopPilot, hoverPilot, hoverSetting, HOVER, ROLES, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS,
+  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, groundSlope, groundNatural, pavingOf, buildList, pondsOf, inPond, pondEdge, settledOf, wildHere, pickTarget, assistPilot, swoopPilot, hoverPilot, hoverSetting, HOVER, ROLES, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS, DiscGrid, WOODS,
 } from '../sim/index.js';
 import { applyTuning, parseTuning, tuningHash, tuningLeaves, TUNE } from '../sim/tunefile.js';
 
@@ -2469,6 +2469,55 @@ function seated(sim, pred) {
   ok(houses > 40 && garages > houses * 0.6 && garages < houses * 0.95 && inLot === garages && level === garages, `${garages} of ${houses} houses have a garage beside them, every one in its own lot with its door in line with the house's front, on the house's level pad`);
   ok(drives === garages && clear === drives && drive <= 0.15 + 1e-6, `(${drives} drives, ${clear} clear) each garage has a drive from the sidewalk to its door, at most ${(drive * 100).toFixed(1)}% (15% allowed), with nothing set on it or in the garage`);
   ok(porchLevel === houses && doors === houses, `every front door has a level stoop and a step before it, the door at the stoop's height (${porchLevel} of ${houses})`);
+}
+
+// 69. Dense woods (GDD 21.5, S7, GEN_VERSION 18): a forest chunk holds 120 to 250 trees on a jittered grid, light
+// reaches the floor in patches, the walkers' loop is a clear path, the per-tree things (webs) stay about as many as a
+// few trees had; the trunk grid finds exactly what the full loops found, in the same order (a run hashes the same
+// with it as without), and a wasp in a wood costs a tick no more than one over the yards
+{
+  const S = 1234n, st = { terrain: 2 };
+  let n = 0, fewest = Infinity, most = 0, darkest = 1, lightest = 0, pathClear = true, webs = 0, wood = null;
+  for (let cz = -8; cz <= 8; cz++) for (let cx = -8; cx <= 8; cx++) {
+    if (landUse(S, cx, cz, st) !== 'forest') continue;
+    const c = generateChunk(S, cx, cz, st), ox = cx * 64, oz = cz * 64; n++;
+    fewest = Math.min(fewest, c.trees.length); most = Math.max(most, c.trees.length); webs = Math.max(webs, c.webs.length);
+    if (!wood) wood = { cx, cz, c };
+    let lit = 0, N = 0;
+    for (let z = -31; z < 32; z += 2) for (let x = -31; x < 32; x += 2) { N++; if (!c.trees.some((t) => (t.x - ox - x) ** 2 + (t.z - oz - z) ** 2 < t.cr * t.cr)) lit++; }
+    darkest = Math.min(darkest, lit / N); lightest = Math.max(lightest, lit / N);
+    const [lx, lz] = WOODS.loop;
+    for (const t of c.trees) { const ax = Math.abs(t.x - ox), az = Math.abs(t.z - oz); if ((ax <= lx + 1 && az <= lz + 1) && Math.min(Math.abs(lx - ax) + (az > lz ? az - lz : 0), Math.abs(lz - az) + (ax > lx ? ax - lx : 0)) < WOODS.path - 1e-9) pathClear = false; }
+  }
+  ok(n >= 4 && fewest > 120 && most <= 250 && darkest > 0.1 && lightest < 0.55 && pathClear && webs <= 20,
+    `${n} forest chunks hold ${fewest} to ${most} trees; the floor is lit in patches (${(darkest * 100).toFixed(0)}% to ${(lightest * 100).toFixed(0)}% of it in sun); the walkers' loop is clear; at most ${webs} webs a chunk`);
+  // the grid: a superset of what a brute search would act on, in ascending order
+  const G = new DiscGrid(wood.c.trees, (t) => Math.max(t.cr, t.r));
+  let exact = true;
+  for (let k = 0; k < 2000; k++) {
+    const x = wood.cx * 64 + ((k * 37) % 70) - 35 + 0.37 * (k % 7), z = wood.cz * 64 + ((k * 53) % 70) - 35 + 0.29 * (k % 5), r = (k % 4) * 0.3;
+    const got = G.near(x, z, r).slice(), want = wood.c.trees.map((t, i) => (Math.hypot(t.x - x, t.z - z) < Math.max(t.cr, t.r) + r ? i : -1)).filter((i) => i >= 0);
+    if (!want.every((i) => got.includes(i)) || got.some((v, i) => i && v <= got[i - 1])) exact = false;
+  }
+  // the same run with and without the grid (box() answering every index): the same state, and the time a tick takes
+  const flyIn = (cx, cz, brute, ticks = 2400) => {
+    const box = DiscGrid.prototype.box;
+    if (brute) DiscGrid.prototype.box = function () { const o = this.out; o.length = 0; if (this.nx) { const n = this.all ?? (this.all = this.cells.reduce((a, q) => a + (q ? q.length : 0), 0)); for (let i = 0; i < n; i++) o.push(i); } return o; };
+    try {
+      const s = new Sim({ seed: 1234, birds: false, terrain: 2 }, { noAI: true }); run(s, 1);
+      const w = s.wasp; place(w, { x: cx * 64 + 3, y: 1.2, z: cz * 64 + 5 }); w.state = 'fly'; w.land = null; w.energy = 1;
+      run(s, 60);
+      const t0 = performance.now();
+      run(s, ticks, (sim, i) => idle({ mz: 40, yawQ: 9800 + ((i >> 6) % 2 ? 1500 : -1500), my: i % 200 < 100 ? 5 : -5 }));
+      return { ms: (performance.now() - t0) / ticks, hash: s.stateHash(), trees: s.activeChunks.reduce((a, r) => a + r.content.trees.length, 0) };
+    } finally { DiscGrid.prototype.box = box; }
+  };
+  const a = flyIn(wood.cx, wood.cz, false), b = flyIn(wood.cx, wood.cz, true);
+  ok(exact && a.hash === b.hash, `the trunk grid finds every trunk a full search would, in order, and a run through a wood hashes the same with it as without (${a.hash})`);
+  let yards = null;
+  for (let cz = -8; cz <= 8 && !yards; cz++) for (let cx = -8; cx <= 8 && !yards; cx++) if (landUse(S, cx, cz, st) === 'yards') yards = { cx, cz }; // (before S7 a wood ran at about 0.8 of these yards)
+  const y = [0, 1, 2].map(() => flyIn(yards.cx, yards.cz, false).ms).sort((p, q) => p - q)[1], f = [0, 1, 2].map(() => flyIn(wood.cx, wood.cz, false).ms).sort((p, q) => p - q)[1];
+  ok(f <= y * 1.1, `a wasp in a wood (${a.trees} trees in its chunks) costs ${f.toFixed(3)} ms a tick, over the yards ${y.toFixed(3)} ms (the full loops: ${b.ms.toFixed(3)} ms)`);
 }
 
 // 68. Ultra far from home (200 km, 1,000 km, 10,000 km): the world goes on there as at home: the same mix of land uses

@@ -2319,7 +2319,7 @@ Houses, sheds, shops, malls, garden lights, birdbaths and fountains, trunks, tab
 
 **How.** One instanced draw a chunk, swaying in the vertex shader (18.76). The season re-poses the blocks only when it has moved on a step. The sim's trees, trunks, shade and crowns are unchanged.
 
-**Still to come (S7).** Dense woods: 120 to 250 trees a forest chunk in the sim, with per-tree nest sites, webs and hollows thinned by tuning, and trunks found through a per-chunk grid.
+**Built since (18.96).** Dense woods in the sim: 134 to 226 trees a forest chunk, with webs, hollows and fruit thinned, and trunks found through a per-chunk grid.
 
 ### 18.80 Wild land round a settled area (GDD 21.6, GEN_VERSION 13)
 
@@ -2482,6 +2482,38 @@ On a jump the CPU path no longer blurs a level out to its parent: the window it 
 **Caustics over a wider floor.** World v3 sized its square of caustics by the focus distance, 2.2 times it with 6 m at least. The game's camera is a few centimetres behind the wasp, so the square was 6 m across round the wasp: sharp light patterns under the wasp, and past them a flat, murky floor. It was also coarse for its size (a 256 texture and a 192 grid, the medium tier), which showed as blocky cells.
 
 The game now asks for a square at least 16 m across (`causticsMin`), pushed 30% of its size ahead along the view (`causticsAhead`), on a 512 texture with a 384 grid. That is about the old detail (3 cm texels, 7 cm cells, against 2.3 and 5 cm) over 2.7 times the width. Water seen at a slant still clouds with distance: that is the water, not the caustics.
+
+### 18.96 Dense woods in the sim (S7, GEN_VERSION 18)
+
+**The woods.** A forest chunk now holds 134 to 226 trees, where it held 16 to 26, and a wild chunk holds as many as its forest is thick (`addWoods`, world.js `WOODS`).
+- **Placement.** The trees stand on a jittered grid. Each chunk draws one of three stands, and its spacing comes from the stand's trunk size (self-thinning: thicker trunks stand further apart):
+
+  | trunk radius | spacing |
+  |---|---|
+  | 12–22 cm | 3.9 m |
+  | 16–28 cm | 4.3 m |
+  | 20–34 cm | 4.8 m |
+
+  A trunk strays up to 70% of its cell.
+- **Size.** Trees in the woods are 5.5 to 9.5 m tall, with crowns 1.9 to 3.1 m across the radius.
+- **Paths.** The walkers' loop (52 × 40 m round the chunk's middle) is kept clear as a path 2.8 m wide. One chunk in three has a clearing 5 to 9 m in radius.
+- **Light.** Over the forest chunks of seed 1234, 18% to 43% of the floor is in sun: light in patches.
+
+**The per-tree things, thinned.** Webs, hollows and windfall fruit are now drawn with their share times `woodsThin(n)`, which is 22/n past 22 trees. A wood therefore keeps about as many of them as the old forest edge had: at most 15 webs a chunk. Yards, parks and farms, with fewer trees, are unchanged.
+
+**The trunk grid.** Each chunk's trunks and cylinders sit on a 4 m grid (`DiscGrid`, in JS and C#), built once beside the content and never in it, since the content is hashed.
+- **Same answers.** A query returns the indices of every disc that can reach the point or rectangle, in their order in the list. A loop over them therefore meets exactly what the full loop would have acted on, in the same order: a run through a wood hashes the same with the grid as without it.
+- **Where it is used.** The wasp's collision (the query is wide enough for a push out of one trunk into the next), the plausibility check, the surface finder, line of sight, the trunk and canopy tests, shelter from rain, wood for pulp, and the assist's solid test.
+
+**The tick.** Through the same forest chunk, a wasp's tick took 0.23–0.27 ms before S7 and takes 0.23–0.25 ms now, with eight times the trees. Without the grid it would take 0.35 ms (5.7 ms with the brute search the test first used). In C# a wood costs 0.05 ms a tick in the double build and 0.09 ms in the fixed one.
+
+**Checked.** Block 69 (JS and both C# builds):
+- the counts, the light, the clear path and the webs;
+- the grid against a brute search;
+- the same hash with and without the grid;
+- a tick in a wood against one over the yards.
+
+The parity digests changed only for generation (chunks, builds, wild). Every behaviour digest held.
 
 ### 18.95 World v3's grass, trees and rain projected from the eye
 
@@ -3113,7 +3145,7 @@ Each is built, tested in JS and both C# builds where the sim is touched, documen
   - streets are within grade;
   - the frame holds on the low setting at the busiest block.
 
-**S7. Dense forests. Blocky crowns built (18.79); dense woods in the sim to come.**
+**S7. Dense forests. Built: blocky crowns (18.79); dense woods in the sim (18.96).**
 - **What.** 21.5.
 - **Done when:**
   - a forest chunk holds over 120 trees;

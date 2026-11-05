@@ -1861,6 +1861,50 @@ namespace Sting.Core.Tests
                 Ok(D(I.site.h) >= 10 && D(I.site.h) <= 90 && inside && beyond && step < 3 && wild > 400 && settledChunks > 30 && built == 0 && trees > 300 && wet == 0 && s.wasp.y >= 0 && st.RulesHash() != t1.RulesHash() && st.WorldTag().Contains("wild beyond 400 m"),
                     $"the settled area sits on the wild land {D(I.site.h):0.0} m above the sea at ({D(I.site.x):0}, {D(I.site.z):0}); {settledChunks} settled chunks, {wild} wild ones with nothing built and {trees} trees, none in the water; no step over 3 m across the band ({step:0.00} per 2 m); a sim runs over it");
             }
+            // 69. dense woods (GDD 21.5, S7, GEN_VERSION 18; sim.test.mjs): a forest chunk holds 120 to 250 trees, the floor is
+            // lit in patches, the walkers' loop is clear, webs stay few; the trunk grid finds every trunk a full search would, in
+            // order; a wasp in a wood costs a tick no more than one over the yards
+            {
+                var st = new Settings { terrain = 2 }; ulong S = 1234;
+                int n = 0, fewest = int.MaxValue, most = 0, webs = 0; double darkest = 1, lightest = 0; bool pathClear = true; ChunkContent wood = null; int wcx = 0, wcz = 0;
+                for (int cz = -8; cz <= 8; cz++) for (int cx = -8; cx <= 8; cx++)
+                    {
+                        if (World.LandUse(S, cx, cz, st) != "forest") continue;
+                        var c = World.GenerateChunk(S, cx, cz, st); double ox = cx * 64, oz = cz * 64; n++;
+                        fewest = Math.Min(fewest, c.trees.Count); most = Math.Max(most, c.trees.Count); webs = Math.Max(webs, c.webs.Count);
+                        if (wood == null) { wood = c; wcx = cx; wcz = cz; }
+                        int lit = 0, N = 0;
+                        for (int z = -31; z < 32; z += 2) for (int x = -31; x < 32; x += 2) { N++; bool sh = false; foreach (var t in c.trees) if (Math.Pow(D(t.x) - ox - x, 2) + Math.Pow(D(t.z) - oz - z, 2) < D(t.cr) * D(t.cr)) { sh = true; break; } if (!sh) lit++; }
+                        darkest = Math.Min(darkest, (double)lit / N); lightest = Math.Max(lightest, (double)lit / N);
+                        double lx = D(World.WoodsLoopX), lz = D(World.WoodsLoopZ);
+                        foreach (var t in c.trees) { double ax = Math.Abs(D(t.x) - ox), az = Math.Abs(D(t.z) - oz); if (ax <= lx + 1 && az <= lz + 1 && Math.Min(Math.Abs(lx - ax) + (az > lz ? az - lz : 0), Math.Abs(lz - az) + (ax > lx ? ax - lx : 0)) < D(World.WoodsPath) - 1e-9) pathClear = false; }
+                    }
+                Ok(n >= 4 && fewest > 120 && most <= 250 && darkest > 0.1 && lightest < 0.55 && pathClear && webs <= 20,
+                    $"{n} forest chunks hold {fewest} to {most} trees; the floor is lit in patches ({darkest * 100:0}% to {lightest * 100:0}% in sun); the walkers' loop is clear; at most {webs} webs a chunk");
+                var G = new DiscGrid(wood.trees.Count, k => wood.trees[k].x, k => wood.trees[k].z, k => Max(wood.trees[k].cr, wood.trees[k].r));
+                bool exact = true;
+                for (int k = 0; k < 2000; k++)
+                {
+                    Num x = (Num)(wcx * 64 + (k * 37) % 70 - 35) + 0.37 * (k % 7), z = (Num)(wcz * 64 + (k * 53) % 70 - 35) + 0.29 * (k % 5), r = (Num)0.3 * (k % 4);
+                    var got = new List<int>(G.Near(x, z, r));
+                    for (int i = 0; i < wood.trees.Count; i++) { var t = wood.trees[i]; if (Sqrt(Sq(t.x - x) + Sq(t.z - z)) < Max(t.cr, t.r) + r && !got.Contains(i)) exact = false; }
+                    for (int i = 1; i < got.Count; i++) if (got[i] <= got[i - 1]) exact = false;
+                }
+                double Fly(int cx, int cz)
+                {
+                    var s = new Sim(new Settings { seed = 1234, birds = false, terrain = 2 }, new SimOpts { noAI = true }); RunS(s, 1);
+                    var w = s.wasp; Place(w, P((Num)cx * 64 + 3, 1.2, (Num)cz * 64 + 5)); w.state = "fly"; w.land = null; w.energy = 1;
+                    RunS(s, 60);
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    RunS(s, 2400, (sim, i) => Idle(c => { c.mz = 40; c.yawQ = 9800 + (((i >> 6) % 2) != 0 ? 1500 : -1500); c.my = i % 200 < 100 ? 5 : -5; }));
+                    return sw.Elapsed.TotalMilliseconds / 2400;
+                }
+                int ycx = 0, ycz = 0; bool fy = false;
+                for (int cz = -8; cz <= 8 && !fy; cz++) for (int cx = -8; cx <= 8 && !fy; cx++) if (World.LandUse(S, cx, cz, st) == "yards") { ycx = cx; ycz = cz; fy = true; }
+                Fly(wcx, wcz); // warm up
+                double fw = new[] { Fly(wcx, wcz), Fly(wcx, wcz), Fly(wcx, wcz) }.OrderBy(v => v).ElementAt(1), yw = new[] { Fly(ycx, ycz), Fly(ycx, ycz), Fly(ycx, ycz) }.OrderBy(v => v).ElementAt(1);
+                Ok(exact && fw <= yw * 1.25, $"the trunk grid finds every trunk a full search would, in order; a wasp in a wood costs {fw:0.000} ms a tick, over the yards {yw:0.000} ms");
+            }
             // 68. ultra far from home (200 km, 1,000 km, 10,000 km; sim.test.mjs): the world goes on there as at home
             {
                 var st = new Settings { terrain = 2 }; ulong S = 1234;

@@ -248,8 +248,9 @@ namespace Sting.Core
                         }
                         if (ok) return false;
                     }
-                    foreach (var cy in c.cylinders)
+                    foreach (int ck in GridsOf(c).c.Box(Min(ax, bx), Min(az, bz), Max(ax, bx), Max(az, bz))) // (S7)
                     {
+                        var cy = c.cylinders[ck];
                         if (cy.h < H) continue;
                         Num dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz;
                         Num t = L2 > 0 ? Clamp(((cy.x - ax) * dx + (cy.z - az) * dz) / L2, 0, 1) : 0;
@@ -742,8 +743,9 @@ namespace Sting.Core
 
         Tree TrunkNear(Wasp w)
         {
-            foreach (var rec in activeChunks) if (Near(rec, w.x, w.z)) foreach (var t in rec.content.trees)
+            foreach (var rec in activeChunks) if (Near(rec, w.x, w.z)) foreach (int tk in GridsOf(rec.content).t.Near(w.x, w.z, 0.06)) // (S7)
                 {
+                    var t = rec.content.trees[tk];
                     Num dx = w.x - t.x, dz = w.z - t.z, d = Sqrt(dx * dx + dz * dz) - t.r;
                     if (d <= 0.06 && w.y > 0.8 && w.y < t.h) return t;
                 }
@@ -775,7 +777,7 @@ namespace Sting.Core
             for (int i = 0; i < trees.Count; i++)
             {
                 var t = trees[i];
-                if (t.r < T.sites.hollowMinR || HSeq(sd, rec.cx, rec.cz, i, 916) >= T.sites.hollowShare) continue;
+                if (t.r < T.sites.hollowMinR || HSeq(sd, rec.cx, rec.cz, i, 916) >= T.sites.hollowShare * World.WoodsThin(rec.content.trees.Count)) continue; // a wood keeps about as many as a few trees had (S7)
                 Num a = HSeq(sd, rec.cx, rec.cz, i, 917) * 6.28318, y = Min(t.h - 0.5, 0.7 + HSeq(sd, rec.cx, rec.cz, i, 918) * 1.2);
                 o.hollows.Add((new V3(t.x + (t.r + 0.015) * DCos(a), y, t.z + (t.r + 0.015) * DSin(a)), t));
             }
@@ -796,7 +798,7 @@ namespace Sting.Core
             for (int ti = 0; ti < trees.Count; ti++)
             {
                 var t = trees[ti];
-                if (HSeq(sd, rec.cx, rec.cz, ti, 931) >= T.fruit.treeShare) continue;
+                if (HSeq(sd, rec.cx, rec.cz, ti, 931) >= T.fruit.treeShare * World.WoodsThin(rec.content.trees.Count)) continue; // (S7)
                 for (int k = 0; k < T.fruit.perTree; k++)
                 {
                     Num fall = Floor(season.startMinute / 1440 + settings.seasonDays * (T.fruit.startFrac + span * HSeq(sd, rec.cx, rec.cz, ti, k, 932)));
@@ -905,8 +907,9 @@ namespace Sting.Core
         /// Canopy cover: a tree crown overhead hides a wasp from birds
         bool UnderCanopy(WaspBase w)
         {
-            foreach (var rec in activeChunks) if (Near(rec, w.x, w.z)) foreach (var t in rec.content.trees)
+            foreach (var rec in activeChunks) if (Near(rec, w.x, w.z)) foreach (int tk in GridsOf(rec.content).t.Near(w.x, w.z, 0)) // (S7)
                 {
+                    var t = rec.content.trees[tk];
                     Num dx = w.x - t.x, dz = w.z - t.z;
                     if (dx * dx + dz * dz < t.cr * t.cr && w.y < t.h + t.cr) return true;
                 }
@@ -1041,8 +1044,10 @@ namespace Sting.Core
                         if (dd > 0) Take(q.x, q.y, q.z, ex / dd, ey / dd, ez / dd, dd, "roof");
                     }
                 }
-                foreach (var cy in CylsOf(rec))
+                var cyls = CylsOf(rec);
+                foreach (int ck in CylGrid(rec).Near(p.x, p.z, lim)) // (S7; bd only shrinks from lim)
                 {
+                    var cy = cyls[ck];
                     Num hx = p.x - cy.x, hz = p.z - cy.z, hd = Sqrt(hx * hx + hz * hz); string sk = cy.grill ? "grill" : "bark";
                     if (hd - cy.r >= bd || p.y > cy.h + bd) continue;
                     if (p.y > cy.h && hd <= cy.r) { Take(p.x, cy.h, p.z, 0, 1, 0, p.y - cy.h, sk); continue; } // the top

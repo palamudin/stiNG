@@ -430,6 +430,14 @@ namespace Sting.Core
             }
             return null;
         }
+        /// dense woods (world.js WOODS, S7): stands (trunk radius from, to, grid spacing), the trunks' jitter in a cell, the
+        /// path kept clear along the walkers' loop (its half extents), a clearing's chance and radius, height and crown, and the
+        /// tree count the per-tree things (webs, hollows, fruit) are thinned to
+        public static readonly Num[][] WoodsStands = { new Num[] { 0.12, 0.22, 3.9 }, new Num[] { 0.16, 0.28, 4.3 }, new Num[] { 0.2, 0.34, 4.8 } };
+        public static readonly Num WoodsJitter = 0.7, WoodsPath = 1.4, WoodsLoopX = 26, WoodsLoopZ = 20, WoodsClearing = 0.35, WoodsClearR0 = 5, WoodsClearR1 = 9, WoodsH0 = 5.5, WoodsH1 = 9.5, WoodsCr0 = 1.9, WoodsCr1 = 3.1;
+        public const int WoodsRef = 22;
+        /// the share of the per-tree things a chunk of n trees keeps (world.js woodsThin)
+        public static Num WoodsThin(int n) => n > WoodsRef ? (Num)WoodsRef / n : (Num)1;
         /// farmland (world.js RURAL, S5): the settled area's outer ring, its lanes, hedgerows and farmsteads
         public static readonly Num RuralRing = 128, RuralInner = 192, RuralLane = 5.5, RuralHedge = 1.2, RuralHedgeH = 1.7, RuralStead = 0.35, RuralPlinth = 1.5, RuralSteep = (Num)1 / 3, RuralMax = 0.35;
         public static string LandUse(ulong seed, int cx, int cz, Settings st = null)
@@ -1071,6 +1079,32 @@ namespace Sting.Core
                 c.cylinders.Add(new Cyl { x = x, z = z, r = r, h = h, wood = true });
             }
 
+            // dense woods (world.js addWoods, S7): share is the chance a tree stands at (x, z) (the wild land's forest), null
+            // for a whole wood
+            void AddWoods(System.Func<Num, Num, Num> share)
+            {
+                var stand = WoodsStands[RangeInt(H(29900), 0, WoodsStands.Length)];
+                int n = (int)Floor(CS / stand[2]); Num cell = CS / n;
+                bool clear = Unit(H(29901)) < WoodsClearing; Num ccx = ox + Range(H(29902), -18, 18), ccz = oz + Range(H(29903), -18, 18), crr = Range(H(29904), WoodsClearR0, WoodsClearR1);
+                for (int j = 0; j < n; j++) for (int i = 0; i < n; i++)
+                {
+                    long s0 = 30000 + (long)(j * n + i) * 8;
+                    Num x = ox - CS / 2 + (i + (Num)0.5 + (Unit(H(s0)) - 0.5) * WoodsJitter) * cell, z = oz - CS / 2 + (j + (Num)0.5 + (Unit(H(s0 + 1)) - 0.5) * WoodsJitter) * cell;
+                    Num ax = Abs(x - ox), az = Abs(z - oz);
+                    Num dl = ax <= WoodsLoopX && az <= WoodsLoopZ ? Min(WoodsLoopX - ax, WoodsLoopZ - az) : Max(Max(ax - WoodsLoopX, az - WoodsLoopZ), 0);
+                    if (dl < WoodsPath) continue;
+                    if (clear && (x - ccx) * (x - ccx) + (z - ccz) * (z - ccz) < crr * crr) continue;
+                    if (share != null && Unit(H(s0 + 2)) >= share(x, z)) continue;
+                    if (!Free(x, z, 0.4)) continue;
+                    bool wet = false; foreach (var q in c.ponds) if (InPond(q, x, z, 1)) wet = true;
+                    if (wet) continue;
+                    Num r = Range(H(s0 + 3), stand[0], stand[1]), h = Range(H(s0 + 4), WoodsH0, WoodsH1), cw = Range(H(s0 + 5), WoodsCr0, WoodsCr1);
+                    c.trees.Add(new Tree { x = x, z = z, r = r, h = h, cr = cw, shade = Unit(H(s0 + 6)) });
+                    c.cylinders.Add(new Cyl { x = x, z = z, r = r, h = h, wood = true });
+                    occupied.Add(new Occ { x = x, z = z, r = 0.6 });
+                }
+            }
+
             void AddFlowers(Num px, Num pz, long slot)
             {
                 int n = RangeInt(H(slot), 4, 11), color = RangeInt(H(slot + 1), 0, 5);
@@ -1396,12 +1430,7 @@ namespace Sting.Core
             else if (c.use == "wild") // wild land past the settled area (GDD 21.6): trees where the wild forest stands, meadow flowers
             {
                 var o = new Num[5];
-                for (int k = 0; k < 40; k++)
-                {
-                    Num x = ox + Range(H(2200 + k * 2), -30, 30), z = oz + Range(H(2201 + k * 2), -30, 30);
-                    WildHere(seed, x, z, st, o);
-                    if (o[0] > o[4] + 0.6 && Unit(H(2300 + k)) < o[2] * 0.85 && Free(x, z, 1.5)) { AddTree(x, z, 2400 + k * 4); occupied.Add(new Occ { x = x, z = z, r = 1 }); }
-                }
+                AddWoods((x, z) => { WildHere(seed, x, z, st, o); return o[0] > o[4] + 0.6 ? o[2] * 0.85 : (Num)0; }); // as thick as the forest here, never in the water (S7)
                 for (int k = 0; k < 3; k++)
                 {
                     Num x = ox + Range(H(2600 + k * 2), -26, 26), z = oz + Range(H(2601 + k * 2), -26, 26);
@@ -1448,7 +1477,7 @@ namespace Sting.Core
             }
             // trees: a few in a park, yard trees, dense at the forest edge, hardly any by a mall
             bool forest = c.use == "forest";
-            int nt = c.use == "wild" || c.use == "urban" ? 0 : c.use == "farm" ? RangeInt(H(2004), 1, 5) : forest ? RangeInt(H(2000), 16, 26) : c.use == "yards" ? RangeInt(H(2001), 1, 4) : c.use == "mall" ? RangeInt(H(2002), 0, 3) : c.use == "town" ? RangeInt(H(2003), 0, 3) : RangeInt(H(11), isOrigin ? 3 : 2, isOrigin ? 6 : 8);
+            int nt = c.use == "wild" || c.use == "urban" ? 0 : c.use == "farm" ? RangeInt(H(2004), 1, 5) : forest ? 0 : c.use == "yards" ? RangeInt(H(2001), 1, 4) : c.use == "mall" ? RangeInt(H(2002), 0, 3) : c.use == "town" ? RangeInt(H(2003), 0, 3) : RangeInt(H(11), isOrigin ? 3 : 2, isOrigin ? 6 : 8);
             for (int i = 0; i < nt; i++)
             {
                 Num x = ox + Range(H(150 + i * 4), -30, 30), z = oz + Range(H(151 + i * 4), -30, 30);
@@ -1465,6 +1494,7 @@ namespace Sting.Core
                     if (Free(x, z, 1.5)) { occupied.Add(new Occ { x = x, z = z, r = 1.5 }); AddActor(6110 + k * 10, x, z, DSin(a), DCos(a), "lie", "sun", null); }
                 }
             }
+            if (forest) AddWoods(null); // dense woods (S7)
             if (forest && Unit(H(6300)) < 0.3) AddActor(6310, ox - 26, oz - 20, 1, 0, "stand", "stroll", new Num[] { ox - 26, oz - 20, ox + 26, oz + 20 });
             // birdbaths (T2-1, see world.js): some backyards, now and then a park, one in the home park
             void AddBath(Num x, Num z)
@@ -1492,10 +1522,11 @@ namespace Sting.Core
                     if (Free(x, z, 1)) { AddBath(x, z); break; }
                 }
             }
+            Num webShare = 0.45 * WoodsThin(c.trees.Count); // a wood keeps about as many webs as a few trees had (S7)
             for (int i = 0; i < c.trees.Count; i++)
             {
                 var t = c.trees[i];
-                if (Unit(H(700 + i)) > 0.45) continue;
+                if (Unit(H(700 + i)) > webShare) continue;
                 Num a = Range(H(710 + i), 0, 6.28), d = t.r + Range(H(720 + i), 0.15, 0.35);
                 Num x = t.x + d * DCos(a), z = t.z + d * DSin(a);
                 c.webs.Add(new Web { x = x, y = Range(H(730 + i), 0.45, 1.6), z = z, nx = -DSin(a), nz = DCos(a), r = Range(H(740 + i), 0.12, 0.26), tree = i });
