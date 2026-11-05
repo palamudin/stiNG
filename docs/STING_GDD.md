@@ -2483,6 +2483,18 @@ On a jump the CPU path no longer blurs a level out to its parent: the window it 
 
 The game now asks for a square at least 16 m across (`causticsMin`), pushed 30% of its size ahead along the view (`causticsAhead`), on a 512 texture with a 384 grid. That is about the old detail (3 cm texels, 7 cm cells, against 2.3 and 5 cm) over 2.7 times the width. Water seen at a slant still clouds with distance: that is the water, not the caustics.
 
+### 18.95 World v3's grass, trees and rain projected from the eye
+
+**What showed.** Far from home the grass moved wildly, like the old grass before its calm wind.
+
+**Why.** It is the same cause as the water (18.94).
+- **Shape.** A blade is a few millimetres wide, and it was built and projected in absolute metres, which a float holds only to about a centimetre per 100 km. So its edges, bend and sway snapped to that step.
+- **Motion.** The wind's patterns took `sin()` and noise of absolute positions: huge angles, which a GPU answers with noise.
+
+**The fix.**
+- **Built from the eye.** Each blade is built as its clump's offset from the eye (`base - cameraPosition`, which is exact this close) plus its own millimetres, then rotated by the view only. Near trees are built the same way: their own shape round the foot plus the foot's offset from the eye. Far tree cards and the rain go to the GPU from the eye too, with `uVP` being the projection times the view's rotation alone. The rain wraps its box round the eye with the eye's position, modulo the box, worked out in doubles.
+- **Wind from a snapped origin.** The wind's gusts and eddies read the clump from a point snapped to 4096 m near the eye. The sway phases take the time and the position modulo a period, so the angles stay small.
+
 ### 18.94 World v3's water projected from the eye
 
 **What showed.** Far from home, the shallow water over the sand came out as triangle patches: water in some, bare sand in others.

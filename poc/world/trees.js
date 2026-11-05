@@ -17,6 +17,7 @@ import { placeTile } from './scatter.js';
 import { NOISE_GLSL } from './noise.js';
 import { CLOUD_SHADOW_GLSL } from './clouds.js';
 
+const TMP_VR = new THREE.Matrix4();
 export const FOREST = { tile: 64, variants: 3, bands: [0, 45, 160, 420], fade: 12, grid: 5.2, meadow: 0.012, budgetMs: 4, far: [1200, 6000], impostor: 128, views: 8 };
 
 const TREE_VERT_HEAD = /* glsl */ `
@@ -25,10 +26,11 @@ attribute vec4 aI1; // horizontal scale, vertical scale
 attribute float aSway, aLeaf; attribute vec3 aCtr;
 uniform float uTime; uniform vec2 uWind; uniform vec3 uBand; // near, far, fade width
 varying float vFade, vLeaf, vVar; varying vec3 vTW; varying vec2 vUvL;
+vec3 tRel; // the vertex from the eye (GDD 18.95)
 `;
 const TREE_VERT = /* glsl */ `
   vec3 transformed = position;
-  float ph = aI0.w * 6.283 + aI0.x * 0.13 + aI0.y * 0.17;
+  float ph = aI0.w * 6.283 + mod(aI0.x, 4096.0) * 0.13 + mod(aI0.y, 4096.0) * 0.17; // far from home a huge angle is noise to sin()
   float ws = length(uWind); vec2 wd = ws > 0.001 ? uWind / ws : vec2(1.0, 0.0);
   // the whole tree leans and rocks with the wind, more toward the top; clusters flutter about their centres
   float sway = (0.45 + 0.35 * sin(uTime * 1.05 + ph) + 0.2 * sin(uTime * 2.6 + ph * 1.7)) * ws;
@@ -41,11 +43,15 @@ const TREE_VERT = /* glsl */ `
   transformed = vec3(cs * transformed.x - sn * transformed.z, transformed.y, sn * transformed.x + cs * transformed.z) * vec3(aI1.x, aI1.y, aI1.x);
   if (aLeaf < 0.5 && aI1.z > 0.5) transformed = vec3(0.0, -1000.0, 0.0); // the game draws this tree's trunk itself
   vec2 base = aI0.xy;
+  vec3 tL = transformed; // the tree's own shape, metres round its foot: exact
   transformed += vec3(base.x, clipHeight(base) - 0.12 * aI1.y, base.y);
+  tRel = vec3(base.x - cameraPosition.x + tL.x, transformed.y - cameraPosition.y, base.y - cameraPosition.z + tL.z); // base - eye is exact this close
   vTW = transformed; vLeaf = aLeaf; vVar = aI0.w; vUvL = uv;
   float dI = length(vec3(base.x, transformed.y, base.y) - cameraPosition);
   vFade = smoothstep(uBand.x - uBand.z, uBand.x, dI) * (1.0 - smoothstep(uBand.y, uBand.y + uBand.z, dI));
 `;
+// projected from the eye (GDD 18.95): viewMatrix * an absolute position cancels two large 32-bit numbers far from home
+const TREE_PROJECT = 'vec4 mvPosition = vec4(mat3(viewMatrix) * tRel, 1.0); gl_Position = projectionMatrix * mvPosition;';
 const TREE_NORMAL = /* glsl */ `
   vec3 objectNormal = vec3(cos(aI0.z) * normal.x - sin(aI0.z) * normal.z, normal.y, sin(aI0.z) * normal.x + cos(aI0.z) * normal.z);
 `;
@@ -137,7 +143,7 @@ export class Forest {
     const clip = this.clipGLSL;
     mat.onBeforeCompile = (sh) => {
       Object.assign(sh.uniforms, U);
-      sh.vertexShader = `${clip}\n${TREE_VERT_HEAD}\n` + sh.vertexShader.replace('#include <begin_vertex>', TREE_VERT).replace('#include <beginnormal_vertex>', TREE_NORMAL);
+      sh.vertexShader = `${clip}\n${TREE_VERT_HEAD}\n` + sh.vertexShader.replace('#include <begin_vertex>', TREE_VERT).replace('#include <project_vertex>', TREE_PROJECT).replace('#include <beginnormal_vertex>', TREE_NORMAL);
       sh.fragmentShader = `${DITHER}\n${SEASON_GLSL}\n${CLOUD_SHADOW_GLSL}\nuniform sampler2D tLeaf; uniform vec3 uSunDir, uSunColor; varying float vFade, vLeaf, vVar; varying vec3 vTW; varying vec2 vUvL;\n` + sh.fragmentShader
         .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n  if (w2ign(gl_FragCoord.xy) > vFade) discard;')
         .replace('#include <color_fragment>', /* glsl */ `#include <color_fragment>
@@ -160,7 +166,7 @@ export class Forest {
     const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
     depth.onBeforeCompile = (sh) => {
       Object.assign(sh.uniforms, U);
-      sh.vertexShader = `${clip}\n${TREE_VERT_HEAD}\n` + sh.vertexShader.replace('#include <begin_vertex>', TREE_VERT);
+      sh.vertexShader = `${clip}\n${TREE_VERT_HEAD}\n` + sh.vertexShader.replace('#include <begin_vertex>', TREE_VERT).replace('#include <project_vertex>', TREE_PROJECT);
       sh.fragmentShader = `${DITHER}\nuniform sampler2D tLeaf; uniform float uLeafGone; varying float vFade, vLeaf; varying vec2 vUvL;\n` + sh.fragmentShader.replace('void main() {', 'void main() {\n  if (w2ign(gl_FragCoord.xy) > vFade) discard;\n  if (vLeaf > 0.5 && (texture(tLeaf, vUvL).a < 0.5 || w2ign(gl_FragCoord.xy + 7.0) < uLeafGone)) discard;');
     };
     depth.customProgramCacheKey = () => 'w3treeD' + lod + (leafy ? 'L' : 'R') + '/' + this.world.clip.cfg.levels;
@@ -281,7 +287,8 @@ export class Forest {
     this.uniforms.uSkyUp.value.copy(this.world.sky.skyUp);
     if (this.farMeshes) {
       const cam = this.world.camera;
-      for (const m of this.farMeshes) { m.userData.U.uCam.value.copy(eye); m.userData.U.uVP.value.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse); }
+      const vr = TMP_VR.copy(cam.matrixWorldInverse).setPosition(0, 0, 0); // the view's rotation: points go in from the eye
+      for (const m of this.farMeshes) { m.userData.U.uCam.value.copy(cam.position); m.userData.U.uVP.value.multiplyMatrices(cam.projectionMatrix, vr); }
       this.stats.far = this.farMeshes.reduce((a, m) => a + m.userData.instances, 0);
     }
   }
@@ -380,9 +387,9 @@ void main() {
   vec3 upv = normalize(mix(vec3(0.0, 1.0, 0.0), normalize(toC), smoothstep(0.35, 1.2, elev) * 0.85));
   // the view: which of the ${V} bakes faces the camera, given the tree's own turn
   float rel = az - rot; vSlice = int(floor(fract(rel / 6.2831853 + 0.5 / ${V}.0) * ${V}.0));
-  float sway = 0.15 * length(uWind) * sin(uTime * 1.05 + base.x * 0.13 + base.y * 0.17);
+  float sway = 0.15 * length(uWind) * sin(uTime * 1.05 + mod(base.x, 4096.0) * 0.13 + mod(base.y, 4096.0) * 0.17);
   vec3 P = vec3(base.x, h - 0.12 * sy, base.y) + right * position.x * w * 0.5 + upv * position.y * hgt + vec3(uWind.x, 0.0, uWind.y) * sway * position.y * position.y * sy;
-  vec4 c = uVP * vec4(P, 1.0);
+  vec4 c = uVP * vec4(P - uCam, 1.0); // uVP: the view's rotation only, the point from the eye (GDD 18.95)
   if (c.w <= 0.0 || abs(c.x) > c.w * 1.25 || abs(c.y) > c.w * 1.25) return;
   vKill = 0.0; vW = P;
   vFade = smoothstep(uRin - uFade, uRin, dist) * (1.0 - smoothstep(uRout - uRout * 0.08, uRout, dist));

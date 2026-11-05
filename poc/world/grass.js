@@ -83,8 +83,8 @@ function clumpGeometry(blades, segs, seed = 45) {
 const GRASS_VERT_HEAD = /* glsl */ `
 attribute float aT, aSide, aBi; attribute vec4 aB; attribute vec2 aCell;
 uniform int uK; uniform float uS0, uRin, uRout, uNextBlades, uTime, uSea, uDensity, uFlower, uAlt, uShore, uSnowLine, uWoodH, uZ0, uBloom, uSnowCover, uWildFrom; uniform vec3 uGrassTint; uniform vec2 uWildH; uniform vec2 uGrassH; uniform vec2 uWind; uniform vec3 uCamG;
-varying float vT, vCol, vRootK, vFade, vDith; varying vec3 vGW; varying vec3 vTint, vPetal; varying float vKill;
-vec3 gPos; vec3 gNor;
+varying float vT, vCol, vRootK, vFade, vDith; varying vec3 vGW, vGR; varying vec3 vTint, vPetal; varying float vKill;
+vec3 gPos; vec3 gNor; vec3 gRel; // gRel: the vertex from the eye (GDD 18.95)
 `;
 // everything is computed in the normal stage (it comes first in three's vertex shader) and reused for the position
 const GRASS_BAND = GRASS.band.toFixed(3), GRASS_ALT = GRASS.altK.toFixed(2);
@@ -105,7 +105,10 @@ const GRASS_BUILD = /* glsl */ `
   // here unchanged, drawn by it; the rest dissolve over the outer band, each clump over a short stretch of its own
   bool persist = lvl > uK && aBi < uNextBlades;
   vKill = 1.0; vFade = 0.0; vDith = 0.0; vT = 0.0; vCol = 0.0; vRootK = 0.0; vTint = vec3(0.0); vPetal = vec3(-1.0);
-  gPos = vec3(0.0); gNor = vec3(0.0, 1.0, 0.0); vGW = gPos;
+  gPos = vec3(0.0); gNor = vec3(0.0, 1.0, 0.0); vGW = gPos; gRel = vec3(0.0); vGR = gRel;
+  // far from home (GDD 18.95) the wind's patterns read the clump from a point snapped to 4096 m near the eye, never
+  // from absolute metres (a float holds those to about a centimetre per 100 km, and sin() of a huge angle is noise)
+  vec2 bL = base - floor(uCamG.xz / 4096.0) * 4096.0;
   if (de >= uRin && de < uRout) {
   vec4 gd = clipAt(base);
   // outside the view (5% wider than the frame, plus a clump's reach) the clump is dropped here, before its blades
@@ -154,8 +157,8 @@ const GRASS_BUILD = /* glsl */ `
   // Smooth, never jittery: every motion here is a slow sine or a broad noise, so a blade glides from pose to pose.
   // A breeze sways blades wide and slowly; a strong wind lays them over and only then quickens them a little.
   float wk = smoothstep(0.25, 2.0, Uh); // 0 in a breath of air, 1 in a stiff wind
-  float gust = 0.6 + 0.4 * sin(1.571 * dot(base, wd) - 1.571 * (0.5 + 1.2 * Uh) * uTime + 3.0 * w2noise(base / 7.0, 205)); // 4 m waves
-  float eddy = 0.5 + 0.5 * w2noise((base - wd * uTime * (0.3 + 0.9 * Uh)) / 1.6, 206); // 0..1, broad and slow, carried downwind
+  float gust = 0.6 + 0.4 * sin(1.571 * dot(bL, wd) - mod(1.571 * (0.5 + 1.2 * Uh) * uTime, 6.2831853) + 3.0 * w2noise(bL / 7.0, 205)); // 4 m waves
+  float eddy = 0.5 + 0.5 * w2noise((bL - wd * mod(uTime * (0.3 + 0.9 * Uh), 4096.0)) / 1.6, 206); // 0..1, broad and slow, carried downwind
   float mv = floor(fract(aB.w * 7.31 + rnd * 3.7) * 8.0); // which of the eight
   float bph = mv * 2.39996, bk = (mv + 0.5) / 8.0; // phases a golden angle apart
   float stiff = 0.65 + 0.7 * bk; // how far this blade gives
@@ -163,17 +166,20 @@ const GRASS_BUILD = /* glsl */ `
   float ug = Uh * gust * (0.8 + 0.4 * eddy) * stiff / 1.5;
   float lay = min(0.85, 0.05 + ug * ug * 0.35); // 1.5 m/s at the tips lays a blade about a third over
   float amp = mix(0.16, 0.1, wk) * (0.75 + 0.5 * eddy); // a wide, slow sway in a breeze; tighter once laid over
-  vec2 flutter = (wp * sin(uTime * rate + bph) + wd * 0.5 * sin(uTime * rate * 0.71 + bph * 1.7)) * amp;
+  vec2 flutter = (wp * sin(mod(uTime * rate, 6.2831853) + bph) + wd * 0.5 * sin(mod(uTime * rate * 0.71, 6.2831853) + bph * 1.7)) * amp;
   vec2 bend = fdir * lean * t * t + (wd * lay + flutter) * H * t * t;
   float drop = (dot(bend, bend) / max(H, 1e-3)) * 0.45; // a bent blade is shorter
-  vec2 xz = base + off + side * aSide * W * (1.0 - t * 0.85) + bend;
+  vec2 bw = off + side * aSide * W * (1.0 - t * 0.85) + bend; // the blade's vertex from its clump: millimetres, kept exact
+  vec2 xz = base + bw;
   gPos = vec3(xz.x, gd.x + t * H - drop * t, xz.y);
+  vec2 rxz = (base - cameraPosition.xz) + bw; // base - eye is exact for points this close
+  gRel = vec3(rxz.x, gPos.y - cameraPosition.y, rxz.y);
   vec3 tangent = normalize(vec3(bend.x * 2.0 * t + 1e-4, H, bend.y * 2.0 * t + 1e-4));
   gNor = normalize(cross(vec3(side.x, 0.0, side.y), tangent));
   // rounded: toward the sky, more so with distance and height, so far blades shade like the ground they cover
   float roundK = mix(0.45, 0.92, smoothstep(2.0, 18.0, max(dist, uAlt * 2.0)));
   gNor = normalize(mix(gNor * sign(dot(gNor, vec3(fdir.x, 0.0, fdir.y)) + 1e-3), vec3(0.0, 1.0, 0.0), roundK));
-  vT = t; vCol = rnd; vGW = gPos;
+  vT = t; vCol = rnd; vGW = gPos; vGR = gRel;
   // colour: dark at the root, light and drier at the tip, by moisture
   vec3 root = vec3(0.08, 0.17, 0.03), tip = mix(vec3(0.44, 0.42, 0.13), vec3(0.2, 0.45, 0.06), smoothstep(0.25, 0.7, gd.y));
   // a dense lawn hides its roots: up close each blade darkens toward its root, from further off the roots are hidden
@@ -225,8 +231,9 @@ export class Grass {
         sh.vertexShader = `${clip}\n${NOISE_GLSL}\n${WEAR_GLSL}\n${GRASS_VERT_HEAD}\n` + sh.vertexShader
           .replace('#include <beginnormal_vertex>', GRASS_BUILD + '\n  vec3 objectNormal = gNor;')
           .replace('#include <begin_vertex>', 'vec3 transformed = gPos;')
-          .replace('#include <project_vertex>', '#include <project_vertex>\n  if (vKill > 0.5) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);');
-        sh.fragmentShader = `${CLOUD_SHADOW_GLSL}\nuniform vec3 uSunDir, uSunColor; varying float vT, vCol, vRootK, vFade, vDith; varying vec3 vGW, vTint, vPetal; varying float vKill;
+          // projected from the eye (GDD 18.95): viewMatrix * an absolute position cancels two large 32-bit numbers
+          .replace('#include <project_vertex>', 'vec4 mvPosition = vec4(mat3(viewMatrix) * gRel, 1.0); gl_Position = projectionMatrix * mvPosition;\n  if (vKill > 0.5) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);');
+        sh.fragmentShader = `${CLOUD_SHADOW_GLSL}\nuniform vec3 uSunDir, uSunColor; varying float vT, vCol, vRootK, vFade, vDith; varying vec3 vGW, vGR, vTint, vPetal; varying float vKill;
 float w2ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); } // interleaved gradient noise\n` + sh.fragmentShader
           .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n  if (vFade < 1.0 && fract(w2ign(gl_FragCoord.xy) + vDith) > vFade) discard; // dissolving, never shrinking')
           .replace('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb = vPetal.x >= 0.0 && vT > 0.9 ? vPetal : vTint;')
@@ -235,7 +242,7 @@ float w2ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.
           .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n  normal = normalize(vNormal);')
           .replace('#include <lights_fragment_end>', /* glsl */ `#include <lights_fragment_end>
   { // the sun through the blade, toward the tip, strongest looking into the light; the root sits in its neighbours' shade
-    vec3 V = normalize(vGW - cameraPosition);
+    vec3 V = normalize(vGR); // from the eye (GDD 18.95)
     float back = pow(clamp(dot(V, uSunDir), 0.0, 1.0), 3.0);
     { float cs = cloudShadow(vGW.xz); reflectedLight.directDiffuse *= cs; reflectedLight.directSpecular *= cs; }
     reflectedLight.directDiffuse += uSunColor * diffuseColor.rgb * back * 0.5 * vT;
