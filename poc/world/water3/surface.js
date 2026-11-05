@@ -359,7 +359,11 @@ void main() {
     // water, the shore side going first, until the next bore brings the next; it reaches 75 cm of depth at most
     float zeta = th - depth, p = s < SW3_UP ? 0.0 : (s - SW3_UP) / (1.0 - SW3_UP);
     float top = zeta - 0.75 * smoothstep(0.3, 1.0, p); // its shoreward edge, over the still water
-    float mass = smoothstep(0.0, 0.03, top + depth) * (1.0 - smoothstep(0.45, 0.75, depth)) * smoothstep(0.0, 0.06, s) * (s < SW3_UP ? 0.9 : mix(0.85, 0.5, p));
+    // only shoreward of the water's own foam: on the sand while it climbs, into the water only as it drains (as far as
+    // it has drained back), and not where the incoming bore's foam already is
+    float reach = 0.75 * smoothstep(0.15, 1.0, p); // how deep into the water it has come back
+    float mass = smoothstep(0.0, 0.03, top + depth) * (1.0 - smoothstep(reach - 0.05, reach + 0.02, depth)) * smoothstep(0.0, 0.06, s) * (s < SW3_UP ? 0.9 : mix(0.85, 0.5, p))
+               * (1.0 - clamp(vCoast.x * 1.5, 0.0, 1.0));
     swLace = max(swLace, mass);
     if (depth < 0.0 || th > 0.0) thin = 0.015; // the sheet on the sand, and the water by the line while the swash is up: thin, and still water (a mirror), never faded to see-through (it read as a dry strip between the two)
   }
