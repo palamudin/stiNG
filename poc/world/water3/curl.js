@@ -90,10 +90,13 @@ void main() {
       // it crossed it (the distance past it, over the sand's slope, at the crest's speed) runs the lip: it is thrown,
       // curls over, plunges and is gone within te seconds (longer for a bigger wave), and the wave goes on as a bore.
       // The next crest does it again at its own break line
-      float rb = 0.345 + 0.09 * early, db = a0 / rb; // the breaking limit (water3/swash.js)
+      // the break point travels along the crest (a peel): where it breaks varies along the shore over a hundred metres or
+      // so, by a quarter, a new layout every wave
+      float peel = 0.5 + 0.5 * w2noise(cx / 120.0 + vec2(cyc * 3.7, -cyc * 2.3), 616);
+      float rb = 0.3 + 0.12 * mix(early, peel, 0.7), db = a0 / rb; // about the breaking limit (water3/swash.js)
       vec3 cn = clipNormal(cx); float tb = max(sqrt(max(1.0 - cn.y * cn.y, 0.0)) / max(cn.y, 0.05), 0.004);
       float tSince = (db - dC) / tb / sqrt(9.81 * max(dC, 0.1));
-      float te = 0.5 + 0.35 * clamp(a0, 0.0, 1.5), ev = tSince / te; // a short event: half a second to a second
+      float te = 0.45 + 0.3 * clamp(a0, 0.0, 1.5), ev = tSince / te; // a short event: under a second
       float stage = clamp(smoothstep(0.0, 0.85, ev) * uLook3.w, 0.0, 1.0);
       float show = smoothstep(0.0, 0.12, ev) * (1.0 - smoothstep(0.95, 1.25, ev)) * smoothstep(0.03, 0.2, a0) * smoothstep(0.1, 0.35, dC);
       if (show > 0.002 && psi >= -0.05 && psi <= ${(C.lipWidth + 0.05).toFixed(2)}) {
@@ -101,7 +104,7 @@ void main() {
         // into the water in front of the face (the lip plunging in), ahead of the crest straight down into the wave's
         // body from the root: nothing joins the lip back over the crest to the water behind it
         float u = clamp(psi / ${C.lipWidth.toFixed(2)}, 0.0, 1.0);
-        float H = 1.2 * a * show;
+        float H = 1.2 * a * show * (1.0 + 0.8 * uLook3.w); // the lip over the wave: bigger than the crest it comes from (the panel's Curl)
         vec2 o = curlAt(u, stage) * H, dir = gDir;
         // the root on the water's own crest: the surface's displacement there (both trains, the lean forward before
         // the collapse, the Gerstner shift: water3/swash.js w3Coast), so the lip grows out of the wave the water draws
@@ -143,7 +146,7 @@ void main() {
   float thick = mix(0.35, 0.04, vLip.x) / max(abs(dot(n, V)), 0.25);  // metres of water the view crosses
   vec3 Tw = exp(-ext * thick);
   vec3 amb = uSkyUp / 3.14159 * 0.8 + uSunColor * sunUp / 3.14159 * 0.6;
-  vec3 body = uSca / ext * (1.0 - Tw) * amb;
+  vec3 body = uSca / ext * (1.0 - Tw) * amb * 1.6 + vec3(0.02, 0.12, 0.09) * amb; // the lip's green, stronger than the open water's
   // light through it from the sun's side (the crest glow, the panel's)
   float through = pow(max(dot(-V, uSun), 0.0), 2.0);
   body += vec3(0.04, 0.42, 0.3) * (uSunColor * sunUp * 0.5 + uSkyUp * 0.35) * (0.25 + 0.75 * through) * (uLook.w / 1.6) * (0.3 + 0.7 * vLip.x) * 0.6;
@@ -155,11 +158,11 @@ void main() {
   vec3 c = body * (1.0 - F) + refl * F + uSunColor * spec;
   float pass_ = dot(Tw, vec3(0.2126, 0.7152, 0.0722)) * (1.0 - F); // what of the background still shows through
   // the tip tearing into white at a full curl
-  float tear = smoothstep(0.55, 1.0, vLip.x) * smoothstep(0.35, 0.9, vLip.y);
+  float tear = smoothstep(0.7, 1.0, vLip.x) * smoothstep(0.2, 0.7, vLip.y); // the spray line along the lip as it comes down
   float lace = texture(tFoam, vW.xz / 1.3 + vec2(0.0, vW.y)).r;
   float white = smoothstep(1.0 - 0.8 * tear, 1.1 - 0.8 * tear, lace + 0.1) * tear;
   c = mix(c, (uSkyUp * 0.8 + uSunColor * sunUp * 0.5) * 0.95, white);
-  float a = (1.0 - pass_ * (1.0 - white)) * vLip.z * smoothstep(0.0, 0.08, vLip.x);
+  float a = max(1.0 - pass_ * (1.0 - white), 0.55) * vLip.z * smoothstep(0.0, 0.06, vLip.x); // never more than half see-through: it reads
   oColor = vec4(c * a, a);
 }`,
       blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
