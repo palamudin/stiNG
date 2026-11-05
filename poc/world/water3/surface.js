@@ -468,6 +468,19 @@ void main() {
   c = mix(c, (uSkyUp * 0.8 + uSunColor * sunUp * 0.55 * cloud) * 0.92, fm * 0.85); // foam on top: white, lit by the sky and the sun
   // debug 8 (L in water 3): the water's kinds, blue the large water, green a river (by its share), its flow as bands
   // across it moving downstream at its speed
+  // debug 9 (L twice): the meshes. The water flat blue lit by its slope; the first surf train's crest line yellow; where
+  // it breaks orange (the curl mesh draws itself red: water3/curl.js)
+  if (uDebug > 8.5 && uDebug < 9.5) {
+    vec3 dc = vec3(0.12, 0.3, 0.85) * (0.45 + 0.55 * max(dot(n, normalize(vec3(0.3, 1.0, 0.2))), 0.0));
+#ifdef W3_COAST
+    if (lv <= uSeaLevel + 0.5 && depth > 0.0 && sw3Ctx(vXZ)) {
+      float ph = sw3Phase(0, uWTime, gTau, gPn), psi = mod(ph + 3.14159265, 6.2831853) - 3.14159265;
+      dc = mix(dc, vec3(1.0, 0.55, 0.1), clamp(vCoast.x, 0.0, 1.0) * 0.8);                           // breaking: orange
+      dc = mix(dc, vec3(1.0, 0.95, 0.15), (1.0 - smoothstep(0.03, 0.08, abs(psi))) * gNear);         // the crest line: yellow
+    }
+#endif
+    c = dc * (uSkyUp * 0.6 + uSunColor * sunUp * 0.4) * 3.0;
+  }
   if (uDebug > 7.5 && uDebug < 8.5) {
     vec3 kc = mix(vec3(0.15, 0.35, 0.95), vec3(0.1, 0.9, 0.3), fl);
     if (sp > 0.01) { vec2 a = fv / sp; float st = fract(dot(vXZ, a) / 3.0 - uTime * sp / 3.0); kc *= 0.45 + 0.55 * smoothstep(0.0, 0.2, st) * (1.0 - smoothstep(0.8, 1.0, st)) + 0.6 * smoothstep(1.5, 2.5, sp); }

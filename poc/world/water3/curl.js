@@ -48,7 +48,7 @@ export class CurlMesh {
       uSurf: world.uSurf, uSurfX: world.uSurfX, uWTime: world.uWTime, uSwDir: world.uSwDir, uLook3: world.uLook3,
       uCam: S.uCam, uGridScale: S.uGridScale, uSeaLevel: S.uSeaLevel, tCurl: { value: this.table },
       uSun: world.sky.uniforms.uSun, uSunColor: world.sky.uniforms.uSunColor, uSkyUp: S.uSkyUp, tFoam: S.tFoam,
-      uSkyView: world.sky.uniforms.uSkyView, uMS: world.sky.uniforms.uMS, uHaze: world.sky.uniforms.uHaze, uAbs: world.uAbs, uSca: world.uSca, uLook: world.uLook, uLook2: world.uLook2,
+      uDebug: world.post.U.uDebug, uSkyView: world.sky.uniforms.uSkyView, uMS: world.sky.uniforms.uMS, uHaze: world.sky.uniforms.uHaze, uAbs: world.uAbs, uSca: world.uSca, uLook: world.uLook, uLook2: world.uLook2,
     };
     this.U = U;
     const C = CURL;
@@ -123,7 +123,7 @@ void main() {
       fragmentShader: /* glsl */ `precision highp float; precision highp int;
 #include <logdepthbuf_pars_fragment>
 ${SKY_GLSL}
-uniform vec3 uSun, uSunColor, uSkyUp, uAbs, uSca; uniform vec4 uLook, uLook2; uniform sampler2D tFoam, uSkyView;
+uniform vec3 uSun, uSunColor, uSkyUp, uAbs, uSca; uniform vec4 uLook, uLook2; uniform sampler2D tFoam, uSkyView; uniform float uDebug;
 in vec3 vW; in vec3 vLip; in float vIn; out vec4 oColor;
 const float W_N = 1.333;
 float wFresnel(float ci) {
@@ -140,6 +140,7 @@ void main() {
   // only triangles wholly of the lip are drawn: one joining it to a vertex left under the water would be a sheet
   // between the lip and the water (a curtain, a fat wave): thrown away, pixel by pixel
   if (vLip.z < 0.002 || vIn < 0.999) discard;
+  if (uDebug > 8.5 && uDebug < 9.5) { vec3 nn = normalize(cross(dFdx(vW), dFdy(vW))); oColor = vec4(vec3(1.0, 0.08, 0.06) * (0.5 + 0.5 * abs(nn.y)) * (uSkyUp * 0.6 + uSunColor * max(uSun.y, 0.0) * 0.4) * 3.0, 1.0); return; } // debug 9: the curl, solid red
   vec3 n = normalize(cross(dFdx(vW), dFdy(vW))); vec3 V = normalize(cameraPosition - vW); if (dot(n, V) < 0.0) n = -n;
   float sunUp = max(uSun.y, 0.0);
   vec3 ext = uAbs / max(uLook.x, 0.05) + uSca;
