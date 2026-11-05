@@ -151,8 +151,10 @@ void main() {
   #include <logdepthbuf_fragment>
   vec2 p = (vUv - 0.5) * 2.0; float radial = max(0.0, 1.0 - dot(p, p));
   // the puff's texture: cauliflower lumps at two scales
-  vec4 ft = texture(tFoam, vUv * 0.92 + vec2(vSeed, vSeed * 0.371)); float t = ft.r; // the baked lace; ft.g its billow height
-  float a = min(0.88, vAlpha * radial * radial * (0.45 + 1.25 * t));
+  // a patch of lace, not a ball: the baked lace cuts it into strands and holes, its outline torn by the same pattern
+  vec4 ft = texture(tFoam, vUv * 0.55 + vec2(vSeed, vSeed * 0.371)); float t = ft.r; // the baked lace; ft.g its billow height
+  float lace = smoothstep(0.38, 0.6, t * (0.55 + 0.75 * radial));
+  float a = min(0.9, vAlpha * smoothstep(0.0, 0.35, radial) * lace * 1.3);
   if (a < 0.008) discard;
   vec3 white = mix(vec3(0.9, 0.96, 0.95), vec3(1.15, 1.13, 1.06), clamp(vPlunge * 2.0, 0.0, 1.0));
   vec3 col = mix(white, vec3(0.58, 0.405, 0.22), vSand * vGrounded * (0.25 + 0.55 * t)) * foamLight() * (0.78 + 0.3 * ft.g); // the billow's lumps lit a little

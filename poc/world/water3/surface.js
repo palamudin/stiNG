@@ -447,7 +447,7 @@ void main() {
   float wf = clamp(vCoast.x, 0.0, 1.0), lc = clamp(vCoast.y, 0.0, 1.0) * (1.0 - 0.6 * inField);
   // the field's foam: thick and white where fresh, eroding into lace as it fades
   fm = max(fm, smoothstep(1.0 - 0.6 * ff, 1.1 - 0.6 * ff, pat) * (0.3 + 0.55 * ff)); // never solid: even the thickest foam shows its lace
-  fm = max(fm, smoothstep(1.0 - 0.75 * wf, 1.15 - 0.75 * wf, pat) * (0.6 + 0.4 * wf));
+  fm = max(fm, smoothstep(1.0 - 0.6 * wf, 1.12 - 0.6 * wf, pat) * (0.6 + 0.4 * wf)); // the breaker's white, open lace even at its thickest
   fm = max(fm, smoothstep(1.0 - 0.5 * lc, 1.1 - 0.5 * lc, pat) * 0.45);
   float spf = 0.55 * lacePat(vXZ, 5.3 * ls, vec2(uTime * 0.006, -uTime * 0.004)) + 0.45 * lacePat(vXZ, 1.9 * ls, -vec2(uTime * 0.012, 0.0)) + 0.15;
   float sf = clamp(vCoast.z, 0.0, 1.0);
