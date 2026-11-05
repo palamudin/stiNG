@@ -54,6 +54,7 @@ float sw3Period() { return 6.2831853 / sw3Omega(0); }
 float gEdgeW = 0.0, gTauE = 0.0, gEdgeD = 1e4; vec2 gDirE = vec2(0.0);
 void sw3CtxE(vec2 p) {
   gEdgeW = 0.0;
+  return; // off for now: no reef waves (and so no curl, which rides them); the shore's own trains and their foam only
   float kn = gShoreKnow; vec4 sh = shoreAtE(p); float know = gShoreKnow; gShoreKnow = kn;
   float coh = know > 0.0 ? length(sh.yz) : 0.0;
   if (know <= 0.0 || abs(sh.x) > 9.0e3 || coh < 1e-4) return;

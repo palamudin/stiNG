@@ -35,7 +35,7 @@ export const SHORE = {
   sweeps: 110,                    // Jacobi passes of the eikonal solve: the travel time reaches that many texels from the line
   gradM: 8,                       // metres of the stencil the direction and coherence are taken over
   dMin: 0.3, dMax: 14,
-  edge: 2.9,                      // metres: the second line baked, the isobath at a reef's edge (sources/wild.js reefAt), for the reef's own waves (water3/swash.js)
+  edge: 0,                        // off for now (0: not baked); 2.9 metres: the second line baked, the isobath at a reef's edge (sources/wild.js reefAt), for the reef's own waves (water3/swash.js)
   perFrame: 2,                    // bakes a frame at most once running
 };
 
@@ -209,7 +209,7 @@ void main() {
   _bake(L, slot, cx, cz) {
     const layer = L.slotBase + L.slots.indexOf(slot);
     this.U.uOff.value = 0; this._bakeLine(L, cx, cz, layer);
-    this.U.uOff.value = this.cfg.edge; this._bakeLine(L, cx, cz, layer + this.nSlots);
+    if (this.cfg.edge > 0) { this.U.uOff.value = this.cfg.edge; this._bakeLine(L, cx, cz, layer + this.nSlots); }
     this.U.uOff.value = 0;
   }
   _bakeLine(L, cx, cz, layer) {
