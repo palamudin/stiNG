@@ -190,6 +190,9 @@ void main() {
       }` : ''}
       d += a * k[${Math.min(c, 3)}]${c === 1 ? ' * gu.x' : c > 1 ? ' * gu.y' : ''}; } }`).join('\n    ')}
   }
+#ifdef W3_COAST
+  if (coast) d.xz *= sw3EdgeShift(depth); // near the line the waves only lift and lower the water (water3/swash.js)
+#endif
   vJ = 1.0 + d.w; // the surface's Jacobian: below about a half it has folded (whitecaps)
   vec3 P = vec3(xz.x + d.x, level + d.y, xz.y + d.z);
   // the trough held over the floor (the clearance grows with distance for the depth buffer's precision); over land the
@@ -199,13 +202,10 @@ void main() {
   // the shoreline: over the sand the surface is a sheet at the shoreline's height, thin at its tip (1 cm) and
   // thickening behind it, and under the sand past the tip by as much as the sand stands over the shoreline; in the
   // last centimetres of water it is lifted to the same sheet. One height for this, the pixels' edge test and the sand
-  if (bed > -1e3 && depth < 0.5 && depth > -3.0 && level <= uSeaLevel + 0.5 && uSurf.x > 0.0) {
+  if (bed > -1e3 && depth < 2.0 && depth > -3.0 && level <= uSeaLevel + 0.5 && uSurf.x > 0.0) {
     float e = max(cell, 0.25);
     vec2 grad = vec2(clipHeight(xz + vec2(e, 0.0)) - clipHeight(xz - vec2(e, 0.0)), clipHeight(xz + vec2(0.0, e)) - clipHeight(xz - vec2(0.0, e))) / (2.0 * e);
-    sw3Beach(xz, grad); gExpo *= 1.0 - fl; // no swash up a river's banks
-    float s, th = level + sw3Shore(xz, length(grad), uWTime, s) - bed;
-    float sheet = bed + (th > 0.0 ? min(0.12, 0.012 + 0.3 * th) : max(th, -0.15));
-    P.y = depth < 0.0 ? sheet : max(P.y, sheet);
+    P.y = sw3EdgeY(xz, level, bed, P.y, grad, uWTime, fl); // the sheet over the sand, the water held up under the swash (water3/swash.js)
   }
 #endif
   vW = P; vXZ = xz; vCell = cell;

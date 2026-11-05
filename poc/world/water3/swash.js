@@ -91,6 +91,23 @@ vec3 sw3Wet(vec2 p, float hgt, float tb, float t) {
   }
   return o;
 }
+// ---- the water's surface near the shore: one height for the water's mesh (water3/surface.js) and test/shorelab.
+// py: the surface's height from the waves at xz; grad: the floor's uphill gradient; fl: a river's share. Over the
+// sand, a sheet at the shoreline's height (thin at its tip, under the sand past it). In the water near the line the
+// surface is held up to the shoreline's own height (water up the sand means water down to it: never a dry strip
+// between the waves and the swash) and a few centimetres over the floor (never a film too thin to show), both fading
+// out by 2 m of depth
+float sw3EdgeY(vec2 xz, float level, float bed, float py, vec2 grad, float t, float fl) {
+  float depth = level - bed;
+  if (depth >= 2.0 || depth <= -3.0) return py;
+  sw3Beach(xz, grad); gExpo *= 1.0 - fl; // no swash up a river's banks
+  float s, zeta = sw3Shore(xz, length(grad), t, s), th = level + zeta - bed;
+  if (depth < 0.0) return bed + (th > 0.0 ? min(0.12, 0.012 + 0.3 * th) : max(th, -0.15));
+  float w = 1.0 - smoothstep(0.5, 2.0, depth);
+  return max(py, max(level + zeta * w, bed + 0.08 * w));
+}
+// the waves' sideways shift near the line, faded out: a trough must not pull the water's edge back off the sand
+float sw3EdgeShift(float depth) { return smoothstep(0.4, 2.0, depth); }
 `;
 
 // The surf's trains on the water (water3/surface.js, vertex): after Ultra-Water's shoreWaves (MIT, Humpalumps).

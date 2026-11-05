@@ -60,7 +60,7 @@ FoamState foamState(vec2 anchor, vec4 seed) {
   if (o.level > uSeaLevel + 0.5 || uSurf.x <= 0.0) return o;
   float depth = o.level - clipHeight(anchor);
   if (depth < 0.22 || depth > 4.2 || !sw3Ctx(anchor)) return o;
-  float sdf = -gShoreD; // metres from the line
+  float sdf = -gShoreD, tauA = gTau; // metres from the line; the crest's travel time from here to it
   if (sdf < 1.0 || sdf > 52.0 || dot(gDir, gDir) < 0.25) return o;
   o.dir = gDir;
   float env = gNear * gExpo * smoothstep(-0.9, 0.5, depth);
@@ -82,7 +82,7 @@ FoamState foamState(vec2 anchor, vec4 seed) {
   // the sand comes back down with it and is still there when the next one arrives, round and round
   o.life = period * (1.0 + generation) + 0.4;
   o.speed = sqrt(9.81 * clamp(depth, 0.3, 14.0)) * (1.04 + 0.2 * o.breaking);
-  o.hitT = clamp((sdf + 1.0) / o.speed, 0.25, 3.0);
+  o.hitT = clamp(tauA, 0.25, 8.0); // it reaches the line when its crest does (the crest's own travel time: the swash starts then)
   o.backAge = max(o.age - o.hitT, 0.0);
   o.strand = 0.0;
   vec2 tangent = vec2(-o.dir.y, o.dir.x);
@@ -94,7 +94,7 @@ FoamState foamState(vec2 anchor, vec4 seed) {
   sw3Beach(lp, lg); float ss, zeta = sw3Shore(lp, tb, uWTime, ss);
   o.swashS = ss;
   float onSheet = sdf + min((0.3 + 0.7 * seed.w) * zeta / tb, 40.0);
-  float travel = min(o.speed * o.age, onSheet);
+  float travel = o.age < o.hitT ? sdf * o.age / o.hitT : onSheet; // in with its crest, then on the swash's sheet
   o.center = anchor + jitter + o.dir * travel + tangent * sin(seed.x * 17.0 + o.backAge * 1.7) * min(o.backAge, 3.0) * 0.12;
   o.bed = clipHeight(o.center) - o.level; // over the still water: > 0 on the sand
   o.ok = true;
