@@ -46,7 +46,7 @@ namespace Sting.Core.Tests
             F(c.sheds.Count); foreach (var t in c.sheds) { F(t.x); F(t.z); F(t.hw); F(t.hd); F(t.h); F(t.crack); F(t.eave); F(t.house); }
             F(c.hasNest);
             // regions (T1-12)
-            F(c.use == "park" ? 0 : c.use == "yards" ? 1 : c.use == "mall" ? 2 : c.use == "forest" ? 3 : c.use == "town" ? 4 : c.use == "wild" ? 5 : -1);
+            F(c.use == "park" ? 0 : c.use == "yards" ? 1 : c.use == "mall" ? 2 : c.use == "forest" ? 3 : c.use == "town" ? 4 : c.use == "wild" ? 5 : c.use == "farm" ? 6 : -1);
             foreach (var list in new[] { c.roads, c.lots }) { F(list.Count); foreach (var t in list) { F(t.minx); F(t.maxx); F(t.minz); F(t.maxz); } }
             F(c.loops.Count); foreach (var t in c.loops) { F(t.x); F(t.z); F(t.r); }
             F(c.malls.Count); foreach (var t in c.malls) { F(t.x); F(t.z); F(t.hw); F(t.hd); F(t.h); }
@@ -60,6 +60,9 @@ namespace Sting.Core.Tests
             F(c.drives.Count); foreach (var t in c.drives) { F(t.minx); F(t.maxx); F(t.minz); F(t.maxz); }
             F(c.porches.Count); foreach (var t in c.porches) { F(t.x); F(t.z); F(t.s); }
             F(c.boxes.Count(b => b.garage)); F(c.boxes.Count(b => b.porch));
+            // farmland (S5)
+            foreach (var list in new[] { c.lanes, c.farmyards }) { F(list.Count); foreach (var t in list) { F(t.minx); F(t.maxx); F(t.minz); F(t.maxz); } }
+            F(c.boxes.Count(b => b.hedge)); F(c.sheds.Count(s => s.farm)); F(c.sheds.Count(s => s.barn));
         }
     }
 }

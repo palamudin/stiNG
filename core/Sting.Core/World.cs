@@ -14,7 +14,7 @@ namespace Sting.Core
     public sealed class Caterpillar { public Num x, y, z; }
     public sealed class Fly { public Num x, y, z, r, w1, w2, w3, p1, p2, p3; }
     public sealed class HumanSlot { public int slot; public Num x, z, fx, fz, exit; public string posture; public string act; public Num[] path; public bool evening; }
-    public sealed class Box { public Num minx, maxx, miny, maxy, minz, maxz; public bool wood, hive, shed, fence, mall, shop, bench, garage, porch; }
+    public sealed class Box { public Num minx, maxx, miny, maxy, minz, maxz; public bool wood, hive, shed, fence, mall, shop, bench, garage, porch, hedge; }
     /// a house's garage (S4, world.js garageOf): its walls' extent, the line of its door, its side of the street, its height and siding
     public sealed class Garage { public Num x0, x1, z0, z1, zf, h; public int s, c; }
     /// the porch before a house's front door: the door's middle on the wall, and the house's side of the street
@@ -33,7 +33,7 @@ namespace Sting.Core
     /// Birds and dragonflies: a patrol loop
     public sealed class Patrol { public Num x, y, z, r, dir; public int period, phase; }
     public sealed class Rival { public Num x, y, z, r, ex, ey, ez; public int workers; }
-    public sealed class Shed { public Num x, z, hw, hd, h; public int crack, eave; public bool house; public Garage g; }
+    public sealed class Shed { public Num x, z, hw, hd, h; public int crack, eave; public bool house, farm, barn; public Garage g; }
     /// a shed's or house's pitched roof (see World.ShedRoof)
     public sealed class Roof { public Num x, z, wall, wallHalf, half, S, y0, rise, L; public bool alongX; }
     /// streets and parking lots (T1-12): flat rectangles; cul-de-sacs; strip-mall buildings
@@ -65,6 +65,7 @@ namespace Sting.Core
         public List<Trap> traps = new List<Trap>(); public bool hasNest; public List<Web> webs = new List<Web>(); public List<Patrol> birds = new List<Patrol>();
         public Rival rival; public List<Shed> sheds = new List<Shed>(); public List<Patrol> dragonflies = new List<Patrol>();
         public List<Garage> garages = new List<Garage>(); public List<Rect> drives = new List<Rect>(); public List<Porch> porches = new List<Porch>();
+        public List<Rect> lanes = new List<Rect>(), farmyards = new List<Rect>();
         /// land use and the suburban layout (T1-12)
         public string use = "park"; public List<Rect> roads = new List<Rect>(), lots = new List<Rect>(); public List<Loop> loops = new List<Loop>(); public List<Mall> malls = new List<Mall>();
         /// birdbaths (T2-1)
@@ -216,7 +217,7 @@ namespace Sting.Core
         /// the top of the walls; it overhangs the walls by 0.12 m on the long sides and 0.1 m at the gable ends (world.js shedRoof)
         public static Roof ShedRoof(Shed sh)
         {
-            bool alongX = sh.hw >= sh.hd; Num wall = alongX ? sh.hd : sh.hw, wallHalf = alongX ? sh.hw : sh.hd, S = wall + 0.12, rise = sh.house ? 1.9 : 0.55;
+            bool alongX = sh.hw >= sh.hd; Num wall = alongX ? sh.hd : sh.hw, wallHalf = alongX ? sh.hw : sh.hd, S = wall + 0.12, rise = sh.house ? 1.9 : sh.barn ? 2.6 : 0.55;
             return new Roof { x = sh.x, z = sh.z, alongX = alongX, wall = wall, wallHalf = wallHalf, half = wallHalf + 0.1, S = S, y0 = sh.h, rise = rise, L = Sqrt(rise * rise + S * S) };
         }
         public static (ShedSite wall, ShedSite attic) ShedSites(Shed sh)
@@ -295,6 +296,10 @@ namespace Sting.Core
                 Add(0, 5, "#4e4b52", mx, g.h + 0.06, mz, w + 0.2, 0.12, d + 0.2, false);
                 Add(0, 5, "#d9d4c7", mx, 1.1, g.zf - g.s * 0.02, w - 0.8, 2.2, 0.06, false);
             }
+            string[] hedgeShades = { "#3b5a2a", "#46652f", "#355024" };
+            foreach (var b in c.boxes) if (b.hedge) // a hedgerow section: a blocky bush (world.js)
+                Add(0, 5, hedgeShades[(int)Abs(Floor(b.minx * 0.37 + b.minz * 0.61)) % 3], (b.minx + b.maxx) / 2, b.maxy / 2, (b.minz + b.maxz) / 2, b.maxx - b.minx, b.maxy, b.maxz - b.minz, false);
+            foreach (var sh in c.sheds) if (sh.farm) Add(0, 5, "#8d8577", sh.x, 0.25, sh.z, sh.hw * 2 + 0.12, 0.5, sh.hd * 2 + 0.12, false); // the stone base course of a building on its footing
             foreach (var p in c.porches) // the stoop and its step, concrete
             {
                 Add(0, 5, "#b9b4a8", p.x, 0.22, p.z - p.s * 0.6, 1.8, 0.44, 1.2, true);
@@ -407,10 +412,17 @@ namespace Sting.Core
             }
             return null;
         }
+        /// farmland (world.js RURAL, S5): the settled area's outer ring, its lanes, hedgerows and farmsteads
+        public static readonly Num RuralRing = 128, RuralInner = 192, RuralLane = 5.5, RuralHedge = 1.2, RuralHedgeH = 1.7, RuralStead = 0.35, RuralPlinth = 1.5, RuralSteep = (Num)1 / 3, RuralMax = 0.35;
         public static string LandUse(ulong seed, int cx, int cz, Settings st = null)
         {
             if (cx == 0 && cz == 0) return "park";
-            if (st != null && st.settled > 0 && Sqrt((Num)(cx * cx + cz * cz)) * CS > st.settled) return "wild"; // past the settled area
+            if (st != null && st.settled > 0)
+            {
+                Num d = Sqrt((Num)(cx * cx + cz * cz)) * CS;
+                if (d > st.settled) return "wild"; // past the settled area
+                if (d > Max(st.settled - RuralRing, RuralInner)) return "farm"; // its outer ring (S5)
+            }
             var R = RegionOf(cx, cz);
             if (TownQuarter(seed, cx, cz, st) != null) return "town";
             return BaseUse(Region(seed, R.rx, R.rz, st), R.lx, R.lz);
@@ -481,7 +493,7 @@ namespace Sting.Core
                 if (rolls.TryGetValue(k, out var v)) return v;
                 if (rolls.Count > 4096) rolls.Clear();
                 string u = LandUse(seed, cx, cz, st);
-                v = u == "park" ? T.terrain.roll.park : u == "forest" ? T.terrain.roll.forest : u == "yards" ? T.terrain.roll.yards : u == "mall" ? T.terrain.roll.mall : u == "town" ? T.terrain.roll.town : 1;
+                v = u == "park" ? T.terrain.roll.park : u == "forest" ? T.terrain.roll.forest : u == "yards" ? T.terrain.roll.yards : u == "mall" ? T.terrain.roll.mall : u == "town" ? T.terrain.roll.town : u == "farm" ? T.terrain.roll.farm : 1;
                 rolls[k] = v;
                 return v;
             }
@@ -605,7 +617,7 @@ namespace Sting.Core
         /// graded ground (GDD 20): kinds 0 street (levelled across at hz), 1 level rect, 2 cul-de-sac, 3 broad-shaped rect, 4 pond (level disc)
         sealed class Pad
         {
-            public int k; public Num minx, maxx, minz, maxz, x, z, r, m, hx, hz, h; public bool hSet;
+            public int k; public Num minx, maxx, minz, maxz, x, z, r, m, hx, hz, h; public bool hSet; public Shed src;
             // a house pad (5) and its front-yard ramp (6), a street (0) or cul-de-sac (2), a footing: worked out per step of the
             // modifier (GDD 21.2): height, shoulder, the ramp's start height
             public Num z0, run, zw, zf, cap, xd; public int sg; public bool road, @fixed, drv; public Pad pad, ramp;
@@ -664,6 +676,12 @@ namespace Sting.Core
             var I = SettledOf(seed, st);
             return Wild.At(I.S, x + I.site.x, z + I.site.z, o);
         }
+        /// the ground before the footings (world.js groundNatural)
+        public static Num GroundNatural(ulong seed, Num x, Num z, Settings st)
+        {
+            int terrain = st != null ? st.terrain : 0; Num h = terrain != 0 ? GroundBase(seed, x, z, st, terrain) : 0;
+            return st != null && st.settled > 0 ? h + SettledOf(seed, st).site.h : h;
+        }
         public static Num GroundAt(ulong seed, Num x, Num z, Settings st)
         {
             if (st != null && st.settled > 0)
@@ -714,17 +732,23 @@ namespace Sting.Core
                 var c = GenerateChunk(seed, cx, cz, st); P = new List<Pad>(); Num a = T.terrain.grade.apron, m = T.terrain.grade.shed;
                 void R(Num x, Num z, Num hw, Num hd) => P.Add(new Pad { k = 5, minx = x - hw - a, maxx = x + hw + a, minz = z - hd - a, maxz = z + hd + a, m = m, hx = x, hz = z });
                 foreach (var t in c.tables) { if (t.axisX) R(t.x, t.z, 0.95, 0.81); else R(t.x, t.z, 0.81, 0.95); }
-                foreach (var s in c.sheds) if (!s.house) R(s.x, s.z, s.hw, s.hd);
+                foreach (var s in c.sheds) if (!s.house || s.farm) { R(s.x, s.z, s.hw, s.hd + (s.house ? 1.6 : 0)); P[P.Count - 1].src = s; } // a farmhouse too, with its porch (S5)
                 foreach (var hv in c.hives) R(hv.x, hv.z, 0.225, 0.225);
                 foreach (var b in c.boxes) if (b.bench && b.miny < 0.45) { R((b.minx + b.maxx) / 2, (b.minz + b.maxz) / 2, (b.maxx - b.minx) / 2 + 0.25, (b.maxz - b.minz) / 2 + 0.25); P[P.Count - 1].@fixed = true; }
                 foreach (var b in c.baths) P.Add(new Pad { k = 6, x = b.x, z = b.z, r = b.r + a, m = m, hx = b.x, hz = b.z });
                 var Bq = new List<(Num x, Num z, Num hw, Num hd)>(); // a footing's shoulder stops short of any building's pad
-                foreach (var q in c.sheds) if (q.house) Bq.Add((q.x, q.z, q.hw, q.hd));
+                foreach (var q in c.sheds) if (q.house && !q.farm) Bq.Add((q.x, q.z, q.hw, q.hd));
                 foreach (var q in c.shops) Bq.Add((q.x, q.z, q.hw, q.hd));
                 foreach (var q in c.malls) Bq.Add((q.x, q.z, q.hw, q.hd));
                 foreach (var f in P)
                 {
                     Num cap = T.terrain.grade.reach;
+                    foreach (var o in P) // and of a farmstead's other buildings' footings (S5)
+                    {
+                        if (o == f || o.src == null || !o.src.farm || o.k != 5 || f.k != 5) continue;
+                        Num ox2 = Max(Max(0, o.minx - f.maxx), f.minx - o.maxx), oz2 = Max(Max(0, o.minz - f.maxz), f.minz - o.maxz);
+                        cap = Min(cap, Sqrt(ox2 * ox2 + oz2 * oz2));
+                    }
                     foreach (var q in Bq)
                     {
                         Num dx = f.k == 6 ? Max(0, Abs(f.x - q.x) - q.hw - f.r) : Max(Max(0, q.x - q.hw - f.maxx), f.minx - q.x - q.hw), dz = f.k == 6 ? Max(0, Abs(f.z - q.z) - q.hd - f.r) : Max(Max(0, q.z - q.hd - f.maxz), f.minz - q.z - q.hd);
@@ -1018,6 +1042,67 @@ namespace Sting.Core
                     c.boxes.Add(new Box { minx = Min(x0, x1) - t, maxx = Max(x0, x1) + t, miny = 0, maxy = fh, minz = Min(z0, z1) - t, maxz = Max(z0, z1) + t, wood = true, fence = true });
                 }
             }
+            // farmland (world.js addFarm, S5): fields in hedgerows, a gravel lane through every other row, now and then a farmstead
+            void AddFarm()
+            {
+                bool lane = ((cz % 2) + 2) % 2 == 0; Num lz0 = oz - RuralLane / 2, lz1 = oz + RuralLane / 2;
+                if (lane) { c.lanes.Add(new Rect { minx = ox - 32, maxx = ox + 32, minz = lz0, maxz = lz1 }); occupied.Add(new Occ { x = ox - 16, z = oz, r = 3 }); occupied.Add(new Occ { x = ox, z = oz, r = 3 }); occupied.Add(new Occ { x = ox + 16, z = oz, r = 3 }); }
+                void Hedge(bool alongX, Num at, long slot)
+                {
+                    int gate = RangeInt(H(slot), 0, 16); Num t = RuralHedge / 2;
+                    for (int k = 0; k < 16; k++)
+                    {
+                        Num a = -32 + k * 4, b = a + 4;
+                        if (k == gate) continue;
+                        if (alongX) c.boxes.Add(new Box { minx = ox + a, maxx = ox + b, miny = 0, maxy = RuralHedgeH, minz = at - t, maxz = at + t, wood = false, hedge = true });
+                        else { if (lane && oz + b > lz0 - 0.5 && oz + a < lz1 + 0.5) continue; c.boxes.Add(new Box { minx = at - t, maxx = at + t, miny = 0, maxy = RuralHedgeH, minz = oz + a, maxz = oz + b, wood = false, hedge = true }); }
+                    }
+                }
+                Hedge(true, oz - 32, 7000); Hedge(false, ox - 32, 7001);
+                occupied.Add(new Occ { x = ox - 32, z = oz, r = 1 });
+                if (Unit(H(7100)) < RuralStead)
+                {
+                    int terrain = st != null ? st.terrain : 0;
+                    Num Gb(Num x, Num z) => terrain != 0 ? GroundBase(seed, x, z, st, terrain) : 0;
+                    Num Sl(Num x, Num z) => Sqrt(Sq(Gb(x + 0.5, z) - Gb(x - 0.5, z)) + Sq(Gb(x, z + 0.5) - Gb(x, z - 0.5)));
+                    int[,] c4 = { { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } }, e8 = { { -1, -1 }, { 0, -1 }, { 1, -1 }, { 1, 0 }, { 1, 1 }, { 0, 1 }, { -1, 1 }, { -1, 0 } };
+                    bool Fits(Num x, Num z, Num hw, Num hd, Num h)
+                    {
+                        Num hm = Gb(x, z), lo = hm, hi = hm;
+                        for (int q = 0; q < 4; q++) { Num g = Gb(x + c4[q, 0] * hw, z + c4[q, 1] * hd); lo = Min(lo, g); hi = Max(hi, g); if (Sl(x + c4[q, 0] * hw, z + c4[q, 1] * hd) > RuralMax) return false; }
+                        if (hm - lo > RuralPlinth || hi - hm > RuralPlinth || Sl(x, z) > RuralMax) return false;
+                        Num sb = Min(4.6, h / 2);
+                        foreach (Num f in new Num[] { 0.5, 1 }) for (int q = 0; q < 8; q++) if (Sl(x + e8[q, 0] * (hw + sb * f), z + e8[q, 1] * (hd + sb * f)) > RuralSteep) return false;
+                        return true;
+                    }
+                    for (int k = 0; k < 6; k++)
+                    {
+                        int side = Unit(H(7110 + k * 4)) < 0.5 ? -1 : 1; Num x = ox + Range(H(7111 + k * 4), -18, 2), z = oz + side * Range(H(7112 + k * 4), 14, 20);
+                        Num hhw = Range(H(7113 + k * 4), 4.2, 5), hhd = 4, hh = Range(H(7140 + k), 5.6, 6.4), bx = x + hhw + 10, bhw = 6, bhd = 4.5, bh = 4.5;
+                        if (!Free(x, z, 7) || !Free(bx, z, 8) || !Fits(x, z, hhw, hhd + 1.6, hh + 1.9) || !Fits(bx, z, bhw, bhd, bh + 2.6)) continue;
+                        c.sheds.Add(new Shed { x = x, z = z, hw = hhw, hd = hhd, h = hh, crack = RangeInt(H(7150), 0, 4), eave = RangeInt(H(7151), 0, 4), house = true, farm = true });
+                        c.boxes.Add(new Box { minx = x - hhw, maxx = x + hhw, miny = 0, maxy = hh, minz = z - hhd, maxz = z + hhd, wood = false, shed = true });
+                        Num zf = z - side * hhd;
+                        c.porches.Add(new Porch { x = x, z = zf, s = side });
+                        c.boxes.Add(new Box { minx = x - 0.9, maxx = x + 0.9, miny = 0, maxy = 0.44, minz = Min(zf, zf - side * 1.2), maxz = Max(zf, zf - side * 1.2), wood = false, porch = true });
+                        c.boxes.Add(new Box { minx = x - 0.9, maxx = x + 0.9, miny = 0, maxy = 0.22, minz = Min(zf - side * 1.2, zf - side * 1.5), maxz = Max(zf - side * 1.2, zf - side * 1.5), wood = false, porch = true });
+                        c.sheds.Add(new Shed { x = bx, z = z, hw = bhw, hd = bhd, h = bh, crack = RangeInt(H(7152), 0, 4), eave = RangeInt(H(7153), 0, 4), house = false, farm = true, barn = true });
+                        c.boxes.Add(new Box { minx = bx - bhw, maxx = bx + bhw, miny = 0, maxy = bh, minz = z - bhd, maxz = z + bhd, wood = true, shed = true });
+                        occupied.Add(new Occ { x = x, z = z, r = 7 }); occupied.Add(new Occ { x = bx, z = z, r = 8 });
+                        Num yz0 = Min(zf - side * 1.6, zf - side * 7), yz1 = Max(zf - side * 1.6, zf - side * 7);
+                        c.farmyards.Add(new Rect { minx = x - hhw, maxx = bx + bhw, minz = yz0, maxz = yz1 });
+                        occupied.Add(new Occ { x = (x + bx) / 2, z = (yz0 + yz1) / 2, r = 5 });
+                        Num sx = x - hhw - 3.5, sz = z;
+                        if (Free(sx, sz, 2) && Fits(sx, sz, 1.2, 0.9, 2.7)) AddShed(sx, sz, true, 7160, false);
+                        Num ym = (yz0 + yz1) / 2;
+                        if (Unit(H(7200)) < 0.7) AddActor(7210, x, ym, 1, 0, "stand", "garden", new[] { x, ym, (x + bx) / 2, ym, bx - 2, ym, bx - 2, z - side * (bhd + 1) });
+                        break;
+                    }
+                }
+                if (lane && Unit(H(7300)) < 0.35) AddActor(7310, ox - 30, oz + 1.6, 1, 0, "stand", "stroll", new Num[] { ox - 30, oz + 1.6, ox + 30, oz + 1.6, ox + 30, oz - 1.6, ox - 30, oz - 1.6 });
+                int nf = RangeInt(H(7400), 0, 3);
+                for (int i = 0; i < nf; i++) { Num x = ox + Range(H(7401 + i * 2), -28, 28), z = oz + Range(H(7402 + i * 2), -28, 28); if (Free(x, z, 2)) AddFlowers(x, z, 7420 + i * 80); }
+            }
             // suburban yards (see world.js addYards)
             void AddYards()
             {
@@ -1177,6 +1262,7 @@ namespace Sting.Core
                 AddFlowers(3, -5, 480);
             }
             else if ((c.use = LandUse(seed, cx, cz, st)) == "yards") AddYards();
+            else if (c.use == "farm") AddFarm();
             else if (c.use == "mall") AddMall();
             else if (c.use == "town") AddTown();
             else if (c.use == "wild") // wild land past the settled area (GDD 21.6): trees where the wild forest stands, meadow flowers
@@ -1234,7 +1320,7 @@ namespace Sting.Core
             }
             // trees: a few in a park, yard trees, dense at the forest edge, hardly any by a mall
             bool forest = c.use == "forest";
-            int nt = c.use == "wild" ? 0 : forest ? RangeInt(H(2000), 16, 26) : c.use == "yards" ? RangeInt(H(2001), 1, 4) : c.use == "mall" ? RangeInt(H(2002), 0, 3) : c.use == "town" ? RangeInt(H(2003), 0, 3) : RangeInt(H(11), isOrigin ? 3 : 2, isOrigin ? 6 : 8);
+            int nt = c.use == "wild" ? 0 : c.use == "farm" ? RangeInt(H(2004), 1, 5) : forest ? RangeInt(H(2000), 16, 26) : c.use == "yards" ? RangeInt(H(2001), 1, 4) : c.use == "mall" ? RangeInt(H(2002), 0, 3) : c.use == "town" ? RangeInt(H(2003), 0, 3) : RangeInt(H(11), isOrigin ? 3 : 2, isOrigin ? 6 : 8);
             for (int i = 0; i < nt; i++)
             {
                 Num x = ox + Range(H(150 + i * 4), -30, 30), z = oz + Range(H(151 + i * 4), -30, 30);

@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, humanParts, malesAbout, chunkOf, toLocal, dirToWorld, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, groundSlope, pavingOf, buildList, pondsOf, inPond, pondEdge, settledOf, wildHere, pickTarget, assistPilot, swoopPilot, hoverPilot, hoverSetting, HOVER, ROLES, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS,
+  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, groundSlope, groundNatural, pavingOf, buildList, pondsOf, inPond, pondEdge, settledOf, wildHere, pickTarget, assistPilot, swoopPilot, hoverPilot, hoverSetting, HOVER, ROLES, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS,
 } from '../sim/index.js';
 import { applyTuning, parseTuning, tuningHash, tuningLeaves, TUNE } from '../sim/tunefile.js';
 
@@ -2468,6 +2468,42 @@ function seated(sim, pred) {
   ok(houses > 40 && garages > houses * 0.6 && garages < houses * 0.95 && inLot === garages && level === garages, `${garages} of ${houses} houses have a garage beside them, every one in its own lot with its door in line with the house's front, on the house's level pad`);
   ok(drives === garages && clear === drives && drive <= 0.15 + 1e-6, `(${drives} drives, ${clear} clear) each garage has a drive from the sidewalk to its door, at most ${(drive * 100).toFixed(1)}% (15% allowed), with nothing set on it or in the garage`);
   ok(porchLevel === houses && doors === houses, `every front door has a level stoop and a step before it, the door at the stoop's height (${porchLevel} of ${houses})`);
+}
+
+// 66. Farmland (GDD 21.2 rural, S5, GEN_VERSION 16): the outer ring of a settled area is farmed: fields in hedgerows,
+// gravel lanes, farmsteads. No farm building stands within a slope setback, each stands level on its footing, no
+// footing's fill or cut is over 1.5 m, hedgerows leave the lanes open, and people walk the lanes and the yards.
+{
+  const st = { settled: 400, terrain: 2 }, S = 1234n, g = (x, z) => groundAt(S, x, z, st), n = (x, z) => groundNatural(S, x, z, st);
+  const sl = (x, z) => Math.hypot(n(x + 0.5, z) - n(x - 0.5, z), n(x, z + 0.5) - n(x, z - 0.5));
+  let farms = 0, steads = 0, buildings = 0, level = 0, plinth = 0, setback = 0, worstFill = 0, lanesOpen = true, lanePeople = 0, yardPeople = 0, inner = 0;
+  for (let cz = -7; cz <= 7; cz++) for (let cx = -7; cx <= 7; cx++) {
+    const use = landUse(S, cx, cz, st), d = Math.hypot(cx, cz) * 64;
+    if (use === 'farm' && d <= 272) inner++;
+    if (use !== 'farm') continue;
+    farms++;
+    const c = generateChunk(S, cx, cz, st), on = (p, r) => p.x >= r.minx - 0.01 && p.x <= r.maxx + 0.01 && p.z >= r.minz - 0.01 && p.z <= r.maxz + 0.01;
+    steads += c.sheds.filter((q) => q.barn).length;
+    for (const b of c.boxes) if (b.hedge) for (const l of c.lanes) if (b.minx < l.maxx && b.maxx > l.minx && b.minz < l.maxz && b.maxz > l.minz) lanesOpen = false;
+    for (const sh of c.sheds.filter((q) => q.farm)) {
+      buildings++;
+      const hd = sh.hd + (sh.house ? 1.6 : 0), cs = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => [sh.x + a * sh.hw, sh.z + b * hd]), h0 = g(sh.x, sh.z);
+      if (cs.every(([x, z]) => Math.abs(g(x, z) - h0) < 1e-9)) level++;
+      const fill = Math.max(...cs.map(([x, z]) => Math.abs(h0 - n(x, z)))); worstFill = Math.max(worstFill, fill); if (fill <= 1.5 + 1e-9) plinth++;
+      const H = sh.h + (sh.house ? 1.9 : sh.barn ? 2.6 : 0.55), sb = Math.min(4.6, H / 2);
+      let ok2 = true;
+      for (const f of [0.5, 1]) for (const [a, b] of [[-1, -1], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0]]) if (sl(sh.x + a * (sh.hw + sb * f), sh.z + b * (hd + sb * f)) > 1 / 3 + 1e-9) ok2 = false;
+      if (ok2) setback++;
+    }
+    for (const hm of c.humans) {
+      const pts = []; for (let k = 0; k < (hm.path || []).length; k += 2) pts.push({ x: hm.path[k], z: hm.path[k + 1] });
+      if (hm.act === 'stroll' && pts.length && pts.every((p) => c.lanes.some((l) => on(p, l)))) lanePeople++;
+      if (hm.act === 'garden' && pts.length && pts.every((p) => c.farmyards.some((y) => on(p, y)) || c.sheds.some((q) => q.barn && Math.abs(p.x - q.x) <= q.hw + 0.01))) yardPeople++;
+    }
+  }
+  ok(farms > 40 && inner === 0 && steads >= 10, `the settled area's outer ring is farmland: ${farms} chunks, ${steads} farmsteads, none nearer the home tree than 272 m`);
+  ok(buildings >= 30 && level === buildings && plinth === buildings && setback === buildings, `every one of ${buildings} farm buildings stands level on its footing (fill or cut at most ${worstFill.toFixed(2)} m of 1.5), and none within a slope setback (nothing steeper than 1:3 within half its height)`);
+  ok(lanesOpen && lanePeople > 0 && yardPeople > 0, `the hedgerows leave the lanes open; ${lanePeople} people walk the lanes and ${yardPeople} work the farmyards`);
 }
 
 // 64. Rough water (GDD 7.5): calm water bears a wasp; the wind whips a pond rough by its fetch and then the surface

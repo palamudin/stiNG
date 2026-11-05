@@ -970,6 +970,7 @@ bank = 9
 
 [terrain.roll]
 park = 1
+farm = 1
 forest = 1
 yards = 0.45
 mall = 0.12

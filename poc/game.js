@@ -242,9 +242,10 @@ function paintCover(C, ox, oz) {
     const rec = sim.records.get(chunkKey(cx, cz));
     if (!rec) continue;
     const c = rec.content;
-    if (c.use === 'yards' || c.use === 'forest' || c.use === 'mall') rect(cx * 64 - 32, cx * 64 + 32, cz * 64 - 32, cz * 64 + 32, c.use === 'yards' ? 'rgba(127,191,74,.28)' : c.use === 'forest' ? 'rgba(61,74,34,.45)' : 'rgba(143,154,106,.45)');
+    if (c.use === 'yards' || c.use === 'forest' || c.use === 'mall' || c.use === 'farm') rect(cx * 64 - 32, cx * 64 + 32, cz * 64 - 32, cz * 64 + 32, c.use === 'yards' ? 'rgba(127,191,74,.28)' : c.use === 'farm' ? 'rgba(196,190,110,.22)' : c.use === 'forest' ? 'rgba(61,74,34,.45)' : 'rgba(143,154,106,.45)');
     for (const r of c.roads || []) { rect(r.minx, r.maxx, r.minz - 1.6, r.minz, '#b9b4a8'); rect(r.minx, r.maxx, r.maxz, r.maxz + 1.6, '#b9b4a8'); rect(r.minx, r.maxx, r.minz, r.maxz, '#45464a'); }
     for (const d of c.drives || []) rect(d.minx, d.maxx, d.minz, d.maxz, '#a9a49a'); // drives to the garages (S4)
+    for (const d of [...(c.lanes || []), ...(c.farmyards || [])]) rect(d.minx, d.maxx, d.minz, d.maxz, '#a39a86'); // gravel lanes and farmyards (S5)
     g.fillStyle = '#45464a';
     for (const l of c.loops || []) { g.beginPath(); g.arc(X(l.x), Z(l.z), l.r * k, 0, Math.PI * 2); g.fill(); }
     for (const l of c.lots || []) {
@@ -690,13 +691,14 @@ function buildChunk(rec) {
   // land use (T1-12): the ground of a yard is a mown lawn, a forest floor is dark; streets, cul-de-sacs, parking lots
   // on a hilly world the ground rings paint all of this into the ground itself (cover maps, GDD 20 G2)
   const painted = W2on || !!(sim && (sim.settings.terrain || sim.settings.settled)); // World v2 shades paving and land use into its ground
-  if (!painted && (c.use === 'yards' || c.use === 'forest' || c.use === 'mall')) {
-    const tint = new THREE.Mesh(new THREE.PlaneGeometry(64, 64, 16, 16), new THREE.MeshLambertMaterial({ color: c.use === 'yards' ? '#7fbf4a' : c.use === 'forest' ? '#3d4a22' : '#8f9a6a', transparent: true, opacity: c.use === 'yards' ? 0.28 : 0.45, depthWrite: false }));
+  if (!painted && (c.use === 'yards' || c.use === 'forest' || c.use === 'mall' || c.use === 'farm')) {
+    const tint = new THREE.Mesh(new THREE.PlaneGeometry(64, 64, 16, 16), new THREE.MeshLambertMaterial({ color: c.use === 'yards' ? '#7fbf4a' : c.use === 'farm' ? '#c4be6e' : c.use === 'forest' ? '#3d4a22' : '#8f9a6a', transparent: true, opacity: c.use === 'yards' ? 0.28 : 0.45, depthWrite: false }));
     tint.rotation.x = -Math.PI / 2; tint.position.set(rec.cx * 64, 0.002, rec.cz * 64); tint.receiveShadow = true; g.add(tint);
   }
   const PAVE = { '#45464a': 10, '#b9b4a8': 11, '#bdb4a4': 12, '#4b4c50': 13 }; // asphalt, sidewalk slabs, square pavers, a lot's asphalt
   const flat = (minx, maxx, minz, maxz, color, y) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(maxx - minx, maxz - minz, Math.max(1, Math.ceil((maxx - minx) / 4)), Math.max(1, Math.ceil((maxz - minz) / 4))), PAVE[color] !== undefined ? surfMat(color, PAVE[color], ONGROUND) : mat(color, ONGROUND)); m.rotation.x = -Math.PI / 2; m.position.set((minx + maxx) / 2, y, (minz + maxz) / 2); m.receiveShadow = true; g.add(m); };
   for (const d of painted ? [] : c.drives || []) flat(d.minx, d.maxx, d.minz, d.maxz, '#a9a49a', 0.004); // drives to the garages (S4)
+  for (const d of painted ? [] : [...(c.lanes || []), ...(c.farmyards || [])]) flat(d.minx, d.maxx, d.minz, d.maxz, '#a39a86', 0.004); // gravel lanes and farmyards (S5)
   for (const r of painted ? [] : c.roads || []) {
     flat(r.minx, r.maxx, r.minz - 1.6, r.minz, '#b9b4a8', 0.004); flat(r.minx, r.maxx, r.maxz, r.maxz + 1.6, '#b9b4a8', 0.004); // sidewalks
     flat(r.minx, r.maxx, r.minz, r.maxz, '#45464a', 0.005);
@@ -756,7 +758,7 @@ function buildChunk(rec) {
   // follows the ground
   const shapes = new Map();
   c.boxes.forEach((b, bi) => {
-    if (b.hive || b.shed || b.mall || b.shop || b.garage || b.porch) return; // drawn with their own shapes (a shop's box drawn again over its walls fought them)
+    if (b.hive || b.shed || b.mall || b.shop || b.garage || b.porch || b.hedge) return; // drawn with their own shapes (a shop's box drawn again over its walls fought them)
     const len = Math.max(b.maxx - b.minx, b.maxz - b.minz), geo = len > 1.5 ? segBox(b.maxx - b.minx > b.maxz - b.minz, Math.ceil(len)) : geoBox;
     if (!shapes.has(geo)) shapes.set(geo, []);
     shapes.get(geo).push([b, bi]);
@@ -2886,7 +2888,7 @@ function mapTile(rec, cell, detail, dpr) {
   const g = cv.getContext('2d'), CSZ = T.chunk.size, sc = px / CSZ, ex = (rec.cx + 0.5) * CSZ, ez = (rec.cz + 0.5) * CSZ, c = rec.content;
   const L = (x, z) => [(ex - x) * sc, (ez - z) * sc]; // the map's own mirror: x and z run right to left and down to up
   const use = c.use || 'park';
-  g.fillStyle = use === 'yards' ? 'hsla(95, 22%, 31%, 0.92)' : use === 'forest' ? 'hsla(100, 35%, 14%, 0.95)' : use === 'mall' ? 'hsla(40, 6%, 30%, 0.92)' : use === 'town' ? 'hsla(30, 18%, 42%, 0.95)' : `hsla(${88 + c.tint * 20}, 30%, ${21 + c.tint * 8}%, 0.92)`;
+  g.fillStyle = use === 'yards' ? 'hsla(95, 22%, 31%, 0.92)' : use === 'farm' ? 'hsla(62, 30%, 34%, 0.92)' : use === 'forest' ? 'hsla(100, 35%, 14%, 0.95)' : use === 'mall' ? 'hsla(40, 6%, 30%, 0.92)' : use === 'town' ? 'hsla(30, 18%, 42%, 0.95)' : `hsla(${88 + c.tint * 20}, 30%, ${21 + c.tint * 8}%, 0.92)`;
   g.fillRect(dpr, dpr, px - 2 * dpr, px - 2 * dpr);
   if (use === 'wild') { // the wild land (GDD 21.6): water, wood or meadow in a 6 x 6 grid of samples
     const o = [0, 0, 0, 0, 0], n = 6;
@@ -3078,7 +3080,7 @@ function drawAtlas() {
   atlasCtx.setTransform(r, 0, 0, r, 0, 0);
   drawMapTo(atlasCtx, W, H, atlas.ox, atlas.oz, atlas.cell, { detail: atlas.cell >= 24, sel: atlas.sel });
 }
-const USE_NAME = { yards: 'Backyards', forest: 'Woods', mall: 'Strip mall', town: 'Town square', park: 'Park', wild: 'Wild land' };
+const USE_NAME = { farm: 'Farmland', yards: 'Backyards', forest: 'Woods', mall: 'Strip mall', town: 'Town square', park: 'Park', wild: 'Wild land' };
 // A card on the area under the pointer (or the tap): what it is, and how much of what is there, as low, mid or high
 const lvl = (v, a, b) => v <= 0 ? '<span class="lv low">none</span>' : `<span class="lv ${v < a ? 'low' : v < b ? 'mid' : 'high'}">${v < a ? 'low' : v < b ? 'mid' : 'high'}</span>`;
 function atlasCard(key, px, py, card = $('atlasCard'), box = $('atlas').getBoundingClientRect(), top = 46) {

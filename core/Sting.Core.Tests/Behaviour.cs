@@ -1860,6 +1860,50 @@ namespace Sting.Core.Tests
                 Ok(D(I.site.h) >= 10 && D(I.site.h) <= 90 && inside && beyond && step < 3 && wild > 400 && settledChunks > 30 && built == 0 && trees > 300 && wet == 0 && s.wasp.y >= 0 && st.RulesHash() != t1.RulesHash() && st.WorldTag().Contains("wild beyond 400 m"),
                     $"the settled area sits on the wild land {D(I.site.h):0.0} m above the sea at ({D(I.site.x):0}, {D(I.site.z):0}); {settledChunks} settled chunks, {wild} wild ones with nothing built and {trees} trees, none in the water; no step over 3 m across the band ({step:0.00} per 2 m); a sim runs over it");
             }
+            // 66. farmland (GDD 21.2 rural, S5, GEN_VERSION 16; sim.test.mjs)
+            {
+                var st = new Settings { settled = 400, terrain = 2 }; ulong S = 1234; Num G(Num x, Num z) => World.GroundAt(S, x, z, st); Num Nn(Num x, Num z) => World.GroundNatural(S, x, z, st);
+                Num Sl(Num x, Num z) => Sqrt(Sq(Nn(x + 0.5, z) - Nn(x - 0.5, z)) + Sq(Nn(x, z + 0.5) - Nn(x, z - 0.5)));
+                int farms = 0, steads = 0, buildings = 0, level = 0, plinth = 0, setback = 0, lanePeople = 0, yardPeople = 0, inner = 0; double worstFill = 0; bool lanesOpen = true;
+                int[,] c4 = { { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } }, e8 = { { -1, -1 }, { 0, -1 }, { 1, -1 }, { 1, 0 }, { 1, 1 }, { 0, 1 }, { -1, 1 }, { -1, 0 } };
+                for (int cz = -7; cz <= 7; cz++) for (int cx = -7; cx <= 7; cx++)
+                    {
+                        string use = World.LandUse(S, cx, cz, st); double d = Math.Sqrt(cx * cx + cz * cz) * 64;
+                        if (use == "farm" && d <= 272) inner++;
+                        if (use != "farm") continue;
+                        farms++;
+                        var c = World.GenerateChunk(S, cx, cz, st);
+                        bool On(Num px, Num pz, Rect r) => px >= r.minx - 0.01 && px <= r.maxx + 0.01 && pz >= r.minz - 0.01 && pz <= r.maxz + 0.01;
+                        steads += c.sheds.Count(q => q.barn);
+                        foreach (var b in c.boxes) if (b.hedge) foreach (var l in c.lanes) if (b.minx < l.maxx && b.maxx > l.minx && b.minz < l.maxz && b.maxz > l.minz) lanesOpen = false;
+                        foreach (var sh in c.sheds.Where(q => q.farm))
+                        {
+                            buildings++;
+                            Num hd = sh.hd + (sh.house ? 1.6 : 0), h0 = G(sh.x, sh.z); bool lv = true; double fill = 0;
+                            for (int q = 0; q < 4; q++) { Num x = sh.x + c4[q, 0] * sh.hw, z = sh.z + c4[q, 1] * hd; if (Abs(G(x, z) - h0) >= 1e-9) lv = false; fill = Math.Max(fill, D(Abs(h0 - Nn(x, z)))); }
+                            if (lv) level++; worstFill = Math.Max(worstFill, fill); if (fill <= 1.5 + 1e-9) plinth++;
+                            Num H = sh.h + (sh.house ? 1.9 : sh.barn ? 2.6 : 0.55), sb = Min(4.6, H / 2); bool ok2 = true;
+                            foreach (Num f in new Num[] { 0.5, 1 }) for (int q = 0; q < 8; q++) if (Sl(sh.x + e8[q, 0] * (sh.hw + sb * f), sh.z + e8[q, 1] * (hd + sb * f)) > (Num)1 / 3 + 1e-9) ok2 = false;
+                            if (ok2) setback++;
+                        }
+                        foreach (var hm in c.humans)
+                        {
+                            if (hm.path == null || hm.path.Length == 0) continue;
+                            bool lanes = true, yards = true;
+                            for (int k = 0; k < hm.path.Length; k += 2)
+                            {
+                                Num px = hm.path[k], pz = hm.path[k + 1];
+                                if (!c.lanes.Any(l => On(px, pz, l))) lanes = false;
+                                if (!(c.farmyards.Any(y => On(px, pz, y)) || c.sheds.Any(q => q.barn && Abs(px - q.x) <= q.hw + 0.01))) yards = false;
+                            }
+                            if (hm.act == "stroll" && lanes) lanePeople++;
+                            if (hm.act == "garden" && yards) yardPeople++;
+                        }
+                    }
+                Ok(farms > 40 && inner == 0 && steads >= 10, $"the settled area's outer ring is farmland: {farms} chunks, {steads} farmsteads, none nearer the home tree than 272 m");
+                Ok(buildings >= 30 && level == buildings && plinth == buildings && setback == buildings, $"every one of {buildings} farm buildings stands level on its footing (fill or cut at most {worstFill:0.00} m of 1.5), and none within a slope setback (nothing steeper than 1:3 within half its height)");
+                Ok(lanesOpen && lanePeople > 0 && yardPeople > 0, $"the hedgerows leave the lanes open; {lanePeople} people walk the lanes and {yardPeople} work the farmyards");
+            }
             // 65. garages, drives and porch steps (GDD 21.2, S4, GEN_VERSION 15; sim.test.mjs)
             {
                 var st = new Settings { terrain = 2 }; ulong S = 1234; Num G(Num x, Num z) => World.GroundAt(S, x, z, st);

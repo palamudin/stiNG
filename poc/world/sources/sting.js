@@ -13,9 +13,9 @@
 // little wear of its own (a park is walked all over, a yard much less, a wood not at all).
 import { groundAt, landUse, pavingOf, pondsOf, pondEdge, POND_PATH, chunkOf, chunkKey, generateChunk, T, hash, Domain } from '../../sim/index.js';
 
-const MOIST = { park: 0.62, yards: 0.72, forest: 0.8, mall: 0.3, town: 0.42 };
-const FOREST = { park: 0.12, yards: 0.08, forest: 1, mall: 0, town: 0 };
-const WEAR = { park: 0.14, yards: 0.05, forest: 0, mall: 0.35, town: 0.3 };
+const MOIST = { park: 0.62, yards: 0.72, forest: 0.8, mall: 0.3, town: 0.42, farm: 0.58 };
+const FOREST = { park: 0.12, yards: 0.08, forest: 1, mall: 0, town: 0, farm: 0.04 };
+const WEAR = { park: 0.14, yards: 0.05, forest: 0, mall: 0.35, town: 0.3, farm: 0.02 };
 // wear round things people use: radius in metres, strength at the centre (falls off smoothly to the edge)
 const W = { table: [2.4, 0.9], tableAcross: 3.1, // a table's worn ground: its length, and across it its benches and the feet under them
    stand: [1.5, 0.6], door: [1.6, 0.55], flower: [0.38, 1], trunk: [0.4, 0.75], hive: [1.3, 0.5] };
@@ -50,6 +50,10 @@ export function stingSource(sim) {
     for (const l of p.loops) { const d = Math.hypot(x - l.x, z - l.z); if (d <= l.r) return 1; if (d <= l.r + walk) v = 0.5; }
     for (const l of p.lots) if (x >= l.minx && x <= l.maxx && z >= l.minz && z <= l.maxz) return 1;
     for (const d of p.drives || []) if (x >= d.minx && x <= d.maxx && z >= d.minz && z <= d.maxz) return 0.9; // a drive to a garage (S4): concrete
+    if (useOf(chunkOf(x), chunkOf(z)) === 'farm') { // a gravel lane or farmyard (S5), from the chunk itself
+      const c = objects(chunkOf(x), chunkOf(z));
+      for (const d of [...c.lanes, ...c.farmyards]) if (x >= d.minx && x <= d.maxx && z >= d.minz && z <= d.maxz) return 0.5;
+    }
     for (const l of p.plazas) if (x >= l.minx && x <= l.maxx && z >= l.minz && z <= l.maxz) return 0.9;
     for (const b of [...p.houses, ...p.shops, ...p.malls]) if (Math.abs(x - b.x) <= b.hw + 0.3 && Math.abs(z - b.z) <= b.hd + 0.3) v = Math.max(v, 0.5);
     // a walk from each house's door (the long side facing its street, as game.js puts the door) to the sidewalk

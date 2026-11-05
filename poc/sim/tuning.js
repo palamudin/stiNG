@@ -5,7 +5,7 @@ import { TUNE } from './tunefile.js';
 
 export const TICK_RATE = 60;
 export const DT = 1 / TICK_RATE;
-export const GEN_VERSION = 15; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11); 6: birdbaths (T2-1); 7: town centres (T2-5); 8: ponds; 9: a pond beside the home park; 10: lobed ponds with a path, benches and a walker; 11: footings under small things; 12: streets, house pads and front yards graded to code; 13: wild land round a settled area; 14: no hive near the first nest; 15: garages, drives and porch steps
+export const GEN_VERSION = 16; // 3: sheds and dragonflies; 4: regions (T1-12); 5: strollers, sunbathers, gardeners (T1-11); 6: birdbaths (T2-1); 7: town centres (T2-5); 8: ponds; 9: a pond beside the home park; 10: lobed ponds with a path, benches and a walker; 11: footings under small things; 12: streets, house pads and front yards graded to code; 13: wild land round a settled area; 14: no hive near the first nest; 15: garages, drives and porch steps; 16: farmland round a village
 
 export const T = {
   population: 8200000000,
@@ -393,7 +393,7 @@ export const T = {
   // takes nothing from the ground's shape: a rise is no windier). roll: how much each land use lets the ground roll (blended between chunk centres).
   terrain: { amp: 1.9, cell: 60, octaves: 5, warp: 0.5, ridge: 0, terrace: 0, terraceStep: 0.5,
     grade: { oct: 2, walk: 1.6, road: 3, lot: 3, house: 2.5, shed: 1, apron: 0.3, pond: 3, reach: 3, street: 0.1, node: 8, window: 64, drive: 0.15, bank: 9 }, flatR: 14, rise: 24, sightStep: 4, poolTries: 3,
-    roll: { park: 1, forest: 1, yards: 0.45, mall: 0.12, town: 0.1 } },
+    roll: { park: 1, forest: 1, yards: 0.45, mall: 0.12, town: 0.1, farm: 1 } },
   plaus: { futureTicks: 120, stingReach: 1.6, humanDrift: 3, maxSwatDelay: 240, maxSwats: 4, rateWindow: 120, rateMax: 6,
     maxSpeed: 12, strikes: 3, pickupReach: 0.3, solidDepth: 0.08, sipMax: 0.12, maxPain: 2 }, // maxPain: no species stings harder (GDD 6.8)
 };

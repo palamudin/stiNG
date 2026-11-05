@@ -47,7 +47,7 @@ export function digestChunk(c, d) {
   f(c.sheds.length); for (const t of c.sheds) { for (const k of ['x', 'z', 'hw', 'hd', 'h', 'crack', 'eave']) f(t[k]); f(!!t.house); }
   f(!!c.nest);
   // regions (T1-12)
-  f(['park', 'yards', 'mall', 'forest', 'town', 'wild'].indexOf(c.use));
+  f(['park', 'yards', 'mall', 'forest', 'town', 'wild', 'farm'].indexOf(c.use));
   for (const list of [c.roads, c.lots]) { f(list.length); for (const t of list) for (const k of ['minx', 'maxx', 'minz', 'maxz']) f(t[k]); }
   f(c.loops.length); for (const t of c.loops) { f(t.x); f(t.z); f(t.r); }
   f(c.malls.length); for (const t of c.malls) for (const k of ['x', 'z', 'hw', 'hd', 'h']) f(t[k]);
@@ -61,6 +61,9 @@ export function digestChunk(c, d) {
   f(c.drives.length); for (const t of c.drives) for (const k of ['minx', 'maxx', 'minz', 'maxz']) f(t[k]);
   f(c.porches.length); for (const t of c.porches) for (const k of ['x', 'z', 's']) f(t[k]);
   f(c.boxes.filter((b) => b.garage).length); f(c.boxes.filter((b) => b.porch).length);
+  // farmland (S5)
+  for (const list of [c.lanes, c.farmyards]) { f(list.length); for (const t of list) for (const k of ['minx', 'maxx', 'minz', 'maxz']) f(t[k]); }
+  f(c.boxes.filter((b) => b.hedge).length); f(c.sheds.filter((s) => s.farm).length); f(c.sheds.filter((s) => s.barn).length);
 }
 
 const lines = [];

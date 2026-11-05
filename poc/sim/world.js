@@ -140,7 +140,7 @@ export function dragonPos(b, tick) {
 // the ridge, v along it; wall and wallHalf are the walls' half sizes across and along, S the eaves' half span, L the
 // slope's length (for its normal).
 export function shedRoof(sh) {
-  const alongX = sh.hw >= sh.hd, wall = alongX ? sh.hd : sh.hw, wallHalf = alongX ? sh.hw : sh.hd, S = wall + 0.12, rise = sh.house ? 1.9 : 0.55;
+  const alongX = sh.hw >= sh.hd, wall = alongX ? sh.hd : sh.hw, wallHalf = alongX ? sh.hw : sh.hd, S = wall + 0.12, rise = sh.house ? 1.9 : sh.barn ? 2.6 : 0.55;
   return { x: sh.x, z: sh.z, alongX, wall, wallHalf, half: wallHalf + 0.1, S, y0: sh.h, rise, L: Math.sqrt(rise * rise + S * S) };
 }
 export function shedSites(sh) {
@@ -213,6 +213,11 @@ export function buildList(c) {
     part(0, 5, '#4e4b52', mx, g.h + 0.06, mz, w + 0.2, 0.12, d + 0.2, false);
     part(0, 5, '#d9d4c7', mx, 1.1, g.zf - g.s * 0.02, w - 0.8, 2.2, 0.06, false);
   }
+  for (const b of c.boxes) if (b.hedge) { // a hedgerow section: a blocky bush, its shade varying along the row
+    const k = Math.abs(Math.floor(b.minx * 0.37 + b.minz * 0.61)) % 3;
+    part(0, 5, ['#3b5a2a', '#46652f', '#355024'][k], (b.minx + b.maxx) / 2, b.maxy / 2, (b.minz + b.maxz) / 2, b.maxx - b.minx, b.maxy, b.maxz - b.minz, false);
+  }
+  for (const sh of c.sheds) if (sh.farm) part(0, 5, '#8d8577', sh.x, 0.25, sh.z, sh.hw * 2 + 0.12, 0.5, sh.hd * 2 + 0.12, false); // the stone base course of a building on its footing
   for (const p of c.porches) { // the stoop and its step, concrete
     part(0, 5, '#b9b4a8', p.x, 0.22, p.z - p.s * 0.6, 1.8, 0.44, 1.2, true);
     part(0, 5, '#aea99c', p.x, 0.11, p.z - p.s * 1.35, 1.8, 0.22, 0.3, true);
@@ -580,14 +585,19 @@ function makeFootings(seed, cx, cz, settings) {
   const c = generateChunk(seed, cx, cz, settings), Gr = T.terrain.grade, a = Gr.apron, m = Gr.shed, F = [];
   const rect = (x, z, hw, hd) => F.push({ k: 5, minx: x - hw - a, maxx: x + hw + a, minz: z - hd - a, maxz: z + hd + a, m, hx: x, hz: z, h: 0, t: 0 });
   for (const t of c.tables) if (t.axisX) rect(t.x, t.z, 0.95, 0.81); else rect(t.x, t.z, 0.81, 0.95); // the table and its benches
-  for (const s of c.sheds) if (!s.house) rect(s.x, s.z, s.hw, s.hd);
+  for (const s of c.sheds) if (!s.house || s.farm) { rect(s.x, s.z, s.hw, s.hd + (s.house ? 1.6 : 0)); F[F.length - 1].src = s; } // a farmhouse too, with its porch: farmland has no pads (S5)
   for (const h of c.hives) rect(h.x, h.z, 0.225, 0.225);
   for (const b of c.boxes) if (b.bench && b.miny < 0.45) { rect((b.minx + b.maxx) / 2, (b.minz + b.maxz) / 2, (b.maxx - b.minx) / 2 + 0.25, (b.maxz - b.minz) / 2 + 0.25); F[F.length - 1].fixed = true; } // a seat and its back, on the pond's graded path: its shoulder stays shed m, clear of the water
   for (const b of c.baths) F.push({ k: 6, x: b.x, z: b.z, r: b.r + a, m, hx: b.x, hz: b.z, h: 0, t: 0 });
-  // a footing's shoulder stops short of any building's pad
-  const B = [...c.sheds.filter((q) => q.house), ...c.shops, ...c.malls];
+  // a footing's shoulder stops short of any building's pad, and of a farmstead's other buildings' footings (S5)
+  const B = [...c.sheds.filter((q) => q.house && !q.farm), ...c.shops, ...c.malls];
   for (const f of F) {
     let cap = Gr.reach;
+    for (const o of F) {
+      if (o === f || !o.src || !o.src.farm || o.k !== 5 || f.k !== 5) continue;
+      const dx = Math.max(0, o.minx - f.maxx, f.minx - o.maxx), dz = Math.max(0, o.minz - f.maxz, f.minz - o.maxz);
+      cap = Math.min(cap, Math.sqrt(dx * dx + dz * dz));
+    }
     for (const q of B) {
       const dx = f.k === 6 ? Math.max(0, Math.abs(f.x - q.x) - q.hw - f.r) : Math.max(0, q.x - q.hw - f.maxx, f.minx - q.x - q.hw), dz = f.k === 6 ? Math.max(0, Math.abs(f.z - q.z) - q.hd - f.r) : Math.max(0, q.z - q.hd - f.maxz, f.minz - q.z - q.hd);
       cap = Math.min(cap, Math.sqrt(dx * dx + dz * dz));
@@ -615,6 +625,11 @@ export function groundAt(seed, x, z, settings, coarse = false) {
     return hs + (wildAt(I.S, x + I.site.x, z + I.site.z, WO)[0] - hs) * k;
   }
   return groundSim(seed, x, z, settings, coarse);
+}
+// the ground before the footings (as groundAt, without them): what a footing is cut into and built up from
+export function groundNatural(seed, x, z, settings) {
+  const terrain = settings ? settings.terrain || 0 : 0, h = terrain ? groundBase(seed, x, z, settings, terrain) : 0;
+  return settings && settings.settled ? h + settledOf(seed, settings).site.h : h;
 }
 // the wild land at (x, z) of a settled world, in the sim's coordinates: [height, moisture, forest, trail, water level]
 export function wildHere(seed, x, z, settings, out = [0, 0, 0, 0, 0]) {
@@ -735,9 +750,16 @@ export function landUse(seed, cx, cz, settings) {
   const m = worldTables(seed, settings).use, k = cellKey(cx, cz), v = m.get(k);
   return v !== undefined ? v : keep(m, k, makeLandUse(seed, cx, cz, settings));
 }
+// Farmland (GDD 21.2 rural, S5): the outer RURAL.ring m of a settled area, never nearer the home tree than RURAL.inner
+// m; fields in hedgerows, a gravel lane along every other row of chunks, now and then a farmstead off it
+export const RURAL = { ring: 128, inner: 192, lane: 5.5, hedge: 1.2, hedgeH: 1.7, gate: 4, stead: 0.35, plinth: 1.5, steep: 1 / 3, max: 0.35 };
 function makeLandUse(seed, cx, cz, settings) {
   if (cx === 0 && cz === 0) return 'park';
-  if (settings && settings.settled && Math.sqrt(cx * cx + cz * cz) * CS > settings.settled) return 'wild'; // past the settled area
+  if (settings && settings.settled) {
+    const d = Math.sqrt(cx * cx + cz * cz) * CS;
+    if (d > settings.settled) return 'wild'; // past the settled area
+    if (d > Math.max(settings.settled - RURAL.ring, RURAL.inner)) return 'farm'; // its outer ring
+  }
   const R = regionOf(cx, cz);
   if (townQuarter(seed, cx, cz, settings)) return 'town';
   return baseUse(regionLayout(seed, R.rx, R.rz, settings), R.lx, R.lz);
@@ -754,7 +776,7 @@ export function generateChunk(seed, cx, cz, settings) {
   const c = {
     cx, cz, tint: unit(H(0)), trees: [], tables: [], benches: [], cans: [], flowers: [], caterpillars: [], flies: [],
     humans: [], boxes: [], cylinders: [], sugar: [], hives: [], traps: [], nest: null,
-    webs: [], birds: [], rival: null, sheds: [], dragonflies: [], garages: [], drives: [], porches: [],
+    webs: [], birds: [], rival: null, sheds: [], dragonflies: [], garages: [], drives: [], porches: [], lanes: [], farmyards: [],
     use: 'park', roads: [], loops: [], lots: [], malls: [], // T1-12: land use, streets, cul-de-sacs, parking lots, mall buildings
     baths: [], // T2-1: birdbaths
     plazas: [], shops: [], gardens: [], // T2-5: a town centre's paving, its shop buildings, its beer garden
@@ -917,6 +939,66 @@ export function generateChunk(seed, cx, cz, settings) {
     if (unit(H(2500)) < 0.6) addActor(2510, x0, oz - 5.2, 1, 0, 'stand', 'stroll', [x0, oz - 5.2, x1, oz - 5.2, x1, oz + 5.2, x0, oz + 5.2]);
     if (unit(H(2600)) < 0.3) addActor(2610, x1, oz + 5.2, -1, 0, 'stand', 'stroll', [x1, oz + 5.2, x0, oz + 5.2, x0, oz - 5.2, x1, oz - 5.2]);
   };
+  // Farmland (GDD 21.2 rural, S5): fields in hedgerows (blocky bushes 1.7 m high along each chunk's west and north edges,
+  // a gate gap in each, open where a lane passes), a gravel lane along x through every other row of chunks, and in about
+  // a third of the chunks a farmstead off the lane: a farmhouse and a barn on footings (a level platform cut into the
+  // slope and filled downhill, its fill or cut at most RURAL.plinth m), a garden shed, a gravel yard, the farmer about it.
+  // A building only goes where it fits the codes (21.1): nothing within its slope setback (half its height, at most
+  // 4.6 m) is steeper than 1:3, and the ground under it no steeper than RURAL.max. Its door faces the lane.
+  const addFarm = () => {
+    const R = RURAL, lane = ((cz % 2) + 2) % 2 === 0, lz0 = oz - R.lane / 2, lz1 = oz + R.lane / 2;
+    if (lane) { c.lanes.push({ minx: ox - 32, maxx: ox + 32, minz: lz0, maxz: lz1 }); occupied.push({ x: ox - 16, z: oz, r: 3 }, { x: ox, z: oz, r: 3 }, { x: ox + 16, z: oz, r: 3 }); }
+    const hedge = (alongX, at, slot) => { // 16 sections of 4 m along the edge, one left open as a gate, none across the lane
+      const gate = rangeInt(H(slot), 0, 16), t = R.hedge / 2;
+      for (let k = 0; k < 16; k++) {
+        const a = -32 + k * 4, b = a + 4;
+        if (k === gate) continue;
+        if (alongX) c.boxes.push({ minx: ox + a, maxx: ox + b, miny: 0, maxy: R.hedgeH, minz: at - t, maxz: at + t, wood: false, hedge: true });
+        else { if (lane && oz + b > lz0 - 0.5 && oz + a < lz1 + 0.5) continue; c.boxes.push({ minx: at - t, maxx: at + t, miny: 0, maxy: R.hedgeH, minz: oz + a, maxz: oz + b, wood: false, hedge: true }); }
+      }
+    };
+    hedge(true, oz - 32, 7000); hedge(false, ox - 32, 7001);
+    occupied.push({ x: ox - 32, z: oz, r: 1 });
+    if (unit(H(7100)) < R.stead) {
+      const terrain = settings ? settings.terrain || 0 : 0, gb = (x, z) => terrain ? groundBase(seed, x, z, settings, terrain) : 0;
+      const sl = (x, z) => Math.sqrt((gb(x + 0.5, z) - gb(x - 0.5, z)) ** 2 + (gb(x, z + 0.5) - gb(x, z - 0.5)) ** 2);
+      const fits = (x, z, hw, hd, h) => {
+        const hm = gb(x, z); let lo = hm, hi = hm;
+        for (const [a, b] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { const g = gb(x + a * hw, z + b * hd); lo = Math.min(lo, g); hi = Math.max(hi, g); if (sl(x + a * hw, z + b * hd) > R.max) return false; }
+        if (hm - lo > R.plinth || hi - hm > R.plinth || sl(x, z) > R.max) return false;
+        const sb = Math.min(4.6, h / 2);
+        for (const f of [0.5, 1]) for (const [a, b] of [[-1, -1], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0]]) if (sl(x + a * (hw + sb * f), z + b * (hd + sb * f)) > R.steep) return false;
+        return true;
+      };
+      for (let k = 0; k < 6; k++) {
+        const side = unit(H(7110 + k * 4)) < 0.5 ? -1 : 1, x = ox + range(H(7111 + k * 4), -18, 2), z = oz + side * range(H(7112 + k * 4), 14, 20);
+        const hhw = range(H(7113 + k * 4), 4.2, 5), hhd = 4, hh = range(H(7140 + k), 5.6, 6.4), bx = x + hhw + 10, bhw = 6, bhd = 4.5, bh = 4.5;
+        if (!free(x, z, 7) || !free(bx, z, 8) || !fits(x, z, hhw, hhd + 1.6, hh + 1.9) || !fits(bx, z, bhw, bhd, bh + 2.6)) continue; // the house's footing takes in its porch
+        // the farmhouse, its porch to the lane; the barn beside it, wood (wasps chew it, nest in it)
+        c.sheds.push({ x, z, hw: hhw, hd: hhd, h: hh, crack: rangeInt(H(7150), 0, 4), eave: rangeInt(H(7151), 0, 4), house: true, farm: true });
+        c.boxes.push({ minx: x - hhw, maxx: x + hhw, miny: 0, maxy: hh, minz: z - hhd, maxz: z + hhd, wood: false, shed: true });
+        const zf = z - side * hhd;
+        c.porches.push({ x, z: zf, s: side });
+        c.boxes.push({ minx: x - 0.9, maxx: x + 0.9, miny: 0, maxy: 0.44, minz: Math.min(zf, zf - side * 1.2), maxz: Math.max(zf, zf - side * 1.2), wood: false, porch: true });
+        c.boxes.push({ minx: x - 0.9, maxx: x + 0.9, miny: 0, maxy: 0.22, minz: Math.min(zf - side * 1.2, zf - side * 1.5), maxz: Math.max(zf - side * 1.2, zf - side * 1.5), wood: false, porch: true });
+        c.sheds.push({ x: bx, z, hw: bhw, hd: bhd, h: bh, crack: rangeInt(H(7152), 0, 4), eave: rangeInt(H(7153), 0, 4), house: false, farm: true, barn: true });
+        c.boxes.push({ minx: bx - bhw, maxx: bx + bhw, miny: 0, maxy: bh, minz: z - bhd, maxz: z + bhd, wood: true, shed: true });
+        occupied.push({ x, z, r: 7 }, { x: bx, z, r: 8 });
+        // the yard between them and the lane, gravel; the farmer works round it
+        const yz0 = Math.min(zf - side * 1.6, zf - side * 7), yz1 = Math.max(zf - side * 1.6, zf - side * 7);
+        c.farmyards.push({ minx: x - hhw, maxx: bx + bhw, minz: yz0, maxz: yz1 });
+        occupied.push({ x: (x + bx) / 2, z: (yz0 + yz1) / 2, r: 5 });
+        const sx = x - hhw - 3.5, sz = z;
+        if (free(sx, sz, 2) && fits(sx, sz, 1.2, 0.9, 2.7)) addShed(sx, sz, true, 7160, false);
+        const ym = (yz0 + yz1) / 2;
+        if (unit(H(7200)) < 0.7) addActor(7210, x, ym, 1, 0, 'stand', 'garden', [x, ym, (x + bx) / 2, ym, bx - 2, ym, bx - 2, z - side * (bhd + 1)]);
+        break;
+      }
+    }
+    if (lane && unit(H(7300)) < 0.35) addActor(7310, ox - 30, oz + 1.6, 1, 0, 'stand', 'stroll', [ox - 30, oz + 1.6, ox + 30, oz + 1.6, ox + 30, oz - 1.6, ox - 30, oz - 1.6]); // someone walking the lane
+    const nf = rangeInt(H(7400), 0, 3); // wildflowers in the field margins
+    for (let i = 0; i < nf; i++) { const x = ox + range(H(7401 + i * 2), -28, 28), z = oz + range(H(7402 + i * 2), -28, 28); if (free(x, z, 2)) addFlowers(x, z, 7420 + i * 80); }
+  };
   // A strip mall on the region's edge: a long low building facing in, its parking lot, outdoor seating by the doors
   const addMall = () => {
     const side = mallSide(seed, cx, cz, settings), out = [[0, -1], [1, 0], [0, 1], [-1, 0]][side], along = out[0] ? [0, 1] : [1, 0];
@@ -1006,6 +1088,7 @@ export function generateChunk(seed, cx, cz, settings) {
     addFlowers(-6, 2, 400);
     addFlowers(3, -5, 480);
   } else if ((c.use = landUse(seed, cx, cz, settings)) === 'yards') addYards();
+  else if (c.use === 'farm') addFarm();
   else if (c.use === 'mall') addMall();
   else if (c.use === 'town') addTown();
   else if (c.use === 'wild') { // wild land past the settled area (GDD 21.6): trees where the wild forest stands, meadow flowers, nothing built
@@ -1051,7 +1134,7 @@ export function generateChunk(seed, cx, cz, settings) {
     for (let i = 0; i < np; i++) addFlowers(ox + range(H(20 + i), -28, 28), oz + range(H(40 + i), -28, 28), 400 + i * 80);
   }
   // trees: a few in a park, yard trees, dense at the forest edge, hardly any by a mall
-  const nt = c.use === 'wild' ? 0 : c.use === 'forest' ? rangeInt(H(2000), 16, 26) : c.use === 'yards' ? rangeInt(H(2001), 1, 4) : c.use === 'mall' ? rangeInt(H(2002), 0, 3) : c.use === 'town' ? rangeInt(H(2003), 0, 3) : rangeInt(H(11), isOrigin ? 3 : 2, isOrigin ? 6 : 8);
+  const nt = c.use === 'wild' ? 0 : c.use === 'farm' ? rangeInt(H(2004), 1, 5) : c.use === 'forest' ? rangeInt(H(2000), 16, 26) : c.use === 'yards' ? rangeInt(H(2001), 1, 4) : c.use === 'mall' ? rangeInt(H(2002), 0, 3) : c.use === 'town' ? rangeInt(H(2003), 0, 3) : rangeInt(H(11), isOrigin ? 3 : 2, isOrigin ? 6 : 8);
   for (let i = 0; i < nt; i++) {
     const x = ox + range(H(150 + i * 4), -30, 30), z = oz + range(H(151 + i * 4), -30, 30);
     if (free(x, z, c.use === 'forest' ? 1.5 : 3)) { addTree(x, z, 200 + i * 4); occupied.push({ x, z, r: c.use === 'forest' ? 1 : 2 }); }

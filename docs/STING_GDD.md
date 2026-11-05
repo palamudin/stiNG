@@ -2483,6 +2483,45 @@ On a jump the CPU path no longer blurs a level out to its parent: the window it 
 
 The game now asks for a square at least 16 m across (`causticsMin`), pushed 30% of its size ahead along the view (`causticsAhead`), on a 512 texture with a 384 grid. That is about the old detail (3 cm texels, 7 cm cells, against 2.3 and 5 cm) over 2.7 times the width. Water seen at a slant still clouds with distance: that is the water, not the caustics.
 
+### 18.90 Farmland round a village (S5, GEN_VERSION 16)
+
+**Where.** On a settled world, the outer 128 m of the settled area is farmland (land use `farm`, `RURAL`), never nearer the home tree than 192 m. A village (wild beyond 400 m) is ringed by farms from 272 to 400 m, then wild land; a town (1 km) from 872 m. The sim's ground rolls there as in a park (`terrain.roll.farm` 1).
+
+**Fields and lanes.**
+- **Hedgerows.** Blocky bushes 1.2 m thick and 1.7 m high run along each chunk's west and north edges, in 4 m sections. One section is left out as a gate, and a hedge stops where a lane passes. They are boxes the sim collides with, not wood.
+- **Lanes.** Every other row of chunks has a gravel lane, 5.5 m wide with no kerbs, along x through its middle. Lanes follow the land.
+- **Margins.** Wildflowers grow in the field margins, and one to four trees stand in a chunk.
+
+**Farmsteads.** About a third of farm chunks have one, off the lane. It holds:
+- a farmhouse (8.4–10 by 8 m, 5.6–6.4 m to the eaves) with its porch toward the lane;
+- a barn (12 by 9 m, 4.5 m walls, a steep 2.6 m roof), of wood: wasps chew it and nest in it;
+- a garden shed;
+- a gravel yard between them and the lane, with the farmer working round it.
+
+Someone walks some of the lanes.
+
+**On slopes, to code (21.1).** Each building stands on a footing: a level platform at the ground's height at its middle, cut into the slope uphill and built up downhill, with banks no steeper than 2:1 within its reach. Its shoulder stops short of the farmstead's other buildings. A stone base course shows round its foot. A site is taken only where:
+- the footing's fill or cut is at most 1.5 m (`plinth`);
+- the ground under it is no steeper than 35%;
+- nothing within its slope setback is steeper than 1:3. The setback is half its height, at most 4.6 m.
+
+Up to six sites are tried; a chunk with none suitable has no farmstead.
+
+**Drawn** in every look:
+- gravel lanes and yards (flats in the classic look on flat ground, the cover maps on hills, paving 0.5 in World v3);
+- hedgerows and base courses from the build list;
+- a farmland tint and moisture;
+- on the map, `Farmland`.
+
+**Tests.** Behaviour block 66 (JS and C#) on a hilly village checks:
+- 60 farm chunks with 22 farmsteads, none inside 272 m;
+- every one of 44 farm buildings level on its footing, with fill or cut at most 1.21 m;
+- none within a slope setback;
+- hedgerows clear of the lanes;
+- 12 people walking lanes and 17 working yards.
+
+The chunk digest covers lanes, farmyards, hedges and farm buildings.
+
 ### 18.89 Water 3 in the game (World v3, from world/w3)
 
 The world thread's Water 3 is merged into the game: 93 commits on `world/w3` since the seasonal sun track. They bring:
@@ -2949,7 +2988,7 @@ Each is built, tested in JS and both C# builds where the sim is touched, documen
   - no street is steeper than its limit;
   - no pad is steeper than 1:50 across.
 
-**S5. Rural.**
+**S5. Rural. Built (18.90): farmland round a settled area.**
 - **What.** Farmland, lanes, farmsteads, and buildings on stepped footings or plinths on slopes up to 35%.
 - **Done when:**
   - no building stands within a slope setback;
