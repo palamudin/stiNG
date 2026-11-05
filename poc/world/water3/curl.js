@@ -25,14 +25,17 @@ import { SHORE } from '../shorefield.js';
 import { SWASH_GLSL, SURF_GLSL } from './swash.js';
 import { SKY_GLSL } from '../sky.js';
 
-export const CURL = { stages: 32, samples: 128, grid: 448, reach: 240, ratio: 1.65 };
+export const CURL = { stages: 32, samples: 128, grid: 448, reach: 240, ratio: 1.0 };
 
-// the centreline (forward, up in face heights, from the crest's top) and its width at seven points, for each stage
+// the centreline (forward, up in face heights, from the crest's top) and its width at seven points, for each stage. As
+// the lab sees a plunge (McAllister et al., Nature 2024, Fig. 4, type I): the crest does not rise far; the face goes
+// vertical then hollow, and the lip is thrown forward out of the crest's top and falls to the trough about a face's
+// height ahead; the tube is between the lip and the hollowed face
 const KEYS = [
-  [0.0, [[0.0, -0.4], [0.05, -0.05], [0.15, 0.05], [0.25, 0.06], [0.35, 0.04], [0.42, 0.0], [0.46, -0.06]], [1.0, 0.5, 0.25, 0.18, 0.12, 0.08, 0.03]],
-  [0.35, [[0.03, -0.4], [0.08, 0.05], [0.2, 0.4], [0.4, 0.58], [0.6, 0.6], [0.75, 0.52], [0.85, 0.4]], [1.0, 0.6, 0.38, 0.3, 0.2, 0.12, 0.04]],
-  [0.7, [[0.05, -0.4], [0.12, 0.05], [0.4, 0.45], [0.8, 0.55], [1.2, 0.48], [1.45, 0.3], [1.6, 0.0]], [1.0, 0.6, 0.36, 0.32, 0.22, 0.1, 0.03]],
-  [1.0, [[0.05, -0.4], [0.12, 0.05], [0.45, 0.45], [0.9, 0.52], [1.35, 0.42], [1.58, 0.12], [1.64, -0.42]], [1.0, 0.6, 0.36, 0.33, 0.22, 0.1, 0.03]],
+  [0.0, [[0.0, -0.25], [0.05, 0.0], [0.15, 0.04], [0.25, 0.02], [0.32, -0.03], [0.36, -0.08], [0.38, -0.12]], [0.9, 0.45, 0.3, 0.2, 0.12, 0.07, 0.03]],  // the crest steepening
+  [0.4, [[0.0, -0.25], [0.08, 0.05], [0.25, 0.15], [0.42, 0.12], [0.52, 0.02], [0.58, -0.08], [0.6, -0.15]], [0.9, 0.5, 0.32, 0.22, 0.14, 0.08, 0.04]], // the face vertical, the lip leaving
+  [0.7, [[0.0, -0.25], [0.1, 0.05], [0.33, 0.18], [0.6, 0.15], [0.82, 0.0], [0.93, -0.2], [0.98, -0.38]], [0.9, 0.5, 0.3, 0.22, 0.14, 0.07, 0.03]],    // thrown
+  [1.0, [[0.0, -0.25], [0.1, 0.05], [0.35, 0.18], [0.65, 0.12], [0.88, -0.1], [1.0, -0.42], [1.02, -0.72]], [0.9, 0.5, 0.3, 0.22, 0.14, 0.07, 0.03]],  // landing in the trough
 ];
 const lerp = (a, b, f) => a + (b - a) * f;
 function keyAt(s) {
@@ -60,7 +63,8 @@ function section(s, n) {
   const e = c[M - 1], o = nrm(M - 1), h = w[M - 1] / 2, tg = [o[1], -o[0]];
   for (let j = 1; j < 8; j++) { const a = Math.PI * j / 8; L.push([e[0] + (o[0] * Math.cos(a) + tg[0] * Math.sin(a)) * h, e[1] + (o[1] * Math.cos(a) + tg[1] * Math.sin(a)) * h, w[M - 1], 1]); }
   for (let i = M - 1; i >= 0; i--) L.push(inner[i]);
-  L.push([inner[0][0] + 0.15, inner[0][1] - 0.35, w[0], 0]);
+  // the face under the lip, hollowed: down from the root's front, back a little, then out to the trough
+  const ir = inner[0]; L.push([ir[0] - 0.04, ir[1] - 0.3, w[0], 0], [ir[0] - 0.02, ir[1] - 0.55, w[0], 0], [ir[0] + 0.12, ir[1] - 0.85, w[0], 0]);
   // resample evenly by length
   const d = [0]; for (let i = 1; i < L.length; i++) d.push(d[i - 1] + Math.hypot(L[i][0] - L[i - 1][0], L[i][1] - L[i - 1][1]));
   const out = []; let k = 0;
@@ -105,6 +109,8 @@ export const CURL_EVENT_GLSL = /* glsl */ `
 vec2 gcCx = vec2(0.0); float gcPsi = 0.0, gcK = 1.0, gcEv = 0.0, gcStage = 0.0, gcFall = 0.0, gcShow = 0.0, gcH0 = 0.0, gcXs = 1.0, gcDC = 1.0, gcA0 = 0.0;
 float curlCel(float d) { return sqrt(9.81 * clamp(d, ${SHORE.dMin.toFixed(2)}, ${SHORE.dMax.toFixed(1)})); }
 void curlEvent(vec2 xz, float level, float depth) {
+  // the coast context (sw3Ctx's) is the caller's again on return: this looks at the crest's own
+  float sN = gNear, sE = gExpo, sP = gPn, sT = gTau, sD = gShoreD, sK = gShoreKnow; vec2 sG = gDir;
   float w = sw3Omega(0); gcK = w / curlCel(depth);
   float ph = sw3Phase(0, uWTime, gTau, gPn); gcPsi = mod(ph + 3.14159265, 6.2831853) - 3.14159265;
   float cyc = floor((ph + 3.14159265) / 6.2831853);
@@ -133,8 +139,18 @@ void curlEvent(vec2 xz, float level, float depth) {
   gcStage = clamp(smoothstep(0.0, 0.55, gcEv), 0.0, 1.0); gcFall = smoothstep(0.7, 1.0, gcEv);
   gcShow = smoothstep(0.0, 0.1, gcEv) * (1.0 - smoothstep(0.88, 1.05, gcEv)) * smoothstep(0.05, 0.25, a0) * smoothstep(0.1, 0.35, dC) * plunge;
   gcH0 = 2.0 * a;
-  // forward: it lands where the face has fallen a third of its height (about 1 rad of the wave ahead of the crest)
-  gcXs = clamp(1.01 * curlCel(dC) / (w * max(gcH0, 0.05)) / ${CURL.ratio.toFixed(2)}, 0.75, 1.3);
+  // forward: about a face's height, further on a long, gentle wave
+  gNear = sN; gExpo = sE; gPn = sP; gTau = sT; gShoreD = sD; gShoreKnow = sK; gDir = sG;
+  gcXs = clamp(1.01 * curlCel(dC) / (w * max(gcH0, 0.05)) / ${CURL.ratio.toFixed(2)}, 0.85, 1.25);
+}
+// the water under a plunging lip (water3/surface.js): its front face drawn down to the trough between the hollowed face
+// and the lip's landing, so the tube is open (the lip mesh is the wave's front while it plunges). Returns (weight,
+// the trough's height); sw3Ctx(xz) already called
+vec2 curlScoop(vec2 xz, float level, float depth, float scale) {
+  curlEvent(xz, level, depth);
+  if (gcPsi >= 0.0 || gcShow <= 0.0) return vec2(0.0);
+  float xr = -gcPsi / gcK / max(gcH0 * scale * gcXs, 0.05); // ahead of the crest, in the lip's reach
+  return vec2(smoothstep(0.1, 0.45, xr) * smoothstep(0.25, 0.55, gcStage) * (1.0 - gcFall) * clamp(gcShow * 1.5, 0.0, 1.0), -0.39 * gcH0);
 }
 `;
 

@@ -41,7 +41,7 @@ import { SWASH_GLSL, SURF_GLSL } from './swash.js';
 import { SurfFoam } from './surffoam.js';
 import { bakeFoamTexture } from './foamtex.js';
 import { FoamField, FOAM_FIELD } from './foamfield.js';
-import { CurlMesh } from './curl.js';
+import { CurlMesh, CURL_EVENT_GLSL } from './curl.js';
 import { SHORE } from '../shorefield.js';
 
 export const SURFACE = {
@@ -152,6 +152,10 @@ ${SURF_GLSL}
 #include <logdepthbuf_pars_vertex>
 ${head}
 ${coast}
+uniform vec4 uLook3;
+#ifdef W3_COAST
+${CURL_EVENT_GLSL}
+#endif
 out vec3 vW; out vec2 vXZ; out float vCell, vNear, vJ; out vec2 vCoastSlope; out vec3 vCoast, vFlow; out vec4 vRough;
 void main() {
   bool skirt = position.y > 0.5;
@@ -175,6 +179,8 @@ void main() {
     // the coast here (the sea's only: a lake has no swell), read once for the trains and the swash
     if (bed > -1e3 && depth > -3.0 && level <= uSeaLevel + 0.5 && uSurf.x > 0.0) coast = sw3Ctx(xz);
     if (coast && depth > 0.0) { d.xyz += w3Coast(xz, depth, cell) * (1.0 - fl); vNear = gNear; vCoastSlope = gCoastSlope * (1.0 - fl); vCoast = gCoastFoam * (1.0 - fl); k.x *= 1.0 - gNear; }
+    // under a plunging lip the front face drawn down to the trough: the tube open under it (water3/curl.js)
+    if (coast && depth > 0.0 && uLook3.w > 0.0) { vec2 sc = curlScoop(xz, level, depth, uLook3.w); d.y = mix(d.y, sc.y, sc.x * (1.0 - fl)); }
 #endif
     k.x *= 1.0 - fl; // a river carries no swell
     vec3 fph = w3FlowPh(xz); mat2 fM = w3FlowM(fv);
