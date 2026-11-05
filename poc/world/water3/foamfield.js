@@ -63,14 +63,17 @@ void main() {
     // foam left behind stays where it was made and only drifts in slowly; the bore's own white is made afresh at its
     // front each frame (the crest's whitewater and charge), so it keeps up with the wave without the field dragging
     v += gDir * 0.25 * gNear;
-    // the curl's landing (water3/curl.js, the same event): white where the lip comes down on the face and the splash
-    // ahead of it, then along the lip as it drops into the bore, by how big the wave is; what it leaves is the lace
+    // the tube's crash (water3/curl.js, the same event): white where the lip comes down and the splash ahead of it as
+    // the tube closes, then across the whole tube as it collapses; by how big the wave is; what it leaves is the lace
     if (uLook3.w > 0.0) {
       curlEvent(p, level, depth);
-      float Lt = max(gcH0 * uLook3.w * gcXs * 1.0 + uCurl.x * gcH0, 0.1), xa = -gcPsi / gcK / Lt; // this texel ahead of its crest, in the lip's reach
-      float land = smoothstep(0.4, 0.55, gcEv) * smoothstep(0.75, 0.95, xa) * (1.0 - smoothstep(1.3, 1.9, xa));
-      float drop = gcFall * smoothstep(0.1, 0.4, xa) * (1.0 - smoothstep(1.2, 1.6, xa));
-      make = max(make, gcShow * max(land, drop) * smoothstep(0.05, 0.4, gcA0) * 1.2);
+      if (gcPsi < 0.0 && gcGate0 > 0.0) {
+        vec3 Cr = curlCircle(uLook3.w, uCurl.xy); float r = max(Cr.z, 0.05);
+        float xa = -gcPsi / gcK, tip = Cr.x + r * 0.17; // ahead of the crest; where the closed lip comes down
+        float land = smoothstep(0.6, 0.8, gcE) * (1.0 - smoothstep(1.0, 1.1, gcE)) * (1.0 - smoothstep(0.15 * r, 0.9 * r, abs(xa - tip - 0.2 * r)));
+        float crash = smoothstep(0.8, 0.9, gcE) * (1.0 - smoothstep(1.0, 1.1, gcE)) * smoothstep(-0.1 * r, 0.2 * r, xa) * (1.0 - smoothstep(Cr.x + 0.9 * r, Cr.x + 1.6 * r, xa));
+        make = max(make, gcGate0 * max(land, crash) * smoothstep(0.05, 0.4, gcA0) * 1.2);
+      }
     }
   }
 #endif

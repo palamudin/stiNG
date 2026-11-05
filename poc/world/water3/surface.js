@@ -94,7 +94,7 @@ export class WaterSurface {
       uSurf: world.uSurf, uSurfX: world.uSurfX, uWTime: world.uWTime, uSwDir: world.uSwDir,
       uWave: world.uWave, // (the panel's wave scale, the sea's fetch m, -, -)
       tScene: { value: null }, tDepth: { value: null }, uVP: { value: new THREE.Matrix4() }, tFoam: { value: null },
-      uLook: world.uLook, uLook2: world.uLook2, uLook3: world.uLook3, uLace: world.uLace, uAbs: world.uAbs, uSca: world.uSca, // the panel's 'Water'
+      uLook: world.uLook, uLook2: world.uLook2, uLook3: world.uLook3, uCurl: world.uCurl, uLace: world.uLace, uAbs: world.uAbs, uSca: world.uSca, // the panel's 'Water'
       uLogF: world.post.U.uLogF, uDebug: world.post.U.uDebug, uRain: world.post.U.uRain, uIce: world.post.U.uIce, uGlint: world.post.U.uGlint, uWPeak: world.post.U.uWPeak,
       tCaus: { value: world.caustics ? world.caustics.rt.texture : null }, uCaus: world.post.U.uCaus,
     };
@@ -152,7 +152,7 @@ ${SURF_GLSL}
 #include <logdepthbuf_pars_vertex>
 ${head}
 ${coast}
-uniform vec4 uLook3;
+uniform vec4 uLook3, uCurl;
 #ifdef W3_COAST
 ${CURL_EVENT_GLSL}
 #endif
@@ -180,7 +180,7 @@ void main() {
     if (bed > -1e3 && depth > -3.0 && level <= uSeaLevel + 0.5 && uSurf.x > 0.0) coast = sw3Ctx(xz);
     if (coast && depth > 0.0) { d.xyz += w3Coast(xz, depth, cell) * (1.0 - fl); vNear = gNear; vCoastSlope = gCoastSlope * (1.0 - fl); vCoast = gCoastFoam * (1.0 - fl); k.x *= 1.0 - gNear; }
     // under a plunging lip the front face drawn down to the trough: the tube open under it (water3/curl.js)
-    if (coast && depth > 0.0 && uLook3.w > 0.0) { vec2 sc = curlScoop(xz, level, depth, uLook3.w); d.y = mix(d.y, sc.y, sc.x * (1.0 - fl)); }
+    if (coast && depth > 0.0 && uLook3.w > 0.0) { vec2 sc = curlScoop(xz, level, depth, uLook3.w, uCurl.xy); d.y = mix(d.y, sc.y, sc.x * (1.0 - fl)); }
 #endif
     k.x *= 1.0 - fl; // a river carries no swell
     vec3 fph = w3FlowPh(xz); mat2 fM = w3FlowM(fv);
@@ -521,6 +521,7 @@ void main() {
     U.uSkyUp.value.copy(W.sky.skyUp);
     const wt = W.uWTime.value, wdt = this._wt === undefined ? 0 : wt - this._wt; this._wt = wt;
     this.field.update(W.renderer, wdt, camera, wind || [0, 0], W.waterCtl.linger);
+    if (this.curl) this.curl.update(W.renderer, camera); // the cells a breaking tube runs through
     this.fieldFar.update(W.renderer, wdt, camera, wind || [0, 0], W.waterCtl.linger * 2.0); // open-sea foam lingers longer (the panel's time, doubled)
     U.uTime.value = W.uWTime.value; U.uWLost.value = W.waves.lostSlope || 0;
     const dt = this._t === null ? 0 : Math.min(Math.max(time - this._t, 0), 0.25); this._t = time;

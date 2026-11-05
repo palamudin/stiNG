@@ -1,216 +1,194 @@
-// Water 3: the breaking wave's curl, a mesh of its own over the water. A heightfield cannot overhang, so the lip is a
-// second surface: a fine grid of its own round the camera, each vertex mapped onto the lip of the surf crest it belongs
-// to (the first train's crest: water3/swash.js), in the shape a table gives for the breaker's stage.
+// Water 3: the breaking wave's tube. A heightfield cannot overhang, so the plunge is a mesh of its own: a tube laid
+// along the crest, of which only an arc of the wall is shown; that arc grows from the crest's top in time with the
+// wave: forward over the top and down (the lip, whitening at its edge) and back down the front (the face hollowing),
+// until the lip reaches the trough and the tube closes; then it crashes, its foam left in the foam field where the
+// lip came down, and that stretch of tube is gone for that wave (a big one may throw a second, smaller tube).
 //
-// The shape (the table, computed once): a fat body on the crest, the crest's top grown up and thrown forward over the
-// face as an arch that lands on the face ahead, the tube under it. As a closed cross-section: from under the swell's
-// back, up over the top, along the lip to its tip (rounded), back along the underside (the tube's ceiling) and down
-// the inner wall into the face. Keyframes along a centreline with a width (the girth: the whole crest at the root,
-// tapering to the tip), eased between: a swelling on the crest; the crest standing up past its own top; the lip
-// thrown over; the lip landed. Units: up in the wave's face (crest to trough, 2a), forward the same, stretched to land
-// where the face has fallen a third of its height.
+// The tube's cross-section: a circle tangent to the crest's top from behind (its centre ahead of and below the top),
+// its radius two thirds of the face (crest to trough) times the panel's 'Curl size', so a full arc reaches the
+// trough; the arc shown runs from -60 degrees (the crest's top, measured from straight up, forward positive) out to
+// 170 degrees (the lip down at the trough) and back to -180 (the hollowed face down at the trough), as a band with a
+// girth (two fifths of the radius at the face and root, a fifth at the lip's edge): a closed loop of wall, smooth normals.
 //
-// Per vertex: the main train's phase there gives the crest it belongs to (half a wave either side) and where round
-// the cross-section it falls, from the back's foot (phase pi, half a wave behind) to the inner wall's foot (phase -pi,
-// half a wave ahead); both feet lie under the water, and the triangles across the half-wave seam (one crest's feet to
-// the next one's) are thrown away. Normals from the cross-section (smooth, not the triangles'); only its outward
-// faces drawn, writing depth, so it reads as a body of water.
+// Placement: the tube is cut into world cells (4 m) round the camera, one instance each. A pass once a frame finds the
+// cells a breaking crest runs through (cheap: one texel per cell); in those, each slice of the instance is a point of
+// the crest (swept along the crest through the cell, snapped onto it), so the tube follows the crest's own curve and
+// the neighbouring cells' pieces meet on it; each cell draws only the part of the tube whose spine lies inside it.
 //
-// The event (curlEvent: also the foam field's, so the splash lands where the lip does): local and brief, a little
-// over a second at any point of the crest, on the stretches of a wave that plunge (the rest spill), running along the
-// crest from where it starts (a peel): see curlEvent. The panel's 'Curl' scales it.
+// The event (curlEvent: also the foam field's and the water surface's, which draws its face down to the tube's floor
+// so the tube is open): a plunge is local and brief (field and lab: the lip's throw to its landing within about half a
+// second, the tube closing within a second); a crest breaks first where it meets its break depth and the curl runs
+// along it (a peel). Each wave picks, along its crest, stretches that plunge (the rest spill: the surf model's
+// whitewater only); a big wave's tubes are big and rarer, a small wave's small and quick.
 import * as THREE from 'three';
 import { NOISE_GLSL } from '../noise.js';
 import { SHORE } from '../shorefield.js';
 import { SWASH_GLSL, SURF_GLSL } from './swash.js';
 import { SKY_GLSL } from '../sky.js';
 
-export const CURL = { stages: 32, samples: 128, grid: 448, reach: 240, ratio: 1.0 };
+export const CURL = { cell: 4, cells: 80, along: 14, around: 48, sweep: 12 };
 
-// the centreline (forward, up in face heights, from the crest's top) and its width at seven points, for each stage. As
-// the lab sees a plunge (McAllister et al., Nature 2024, Fig. 4, type I): the crest does not rise far; the face goes
-// vertical then hollow, and the lip is thrown forward out of the crest's top and falls to the trough about a face's
-// height ahead; the tube is between the lip and the hollowed face
-const KEYS = [
-  [0.0, [[0.0, -0.25], [0.05, 0.0], [0.15, 0.04], [0.25, 0.02], [0.32, -0.03], [0.36, -0.08], [0.38, -0.12]], [0.9, 0.45, 0.3, 0.2, 0.12, 0.07, 0.03]],  // the crest steepening
-  [0.4, [[0.0, -0.25], [0.08, 0.05], [0.25, 0.15], [0.42, 0.12], [0.52, 0.02], [0.58, -0.08], [0.6, -0.15]], [0.9, 0.5, 0.32, 0.22, 0.14, 0.08, 0.04]], // the face vertical, the lip leaving
-  [0.7, [[0.0, -0.25], [0.1, 0.05], [0.33, 0.18], [0.6, 0.15], [0.82, 0.0], [0.93, -0.2], [0.98, -0.38]], [0.9, 0.5, 0.3, 0.22, 0.14, 0.07, 0.03]],    // thrown
-  [1.0, [[0.0, -0.25], [0.1, 0.05], [0.35, 0.18], [0.65, 0.12], [0.88, -0.1], [1.0, -0.42], [1.02, -0.72]], [0.9, 0.5, 0.3, 0.22, 0.14, 0.07, 0.03]],  // landing in the trough
-];
-const lerp = (a, b, f) => a + (b - a) * f;
-function keyAt(s) {
-  let k = 0; while (k < KEYS.length - 2 && s > KEYS[k + 1][0]) k++;
-  let f = Math.min(Math.max((s - KEYS[k][0]) / (KEYS[k + 1][0] - KEYS[k][0]), 0), 1); f = f * f * (3 - 2 * f);
-  const A = KEYS[k], B = KEYS[k + 1];
-  return [A[1].map((p, i) => [lerp(p[0], B[1][i][0], f), lerp(p[1], B[1][i][1], f)]), A[2].map((w, i) => lerp(w, B[2][i], f))];
-}
-// the cross-section at stage s: a loop of points (x, y, width, along) resampled evenly by length; along is 0 at the root
-// to 1 at the tip on the outer side, negative on the underside
-function section(s, n) {
-  const [C, Wd] = keyAt(s), M = 72, c = [], w = [], al = [];
-  const P = i => C[Math.min(Math.max(i, 0), C.length - 1)];
-  for (let i = 0; i < M; i++) { // Catmull-Rom through the centreline
-    const g = i / (M - 1) * (C.length - 1), k = Math.min(Math.floor(g), C.length - 2), t = g - k;
-    const p0 = P(k - 1), p1 = P(k), p2 = P(k + 1), p3 = P(k + 2), t2 = t * t, t3 = t2 * t;
-    c.push([0, 1].map(e => 0.5 * (2 * p1[e] + (-p0[e] + p2[e]) * t + (2 * p0[e] - 5 * p1[e] + 4 * p2[e] - p3[e]) * t2 + (-p0[e] + 3 * p1[e] - 3 * p2[e] + p3[e]) * t3)));
-    w.push(lerp(Wd[k], Wd[k + 1], t)); al.push(i / (M - 1));
-  }
-  const nrm = i => { const a = c[Math.max(i - 1, 0)], b = c[Math.min(i + 1, M - 1)], dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1; return [-dy / l, dx / l]; }; // outward: the back, the top
-  const outer = [], inner = [];
-  for (let i = 0; i < M; i++) { const o = nrm(i), h = w[i] / 2; outer.push([c[i][0] + o[0] * h, c[i][1] + o[1] * h, w[i], al[i]]); inner.push([c[i][0] - o[0] * h, c[i][1] - o[1] * h, w[i], -al[i]]); }
-  const L = [[outer[0][0] - 0.25, outer[0][1] - 0.35, w[0], 0], ...outer];
-  // the tip, rounded: half a circle round the centreline's end, from the outer side to the inner
-  const e = c[M - 1], o = nrm(M - 1), h = w[M - 1] / 2, tg = [o[1], -o[0]];
-  for (let j = 1; j < 8; j++) { const a = Math.PI * j / 8; L.push([e[0] + (o[0] * Math.cos(a) + tg[0] * Math.sin(a)) * h, e[1] + (o[1] * Math.cos(a) + tg[1] * Math.sin(a)) * h, w[M - 1], 1]); }
-  for (let i = M - 1; i >= 0; i--) L.push(inner[i]);
-  // the face under the lip, hollowed: down from the root's front, back a little, then out to the trough
-  const ir = inner[0]; L.push([ir[0] - 0.04, ir[1] - 0.3, w[0], 0], [ir[0] - 0.02, ir[1] - 0.55, w[0], 0], [ir[0] + 0.12, ir[1] - 0.85, w[0], 0]);
-  // resample evenly by length
-  const d = [0]; for (let i = 1; i < L.length; i++) d.push(d[i - 1] + Math.hypot(L[i][0] - L[i - 1][0], L[i][1] - L[i - 1][1]));
-  const out = []; let k = 0;
-  for (let j = 0; j < n; j++) {
-    const t = j / (n - 1) * d[d.length - 1]; while (k < L.length - 2 && d[k + 1] < t) k++;
-    const f = (t - d[k]) / Math.max(d[k + 1] - d[k], 1e-9), A = L[k], B = L[k + 1];
-    out.push([lerp(A[0], B[0], f), lerp(A[1], B[1], f), lerp(A[2], B[2], f), Math.abs(A[3]) > Math.abs(B[3]) ? lerp(A[3], B[3], f) : lerp(A[3], B[3], f)]);
-  }
-  return out;
-}
-function curlTable() {
-  const S = CURL.stages, U = CURL.samples, data = new Float32Array(S * U * 4);
-  for (let j = 0; j < S; j++) { const sec = section(j / (S - 1), U); for (let i = 0; i < U; i++) data.set(sec[i], (j * U + i) * 4); }
-  const t = new THREE.DataTexture(data, U, S, THREE.RGBAFormat, THREE.FloatType);
-  t.minFilter = t.magFilter = THREE.NearestFilter; t.needsUpdate = true; // read with its own bilinear (float filtering is not everywhere)
-  return t;
-}
-// the grid: N x N round the camera, 0.15 m apart at the middle growing to 2.4 m at the edge (reach metres out)
-function curlGrid() {
-  const N = CURL.grid, R = CURL.reach, b = 2.8, g = t => R * (Math.exp(b * t) - 1) / (Math.exp(b) - 1);
-  const co = new Float32Array(N); for (let i = 0; i < N; i++) { const q = -1 + 2 * i / (N - 1); co[i] = Math.sign(q) * g(Math.abs(q)); }
-  const pos = new Float32Array(N * N * 3), idx = new Uint32Array((N - 1) * (N - 1) * 6);
-  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { const o = (j * N + i) * 3; pos[o] = co[i]; pos[o + 2] = co[j]; }
-  let o = 0;
-  for (let j = 0; j < N - 1; j++) for (let i = 0; i < N - 1; i++) { const a = j * N + i, b2 = a + 1, c = a + N, d = c + 1; idx.set([a, c, b2, b2, c, d], o); o += 6; }
-  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setIndex(new THREE.BufferAttribute(idx, 1));
-  return geo;
-}
-
-// the curl event of the main train's crest a point belongs to (sw3Ctx(xz) already called): the crest gcCx, the phase
-// gcPsi (> 0 behind the crest), k at the point gcK; the event gcEv (0 starting .. 0.55 landed .. 1 gone), gcStage,
-// gcFall (the lip dropping), gcShow; gcBig how much of a tube-making wave it is; the face's height gcH0 (2a) and the forward stretch gcXs; the depth at the crest gcDC.
-//
-// A plunge is local and brief (field and lab: the lip's throw to its landing within about half a second, the tube
-// closing within a second; a crest breaks first where it meets shallow water first and the curl runs along it, a
-// peel): so the event is not the whole crest at once. Each wave picks, along its crest, stretches that plunge (the
-// rest spill: whitewater only, the surf model's own) and, within them, where the break starts: the delay before a
-// point of the crest breaks, after it reached its break line, grows away from those starting points, so the curl
-// runs along the crest at a few metres a second and only the stretch it is passing has a tube; behind it the lip
-// has landed and is gone into the bore, ahead of it the crest has yet to throw.
+// the curl event of the main train's crest a point belongs to (sw3Ctx(xz) already called; the caller's coast context
+// is restored on return). Out: the crest gcCx, the phase gcPsi (> 0 behind the crest), k at the point gcK, the depth
+// at the crest gcDC, the wave's own height gcA0, the face (2a) gcH0, gcBig how much of a tube-making wave it is; the
+// raw clock gcEv; the tube being drawn: its own clock gcE (0 .. 0.8 grown and closed .. 1 crashed and gone), its size
+// gcSc (1, or the second tube's), its growth gcS, gcGate0 (whether this stretch plunges at all) and gcVis (shown now)
 export const CURL_EVENT_GLSL = /* glsl */ `
-vec2 gcCx = vec2(0.0); float gcBig = 0.0, gcPsi = 0.0, gcK = 1.0, gcEv = 0.0, gcStage = 0.0, gcFall = 0.0, gcShow = 0.0, gcH0 = 0.0, gcXs = 1.0, gcDC = 1.0, gcA0 = 0.0;
+vec2 gcCx = vec2(0.0); float gcPsi = 0.0, gcK = 1.0, gcDC = 1.0, gcA0 = 0.0, gcH0 = 0.0, gcBig = 0.0, gcEv = 0.0, gcE = 0.0, gcSc = 1.0, gcS = 0.0, gcGate0 = 0.0, gcVis = 0.0;
 float curlCel(float d) { return sqrt(9.81 * clamp(d, ${SHORE.dMin.toFixed(2)}, ${SHORE.dMax.toFixed(1)})); }
 void curlEvent(vec2 xz, float level, float depth) {
-  // the coast context (sw3Ctx's) is the caller's again on return: this looks at the crest's own
   float sN = gNear, sE = gExpo, sP = gPn, sT = gTau, sD = gShoreD, sK = gShoreKnow; vec2 sG = gDir;
   float w = sw3Omega(0); gcK = w / curlCel(depth);
   float ph = sw3Phase(0, uWTime, gTau, gPn); gcPsi = mod(ph + 3.14159265, 6.2831853) - 3.14159265;
   float cyc = floor((ph + 3.14159265) / 6.2831853);
   vec2 c0 = xz + gDir * (gcPsi / gcK);
-  // one step more onto the crest itself (its own phase, its own depth there): every vertex of a cross-section lands on
-  // the same crest point, so a lip is built from one event, not torn between neighbours that each guessed the crest
-  // a little differently
+  // one step more onto the crest itself (its own phase, its own depth there)
   if (sw3Ctx(c0)) { float p0 = mod(sw3Phase(0, uWTime, gTau, gPn) + 3.14159265, 6.2831853) - 3.14159265; c0 += gDir * (p0 * curlCel(level - clipHeight(c0)) / w); sw3Ctx(c0); }
   gcCx = c0;
   float dC = max(level - clipHeight(gcCx), 0.02); gcDC = dC;
   float shoal = pow(clamp(max(dC, 0.6) / ${SHORE.dMax.toFixed(1)}, 0.04, 1.0), -0.25);
-  float a0 = uSurf.x * gNear * gExpo * shoal * sw3Group(gcCx, uWTime), a = min(a0, 0.42 * dC + 0.02); gcA0 = a0;
+  float a0 = uSurf.x * gNear * gExpo * shoal * sw3Group(gcCx, uWTime), a = min(a0, 0.42 * dC + 0.02); gcA0 = a0; gcH0 = 2.0 * a;
   float early = 0.5 + 0.5 * w2noise(gcCx / 33.0 + vec2(cyc * 7.3, cyc * 3.1), 614);
   float rb = 0.3 + 0.09 * early, db = a0 / rb; // the breaking limit, early or late along the crest (water3/swash.js)
   vec3 cn = clipNormal(gcCx); float tb = max(sqrt(max(1.0 - cn.y * cn.y, 0.0)) / max(cn.y, 0.05), 0.004);
   float tSince = (db - dC) / tb / sqrt(9.81 * max(dC, 0.1)); // seconds since the crest reached its break line
-  // along the crest (s): which stretches of this wave plunge (more of a bigger wave's), and the peel: the delay before
-  // it breaks here, 0 at the stretch's starting points to 4 s between them (60 m apart or so: the curl runs at 5 to
-  // 15 m/s), a new layout every wave
-  // only a big wave makes a tube: a small one's peaks just pitch over and crash into its own face (shorter stretches,
-  // more of them, quicker); between, the lip is thrown further the bigger the wave
+  // along the crest (s): which stretches of this wave plunge, and the peel (the delay before it breaks here after its
+  // break line, 0 at the stretch's starting points); a big wave's stretches long and fewer, a small one's short
   float s = dot(gcCx, vec2(-gDir.y, gDir.x)); gcBig = smoothstep(0.7, 1.5, a0);
   float plunge = smoothstep(0.5 + 0.12 * gcBig, 0.66 + 0.12 * gcBig, 0.5 + 0.5 * w2noise(vec2(s / mix(90.0, 260.0, gcBig), cyc * 2.71), 618));
   float delay = mix(1.0, 2.0, gcBig) * (0.5 + 0.5 * w2noise(vec2(s / mix(22.0, 60.0, gcBig), cyc * 1.37), 617));
-  // the event itself: a little over a second (more for a bigger wave): thrown and landed by 0.55, the lip dropping
-  // into the bore from 0.7, gone by 1
-  float te = mix(0.6, 1.1, gcBig) + 0.3 * clamp(a0, 0.0, 1.5); gcEv = (tSince - delay) / te;
-  gcStage = clamp(smoothstep(0.0, 0.55, gcEv), 0.0, 1.0) * mix(0.45, 1.0, gcBig); // a small wave's lip only leaves the face gcFall = smoothstep(0.7, 1.0, gcEv);
-  gcShow = smoothstep(0.0, 0.1, gcEv) * (1.0 - smoothstep(0.88, 1.05, gcEv)) * smoothstep(0.05, 0.25, a0) * smoothstep(0.1, 0.35, dC) * plunge;
-  gcH0 = 2.0 * a;
-  // forward: about a face's height, further on a long, gentle wave
+  float te = mix(0.7, 1.2, gcBig) + 0.3 * clamp(a0, 0.0, 1.5); gcEv = (tSince - delay) / te;
+  // the tube: grown and closed by 0.8 of its time, crashed and gone by 1; after it, on some stretches of a big wave,
+  // a second one at about half the size
+  float e = gcEv, g2 = 1.0; gcSc = 1.0;
+  if (e > 1.05) { e = (gcEv - 1.1) / 0.75; gcSc = 0.55; g2 = smoothstep(0.3, 0.7, gcBig) * smoothstep(0.45, 0.55, 0.5 + 0.5 * w2noise(vec2(s / 80.0, cyc * 4.1), 619)); }
+  gcE = e; gcS = smoothstep(0.0, 0.8, e);
+  gcGate0 = smoothstep(0.05, 0.25, a0) * smoothstep(0.1, 0.35, dC) * plunge * g2;
+  gcVis = gcGate0 * smoothstep(0.0, 0.06, e) * (1.0 - smoothstep(0.82, 1.0, e));
   gNear = sN; gExpo = sE; gPn = sP; gTau = sT; gShoreD = sD; gShoreKnow = sK; gDir = sG;
-  gcXs = clamp(1.01 * curlCel(dC) / (w * max(gcH0, 0.05)) / ${CURL.ratio.toFixed(2)}, 0.85, 1.25);
 }
-// the water under a plunging lip (water3/surface.js): its front face drawn down to the trough between the hollowed face
-// and the lip's landing, so the tube is open (the lip mesh is the wave's front while it plunges). Returns (weight,
-// the trough's height); sw3Ctx(xz) already called
-vec2 curlScoop(vec2 xz, float level, float depth, float scale) {
+// the tube's circle (in the crest's plane: forward, up from the crest's top): (centre, radius); and the arc shown (its
+// ends, radians from straight up, forward positive)
+vec3 curlCircle(float scale, vec2 nudge) { float r = 0.667 * gcH0 * scale * gcSc; return vec3(vec2(0.866, -0.5) * r + nudge * gcH0, r); }
+vec2 curlArc() { return vec2(-1.0472 - gcS * 2.0944, -1.0472 + gcS * 4.0143); }
+// the water under a tube (water3/surface.js): its front face drawn down to the tube's floor between the crest and
+// the lip's landing, so the tube is open. Returns (weight, the height to draw it down to, from the still water);
+// sw3Ctx(xz) already called
+vec2 curlScoop(vec2 xz, float level, float depth, float scale, vec2 nudge) {
   curlEvent(xz, level, depth);
-  if (gcPsi >= 0.0 || gcShow <= 0.0) return vec2(0.0);
-  float xr = -gcPsi / gcK / max(gcH0 * scale * gcXs, 0.05); // ahead of the crest, in the lip's reach
-  return vec2(smoothstep(0.1, 0.45, xr) * smoothstep(0.55, 0.85, gcStage) * gcBig * (1.0 - gcFall) * clamp(gcShow * 1.5, 0.0, 1.0), -0.39 * gcH0);
+  if (gcPsi >= 0.0 || gcVis <= 0.0) return vec2(0.0);
+  vec3 C = curlCircle(scale, nudge);
+  float xa = -gcPsi / gcK - (C.x - 0.866 * C.z); // ahead of the crest's top (the nudge's share taken off)
+  return vec2(smoothstep(0.0, 0.35 * C.z, xa) * smoothstep(0.25, 0.6, gcS) * gcVis, max(-0.39 * gcH0, 0.61 * gcH0 + C.y - C.z));
 }
 `;
 
+// the tube's piece: along (0..1 across the sweep) x around (0..1 round the wall's loop), closed round
+function tubeGeometry() {
+  const A = CURL.along, R = CURL.around, n = CURL.cells * CURL.cells;
+  const tube = new Float32Array(A * R * 2), idx = [];
+  for (let j = 0; j < A; j++) for (let i = 0; i < R; i++) { const o = (j * R + i) * 2; tube[o] = j / (A - 1); tube[o + 1] = i / R; }
+  for (let j = 0; j < A - 1; j++) for (let i = 0; i < R; i++) { const a = j * R + i, b = j * R + (i + 1) % R, c = a + R, d = b + R; idx.push(a, c, b, b, c, d); }
+  const g = new THREE.InstancedBufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(A * R * 3), 3)); // unused (three wants one)
+  g.setAttribute('tube', new THREE.BufferAttribute(tube, 2));
+  const id = new Float32Array(n); for (let k = 0; k < n; k++) id[k] = k;
+  g.setAttribute('cellId', new THREE.InstancedBufferAttribute(id, 1));
+  g.setIndex(idx); g.instanceCount = n;
+  return g;
+}
+
 export class CurlMesh {
   constructor(world, surface) {
-    const shore = world.shore, S = surface.U;
-    this.table = curlTable();
-    const U = {
+    const shore = world.shore, S = surface.U, C = CURL, NC = C.cells;
+    const common = {
       ...world.clip.uniforms, ...shore.uniforms,
       uSurf: world.uSurf, uSurfX: world.uSurfX, uWTime: world.uWTime, uSwDir: world.uSwDir, uLook3: world.uLook3, uCurl: world.uCurl,
-      uCam: S.uCam, uSeaLevel: S.uSeaLevel, tCurl: { value: this.table },
+      uSeaLevel: S.uSeaLevel, uCellO: { value: new THREE.Vector2() },
+    };
+    const lib = `${NOISE_GLSL}
+${world.clip.glsl()}
+${shore.glsl()}
+${SWASH_GLSL}
+${SURF_GLSL}
+uniform float uSeaLevel; uniform vec4 uLook3, uCurl; uniform vec2 uCellO;
+${CURL_EVENT_GLSL}
+const float CS = ${C.cell.toFixed(1)}, NC = ${NC.toFixed(1)};`;
+
+    // ---- the cells' pass: which cells a tube runs through now, and where its crest is (from the cell's centre)
+    this.cells = new THREE.WebGLRenderTarget(NC, NC, { type: THREE.HalfFloatType, format: THREE.RGBAFormat, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: false, generateMipmaps: false });
+    this.cellMat = new THREE.ShaderMaterial({
+      glslVersion: THREE.GLSL3, uniforms: common, depthTest: false, depthWrite: false,
+      vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }',
+      fragmentShader: /* glsl */ `precision highp float; precision highp int;
+${lib}
+out vec4 oColor;
+void main() {
+  vec2 c = uCellO + (floor(gl_FragCoord.xy) + 0.5) * CS;
+  oColor = vec4(0.0);
+  float level = clipWater(c), depth = level - clipHeight(c);
+  if (level > uSeaLevel + 0.5 || depth <= 0.0 || uSurf.x <= 0.0 || uLook3.w <= 0.0 || !sw3Ctx(c)) return;
+  curlEvent(c, level, depth);
+  // a tube here: the crest within the cell's reach (its half diagonal and a little), with a tube on it now or soon
+  if (distance(gcCx, c) < 0.75 * CS * 1.4143 + 0.5 && gcGate0 > 0.002 && gcE > -0.25 && gcE < 1.05) oColor = vec4(gcCx - c, 1.0, 0.0);
+}`,
+    });
+    this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.cellMat); this.quad.frustumCulled = false;
+    this.cellScene = new THREE.Scene(); this.cellScene.add(this.quad); this.cam = new THREE.Camera();
+
+    // ---- the tube
+    const U = {
+      ...common, tCells: { value: this.cells.texture },
       uSun: world.sky.uniforms.uSun, uSunColor: world.sky.uniforms.uSunColor, uSkyUp: S.uSkyUp, tFoam: S.tFoam,
       uDebug: world.post.U.uDebug, uSkyView: world.sky.uniforms.uSkyView, uMS: world.sky.uniforms.uMS, uHaze: world.sky.uniforms.uHaze, uAbs: world.uAbs, uSca: world.uSca, uLook: world.uLook, uLook2: world.uLook2,
     };
     this.U = U;
-    const C = CURL;
-    this.grid = curlGrid();
     this.mat = new THREE.ShaderMaterial({
       glslVersion: THREE.GLSL3, uniforms: U, side: THREE.DoubleSide, transparent: true, depthWrite: true,
       vertexShader: /* glsl */ `precision highp float; precision highp int;
 #include <common>
 #include <logdepthbuf_pars_vertex>
-${NOISE_GLSL}
-${world.clip.glsl()}
-${shore.glsl()}
-${SWASH_GLSL}
-${SURF_GLSL}
-uniform vec3 uCam; uniform float uSeaLevel; uniform vec4 uLook3, uCurl; uniform highp sampler2D tCurl;
-${CURL_EVENT_GLSL}
-out vec3 vW, vN; out vec4 vLip; out float vIn, vTh; out vec2 vPsi; // vN: the outward normal; vLip: (along the lip: 0 root .. 1 tip, < 0 underside; stage; shown; -); vTh: girth (m); vPsi: (phase, |phase|) for the seam
-// the table, bilinear by hand
-vec4 curlAt(float u, float s) {
-  vec2 g = vec2(u * ${(C.samples - 1).toFixed(1)}, s * ${(C.stages - 1).toFixed(1)}); vec2 i0 = floor(g), f = g - i0; ivec2 i = ivec2(i0), j = min(i + 1, ivec2(${C.samples - 1}, ${C.stages - 1}));
-  vec4 a = texelFetch(tCurl, i, 0), b = texelFetch(tCurl, ivec2(j.x, i.y), 0), c = texelFetch(tCurl, ivec2(i.x, j.y), 0), d = texelFetch(tCurl, j, 0);
-  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-}
+${lib}
+uniform sampler2D tCells;
+in vec2 tube; in float cellId;
+out vec3 vW, vN; out vec4 vInfo; out float vTh; out vec2 vSpine; flat out vec2 vCell;
+// vInfo: (how far back from the lip's edge, radians; growth; shown; 1 where this vertex is good)
 void main() {
-  vLip = vec4(0.0); vIn = 0.0; vTh = 0.0; vPsi = vec2(0.0); vN = vec3(0.0, 1.0, 0.0);
-  vec2 xz = uCam.xz + position.xz;
-  float level = clipWater(xz);
-  vec3 P = vec3(xz.x, level - 0.4, xz.y); // under the water: no lip here
-  if (level <= uSeaLevel + 0.5 && uSurf.x > 0.0 && uLook3.w > 0.0 && sw3Ctx(xz)) {
-    curlEvent(xz, level, level - clipHeight(xz));
-    float show = gcShow * (1.0 - smoothstep(${(C.reach - 70).toFixed(1)}, ${(C.reach - 10).toFixed(1)}, distance(gcCx, uCam.xz)));
-    if (show > 0.002 && sw3Ctx(gcCx)) {
-      float H = gcH0 * uLook3.w * smoothstep(0.0, 0.15, gcEv); // grown from nothing as it starts
-      float v = (3.14159265 - gcPsi) / 6.2831853, dv = 1.0 / ${(C.samples - 1).toFixed(1)};
-      vec4 T = curlAt(v, gcStage);
-      vec2 sc = vec2(H * gcXs, H), o = T.xy * sc;
-      vec2 t = (curlAt(min(v + dv, 1.0), gcStage).xy - curlAt(max(v - dv, 0.0), gcStage).xy) * sc; t /= max(length(t), 1e-6);
-      o.y -= gcFall * H * 0.8; // the lip dropping into the bore
-      o += uCurl.xy * gcH0; // the panel's nudge, forward and up, in face heights
-      vec3 d = w3Coast(gcCx, gcDC, 0.25); // the root on the water's own crest (both trains, its lean, its collapse)
-      vec2 dir = gDir;
-      P = vec3(gcCx.x + d.x, level + d.y, gcCx.y + d.z) + vec3(dir.x, 0.0, dir.y) * o.x + vec3(0.0, o.y, 0.0);
-      vN = vec3(dir.x, 0.0, dir.y) * -t.y + vec3(0.0, t.x, 0.0);
-      vIn = 1.0; vTh = T.z * H; vPsi = vec2(gcPsi, abs(gcPsi));
-      vLip = vec4(T.w, gcStage, show * (1.0 - 0.75 * gcFall), 0.0);
+  vInfo = vec4(0.0); vTh = 0.0; vN = vec3(0.0, 1.0, 0.0);
+  vec2 ij = vec2(mod(cellId, NC), floor(cellId / NC)); vCell = uCellO + ij * CS;
+  vec4 st = texelFetch(tCells, ivec2(ij), 0);
+  gl_Position = vec4(0.0, 0.0, -2.0, 1.0); vW = vec3(0.0); vSpine = vec2(1e9); // nothing here: outside the view
+  if (st.z < 0.5) return;
+  vec2 cx0 = vCell + 0.5 * CS + st.xy;
+  float level = clipWater(cx0);
+  vec3 P = vec3(cx0.x, level - 2.0, cx0.y);
+  if (sw3Ctx(cx0)) {
+    // this slice: a point swept along the crest through the cell, snapped onto the crest (curlEvent)
+    vec2 p = cx0 + vec2(-gDir.y, gDir.x) * (tube.x - 0.5) * ${C.sweep.toFixed(1)};
+    float lp = clipWater(p);
+    if (sw3Ctx(p)) {
+      curlEvent(p, lp, lp - clipHeight(p));
+      vSpine = gcCx;
+      if (sw3Ctx(gcCx)) {
+        vec2 dir = gDir;
+        vec3 d = w3Coast(gcCx, gcDC, 0.25); // the crest's top: the water's own (both trains, its lean, its collapse)
+        vec3 top = vec3(gcCx.x + d.x, clipWater(gcCx) + d.y, gcCx.y + d.z);
+        vec3 Cr = curlCircle(uLook3.w, uCurl.xy); vec2 arc = curlArc();
+        float r = Cr.z;
+        // round the wall's loop: the outer face from the arc's back end to the lip, the lip's edge, the inner face
+        // back, the foot
+        float q = tube.y, th, rad, ang; vec2 n2;
+        float thk = r * 0.42; // the wall's girth at the face and root (a body of water, not a sheet), thinning to half along the lip
+        if (q < 0.45) { ang = mix(arc.x, arc.y, q / 0.45); rad = r; n2 = vec2(sin(ang), cos(ang)); }
+        else if (q < 0.5) { ang = arc.y; th = thk * mix(1.0, 0.5, smoothstep(-1.0, 3.0, ang)); rad = r - th * (q - 0.45) / 0.05; n2 = vec2(cos(ang), -sin(ang)); }
+        else if (q < 0.95) { ang = mix(arc.y, arc.x, (q - 0.5) / 0.45); th = thk * mix(1.0, 0.5, smoothstep(-1.0, 3.0, ang)); rad = r - th; n2 = -vec2(sin(ang), cos(ang)); }
+        else { ang = arc.x; rad = r - thk * (1.0 - (q - 0.95) / 0.05); n2 = -vec2(cos(ang), -sin(ang)); }
+        vec2 o = Cr.xy + rad * vec2(sin(ang), cos(ang));
+        P = top + vec3(dir.x, 0.0, dir.y) * o.x + vec3(0.0, o.y, 0.0);
+        vN = vec3(dir.x, 0.0, dir.y) * n2.x + vec3(0.0, n2.y, 0.0);
+        vTh = thk * mix(1.0, 0.5, smoothstep(-1.0, 3.0, ang));
+        vInfo = vec4(arc.y - ang, gcS, gcVis, gcVis > 0.002 && r > 0.02 ? 1.0 : 0.0);
+      }
     }
   }
   vW = P;
@@ -221,55 +199,59 @@ void main() {
 #include <logdepthbuf_pars_fragment>
 ${SKY_GLSL}
 uniform vec3 uSun, uSunColor, uSkyUp, uAbs, uSca; uniform vec4 uLook, uLook2; uniform sampler2D tFoam, uSkyView; uniform float uDebug;
-in vec3 vW, vN; in vec4 vLip; in float vIn, vTh; in vec2 vPsi; out vec4 oColor;
+const float CS = ${C.cell.toFixed(1)};
+in vec3 vW, vN; in vec4 vInfo; in float vTh; in vec2 vSpine; flat in vec2 vCell; out vec4 oColor;
 const float W_N = 1.333;
 float wFresnel(float ci) {
   ci = clamp(ci, 0.0, 1.0); float st2 = (1.0 - ci * ci) / (W_N * W_N); if (st2 >= 1.0) return 1.0;
   float ct = sqrt(1.0 - st2), rs = (ci - W_N * ct) / (ci + W_N * ct), rp = (W_N * ci - ct) / (W_N * ci + ct);
   return 0.5 * (rs * rs + rp * rp);
 }
-// the water's own material (water3/surface.js): its absorption and scattering (the colour preset and clarity), the sky
-// by exact Fresnel, the sun's highlight, the light through it; what lies behind (the wave's face) shows through by how
-// much water the view crosses (the girth there: the fat crest near opaque, the thin tip see-through), tinted as the
-// water tints it
+// the water's own material (water3/surface.js): absorption and scattering (the colour preset and clarity), the sky by
+// exact Fresnel, the sun's highlight, light through the wall (thick at the face, thin at the lip); the lip's edge
+// whitening into foam as it is thrown, more as the tube closes
 void main() {
   #include <logdepthbuf_fragment>
-  // only triangles wholly of the lip are drawn: one joining it to a vertex left under the water would be a curtain, and
-  // one across the half-wave seam (one crest's feet to the next one's: the phase jumping from pi to -pi, so the
-  // interpolated |phase| and the interpolated phase disagree) would join two lips; thrown away, pixel by pixel
-  if (vLip.z < 0.002 || vIn < 0.999 || vPsi.y - abs(vPsi.x) > 1.2) discard;
+  // this cell's share of the tube only (its spine inside the cell; the neighbours draw theirs), and none where a
+  // vertex had no tube
+  if (vInfo.w < 0.999 || vInfo.z < 0.002 || any(lessThan(vSpine, vCell)) || any(greaterThanEqual(vSpine, vCell + CS))) discard;
   vec3 V = normalize(cameraPosition - vW), n = normalize(vN);
-  if (dot(n, V) < -0.08) discard; // its outward faces only: a body, not a shell seen from both sides
-  n = normalize(n + V * max(0.0, -dot(n, V)) * 1.2); // the rim turned to the eye
-  if (uDebug > 8.5 && uDebug < 9.5) { oColor = vec4(mix(vec3(1.0, 0.08, 0.06), vec3(0.5, 0.0, 0.12), step(vLip.x, -0.001)) * (0.45 + 0.55 * max(dot(n, normalize(vec3(0.3, 1.0, 0.2))), 0.0)) * (uSkyUp * 0.6 + uSunColor * max(uSun.y, 0.0) * 0.4) * 3.0, 1.0); return; } // debug 9: the curl red, its underside dark red
+  if (dot(n, V) < -0.1) discard; // its outward faces: a wall of water, not a shell seen from both sides
+  n = normalize(n + V * max(0.0, -dot(n, V)) * 1.2);
+  float foamy = (1.0 - smoothstep(0.0, 0.7, vInfo.x)) * smoothstep(0.2, 0.7, vInfo.y);
+  if (uDebug > 8.5 && uDebug < 9.5) { oColor = vec4(mix(vec3(1.0, 0.08, 0.06), vec3(1.0, 0.95, 0.9), foamy) * (0.45 + 0.55 * max(dot(n, normalize(vec3(0.3, 1.0, 0.2))), 0.0)) * (uSkyUp * 0.6 + uSunColor * max(uSun.y, 0.0) * 0.4) * 3.0, 1.0); return; } // debug 9: the tube red, its lip's foam white
   float sunUp = max(uSun.y, 0.0);
   vec3 ext = uAbs / max(uLook.x, 0.05) + uSca;
-  float thick = clamp(vTh * 0.8 / max(dot(n, V), 0.3), 0.02, 8.0); // metres of water the view crosses: the girth there
+  float thick = clamp(vTh / max(dot(n, V), 0.3), 0.02, 6.0); // metres of water the view crosses
   vec3 Tw = exp(-ext * thick);
   vec3 amb = uSkyUp / 3.14159 * 0.8 + uSunColor * sunUp / 3.14159 * 0.6;
-  vec3 body = uSca / ext * (1.0 - Tw) * amb * 1.6 + vec3(0.02, 0.12, 0.09) * amb; // the lip's green, stronger than the open water's
-  // light through it from the sun's side (the crest glow, the panel's)
-  float through = pow(max(dot(-V, uSun), 0.0), 2.0);
-  body += vec3(0.04, 0.42, 0.3) * (uSunColor * sunUp * 0.5 + uSkyUp * 0.35) * (0.25 + 0.75 * through) * (uLook.w / 1.6) * (0.3 + 0.7 * abs(vLip.x)) * 0.6;
+  vec3 body = uSca / ext * (1.0 - Tw) * amb * 1.6 + vec3(0.02, 0.12, 0.09) * amb;
+  float through = pow(max(dot(-V, uSun), 0.0), 2.0); // light through it from the sun's side (the crest glow, the panel's)
+  body += vec3(0.04, 0.42, 0.3) * (uSunColor * sunUp * 0.5 + uSkyUp * 0.35) * (0.25 + 0.75 * through) * (uLook.w / 1.6) * 0.5;
   vec3 R = reflect(-V, n); R.y = abs(R.y);
   float F = wFresnel(max(dot(n, V), 0.0));
   vec3 refl = texture(uSkyView, skyUV(R, uSun)).rgb;
   vec3 Hh = normalize(V + uSun); float rough = 0.04 + uLook.y;
   float spec = pow(max(dot(n, Hh), 0.0), 2.0 / (rough * rough) - 2.0) * (1.0 / (3.14159 * rough * rough)) * 0.25 * wFresnel(dot(V, Hh)) * step(0.0, uSun.y);
   vec3 c = body * (1.0 - F) + refl * F + uSunColor * spec;
-  float pass_ = dot(Tw, vec3(0.2126, 0.7152, 0.0722)) * (1.0 - F); // what of the background still shows through
-  // the tip tearing into white at a full curl
-  float tear = smoothstep(0.75, 1.0, abs(vLip.x)) * smoothstep(0.4, 0.8, vLip.y); // the spray line along the lip as it comes down
-  float lace = texture(tFoam, vW.xz / 1.3 + vec2(0.0, vW.y)).r;
-  float white = smoothstep(1.0 - 0.8 * tear, 1.1 - 0.8 * tear, lace + 0.1) * tear;
+  float pass_ = dot(Tw, vec3(0.2126, 0.7152, 0.0722)) * (1.0 - F);
+  // the lip's edge into foam, laced
+  float lace = texture(tFoam, vW.xz / 1.3 + vec2(0.0, vW.y * 0.7)).r;
+  float white = clamp(foamy * 1.4 - (1.0 - lace) * 0.6, 0.0, 1.0);
   c = mix(c, (uSkyUp * 0.8 + uSunColor * sunUp * 0.5) * 0.95, white);
-  float a = max(1.0 - pass_ * (1.0 - white), 0.35) * vLip.z; // never wholly see-through: it reads
+  float a = max(1.0 - pass_ * (1.0 - white), 0.4) * vInfo.z;
   oColor = vec4(c * a, a);
 }`,
       blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
     });
-    this.mesh = new THREE.Mesh(this.grid, this.mat); // its own fine grid
+    this.mesh = new THREE.Mesh(tubeGeometry(), this.mat);
     this.mesh.frustumCulled = false; this.mesh.renderOrder = 2;
   }
-  dispose() { this.mat.dispose(); this.table.dispose(); this.grid.dispose(); }
+  // once a frame, before the water is drawn: the cells round the camera, and which carry a tube
+  update(renderer, camera) {
+    const C = CURL, half = C.cell * C.cells / 2;
+    this.U.uCellO.value.set(Math.floor((camera.position.x - half) / C.cell) * C.cell, Math.floor((camera.position.z - half) / C.cell) * C.cell);
+    const prev = renderer.getRenderTarget(); renderer.setRenderTarget(this.cells); renderer.render(this.cellScene, this.cam); renderer.setRenderTarget(prev);
+  }
+  dispose() { this.mat.dispose(); this.cellMat.dispose(); this.cells.dispose(); this.mesh.geometry.dispose(); this.quad.geometry.dispose(); }
 }
