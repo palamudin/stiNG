@@ -2483,6 +2483,15 @@ On a jump the CPU path no longer blurs a level out to its parent: the window it 
 
 The game now asks for a square at least 16 m across (`causticsMin`), pushed 30% of its size ahead along the view (`causticsAhead`), on a 512 texture with a 384 grid. That is about the old detail (3 cm texels, 7 cm cells, against 2.3 and 5 cm) over 2.7 times the width. Water seen at a slant still clouds with distance: that is the water, not the caustics.
 
+### 18.99 World v3's night, adopted
+
+The world thread gave World v3 a night of its own (`world/w3` 61b982c): a moon about opposite the sun, at a thirtieth of the sun's light, cool and dimmed by cloud, and a fixed field of stars that shows as the sky darkens. The water reflects both, blurred by its ripples, and carries the moon's path. By night the land's key light and shadows are the moon's, and the exposure counts it. The game adapts in three ways:
+- **One sky.** In World v3 the game no longer draws its own stars, moon disc or moonlight; the classic look keeps them.
+- **The moon's phase.** The game passes its 29.5-day lunar phase to the world (`env.moon`, 0 at new moon to 1 at full). The world's moonlight, shadows and path on the water scale with it, so a new-moon night is dark and a full moon lights the land.
+- **The night's floor (18.82).** The game's exposure floor for a legible night now counts the moonlight the world's own exposure already includes, so a moonlit night is not opened up twice.
+
+The swash's new timing (480883e) came in with it unchanged.
+
 ### 18.98 Places of interest and field notes (T3-2)
 
 **The place list.** The sim keeps a list of the places worth a pin on the map (`sim.places()`; C# `Places()`, in SimPlaces.cs). It is made, when asked, from what the sim holds, in this order:

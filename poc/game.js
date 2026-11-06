@@ -1978,11 +1978,11 @@ function nightSky(f, dayAmt) {
   // the moon rises in the east as the sun sets when full, later as it wanes: across the night by its phase
   const t = ((f - 1) * 15 / 9 + phase) % 1, a = Math.PI * Math.min(1, Math.max(0, t));
   const mdir = new THREE.Vector3(-Math.cos(a) * 0.85, Math.max(0.12, Math.sin(a)), -0.4).normalize();
-  moon.intensity = 0.38 * full * night * (1 - cloud) * (Math.sin(a) > 0.05 ? 1 : 0);
+  moon.intensity = W2on ? 0 : 0.38 * full * night * (1 - cloud) * (Math.sin(a) > 0.05 ? 1 : 0); // (World v3 lights the night with its own moon, at the phase the game passes it)
   moon.position.copy(camera.position).addScaledVector(mdir, 40); moon.target.position.copy(camera.position);
   hemi.intensity += (0.07 * (1 - cloud) + 0.12 * full * (1 - cloud)) * night; // starlight and the moon's sky glow
-  const G = NIGHT_SKY.userData, show = true; // World v3's sky has no stars or moon of its own: the game's go over it
-  NIGHT_SKY.visible = show; NIGHT_SKY.position.copy(camera.position); NIGHT_SKY.scale.setScalar(W2on ? 14 : 1); // in World v3 past its clouds, so they hide the stars
+  const G = NIGHT_SKY.userData, show = !W2on; // World v3 draws its own moon and stars (and the water reflects them): the game's only in the classic look
+  NIGHT_SKY.visible = show; NIGHT_SKY.position.copy(camera.position);
   G.stars.material.opacity = show ? night * night * (1 - cloud) : 0;
   G.disc.material.opacity = show ? night * (0.25 + 0.75 * full) * (1 - cloud * 0.8) * (Math.sin(a) > 0.02 ? 1 : 0) : 0;
   G.disc.position.copy(mdir).multiplyScalar(330); G.disc.lookAt(camera.position.x - RO.x, camera.position.y, camera.position.z - RO.z); // facing the eye
@@ -3923,7 +3923,7 @@ function w2Frame(dt, focus) {
   // World v3's year opens in late winter (snow until t 0.06), greens by 0.08, turns from 0.55, bare and snowy past 0.76:
   // the colony's spring-to-autumn runs over t 0.08..0.78 of it, its winter at 0.9
   const day = 360 * (sim.winter ? 0.9 : 0.08 + 0.7 * Math.min(1, Math.max(0, sim.seasonFrac)));
-  world2.set({ map: ov.m, hour: md / 60, day, cloud, rain, storm, snow: 0, haze: 1 + rain, mist: 1 + 3 * rain, wet: rain, wind: w2Breeze(wd), wind10: [wd.x * 1.26, wd.z * 1.26] });
+  world2.set({ map: ov.m, hour: md / 60, day, moon: NIGHT.full, cloud, rain, storm, snow: 0, haze: 1 + rain, mist: 1 + 3 * rain, wet: rain, wind: w2Breeze(wd), wind10: [wd.x * 1.26, wd.z * 1.26] });
   const fy = focus ? terrAt(focus.x, focus.z) : 0;
   const fd = focus ? Math.max(0.05, Math.hypot(camera.position.x - focus.x, camera.position.y - focus.y - fy, camera.position.z - focus.z)) : 10;
   world2.update(dt, camera.position, 2 ** (Math.round(Math.log2(fd) * 3) / 3)); // in steps: a shadow box that breathes with the camera's ease made the walls shimmer
@@ -3934,7 +3934,8 @@ function w2Frame(dt, focus) {
     const fl = (0.018 + 0.07 * NIGHT.full * clear) * night;
     if (fl > 0) { hemi.color.r = Math.max(hemi.color.r, fl * 0.75); hemi.color.g = Math.max(hemi.color.g, fl * 0.85); hemi.color.b = Math.max(hemi.color.b, fl * 1.25); }
     const g2 = Math.max(0, sy), S = W.sky, lum = 0.2126 * (S.sunColor.r * g2 + S.skyUp.r) + 0.7152 * (S.sunColor.g * g2 + S.skyUp.g) + 0.0722 * (S.sunColor.b * g2 + S.skyUp.b);
-    const auto = THREE.MathUtils.clamp(Math.PI / Math.max(lum, 0.05), 0.02, 40), want = THREE.MathUtils.clamp(Math.PI / Math.max(lum, 0.32 - 0.12 * NIGHT.full * clear), 0.02, 40);
+    const mc = S.uniforms.uMoonColor.value, lumM = (0.2126 * mc.r + 0.7152 * mc.g + 0.0722 * mc.b) * Math.max(0, S.uniforms.uMoonDir.value.y); // the moonlight the world's exposure counts
+    const auto = THREE.MathUtils.clamp(Math.PI / Math.max(lum + lumM, 0.05), 0.02, 40), want = THREE.MathUtils.clamp(Math.PI / Math.max(lum + lumM, 0.32 - 0.12 * NIGHT.full * clear), 0.02, 40);
     W.env.exposure = want / auto; }
   // the fireflies' sparks: a fixed brightness on the post chain's exposure (it opens up at night), so they glint, not glare
   ffGlow.material.color.setScalar(Math.min(1, 2.2 / Math.max(1, world2.post.U.uExposure.value)));

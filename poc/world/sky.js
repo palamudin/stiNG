@@ -17,6 +17,30 @@ export const ATMO = {
   sunAngle: 0.00935, // the sun's angular diameter, radians (0.535 degrees)
 };
 
+// The night sky: the moon (opposite the sun, a little off; its light uMoonColor at the ground, World.update) as a disc
+// and a glow, and the stars: a fixed field by direction, a few to a degree, faint ones and a few bright, showing as the
+// sky darkens. For the sky (post.js) and the water's reflection of it (water3/surface.js: blurrier, sharp > 0)
+export const NIGHT_GLSL = /* glsl */ `
+uniform vec3 uMoonDir, uMoonColor;
+float nightDark() { return 1.0 - smoothstep(-0.14, 0.02, uSun.y); }
+float nightHash(vec2 c) { return fract(sin(dot(c, vec2(127.1, 311.7))) * 43758.5453); }
+vec3 nightStars(vec3 v, float blur) {
+  if (v.y <= 0.0) return vec3(0.0);
+  vec2 uv = vec2(atan(v.z, v.x), asin(clamp(v.y, -1.0, 1.0))) * 57.29578 * 2.2; // cells of about half a degree
+  vec2 c = floor(uv), f = fract(uv) - 0.5; float h = nightHash(c), h2 = nightHash(c + 17.3);
+  float on = step(0.9, h), b = mix(0.25, 1.0, pow(h2, 6.0)) * on;
+  vec2 o = (vec2(fract(h * 13.1), fract(h * 31.7)) - 0.5) * 0.6; float s = 0.06 + blur;
+  float pt = exp(-dot(f - o, f - o) / (2.0 * s * s)) * (0.06 / s) * (0.06 / s);
+  vec3 tint = mix(vec3(0.8, 0.88, 1.15), vec3(1.15, 0.95, 0.75), fract(h2 * 7.7));
+  return tint * b * pt * nightDark() * smoothstep(0.0, 0.12, v.y) * 0.12;
+}
+vec3 nightMoon(vec3 v, float blur) {
+  float c = max(dot(v, uMoonDir), 0.0), r = 0.0075 + blur; // its disc (drawn a little large) and a glow round it
+  float a = acos(clamp(c, -1.0, 1.0));
+  return uMoonColor * (smoothstep(r * 1.08, r * 0.92, a) * 30.0 * (0.0075 / r) * (0.0075 / r) + pow(c, 900.0) * 1.5 + pow(c, 40.0) * 0.12) * smoothstep(-0.02, 0.05, uMoonDir.y);
+}
+vec3 nightSky(vec3 v, float blur) { return nightStars(v, blur) + nightMoon(v, blur); }
+`;
 export const SKY_GLSL = /* glsl */ `
 const float A_RG = ${ATMO.Rg.toFixed(1)}, A_RT = ${ATMO.Rt.toFixed(1)};
 const vec3 A_RAY = vec3(${ATMO.rayleigh.map((v) => v.toExponential(4)).join(', ')});
@@ -101,7 +125,7 @@ export class Sky {
       uHaze: { value: 1 },
       uCamH: { value: 2 },
       uSunColor: { value: new THREE.Color() }, // the sun's light at the ground, after the air
-      uMoon: { value: 0 },
+      uMoonDir: { value: new THREE.Vector3(0, 1, 0) }, uMoonColor: { value: new THREE.Color(0, 0, 0) }, // the moon (World.update): its direction and its light at the ground
     };
     this.mat = new THREE.ShaderMaterial({
       glslVersion: THREE.GLSL3,
