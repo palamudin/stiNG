@@ -273,11 +273,20 @@ ${this.shore ? '  else if (q.y == 1) { vec4 sh = shoreAt(p); o = vec4(sh.x, sh.w
     const camH = Math.max(1, eye.y - (this.source.sea > -1e5 ? this.source.sea : 0));
     this.sky.update(this.sunDir, camH, E.haze);
     this.uniforms.uSunDir.value.copy(this.sunDir);
+    // the moon: about opposite the sun (a little off its track), up while the sun is down; its light at the ground about a
+    // thirtieth of the sun's in these units (the exposure opens up at night to show it), cool, dimmed by cloud
+    { const m = this.sky.uniforms.uMoonDir.value.set(-this.sunDir.x + 0.18, -this.sunDir.y + 0.32, -this.sunDir.z - 0.12).normalize();
+      const up = THREE.MathUtils.smoothstep(m.y, -0.02, 0.15) * (1 - THREE.MathUtils.smoothstep(this.sunDir.y, -0.1, 0.05)) * (1 - 0.8 * THREE.MathUtils.smoothstep(E.cloud ?? 0, 0.3, 0.95));
+      this.sky.uniforms.uMoonColor.value.setRGB(0.55, 0.62, 0.8).multiplyScalar(0.11 * up); }
     // the clouds overhead take the sun's light (their shadow on the ground is the map; this is the average under cover)
     const cover = E.cloud ?? 0, through = 1 - 0.85 * THREE.MathUtils.smoothstep(cover, 0.3, 0.95);
     this.sky.sunColor.multiplyScalar(through); this.sky.skyUp.multiplyScalar(1 - 0.3 * cover); this.sky.skyHorizon.multiplyScalar(1 - 0.3 * cover); this.sky.uniforms.uSunColor.value.copy(this.sky.sunColor);
-    this.sun.color.copy(this.sky.sunColor); this.sun.intensity = 1 + 6 * (E.flash || 0);
-    this.hemi.color.copy(this.sky.skyUp); this.hemi.intensity = 1 + 4 * (E.flash || 0);
+    // the key light: the sun by day, the moon by night (its light and its shadows), crossing at dusk; the sky's light at
+    // night a little of the moon's too
+    const mc = this.sky.uniforms.uMoonColor.value, night = 1 - THREE.MathUtils.smoothstep(this.sunDir.y, -0.1, 0.05);
+    this.keyDir = (this.keyDir || new THREE.Vector3()).copy(this.sunDir).lerp(this.sky.uniforms.uMoonDir.value, night).normalize();
+    this.sun.color.copy(this.sky.sunColor).add(mc); this.sun.intensity = 1 + 6 * (E.flash || 0);
+    this.hemi.color.setRGB(this.sky.skyUp.r + 0.25 * mc.r, this.sky.skyUp.g + 0.25 * mc.g, this.sky.skyUp.b + 0.25 * mc.b); this.hemi.intensity = 1 + 4 * (E.flash || 0);
     // what the ground sends back up: the sun and sky on an average ground (albedo 0.18)
     const g = Math.max(0, this.sunDir.y);
     this.hemi.groundColor.setRGB(0.18 * (this.sky.sunColor.r * g + this.sky.skyUp.r), 0.18 * (this.sky.sunColor.g * g + this.sky.skyUp.g), 0.15 * (this.sky.sunColor.b * g + this.sky.skyUp.b));
@@ -291,7 +300,7 @@ ${this.shore ? '  else if (q.y == 1) { vec4 sh = shoreAt(p); o = vec4(sh.x, sh.w
     // snap the shadow box to its texels so shadows do not crawl as the camera moves
     const texel = (2 * box) / this.q.shadow;
     this.sun.target.position.set(Math.round(fx / texel) * texel, fy, Math.round(fz / texel) * texel);
-    this.sun.position.copy(this.sun.target.position).addScaledVector(this.sunDir, box * 4);
+    this.sun.position.copy(this.sun.target.position).addScaledVector(this.keyDir, box * 4);
     this.uniforms.uShadowFar.value = box;
     this.uniforms.uWet.value = E.wet;
     this.uniforms.uTime.value = this.time; // the grass and the trees sway on this clock (the post chain has its own)
@@ -352,8 +361,9 @@ ${this.shore ? '  else if (q.y == 1) { vec4 sh = shoreAt(p); o = vec4(sh.x, sh.w
     U.uBlurIn.value = (1 - this.clip.sharpness()) * 3.0; // the picture comes into focus as the ground's detail arrives
     // exposure follows the light: a fixed EV for day, opening up at dusk
     const g2 = Math.max(0, this.sunDir.y), lum = 0.2126 * (this.sky.sunColor.r * g2 + this.sky.skyUp.r) + 0.7152 * (this.sky.sunColor.g * g2 + this.sky.skyUp.g) + 0.0722 * (this.sky.sunColor.b * g2 + this.sky.skyUp.b);
+    const mc2 = this.sky.uniforms.uMoonColor.value, lumM = (0.2126 * mc2.r + 0.7152 * mc2.g + 0.0722 * mc2.b) * Math.max(0, this.sky.uniforms.uMoonDir.value.y); // the moon's share at night
     // a grey card (18%) facing up maps to scene-linear 0.18 when exposure = pi / E (E: the light on level ground)
-    U.uExposure.value = THREE.MathUtils.clamp(Math.PI / Math.max(lum, 0.05), 0.02, 40) * (E.exposure ?? 1);
+    U.uExposure.value = THREE.MathUtils.clamp(Math.PI / Math.max(lum + lumM, 0.05), 0.02, 40) * (E.exposure ?? 1);
   }
   render() {
     // count the whole frame (shadows, scene, post), not just its last pass

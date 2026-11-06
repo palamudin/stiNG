@@ -12,7 +12,7 @@
 //   -> bloom: a six-level mip chain blended in at a small fraction, no threshold (energy kept)
 //   -> final: exposure, AgX, a light grade, vignette, grain, sRGB out.
 import * as THREE from 'three';
-import { SKY_GLSL } from './sky.js';
+import { SKY_GLSL, NIGHT_GLSL } from './sky.js';
 import { waterGLSL, WATER_SHADE_GLSL, WATER } from './water.js';
 import { SHORE_WAVE_GLSL } from './shorefield.js';
 import { NOISE_GLSL } from './noise.js';
@@ -161,6 +161,7 @@ vec3 viewRayZ(vec2 uv) { vec4 p = uInvProj * vec4(uv * 2.0 - 1.0, 1.0, 1.0); p.x
 // the log depth buffer back to distance along the ray
 float rayDist(vec2 uv, float d) { float w = exp2(d * uLogF) - 1.0; return w * length(viewRayZ(uv)); }
 vec3 skyAt(vec3 v) { return texture(uSkyView, skyUV(v, uSun)).rgb; }
+${NIGHT_GLSL}
 vec3 sunDisc(vec3 v) {
   float c = dot(v, uSun), r = ${(0.5 * 0.00935).toFixed(6)};
   float a = acos(clamp(c, -1.0, 1.0)); if (a > r * 1.6) return vec3(0.0);
@@ -190,7 +191,7 @@ void main() {
   float d0 = texture(tDepth, uv).r;
   vec3 col = texture(tColor, uv).rgb;
   float dist = d0 >= 1.0 ? 1e9 : rayDist(uv, d0);
-  if (d0 >= 1.0) col = skyAt(v) + sunDisc(v) + uFlash * uSkyUp * 4.0; // lightning: the whole sky lights
+  if (d0 >= 1.0) col = skyAt(v) + sunDisc(v) + nightSky(v, 0.0) + uFlash * uSkyUp * 4.0; // lightning: the whole sky lights
   float outDist = dist; bool wet = false; float layer = 0.0; // debug: 0 ground, 1 sea, 2 sheet, 3 body
 #if W_CASCADES > 0
   // the nearest water: the sea (iterated onto its waves), then the bodies (discs on the ground's plane)

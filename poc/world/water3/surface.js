@@ -35,7 +35,7 @@
 // The world's depth buffer is logarithmic, so the shaders carry three.js's log-depth chunks.
 import * as THREE from 'three';
 import { NOISE_GLSL } from '../noise.js';
-import { SKY_GLSL } from '../sky.js';
+import { SKY_GLSL, NIGHT_GLSL } from '../sky.js';
 import { WATER, WATER_CAUSTIC_GLSL, POISSON } from '../water.js';
 import { SWASH_GLSL, SURF_GLSL } from './swash.js';
 import { SurfFoam } from './surffoam.js';
@@ -219,6 +219,7 @@ ${head}
 ${coast}
 ${SKY_GLSL}
 uniform vec3 uSun, uSunColor, uSkyUp; uniform sampler2D uSkyView, tScene, tFoam, tFoamField, tFoamFar; uniform vec3 uFoamWin, uFoamFarWin; uniform vec4 uLace;
+${NIGHT_GLSL}
 // the foam's lace (water3/foamtex.js), never tiled: each read is two of the texture, the second rotated and shifted,
 // blended by a slow noise (as the waves' cascades are); its scale varies in patches (two scales blended by a slower
 // noise, by the panel's lace variation); uLace = (lace scale, scale variation, patchiness, -)
@@ -369,7 +370,7 @@ void main() {
   if (under) n = -n;
   vec3 ext = W_ABS + W_SCA;
   float sunUp = max(uSun.y, 0.0);
-  vec3 amb = uSkyUp / 3.14159 * 0.8 + uSunColor * sunUp / 3.14159 * 0.6;
+  vec3 amb = uSkyUp / 3.14159 * 0.8 + uSunColor * sunUp / 3.14159 * 0.6 + uMoonColor * max(uMoonDir.y, 0.0) / 3.14159 * 0.7; // the moon's light too, at night
   if (under) {
     // from below: the world above through the surface, the water between the eye and it
     vec3 Tw = exp(-ext * tw);
@@ -402,7 +403,7 @@ void main() {
   { float tb = clamp(vCoast.z, 0.0, 1.0) * 0.5 * edge; vec3 turb = vec3(0.32, 0.4, 0.27) * (uSkyUp * 0.8 + uSunColor * sunUp * 0.6 * cloud); body = mix(body, turb, tb); }
   // ---- reflection: the scene where the march finds it, else the sky; the sun through the slopes' distribution
   vec3 Rv = reflect(-V, n); Rv.y = abs(Rv.y);
-  vec3 refl = skyAt(Rv);
+  vec3 refl = skyAt(Rv) + nightSky(Rv, 0.02 + 0.5 * sqrt(sv.x + sv.y)); // the night sky in it: the stars and the moon, blurred by the ripples
 #ifdef W3_SSR
   { vec4 ss = wSSR(vW, Rv); refl = mix(refl, ss.rgb, ss.a); }
 #endif
@@ -413,6 +414,13 @@ void main() {
   float ch = max(Hh.y, 1e-3), Dm = P22 / (ch * ch * ch * ch), sav = 0.5 * (s2.x + s2.y);
   float G = 1.0 / (1.0 + wLambda(max(V.y, 1e-3), sav) + wLambda(max(uSun.y, 1e-3), sav));
   vec3 spec = uSunColor * wFresnel(dot(V, Hh)) * Dm * G / (4.0 * max(V.y, 1e-3)) * step(0.0, uSun.y) * cloud;
+  // the moon's path on the water: the same highlight from the moon (its disc a little larger than the sun's)
+  if (uMoonColor.r > 1e-5) {
+    vec3 Hm = normalize(V + uMoonDir); vec2 shm = vec2(-Hm.x, -Hm.z) / max(Hm.y, 1e-3) - m, s2m = s2 + vec2(1.5e-5);
+    float Pm = exp(-0.5 * (shm.x * shm.x / s2m.x + shm.y * shm.y / s2m.y)) / (6.2831853 * sqrt(s2m.x * s2m.y)), chm = max(Hm.y, 1e-3);
+    float Gm = 1.0 / (1.0 + wLambda(max(V.y, 1e-3), sav) + wLambda(max(uMoonDir.y, 1e-3), sav));
+    spec += uMoonColor * 6.0 * wFresnel(dot(V, Hm)) * Pm / (chm * chm * chm * chm) * Gm / (4.0 * max(V.y, 1e-3)) * step(0.0, uMoonDir.y);
+  }
   // glints: facets the size of the short ripples in cells anchored to the world, at the two power-of-two sizes round
   // the footprint; each cell redraws its Poisson count about three times a second, so close water sparkles and far
   // water is smooth (the mean is the smooth highlight's)
