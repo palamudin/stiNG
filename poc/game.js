@@ -6,6 +6,7 @@ import {
   toWorld, toLocal, dirToWorld, chunkKey, chunkOf, hash, Domain, rangeInt, resolveSting, zoneCover, segClosest, classify, predictedKind,
   NEST, NEST_ENTRANCE, flyPos, beePos, fmtClock, minuteOfDay, isLowerZone, broodTotal, sugarCap, proteinCap, waterCap, garmentGraph, dayWeather,
   NetLab, LINKS, generateChunk, wildHere, landUse, pondsOf, pondEdge, POND_PATH, buildList, settledOf, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetVel, CHASE, targetLabel, assistPilot, swoopPilot, hoverPilot, hoverSetting, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE, SKILLS, SKILL_UNLOCKS, SKILL_RANKED, SKILL_HIVE, skillCost, ROLES,
+  FIELD_NOTES, PLACE_KINDS,
 } from './sim/index.js';
 import { Rings, RING, ringGrid, ringGLSL } from './view/rings.js';
 import { Batch, place } from './view/merge.js';
@@ -3023,6 +3024,18 @@ function drawMapTo(ctx, W, H, ox, oz, cell, o = {}) {
       ctx.fillText(String(n), ex - Math.cos(ang) * 20, ey - Math.sin(ang) * 20);
     }
   }
+  // places of interest (T3-2): water, town squares, porch lights, nest sites and the exterminator, zoomed in; a kind whose
+  // field note is still to find has a hollow pin
+  if (o.detail) {
+    const PIN = { water: '#4f8cbe', town: '#d9b26a', light: '#ffd27a', site: '#b08a5a', exterminator: red };
+    for (const p of sim.places()) {
+      const c = PIN[p.kind]; if (!c) continue;
+      const [px, py] = toS(p.x, p.z); if (px < -8 || py < -8 || px > W + 8 || py > H + 8) continue;
+      const found = sim.guide[p.kind] !== undefined, r = (p.kind === 'town' ? 5 : 3) * k;
+      ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2);
+      if (found) { ctx.fillStyle = c; ctx.fill(); } else { ctx.strokeStyle = c; ctx.lineWidth = 1.5; ctx.stroke(); }
+    }
+  }
   // swarms out (T2-11): an amber blob where the cloud is
   ctx.fillStyle = 'rgba(214,150,40,.9)';
   for (const sw of sim.swarms) { const p = sim.swarmAt(sw, sim.minute), [px, py] = toS(p.x, p.z); ctx.beginPath(); ctx.arc(px, py, 4 * k, 0, Math.PI * 2); ctx.fill(); }
@@ -3059,7 +3072,7 @@ const atlasCtx = $('atlasMap').getContext('2d');
 function openAtlas() {
   const w = sim && (sim.wasp || sim.nest);
   if (!w) return;
-  atlas.open = true; atlas.ox = w.x; atlas.oz = w.z; atlas.sel = null; $('atlas').hidden = false; $('atlasCard').hidden = true;
+  atlas.open = true; atlas.ox = w.x; atlas.oz = w.z; atlas.sel = null; $('atlas').hidden = false; $('atlasCard').hidden = true; drawGuide();
   const cv = $('atlasMap'); atlas.cell = Math.max(32, Math.min(cv.clientWidth, cv.clientHeight) / 9); // about nine areas across
   input.lmb = false; input.free.held = false;
   if (document.pointerLockElement === canvas) document.exitPointerLock?.();
@@ -3129,6 +3142,21 @@ function drawAtlas() {
 const USE_NAME = { urban: 'Town blocks', farm: 'Farmland', yards: 'Backyards', forest: 'Woods', mall: 'Strip mall', town: 'Town square', park: 'Park', wild: 'Wild land' };
 // A card on the area under the pointer (or the tap): what it is, and how much of what is there, as low, mid or high
 const lvl = (v, a, b) => v <= 0 ? '<span class="lv low">none</span>' : `<span class="lv ${v < a ? 'low' : v < b ? 'mid' : 'high'}">${v < a ? 'low' : v < b ? 'mid' : 'high'}</span>`;
+// the field notes (T3-2) of the kinds of place in an area: the note once found, else what to reach to find it
+function placeNotes(key) {
+  const kinds = new Set(sim.places().filter((p) => chunkKey(chunkOf(p.x), chunkOf(p.z)) === key).map((p) => p.kind));
+  return [...kinds].map((k) => { const n = FIELD_NOTES[k]; return sim.guide[k] !== undefined ? `<div class="note"><b>${n.title}.</b> ${n.note}<em>${n.source}</em></div>` : `<div class="note"><b>${n.title}</b>: a field note to find. Reach it.</div>`; }).join('');
+}
+// the field guide: every note found, in the guide's order, and the ones still to find
+function drawGuide() {
+  const g = $('guide'), n = PLACE_KINDS.filter((k) => sim.guide[k] !== undefined).length;
+  $('guideBtn').textContent = `Guide ${n}/${PLACE_KINDS.length}`;
+  if (g.hidden) return;
+  g.innerHTML = `<h3>Field guide</h3>${n} of ${PLACE_KINDS.length} notes found. Each unlocks the first time you reach a place of its kind.` + PLACE_KINDS.map((k) => {
+    const N = FIELD_NOTES[k], d = sim.guide[k];
+    return d !== undefined ? `<div class="note"><b>${N.title}.</b> ${N.note}<em>${N.source} · found on day ${d + 1}</em></div>` : `<div class="note locked"><b>${N.title}</b>: not found yet.</div>`;
+  }).join('');
+}
 function atlasCard(key, px, py, card = $('atlasCard'), box = $('atlas').getBoundingClientRect(), top = 46) {
   if (!key) { card.hidden = true; return; }
   const [cx, cz] = key.split(',').map(Number), rec = sim.records.get(key) || (devOpts.reveal ? revealed(cx, cz) : null), CSZ = T.chunk.size;
@@ -3156,7 +3184,8 @@ function atlasCard(key, px, py, card = $('atlasCard'), box = $('atlas').getBound
       + `Water ${baths ? `<span class="lv mid">yes</span> ${baths} birdbath${baths > 1 ? 's' : ''}` : '<span class="lv low">none</span>'}<br>`
       + `Danger ${lvl(danger, 3, 6)} ${bits([hives && `${hives} hive${hives > 1 ? 's' : ''}`, webs && `${webs} web${webs > 1 ? 's' : ''}`, birds && `${birds} bird${birds > 1 ? 's' : ''}`, c.rival && 'rivals'])}<br>`
       + `Trees ${c.trees.length} · tables ${c.tables.length}${(c.sheds || []).length ? ` · buildings ${(c.sheds || []).length}` : ''}`
-      + (here.length ? `<div class="here">${here.join(' · ')}</div>` : '');
+      + (here.length ? `<div class="here">${here.join(' · ')}</div>` : '')
+      + placeNotes(key);
   }
   if (devOpts.dev) { // dev tools: teleport to the point clicked
     const cv = $('atlasMap'), x = atlas.ox - (px - cv.clientWidth / 2) / atlas.cell * CSZ, z = atlas.oz - (py - cv.clientHeight / 2) / atlas.cell * CSZ;
@@ -3210,6 +3239,7 @@ function atlasZoom(f, px, py) {
   for (const b of document.querySelectorAll('#atlasTools button[data-a]')) b.addEventListener('click', () => {
     const a = b.dataset.a;
     if (a === 'close') closeAtlas(); else if (a === 'zoom+') atlasZoom(1.4); else if (a === 'zoom-') atlasZoom(1 / 1.4);
+    else if (a === 'guide') { $('guide').hidden = !$('guide').hidden; drawGuide(); }
     else { const w = a === 'me' ? sim.wasp : sim.nest; if (w) { atlas.ox = w.x; atlas.oz = w.z; drawAtlas(); } }
   });
   addEventListener('resize', () => drawAtlas());
@@ -3341,6 +3371,7 @@ function handleEvents(events) {
       case 'caught': if (e.id === sim.drivenId) { toast(e.kind === 'wasp' ? 'Took a wasp · carry it home for the brood' : `Caught a ${e.kind}`, 'var(--yellow)', 1.4); blip(900, 600, 0.08, 0.05, 'square'); } break;
       case 'pollen': if (e.driven) { toast('Pollen packed · bring it home', 'var(--yellow)', 1.4); blip(700, 900, 0.08, 0.05, 'triangle'); } break; // T2-11
       case 'swarm': toast(`The old queen swarmed with ${fmt(e.adults)} workers. They hang in a clump on a branch ${Math.round(Math.hypot(e.x - sim.nest.x, e.z - sim.nest.z))} m off while their scouts look for a home. A daughter queen keeps the hive; it lays nothing until she has mated.`, 'var(--yellow)', 5); logEvent('swarm'); break;
+      case 'fieldNote': { const N = FIELD_NOTES[e.kind]; if (N) { toast(`Field note found: ${N.title}. Read it in the atlas guide (M).`, 'var(--yellow)', 3.5); logEvent(`Field note: ${N.title}`); if (atlas.open) drawGuide(); } break; }
       case 'swarmSettled': toast(`The swarm moved into a tree ${Math.round(Math.hypot(e.x - sim.nest.x, e.z - sim.nest.z))} m away: a new colony of the line.`, 'var(--yellow)', 4); logEvent('swarm settled'); syncNests(); lineSig = ''; break;
       case 'swarmGone': toast('The swarm flew off out of the area.', 'var(--muted)', 3); break;
       case 'queenMated': if (e.own) toast('The young queen is back from her mating flight. The hive lays again.', 'var(--yellow)', 3.5); logEvent('queen mated'); break;

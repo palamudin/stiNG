@@ -86,7 +86,7 @@ namespace Sting.Core
 
     public static class Persist
     {
-        public const int SAVE_VERSION = 35; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home); 14: barbecue meat taken; 15: regions, pulp taken from wood; 16: strolls and garden rounds; 17: the carry ledger and sips (T1-20); 18: water (T2-1); 19: young queens on their mating flight (T2-3); 20: lineage colonies (T2-4); 21: feature modifiers (T2-6); 22: the exterminator called to a sister colony; 23: terrain; 24: the swoop; 25: species (wasps, hornets, honeybees); 26: XP and skills; 27: the player gauge, hives kept over a wasp winter; 28: wintering in somewhere warm; 29: a person's pace, for a lock; 30: each line's own progression, insects' own experience, role levels; 31: a colony switch on its way through the relay; 32: the year's mark and a honeybee line's wasp offer; 33: a firefly spat out; 34: swarms on their way and a young queen's mating flight; 35: the settled area
+        public const int SAVE_VERSION = 36; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home); 14: barbecue meat taken; 15: regions, pulp taken from wood; 16: strolls and garden rounds; 17: the carry ledger and sips (T1-20); 18: water (T2-1); 19: young queens on their mating flight (T2-3); 20: lineage colonies (T2-4); 21: feature modifiers (T2-6); 22: the exterminator called to a sister colony; 23: terrain; 24: the swoop; 25: species (wasps, hornets, honeybees); 26: XP and skills; 27: the player gauge, hives kept over a wasp winter; 28: wintering in somewhere warm; 29: a person's pace, for a lock; 30: each line's own progression, insects' own experience, role levels; 31: a colony switch on its way through the relay; 32: the year's mark and a honeybee line's wasp offer; 33: a firefly spat out; 34: swarms on their way and a young queen's mating flight; 35: the settled area; 36: the field guide (T3-2)
         const uint MAGIC = 0x474E4953; // "SING"
 
         // ---------------------------------------------------------------- one Io per type
@@ -337,6 +337,11 @@ namespace Sting.Core
             a.D(ref s.lineage); a.I(ref s.drivenId);
             a.List(ref s.line, () => new LineColony(), x => { a.I(ref x.id); a.I(ref x.season); if (a.Reading) { x.nest = new Nest(); x.colony = new ColonyState(); } IoNest(a, x.nest); IoColony(a, x.colony); a.L(ref x.ext); }); a.I(ref s.lineSeq); // T2-4
             a.List(ref s.swarms, () => new SwarmOut(), x => { a.D(ref x.n); a.V(ref x.from); a.V(ref x.biv); a.V(ref x.to); a.L(ref x.t0); a.L(ref x.@out); a.L(ref x.leave); a.L(ref x.arrive); a.B(ref x.own); if (a.Opt(ref x.nest)) IoNest(a, x.nest); if (a.Opt(ref x.colony)) IoColony(a, x.colony); }); // T2-11
+            { // the field guide (T3-2), in the order found
+                int gn = s.guideOrder.Count; a.I(ref gn);
+                if (a.Reading) { s.guide.Clear(); s.guideOrder.Clear(); for (int i = 0; i < gn; i++) { string k = null; long d = 0; a.S(ref k); a.L(ref d); s.guide[k] = d; s.guideOrder.Add(k); } }
+                else foreach (var k in s.guideOrder) { string kk = k; long d = s.guide[k]; a.S(ref kk); a.L(ref d); }
+            }
             if (a.Opt(ref s.winter))
             {
                 var W = s.winter; a.S(ref W.why); a.D(ref W.survivors); a.D(ref W.lineage); a.I(ref W.until); a.S(ref W.offer); a.B(ref W.home); a.B(ref W.bee); a.D(ref W.days);

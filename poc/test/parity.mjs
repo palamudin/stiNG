@@ -6,6 +6,7 @@ import { applyTuning } from '../sim/tunefile.js';
 applyTuning(T, readFileSync(new URL('../../tuning/sting.tune', import.meta.url), 'utf8')); // T1-22: the shipped tuning
 import { generateChunk, buildList, settledOf, wildHere, dayWeather, windAt, humanWindow, flyPos, beePos, birdPos, dragonPos, makeNest, shedSites, shedRoof, groundAt, groundSlope } from '../sim/world.js';
 import { hash, Domain, u64, datan2, dsin, h32 } from '../sim/rng.js';
+import { FIELD_NOTES } from '../sim/places.js';
 import { newColony, colonyStep, destroyNest, colonyFinished, seasonPhase, sugarCap, proteinCap, waterCap } from '../sim/colony.js';
 import { Sim } from '../sim/sim.js';
 import { NetLab, MeshLab } from '../sim/net.js';
@@ -129,6 +130,8 @@ for (const seed of seeds) {
   for (const sh of generateChunk(1234n, 0, 1).sheds) { const r = shedRoof(sh); for (const k of ['wall', 'wallHalf', 'half', 'S', 'y0', 'rise', 'L']) d.f(r[k]); d.f(r.alongX); }
   out('motion', d.hex());
 }
+// the field notes (T3-2): every kind, its title, note and source, word for word in both builds
+{ const d = Digest(); for (const [k, n] of Object.entries(FIELD_NOTES)) { d.s(k); d.s(n.title); d.s(n.note); d.s(n.source); } out('notes', d.hex()); }
 
 // bodies: traits, clothing, parts, zones, reach, resolution, garment graphs
 for (const seed of seeds) {
@@ -232,6 +235,7 @@ for (const sc of SIM_SCENARIOS) {
     sim.step(bot(sim));
     for (const e of sim.drainEvents()) { d.s(e.type); d.f(e.t); }
     if (sim.tick % 60 === 0) { d.s(sim.stateHash()); d.s(sim.humanHash()); }
+    if (sim.tick % 600 === 0) { for (const p of sim.places()) { d.s(p.kind); d.s(p.key); d.f(p.x); d.f(p.y); d.f(p.z); } for (const k of Object.keys(sim.guide)) { d.s(k); d.f(sim.guide[k]); } } // places of interest and the field guide (T3-2)
     if (sc.prog && sim.tick % 60 === 0) { const P = sim.prog, Q = sim.player; d.f(P.unit); d.f(P.unitTotal); d.f(P.hive); d.f(P.hiveTotal); d.f(P.stabs); for (const r of P.ranks) d.f(r); for (const r of P.roles) d.f(r); d.f(Q.hand); d.f(Q.gaugeRate); d.f(Q.gaugeDays); d.f(sim.line.length); d.f(sim.colony.adults); for (const x of sim.line) { d.f(x.id); d.f(x.colony.adults); d.f(x.colony.sugar); } }
   }
   d.s(sim.stateHash()); d.s(sim.humanHash());

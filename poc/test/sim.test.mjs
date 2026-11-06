@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, humanParts, malesAbout, chunkOf, toLocal, dirToWorld, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, groundSlope, groundNatural, pavingOf, buildList, pondsOf, inPond, pondEdge, settledOf, wildHere, pickTarget, assistPilot, swoopPilot, hoverPilot, hoverSetting, HOVER, ROLES, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS, DiscGrid, WOODS, chunkGrade, SLOPE,
+  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, groundSlope, groundNatural, pavingOf, buildList, pondsOf, inPond, pondEdge, settledOf, wildHere, pickTarget, assistPilot, swoopPilot, hoverPilot, hoverSetting, HOVER, ROLES, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS, DiscGrid, WOODS, chunkGrade, SLOPE, FIELD_NOTES, PLACE_KINDS,
 } from '../sim/index.js';
 import { applyTuning, parseTuning, tuningHash, tuningLeaves, TUNE } from '../sim/tunefile.js';
 
@@ -2471,6 +2471,25 @@ function seated(sim, pred) {
   ok(houses > 40 && garages > houses * 0.6 && garages < houses * 0.95 && inLot === garages && level === garages, `${garages} of ${houses} houses have a garage beside them, every one in its own lot with its door in line with the house's front, on the house's level pad`);
   ok(drives === garages && clear === drives && drive <= 0.15 + 1e-6, `(${drives} drives, ${clear} clear) each garage has a drive from the sidewalk to its door, at most ${(drive * 100).toFixed(1)}% (15% allowed), with nothing set on it or in the garage`);
   ok(porchLevel === houses && doors === houses, `every front door has a level stoop and a step before it, the door at the stoop's height (${porchLevel} of ${houses})`);
+}
+
+// 71. Places of interest and field notes (T3-2, GDD 10, Appendix C): the sim lists the places worth a pin (the nest, hives,
+// porch lights, water, nest sites, a rival nest...) with keys that name them the same every time; every kind has a true
+// note with its source; a note unlocks the first time the wasp reaches its kind, once, with an event; the guide is saved
+{
+  const notesOk = PLACE_KINDS.length === 10 && PLACE_KINDS.every((k) => { const n = FIELD_NOTES[k]; return n.title && n.note.length > 40 && n.source.length > 8; });
+  const s = new Sim({ seed: 1234, birds: false }, { noAI: true }); run(s, 31); // (the guide looks every 30 ticks)
+  const P = s.places(), kinds = new Set(P.map((p) => p.kind)), keys = new Set(P.map((p) => p.key));
+  const same = JSON.stringify(P) === JSON.stringify(s.places());
+  const hv = P.find((p) => p.kind === 'hive'), w = s.wasp;
+  const before = JSON.stringify(s.guide);
+  place(w, { x: hv.x + 1, y: hv.y + 0.5, z: hv.z }); w.state = 'fly'; w.land = null; w.energy = 1;
+  const ev = run(s, 61), notes = ev.filter((e) => e.type === 'fieldNote'), again = run(s, 120).filter((e) => e.type === 'fieldNote' && e.kind === 'hive').length;
+  const r = restore(snapshot(s));
+  ok(notesOk && ['nest', 'hive', 'light', 'site', 'water', 'rival'].every((k) => kinds.has(k)) && keys.size === P.length && same,
+    `${P.length} places round the home tree (${[...kinds].join(', ')}), each with its own key; all ${PLACE_KINDS.length} kinds carry a field note with its source`);
+  ok(before === '{"nest":0}' && s.guide.hive === s.day && notes.some((e) => e.kind === 'hive') && again === 0 && JSON.stringify(r.guide) === JSON.stringify(s.guide),
+    `the nest's note is found at the start; reaching a hive unlocks its note once (${notes.map((e) => e.kind).join(', ')}); the guide survives a save (${Object.keys(r.guide).join(', ')})`);
 }
 
 // 70. The region of templates (GDD 21.6, S8, GEN_VERSION 19): a hilly world reads as a town in its land: built where it

@@ -1863,6 +1863,20 @@ namespace Sting.Core.Tests
                 Ok(D(I.site.h) >= 10 && D(I.site.h) <= 90 && inside && beyond && step < 3 && wild > 400 && settledChunks > 30 && built == 0 && trees > 300 && wet == 0 && s.wasp.y >= 0 && st.RulesHash() != t1.RulesHash() && st.WorldTag().Contains("wild beyond 400 m"),
                     $"the settled area sits on the wild land {D(I.site.h):0.0} m above the sea at ({D(I.site.x):0}, {D(I.site.z):0}); {settledChunks} settled chunks, {wild} wild ones with nothing built and {trees} trees, none in the water; no step over 3 m across the band ({step:0.00} per 2 m); a sim runs over it");
             }
+            // 71. places of interest and field notes (T3-2; sim.test.mjs)
+            {
+                bool notesOk = Places.Notes.Length == 10 && Places.Notes.All(n => n.title.Length > 0 && n.note.Length > 40 && n.source.Length > 8);
+                var s = new Sim(new Settings { seed = 1234, birds = false }, new SimOpts { noAI = true }); RunS(s, 31); // (the guide looks every 30 ticks)
+                var PL = s.Places(); var kinds = new HashSet<string>(PL.Select(p => p.kind)); var keys = new HashSet<string>(PL.Select(p => p.key));
+                bool before = s.guide.Count == 1 && s.guide.ContainsKey("nest");
+                var hv = PL.First(p => p.kind == "hive"); var w = s.wasp;
+                Place(w, P(hv.x + 1, hv.y + 0.5, hv.z)); w.state = "fly"; w.land = null; w.energy = 1;
+                var ev = RunS(s, 61); bool got = ev.Any(e => e.type == "fieldNote" && (string)e["kind"] == "hive"); int again = RunS(s, 120).Count(e => e.type == "fieldNote" && (string)e["kind"] == "hive");
+                var r = Persist.Restore(Persist.Snapshot(s));
+                bool saved = r.guideOrder.SequenceEqual(s.guideOrder) && s.guideOrder.All(k => r.guide[k] == s.guide[k]);
+                Ok(notesOk && new[] { "nest", "hive", "light", "site", "water", "rival" }.All(kinds.Contains) && keys.Count == PL.Count && before && s.guide.ContainsKey("hive") && got && again == 0 && saved,
+                    $"{PL.Count} places round the home tree ({string.Join(", ", kinds)}); every kind carries a field note; reaching a hive unlocks its note once; the guide survives a save ({string.Join(", ", r.guideOrder)})");
+            }
             // 70. the region of templates (GDD 21.6, S8, GEN_VERSION 19; sim.test.mjs): a hilly world reads as a town in its land
             {
                 ulong S = 1234; var st = new Settings { terrain = 2 }; var by = new Dictionary<string, List<double>>(); var slopeWood = new List<double>();

@@ -11,6 +11,7 @@ import {
   isRaining, dayWeather, tempAt, windAt, isDaylight, humanWindow, flyPos, beePos, birdPos, dragonPos, shedSites, shedRoof, groundAt, settledOf, wildHere, makeNest, inPond, pondEdge,
   WOODS, woodsThin,
 } from './world.js';
+import { PLACES, PLACE_KINDS } from './places.js';
 import { newColony, colonyStep, destroyNest, colonyFinished, seasonPhase, reproShare, broodTotal, spOf } from './colony.js';
 
 // A wasp's species row (GDD 6.8): its line's, or a rival's (the neighbourhood's yellowjackets)
@@ -105,6 +106,7 @@ export class Sim {
     this.species = opts.species || this.settings.species || 'wasp'; // the player's line (GDD 6.8)
     this.colony = newColony(false, this.species);
     this.swarms = []; // swarms on their way to a new home (T2-11)
+    this.guide = {}; // the field guide (T3-2): kind -> the day its note was found
     this.progs = {}; // each line's XP, stabs and skills, by species (GDD 6.8); this.prog is the line in hand
     this.player = this._newPlayer(); // the player gauge: what the player earns in hand, whichever line
     this.nest = makeNest(NEST.treeX, NEST.treeZ, NEST.x, NEST.y, NEST.z);
@@ -402,6 +404,7 @@ export class Sim {
     if (this.tick % 3 === 0) this._humans();
     // 4. colony at 1 Hz
     if (this.tick % 60 === 0) this._colonyTick();
+    if (this.tick % PLACES.every === 0) this._guideTick(); // the field guide (T3-2)
     // 5. respawn of the driven wasp
     if (!this._driven() && !this.extinct && !this.winter && this.tick >= this.respawnAt) this._respawn();
     this._updateChunks();
@@ -5199,6 +5202,45 @@ export class Sim {
 
   // after an AI sting: get out
   _aiAfterSting(w) { w.ai.stings--; w.ai.mode = 'evade'; w.ai.until = w.ai.timer; w.ai.timer = this.tick + T.ai.evadeTicks; }
+
+  // ---------------------------------------------------------------- places of interest and the field guide (T3-2)
+
+  // The places worth a pin on the map (GDD 10, Appendix C), from what the sim holds now: the nest, the line's colonies,
+  // then each active chunk's rival nest, hives, water, town centre, porch lights and nest sites, then swarms and the
+  // exterminator. { kind, x, y, z, key }: key names the place, the same every time it is listed
+  places() {
+    const out = [], add = (kind, x, y, z, key) => out.push({ kind, x, y, z, key: kind + ':' + key });
+    const col = this.colony, CS = T.chunk.size;
+    if (col.nestAlive && col.sited !== false) { const e = this.nest.entrance; add('nest', e.x, e.y, e.z, 'own'); }
+    for (const sc of this.line) if (sc.colony.nestAlive) { const e = sc.nest.entrance; add('line', e.x, e.y, e.z, sc.id); }
+    for (const rec of this.activeChunks) {
+      const c = rec.content, k = chunkKey(rec.cx, rec.cz);
+      if (c.rival) add('rival', c.rival.ex, c.rival.ey, c.rival.ez, k);
+      this.hivesIn(rec).forEach((h, j) => add('hive', h.ex, h.ey, h.ez, k + ':' + j));
+      for (const wt of this.waterIn(rec)) if (wt.kind !== 'puddle') add('water', wt.x, wt.y, wt.z, k + ':' + wt.i);
+      if (c.use === 'town') add('town', rec.cx * CS, 0, rec.cz * CS, k);
+      for (const l of this.lightsIn(rec)) add('light', l.x, l.y, l.z, k + ':' + l.si);
+      const S = this.sitesIn(rec);
+      S.hollows.forEach((h, j) => add('site', h.x, h.y, h.z, k + ':h' + j));
+      S.holes.forEach((h, j) => add('site', h.x, 0, h.z, k + ':g' + j));
+    }
+    this.swarms.forEach((sw, j) => add('swarm', sw.biv.x, sw.biv.y, sw.biv.z, j));
+    const e = this.ext;
+    if (e && e.hm && e.state === 'active') add('exterminator', e.hm.x, 1, e.hm.z, e.visit);
+    return out;
+  }
+  // the field guide: a kind's note unlocks the first time the driven wasp reaches a place of that kind
+  _guideTick() {
+    const w = this._driven();
+    if (!w || PLACE_KINDS.every((k) => this.guide[k] !== undefined)) return;
+    for (const p of this.places()) {
+      if (this.guide[p.kind] !== undefined) continue;
+      const r = PLACES.reachBy[p.kind] ?? PLACES.reach, flat = p.kind === 'town';
+      if (sq(w.x - p.x) + sq(w.z - p.z) + (flat ? 0 : sq(w.y - p.y)) > r * r) continue;
+      this.guide[p.kind] = this.day;
+      this.emit('fieldNote', { kind: p.kind, day: this.day });
+    }
+  }
 
   // ---------------------------------------------------------------- state hash (GDD 3.8)
 

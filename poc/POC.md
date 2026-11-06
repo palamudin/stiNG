@@ -176,6 +176,7 @@ Run the tests from this folder with `node test/sim.test.mjs`, `node test/net.tes
 | 146 | World v3's grass, near and far trees and rain projected from the eye, and the wind's patterns read from a snapped origin, so far from home the grass stays calm | 18.95 | 25 |
 | 147 | Dense woods (S7): 134 to 226 trees a forest chunk on a jittered grid spaced by trunk size, a clear path and clearings, light in patches; webs, hollows and fruit thinned; trunks found through a 4 m grid with the same answers, so a wood ticks no slower | 18.96 | 25 |
 | 148 | The region of templates (S8): on a hilly world the land use follows each chunk's grade: built up to 12% (town centres 10%), farmed to 20%, wooded past it; the home neighbourhood built, flat worlds as before | 18.97 | 25 |
+| 149 | Places of interest and field notes (T3-2): the sim's place list (nest, line, rivals, hives, swarms, water, town centres, porch lights, nest sites, the exterminator), a true note for each kind unlocking the first time you reach one, kept in the save; map pins, notes on the area cards, the atlas field guide | 18.98 | 25 |
 
 ## Verified
 

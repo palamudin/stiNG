@@ -4,6 +4,7 @@ export * from './tuning.js';
 export * from './tunefile.js';
 export * from './body.js';
 export * from './world.js';
+export * from './places.js';
 export * from './wild.js';
 export * from './colony.js';
 export * from './sim.js';

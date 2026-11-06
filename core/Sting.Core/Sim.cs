@@ -452,6 +452,7 @@ namespace Sting.Core
             if (tick % 3 == 0) Humans();
             // 4. colony at 1 Hz
             if (tick % 60 == 0) ColonyTick();
+            if (tick % Sting.Core.Places.Every == 0) GuideTick(); // the field guide (T3-2)
             // 5. respawn of the driven wasp
             if (Driven() == null && !extinct && winter == null && tick >= respawnAt) Respawn();
             UpdateChunks();

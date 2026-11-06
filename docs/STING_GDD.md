@@ -2483,6 +2483,34 @@ On a jump the CPU path no longer blurs a level out to its parent: the window it 
 
 The game now asks for a square at least 16 m across (`causticsMin`), pushed 30% of its size ahead along the view (`causticsAhead`), on a 512 texture with a 384 grid. That is about the old detail (3 cm texels, 7 cm cells, against 2.3 and 5 cm) over 2.7 times the width. Water seen at a slant still clouds with distance: that is the water, not the caustics.
 
+### 18.98 Places of interest and field notes (T3-2)
+
+**The place list.** The sim keeps a list of the places worth a pin on the map (`sim.places()`; C# `Places()`, in SimPlaces.cs). It is made, when asked, from what the sim holds, in this order:
+- the nest and the line's living colonies;
+- then each active chunk's rival nest, hives (managed and feral), birdbaths and ponds, town centre, porch lights and nest sites (hollow trees and burrows);
+- then swarms out and the exterminator at work.
+
+Each place has a kind, a position, and a key that names it the same every time it is listed. Round the home tree there are 64 places, and the list takes under 0.1 ms.
+
+**Field notes.** Each of the ten kinds carries a true note with its source (sim/places.js `FIELD_NOTES`, C# `Places.Notes`, the same words in both builds). The new facts are in Appendix C:
+- water: paper wasps cool the nest with water;
+- squares and beer gardens: yellowjackets forage mostly for sugar late in the season;
+- rival nests: the southern yellowjacket takes over eastern yellowjacket nests;
+- nest sites: old rodent burrows and voids;
+- the exterminator: nests are treated at night or dusk.
+
+The rest come from the facts Appendix C already had.
+
+**The field guide.** Twice a second the sim checks whether the driven wasp has reached a place of a kind whose note is still to find: 2.5 m, or 4 m for a nest and the exterminator, or 24 m across for a town centre. If so, the note unlocks, with the day it was found, and a `fieldNote` event fires. The guide is kept in the save: the JS snapshot, and C# save version 36.
+
+**On the map.** Zoomed in, the atlas pins water, town centres, porch lights, nest sites and the exterminator; hives, rival nests, swarms and the line were already shown. A pin is filled once its kind's note is found and hollow until then. An area's card ends with the notes of the kinds of place in it, or what to reach to find each. The atlas's Guide button (with the count, n of 10) opens the field guide, listing every note found and those still to find. A note found pops a toast. The map tiles themselves stay the world thread's (G6).
+
+**Checked.**
+- Block 71, in JS and both C# builds: the places round the home tree, unique keys, every kind's note, a hive's note unlocking once, and the guide surviving a save.
+- The place list and the guide go into every simulation digest once every 600 ticks.
+- A `notes` digest holds the notes word for word.
+- Both builds match all 34 digests.
+
 ### 18.97 The region of templates (S8, GEN_VERSION 19)
 
 **The land decides.** On a world with terrain, each chunk's land is graded before anything is built on it (`chunkGrade`, world.js `SLOPE`).
@@ -2804,7 +2832,7 @@ Set 2026-11-03, after T2-14: graphics now belong to the world-building thread (2
 | # | Goal | GDD | Size | Done when |
 |---|---|---|---|---|
 | T3-1 | **Built (18.72).** **Leftovers from the flight and network work.** <br>• Other players' AI wasps reported inside walls are not drawn there (as players' wasps already are, 18.36). <br>• Assisted flight plans a way round long walls and hedges, not only single obstacles. <br>• A lock on a walking person lands on the exact spot locked. <br>• H's hover distance and orbit can be set. <br>• `CHASE.close` goes. | 11.8, 7.9 | M | each has a check in JS and C# where it touches the sim |
-| T3-2 | **Places of interest and field notes** (the sim half of 20.3 G6). <br>• A place list kept by the sim (C# twin): the nest, colonies of the line, rival nests, hives, swarms, water, town squares and beer gardens, porch lights, the exterminator, nest sites found. <br>• Every kind carries a true field note from Appendix C. <br>• Notes unlock into a field guide the first time the place is reached, kept in the save. <br>• The map and area cards show them. The drawn map tiles are the world thread's. | 10, App. C | M | the list matches in JS and C#; the guide unlocks, saves and restores |
+| T3-2 | **Built (18.98).** **Places of interest and field notes** (the sim half of 20.3 G6). <br>• A place list kept by the sim (C# twin): the nest, colonies of the line, rival nests, hives, swarms, water, town squares and beer gardens, porch lights, the exterminator, nest sites found. <br>• Every kind carries a true field note from Appendix C. <br>• Notes unlock into a field guide the first time the place is reached, kept in the save. <br>• The map and area cards show them. The drawn map tiles are the world thread's. | 10, App. C | M | the list matches in JS and C#; the guide unlocks, saves and restores |
 | T3-3 | **The growth tree's branches** (T2-13 in full, with T2-7). <br>• Nest (cell building, brood speed, insulation, guard strength), Flight (the Reflex cue, swoop recovery, lock-on range, assisted reach) and Line (gyne output, winter survival by site, how many lineage colonies found). <br>• Points come from experience, a few a season. <br>• Every node that changes an outcome is a colony parameter in ranges the plausibility checks know (11.8). | 6.8, 7.8 | L | nodes act in the sim, ranges are audited across peers, the colony view spends points |
 | T3-4 | **The player's own colonies meeting across species.** <br>• A player's hornets hunt the same player's yellowjackets and bees ball them, unless the player marks the colonies kin. <br>• Kin is colony state every peer reads. | 6.8 | S | a kin mark stops the hunting and balling; unmarked, they fight |
 | T3-5 | **How many colonies a player holds,** as a world setting, with colonies far from the player run at the abstract tier. | 6.8, 11.12 | M | the setting caps the held colonies; a far colony steps abstractly and comes back in step |
@@ -3895,6 +3923,11 @@ Values the tuning starts from. They are references, not targets; gameplay compre
 | Honeybee worker ages | cleaning, fanning, feeding larvae, receiving loads, guarding, then foraging | same |
 | Barbed sting | a worker cannot pull its barbed sting out of a person and dies; the queen stings many times, drones have no sting | UC ANR Bug Squad, *Why Do Honey Bees Die When They Sting?* |
 | Perennial yellowjacket nests | in the south a small share of southern yellowjacket nests survive the winter as perennial nests, which can grow very large; most die at the first freeze | Mississippi State University Extension, *Southern Yellowjackets* (Bug's Eye View, vol. 2 no. 32) |
+| Water for cooling | paper wasps gather water and spread it on and in the cells to cool the nest by evaporation; fanning helps | Stabentheiner et al., *Scientific Reports* 12:3372 (2022) |
+| Late-season sugar | yellowjackets forage primarily for sugar at the end of the season, and like the foods people eat outside at picnics and fairs | UMass Extension, *Yellowjackets* |
+| Social parasite | the southern yellowjacket's queen often takes over a small eastern yellowjacket nest in late spring, sometimes killing its queen | Wikipedia, *Vespula squamosa*; UMass Extension, *Yellowjackets* |
+| Nest sites | yellowjackets nest in old rodent burrows, holes and structural voids | Utah State University Extension, *Western Yellowjacket* |
+| Treating a nest | at night or dusk, when it is cooler and the wasps are less active | same; UMass Extension, *Yellowjackets* |
 
 Sources:
 - https://en.wikipedia.org/wiki/Vespula_vulgaris
@@ -3903,3 +3936,7 @@ Sources:
 - https://bees.caes.uga.edu/beekeeping-resources/getting-started-topics/getting-started-honey-bee-biology.html
 - https://ucanr.edu/blog/bug-squad/article/why-do-honey-bees-die-when-they-sting
 - https://extension.msstate.edu/taxonomy/term/4171/2016/southern-yellowjackets-vol-2-no-32
+- https://www.nature.com/articles/s41598-022-07279-0
+- https://www.umass.edu/agriculture-food-environment/landscape/fact-sheets/yellowjackets
+- https://en.wikipedia.org/wiki/Vespula_squamosa
+- https://extension.usu.edu/planthealth/ipm/notes_nuisance/western-yellowjacket

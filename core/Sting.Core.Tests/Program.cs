@@ -180,6 +180,8 @@ namespace Sting.Core.Tests
                 foreach (var sh in World.GenerateChunk(1234, 0, 1).sheds) { var r = World.ShedRoof(sh); foreach (var v in new[] { r.wall, r.wallHalf, r.half, r.S, r.y0, r.rise, r.L }) d.F(v); d.F(r.alongX); }
                 Out("motion", d.Hex);
             }
+            // the field notes (T3-2): every kind, its title, note and source, word for word in both builds
+            { var d = new Digest(); foreach (var n in Places.Notes) { d.S(n.kind); d.S(n.title); d.S(n.note); d.S(n.source); } Out("notes", d.Hex); }
         }
 
         static IEnumerable<TItem> Concat<TItem>(List<TItem> a, List<TItem> b) { foreach (var x in a) yield return x; foreach (var x in b) yield return x; }

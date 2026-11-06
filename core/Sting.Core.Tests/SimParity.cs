@@ -109,6 +109,7 @@ namespace Sting.Core.Tests
                     var w = sim.wasp; double x = w != null ? (double)w.x : 0, y = w != null ? (double)w.y : 0, z = w != null ? (double)w.z : 0;
                     trace.Add(string.Join(" ", sim.tick, kinds.ToString("x8"), x.ToString("R", CultureInfo.InvariantCulture), y.ToString("R", CultureInfo.InvariantCulture), z.ToString("R", CultureInfo.InvariantCulture), ((double)sim.colony.adults).ToString("R", CultureInfo.InvariantCulture)));
                 }
+                if (sim.tick % 600 == 0) { foreach (var pl in sim.Places()) { d.S(pl.kind); d.S(pl.key); d.F(pl.x); d.F(pl.y); d.F(pl.z); } foreach (var k in sim.guideOrder) { d.S(k); d.F(sim.guide[k]); } } // places of interest and the field guide (T3-2)
                 if (prog && sim.tick % 60 == 0) { var P = sim.prog; var Q = sim.player; d.F(P.unit); d.F(P.unitTotal); d.F(P.hive); d.F(P.hiveTotal); d.F(P.stabs); foreach (int r in P.ranks) d.F(r); foreach (int r in P.roles) d.F(r); d.F(Q.hand); d.F(Q.gaugeRate); d.F(Q.gaugeDays); d.F(sim.line.Count); d.F(sim.colony.adults); foreach (var x in sim.line) { d.F(x.id); d.F(x.colony.adults); d.F(x.colony.sugar); } }
             }
             traces[name] = trace;
