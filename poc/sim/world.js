@@ -290,17 +290,21 @@ export function features(s) {
 // each is emptied when it grows past its cap. One set of tables per seed and feature modifiers.
 const TABLE_CAP = 65536, tableSets = new Map();
 let lastTables = null;
+const shapeTag = () => { const G = T.terrain; return '|' + [G.amp, G.cell, G.octaves, G.warp, G.ridge, G.terrace, G.terraceStep, G.grade.oct].join(','); };
 function worldTables(seed, s) {
-  const woods = s?.woods ?? 1, towns = s?.towns ?? 1, water = s?.water ?? 1, hives = s?.hives ?? 1, settled = s?.settled ?? 0, L = lastTables;
-  if (L && L.seed === seed && L.woods === woods && L.towns === towns && L.water === water && L.hives === hives && L.settled === settled) return L.t;
-  const tag = seed + ':' + woods + ',' + towns + ',' + water + ',' + hives + ',' + settled;
+  const woods = s?.woods ?? 1, towns = s?.towns ?? 1, water = s?.water ?? 1, hives = s?.hives ?? 1, settled = s?.settled ?? 0, terrain = s?.terrain || 0, L = lastTables; // (terrain: the land use follows the slope, S8)
+  const G = T.terrain; // (a retuned ground grades differently, and the land use follows the grade: the shape is in the key)
+  if (L && L.seed === seed && L.woods === woods && L.towns === towns && L.water === water && L.hives === hives && L.settled === settled && L.terrain === terrain
+    && (!terrain || (L.amp === G.amp && L.cell === G.cell && L.oct === G.octaves && L.warp === G.warp && L.ridge === G.ridge && L.terr === G.terrace && L.step === G.terraceStep && L.goct === G.grade.oct))) return L.t;
+  const shape = terrain ? shapeTag() : '';
+  const tag = seed + ':' + woods + ',' + towns + ',' + water + ',' + hives + ',' + settled + ',' + terrain + shape;
   let t = tableSets.get(tag);
   if (!t) {
     if (tableSets.size >= 8) tableSets.clear();
-    t = { use: new Map(), region: new Map(), roll: new Map(), ponds: new Map(), paving: new Map(), pads: new Map(), feet: new Map(), street: new Map(), streetE: new Map() };
+    t = { use: new Map(), grade: new Map(), region: new Map(), roll: new Map(), ponds: new Map(), paving: new Map(), pads: new Map(), feet: new Map(), street: new Map(), streetE: new Map() };
     tableSets.set(tag, t);
   }
-  lastTables = { seed, woods, towns, water, hives, settled, t };
+  lastTables = { seed, woods, towns, water, hives, settled, terrain, amp: G.amp, cell: G.cell, oct: G.octaves, warp: G.warp, ridge: G.ridge, terr: G.terrace, step: G.terraceStep, goct: G.grade.oct, t };
   return t;
 }
 function keep(map, key, v) { if (map.size >= TABLE_CAP) map.clear(); map.set(key, v); return v; }
@@ -726,6 +730,29 @@ export function groundSlope(seed, x, z, settings) {
   const e = 0.25;
   return { x: (groundAt(seed, x + e, z, settings) - groundAt(seed, x - e, z, settings)) / (2 * e), z: (groundAt(seed, x, z + e, settings) - groundAt(seed, x, z - e, settings)) / (2 * e) };
 }
+// The region of templates (S8, GDD 21.6): a chunk's land, before anything is built on it, is graded by its steepest
+// rise over SLOPE.step m across a 5 x 5 grid of the broad shape (SLOPE.oct octaves, the modifier and the home ring,
+// no land use: the ground's roll follows the land use, so the use must not follow the roll). Built land (yards, a mall)
+// needs at most SLOPE.built, a town centre at most SLOPE.town over its four chunks; land too steep to build on is farmed
+// up to SLOPE.farm, and wooded past it. A lookup table per chunk: computed once, read thereafter. Flat worlds are as before
+export const SLOPE = { step: 16, oct: 2, built: 0.12, town: 0.1, farm: 0.2, home: 1 }; // home: the chunks round the home park stay built (the colony's neighbourhood)
+export function chunkGrade(seed, cx, cz, settings) {
+  const terrain = settings?.terrain || 0;
+  if (!terrain) return 0;
+  const m = worldTables(seed, settings).grade, k = cellKey(cx, cz), v = m.get(k);
+  if (v !== undefined) return v;
+  const G = T.terrain, S = SLOPE, ox = cx * CS, oz = cz * CS, h = new Float64Array(25);
+  for (let j = 0; j < 5; j++) for (let i = 0; i < 5; i++) {
+    const x = ox - 2 * S.step + i * S.step, z = oz - 2 * S.step + j * S.step, f = smooth(clamp01((Math.sqrt(x * x + z * z) - G.flatR) / G.rise));
+    h[j * 5 + i] = f === 0 ? 0 : terrain * G.amp * f * groundShape(seed, x, z, S.oct);
+  }
+  let g = 0;
+  for (let j = 0; j < 5; j++) for (let i = 0; i < 5; i++) {
+    if (i < 4) g = Math.max(g, Math.abs(h[j * 5 + i + 1] - h[j * 5 + i]) / S.step);
+    if (j < 4) g = Math.max(g, Math.abs(h[j * 5 + i + 5] - h[j * 5 + i]) / S.step);
+  }
+  return keep(m, k, g);
+}
 export function regionLayout(seed, rx, rz, settings) {
   const regions = worldTables(seed, settings).region, key = cellKey(rx, rz);
   let L = regions.get(key);
@@ -733,6 +760,7 @@ export function regionLayout(seed, rx, rz, settings) {
   const F = features(settings);
   const H = (slot) => hash(seed, Domain.WorldGen, u64(rx), u64(rz), BigInt(90000 + slot));
   L = { strip: rx === 0 && rz === 0 ? REGION / 2 : 2 + rangeInt(H(1), 0, 4), mallSide: rangeInt(H(2), 0, 4), mallFrom: rangeInt(H(3), 0, REGION - 2), forest: rangeInt(H(4), 0, 4) };
+  L.seed = seed; L.rx = rx; L.rz = rz; L.terrain = settings?.terrain || 0; L.settings = { terrain: L.terrain }; // for the slope (S8)
   // forest corners (2x2; a wooded world has two of 3x3, the second diagonally across)
   const fs = F.woods >= 2 ? 3 : 2;
   L.forests = [];
@@ -748,6 +776,7 @@ export function regionLayout(seed, rx, rz, settings) {
       for (let dz = 0; dz < 2 && ok; dz++) for (let dx = 0; dx < 2 && ok; dx++) {
         const lx = tx + dx, lz = tz + dz;
         if (baseUse(L, lx, lz) !== 'yards' || (home && Math.abs(lx - REGION / 2) <= 1 && Math.abs(lz - REGION / 2) <= 1)) ok = false;
+        else if (L.terrain && chunkGrade(seed, L.rx * REGION + lx - REGION / 2, L.rz * REGION + lz - REGION / 2, L.settings) > SLOPE.town) ok = false; // a town centre on flat land (S8)
       }
       if (ok) { L.towns.push({ tx, tz, garden: rangeInt(H(t ? 10 : 7), 0, 4) }); break; }
     }
@@ -756,8 +785,17 @@ export function regionLayout(seed, rx, rz, settings) {
   regions.set(key, L);
   return L;
 }
-// land use before the town centres are laid over it
+// land use before the town centres are laid over it: the layout's, then by the slope (S8): built land too steep to build
+// on is farmed, or wooded where it is steeper still; parks and woods stay where they are, and the home neighbourhood is built
 function baseUse(L, lx, lz) {
+  const u = layoutUse(L, lx, lz);
+  if (!L.terrain || u === 'park' || u === 'forest') return u;
+  const cx = L.rx * REGION + lx - REGION / 2, cz = L.rz * REGION + lz - REGION / 2;
+  if (Math.abs(cx) <= SLOPE.home && Math.abs(cz) <= SLOPE.home) return u;
+  const g = chunkGrade(L.seed, cx, cz, L.settings);
+  return g <= SLOPE.built ? u : g <= SLOPE.farm ? 'farm' : 'forest';
+}
+function layoutUse(L, lx, lz) {
   if (lz === L.strip) return 'park';
   const edge = [lz === 0, lx === REGION - 1, lz === REGION - 1, lx === 0][L.mallSide], along = L.mallSide % 2 ? lz : lx;
   if (edge && along >= L.mallFrom && along < L.mallFrom + 3) return 'mall';

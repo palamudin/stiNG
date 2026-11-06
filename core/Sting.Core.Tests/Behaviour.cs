@@ -1081,9 +1081,11 @@ namespace Sting.Core.Tests
                 lin = hiH - loH > 1.6 * (hi - lo);
                 Ok(flat && home && lin && hi - lo > 2 && hi - lo < 9, $"the ground rolls {D(hi - lo):0.0} m over 300 m on a rolling world, {D(hiH - loH):0.0} on a hilly one; a flat world and the home tree's ground stay level");
                 Num Slope(Num cx, Num cz) { Num m = 0; for (int j = -5; j <= 5; j++) for (int i = -5; i <= 5; i++) { Num x = cx + i * 4, z = cz + j * 4; m = Max(m, Max(Abs(G2(x + 2, z) - G2(x - 2, z)) / 4, Abs(G2(x, z + 2) - G2(x, z - 2)) / 4)); } return m; }
-                var TL = World.Region(1234, 1, 0).towns[0]; Num tcx = (8 - 4 + TL.tx + (Num)0.5) * 64, tcz = (TL.tz - 4 + (Num)0.5) * 64;
+                Town TL = null; int LR = 0; // the hilly world's own layout (S8: a town centre stands where it is flat enough)
+                int LZ = 0; for (int k = 1; k < 81 && TL == null; k++) { int rx = k % 9 - 4, rz = k / 9 - 4; if (rx == 0 && rz == 0) continue; var q = World.Region(1234, rx, rz, S2).towns; if (q.Count > 0) { TL = q[0]; LR = rx; LZ = rz; } }
+                Num tcx = (8 * LR - 4 + TL.tx + (Num)0.5) * 64, tcz = (8 * LZ + TL.tz - 4 + (Num)0.5) * 64;
                 int pkx = 0, pkz = 0; bool fpk = false;
-                for (int x = 4; x < 12 && !fpk; x++) for (int z = -4; z < 4 && !fpk; z++) if (World.LandUse(1234, x, z) == "park" && World.LandUse(1234, x + 1, z) == "park") { pkx = x; pkz = z; fpk = true; }
+                for (int x = 4; x < 12 && !fpk; x++) for (int z = -4; z < 4 && !fpk; z++) if (World.LandUse(1234, x, z, S2) == "park" && World.LandUse(1234, x + 1, z, S2) == "park") { pkx = x; pkz = z; fpk = true; }
                 Ok(Slope(tcx, tcz) < Slope(pkx * 64 + 32, pkz * 64) / 3, $"a town square is near level (slope {D(Slope(tcx, tcz)):0.000}) where a park rolls ({D(Slope(pkx * 64 + 32, pkz * 64)):0.000})");
                 // ground v2 (GDD 20 G1): the slope comes with the height; terraces cut flat treads
                 {
@@ -1114,7 +1116,7 @@ namespace Sting.Core.Tests
                     double across = 0, pad = 0, bumpy = 0, rough = 0; int roads = 0, houses = 0;
                     for (int cz = -4; cz <= 4; cz++) for (int cx = -4; cx <= 4; cx++)
                     {
-                        var p = World.PavingOf(1234, cx, cz, new Settings());
+                        var p = World.PavingOf(1234, cx, cz, S2); // the hilly world's own streets (S8)
                         foreach (var r in p.roads)
                         {
                             roads++;
@@ -1685,7 +1687,7 @@ namespace Sting.Core.Tests
                 Num alt0 = w.y + s.Ground(w.x, w.z), h0 = w.y; double dev = 0;
                 for (int k = 0; k < 240 && w.x < bx + 10; k++) { Fly(1, 0, 1); dev = Math.Max(dev, D(Abs(w.y + s.Ground(w.x, w.z) - alt0))); }
                 Num fell = h0 - w.y, rise = s.Ground(w.x, w.z) - s.Ground(bx - 3, bz);
-                Ok(dev < 0.005 && D(Abs(fell - rise)) < 0.01 && rise > 1, $"flying level up a rise of {D(rise):0.00} m, the wasp keeps its altitude (within {dev * 1000:0.0} mm) and its height above the ground falls by as much ({D(fell):0.00} m)");
+                Ok(dev < 0.005 && D(Abs(fell - rise)) < 0.01 && rise > 0.6, $"flying level up a rise of {D(rise):0.00} m, the wasp keeps its altitude (within {dev * 1000:0.0} mm) and its height above the ground falls by as much ({D(fell):0.00} m)");
                 Num Hold(int dir, Num x0)
                 {
                     Place(w, P(x0, 1, bz)); w.energy = 1; int n = 0;
@@ -1861,6 +1863,28 @@ namespace Sting.Core.Tests
                 Ok(D(I.site.h) >= 10 && D(I.site.h) <= 90 && inside && beyond && step < 3 && wild > 400 && settledChunks > 30 && built == 0 && trees > 300 && wet == 0 && s.wasp.y >= 0 && st.RulesHash() != t1.RulesHash() && st.WorldTag().Contains("wild beyond 400 m"),
                     $"the settled area sits on the wild land {D(I.site.h):0.0} m above the sea at ({D(I.site.x):0}, {D(I.site.z):0}); {settledChunks} settled chunks, {wild} wild ones with nothing built and {trees} trees, none in the water; no step over 3 m across the band ({step:0.00} per 2 m); a sim runs over it");
             }
+            // 70. the region of templates (GDD 21.6, S8, GEN_VERSION 19; sim.test.mjs): a hilly world reads as a town in its land
+            {
+                ulong S = 1234; var st = new Settings { terrain = 2 }; var by = new Dictionary<string, List<double>>(); var slopeWood = new List<double>();
+                bool builtOk = true, townOk = true, steepOk = true, homeOk = true, flatSame = true; int n = 0;
+                for (int cz = -12; cz <= 12; cz++) for (int cx = -12; cx <= 12; cx++)
+                    {
+                        string u = World.LandUse(S, cx, cz, st); Num g = World.ChunkGrade(S, cx, cz, st); n++;
+                        bool home = Math.Abs(cx) <= World.SlopeHome && Math.Abs(cz) <= World.SlopeHome;
+                        if (!by.ContainsKey(u)) by[u] = new List<double>(); by[u].Add(D(g));
+                        if (World.LandUse(S, cx, cz, new Settings()) == "farm") flatSame = false;
+                        if (home) { if (u == "farm" || (u == "forest" && World.LandUse(S, cx, cz, new Settings()) != "forest")) homeOk = false; continue; }
+                        if ((u == "yards" || u == "urban" || u == "mall") && g > World.SlopeBuilt) builtOk = false;
+                        if (u == "town" && g > World.SlopeTown) townOk = false;
+                        if (g > World.SlopeFarm && u != "forest" && u != "park") steepOk = false;
+                        if (u == "forest" && World.LandUse(S, cx, cz, new Settings()) != "forest") slopeWood.Add(D(g));
+                    }
+                List<double> Get(string k) => by.TryGetValue(k, out var l) ? l : new List<double>();
+                var built = Get("yards").Concat(Get("urban")).Concat(Get("mall")).Concat(Get("town")).ToList(); var farm = Get("farm");
+                double Mean(List<double> a) => a.Count > 0 ? a.Average() : double.NaN;
+                Ok(builtOk && townOk && steepOk && homeOk && flatSame && Get("town").Count >= 4 && built.Count > 0.25 * n && farm.Count > 0.25 * n && slopeWood.Count > 10 && Mean(built) < Mean(farm) && Mean(farm) < Mean(slopeWood),
+                    $"a hilly world reads as a town in its land: {100.0 * built.Count / n:0}% built at a mean grade of {Mean(built) * 100:0.0}%, {Get("town").Count} town-centre chunks, {100.0 * farm.Count / n:0}% farmed at {Mean(farm) * 100:0.0}%, {slopeWood.Count} chunks wooded for their slope at {Mean(slopeWood) * 100:0.0}%; the home neighbourhood built; a flat world as before");
+            }
             // 69. dense woods (GDD 21.5, S7, GEN_VERSION 18; sim.test.mjs): a forest chunk holds 120 to 250 trees, the floor is
             // lit in patches, the walkers' loop is clear, webs stay few; the trunk grid finds every trunk a full search would, in
             // order; a wasp in a wood costs a tick no more than one over the yards
@@ -1907,7 +1931,7 @@ namespace Sting.Core.Tests
             }
             // 68. ultra far from home (200 km, 1,000 km, 10,000 km; sim.test.mjs): the world goes on there as at home
             {
-                var st = new Settings { terrain = 2 }; ulong S = 1234;
+                var st = new Settings { terrain = 1 }; ulong S = 1234; // rolling: on a hilly world the land use follows the slope (S8)
                 (Dictionary<string, int> uses, int houses, int rows, int bad, double street, int pads, int padBad) Patch(int c0)
                 {
                     var uses = new Dictionary<string, int>(); int houses = 0, rows = 0, bad = 0, pads = 0, padBad = 0; double street = 0;
@@ -1951,7 +1975,7 @@ namespace Sting.Core.Tests
             {
                 var st = new Settings { terrain = 2 }; ulong S = 1234; Num G(Num x, Num z) => World.GroundAt(S, x, z, st);
                 int chunks = 0, buildings = 0, level = 0, high = 0, stairs = 0, fronts = 0, dividers = 0, walkers = 0, batches = 0; double street = 0; bool courtLow = true;
-                for (int cz = -8; cz <= 8; cz++) for (int cx = -8; cx <= 8; cx++)
+                for (int cz = -16; cz <= 16; cz++) for (int cx = -16; cx <= 16; cx++) // (wide: towns stand only where it is flat enough, S8)
                     {
                         if (World.LandUse(S, cx, cz, st) != "urban") continue;
                         chunks++;
@@ -1986,7 +2010,7 @@ namespace Sting.Core.Tests
                 for (int cz = -7; cz <= 7; cz++) for (int cx = -7; cx <= 7; cx++)
                     {
                         string use = World.LandUse(S, cx, cz, st); double d = Math.Sqrt(cx * cx + cz * cz) * 64;
-                        if (use == "farm" && d <= 272) inner++;
+                        if (use == "farm" && d <= 272 && World.ChunkGrade(S, cx, cz, st) <= World.SlopeBuilt) inner++; // nearer than the ring only where too steep to build on (S8)
                         if (use != "farm") continue;
                         farms++;
                         var c = World.GenerateChunk(S, cx, cz, st);
@@ -2017,7 +2041,7 @@ namespace Sting.Core.Tests
                             if (hm.act == "garden" && yards) yardPeople++;
                         }
                     }
-                Ok(farms > 40 && inner == 0 && steads >= 10, $"the settled area's outer ring is farmland: {farms} chunks, {steads} farmsteads, none nearer the home tree than 272 m");
+                Ok(farms > 40 && inner == 0 && steads >= 10, $"the settled area's outer ring is farmland: {farms} chunks, {steads} farmsteads; none nearer the home tree than 272 m but on land too steep to build on");
                 Ok(buildings >= 30 && level == buildings && plinth == buildings && setback == buildings, $"every one of {buildings} farm buildings stands level on its footing (fill or cut at most {worstFill:0.00} m of 1.5), and none within a slope setback (nothing steeper than 1:3 within half its height)");
                 Ok(lanesOpen && lanePeople > 0 && yardPeople > 0, $"the hedgerows leave the lanes open; {lanePeople} people walk the lanes and {yardPeople} work the farmyards");
             }

@@ -175,6 +175,7 @@ Run the tests from this folder with `node test/sim.test.mjs`, `node test/net.tes
 | 145 | World v3's terrain, water and breakers' curl projected from the eye, so the shoreline's thin water no longer fights the sand far from home; the world thread's water log (K) | 18.94 | 25 |
 | 146 | World v3's grass, near and far trees and rain projected from the eye, and the wind's patterns read from a snapped origin, so far from home the grass stays calm | 18.95 | 25 |
 | 147 | Dense woods (S7): 134 to 226 trees a forest chunk on a jittered grid spaced by trunk size, a clear path and clearings, light in patches; webs, hollows and fruit thinned; trunks found through a 4 m grid with the same answers, so a wood ticks no slower | 18.96 | 25 |
+| 148 | The region of templates (S8): on a hilly world the land use follows each chunk's grade: built up to 12% (town centres 10%), farmed to 20%, wooded past it; the home neighbourhood built, flat worlds as before | 18.97 | 25 |
 
 ## Verified
 

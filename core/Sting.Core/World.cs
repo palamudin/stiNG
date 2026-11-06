@@ -52,7 +52,8 @@ namespace Sting.Core
     /// a forest corner (x, z, n chunks square); a town centre's 2x2 block and which quarter of it is the beer garden
     public sealed class ForestBlock { public int x, z, n; }
     public sealed class Town { public int tx, tz, garden; }
-    public sealed class RegionLayout { public int strip, mallSide, mallFrom, forest; public List<ForestBlock> forests = new List<ForestBlock>(); public List<Town> towns = new List<Town>(); }
+    public sealed class RegionLayout { public int strip, mallSide, mallFrom, forest; internal ulong seed; internal int rx, rz, terrain; // (seed, place and terrain: for the slope, S8)
+        public List<ForestBlock> forests = new List<ForestBlock>(); public List<Town> towns = new List<Town>(); }
     public sealed class TownQ { public int qx, qz; public bool garden, fountain; }
     public sealed class Spawn { public Num x, y, z, yaw; }
     public sealed class Nest
@@ -376,12 +377,13 @@ namespace Sting.Core
         public static RegionLayout Region(ulong seed, int rx, int rz, Settings st = null)
         {
             var F = Features(st);
-            string key = seed + ":" + rx + "," + rz + ":" + F.woods + "," + F.towns;
+            int terrain = st?.terrain ?? 0; // the land use follows the slope (S8)
+            string key = seed + ":" + rx + "," + rz + ":" + F.woods + "," + F.towns + "," + terrain + (terrain != 0 ? ShapeTag() : ""); // (and the shape: a retuned ground grades differently)
             lock (regionCache)
             {
                 if (regionCache.TryGetValue(key, out var L)) return L;
                 ulong H(long slot) => Hash(seed, Domain.WorldGen, U64(rx), U64(rz), U64(90000 + slot));
-                L = new RegionLayout { strip = rx == 0 && rz == 0 ? REGION / 2 : 2 + RangeInt(H(1), 0, 4), mallSide = RangeInt(H(2), 0, 4), mallFrom = RangeInt(H(3), 0, REGION - 2), forest = RangeInt(H(4), 0, 4) };
+                L = new RegionLayout { strip = rx == 0 && rz == 0 ? REGION / 2 : 2 + RangeInt(H(1), 0, 4), mallSide = RangeInt(H(2), 0, 4), mallFrom = RangeInt(H(3), 0, REGION - 2), forest = RangeInt(H(4), 0, 4), seed = seed, rx = rx, rz = rz, terrain = terrain };
                 // forest corners (2x2; a wooded world has two of 3x3, the second diagonally across)
                 int fs = F.woods >= 2 ? 3 : 2;
                 for (int k = 0; k < System.Math.Min(F.woods, 2); k++) { int f = k != 0 ? L.forest ^ 3 : L.forest; L.forests.Add(new ForestBlock { x = (f & 1) != 0 ? REGION - fs : 0, z = (f & 2) != 0 ? REGION - fs : 0, n = fs }); }
@@ -399,6 +401,7 @@ namespace Sting.Core
                         {
                             int lx = tx + dx, lz = tz + dz;
                             if (BaseUse(L, lx, lz) != "yards" || (home && System.Math.Abs(lx - REGION / 2) <= 1 && System.Math.Abs(lz - REGION / 2) <= 1)) ok = false;
+                            else if (L.terrain != 0 && ChunkGrade(seed, L.rx * REGION + lx - REGION / 2, L.rz * REGION + lz - REGION / 2, L.terrain) > SlopeTown) ok = false; // a town centre on flat land (S8)
                         }
                         if (ok) { L.towns.Add(new Town { tx = tx, tz = tz, garden = RangeInt(H(t != 0 ? 10 : 7), 0, 4) }); break; }
                     }
@@ -408,8 +411,51 @@ namespace Sting.Core
                 return L;
             }
         }
-        /// land use before the town centres are laid over it
+        /// The region of templates (world.js SLOPE, chunkGrade, S8): a chunk's land, before anything is built on it, graded by its
+        /// steepest rise over SlopeStep m across a 5 x 5 grid of the broad shape (SlopeOct octaves, the modifier and the home
+        /// ring, no land use). Built land needs at most SlopeBuilt, a town centre SlopeTown; steeper land is farmed up to
+        /// SlopeFarm and wooded past it; the chunks within SlopeHome of the home park stay built. A table per chunk
+        public static readonly Num SlopeStep = 16, SlopeBuilt = 0.12, SlopeTown = 0.1, SlopeFarm = 0.2; public const int SlopeOct = 2, SlopeHome = 1;
+        static readonly Dictionary<long, Num> grades = new Dictionary<long, Num>(); static string gradeTag;
+        public static Num ChunkGrade(ulong seed, int cx, int cz, Settings st) => ChunkGrade(seed, cx, cz, st?.terrain ?? 0);
+        public static Num ChunkGrade(ulong seed, int cx, int cz, int terrain)
+        {
+            if (terrain == 0) return 0;
+            string tag = seed + ":" + terrain + ShapeTag();
+            lock (grades)
+            {
+                if (gradeTag != tag) { gradeTag = tag; grades.Clear(); }
+                long k = CellKey(cx, cz);
+                if (grades.TryGetValue(k, out var v)) return v;
+                if (grades.Count > 65536) grades.Clear();
+                Num ox = (Num)cx * CS, oz = (Num)cz * CS; var h = new Num[25];
+                for (int j = 0; j < 5; j++) for (int i = 0; i < 5; i++)
+                    {
+                        Num x = ox - 2 * SlopeStep + i * SlopeStep, z = oz - 2 * SlopeStep + j * SlopeStep, f = Smooth(Clamp01((Sqrt(x * x + z * z) - T.terrain.flatR) / T.terrain.rise));
+                        h[j * 5 + i] = f == 0 ? (Num)0 : terrain * T.terrain.amp * f * GroundShape(seed, x, z, SlopeOct);
+                    }
+                Num g = 0;
+                for (int j = 0; j < 5; j++) for (int i = 0; i < 5; i++)
+                    {
+                        if (i < 4) g = Max(g, Abs(h[j * 5 + i + 1] - h[j * 5 + i]) / SlopeStep);
+                        if (j < 4) g = Max(g, Abs(h[j * 5 + i + 5] - h[j * 5 + i]) / SlopeStep);
+                    }
+                grades[k] = g;
+                return g;
+            }
+        }
+        /// land use before the town centres are laid over it: the layout's, then by the slope (S8): built land too steep to
+        /// build on is farmed, or wooded where steeper still; parks and woods stay, and the home neighbourhood is built
         static string BaseUse(RegionLayout L, int lx, int lz)
+        {
+            string u = LayoutUse(L, lx, lz);
+            if (L.terrain == 0 || u == "park" || u == "forest") return u;
+            int cx = L.rx * REGION + lx - REGION / 2, cz = L.rz * REGION + lz - REGION / 2;
+            if (System.Math.Abs(cx) <= SlopeHome && System.Math.Abs(cz) <= SlopeHome) return u;
+            Num g = ChunkGrade(L.seed, cx, cz, L.terrain);
+            return g <= SlopeBuilt ? u : g <= SlopeFarm ? "farm" : "forest";
+        }
+        static string LayoutUse(RegionLayout L, int lx, int lz)
         {
             if (lz == L.strip) return "park";
             bool edge = L.mallSide == 0 ? lz == 0 : L.mallSide == 1 ? lx == REGION - 1 : L.mallSide == 2 ? lz == REGION - 1 : lx == 0;
@@ -515,7 +561,7 @@ namespace Sting.Core
         /// how much a chunk's land use lets the ground roll
         static Num ChunkRoll(ulong seed, int cx, int cz, Settings st)
         {
-            var F = Features(st); string tag = seed + ":" + F.woods + "," + F.towns;
+            var F = Features(st); string tag = seed + ":" + F.woods + "," + F.towns + "," + F.settled + "," + F.terrain + ShapeTag(); // (the land use follows the settled area and the slope)
             lock (rolls)
             {
                 if (rollTag != tag) { rollTag = tag; rolls.Clear(); }
@@ -686,7 +732,7 @@ namespace Sting.Core
         static readonly Dictionary<long, List<Pad>> pads = new Dictionary<long, List<Pad>>(); static string padTag;
         static List<Pad> PadsOf(ulong seed, int cx, int cz, Settings st)
         {
-            var F = Features(st); string tag = seed + ":" + F.woods + "," + F.towns + "," + N(F.water) + "," + N(F.hives) + "," + F.settled + ShapeTag();
+            var F = Features(st); string tag = seed + ":" + F.woods + "," + F.towns + "," + N(F.water) + "," + N(F.hives) + "," + F.settled + "," + F.terrain + ShapeTag();
             lock (pads)
             {
                 if (padTag != tag) { padTag = tag; pads.Clear(); }
@@ -732,7 +778,14 @@ namespace Sting.Core
             }
         }
         /// the terrain's shape tuning: a cache of pads, footings or street nodes is dropped when it changes (world.js shapeStamp)
-        static string ShapeTag() => "|" + N(T.terrain.amp) + "," + N(T.terrain.cell) + "," + T.terrain.octaves + "," + N(T.terrain.warp) + "," + N(T.terrain.ridge) + "," + N(T.terrain.terrace) + "," + N(T.terrain.terraceStep) + "," + T.terrain.grade.oct;
+        static string shapeTag; static Num stAmp, stCell, stWarp, stRidge, stTerr, stStep; static int stOct = -1, stGoct;
+        /// the terrain's shape parameters as a cache tag, rebuilt only when they change (it is read on every ground sample)
+        static string ShapeTag()
+        {
+            if (shapeTag != null && stAmp == T.terrain.amp && stCell == T.terrain.cell && stOct == T.terrain.octaves && stWarp == T.terrain.warp && stRidge == T.terrain.ridge && stTerr == T.terrain.terrace && stStep == T.terrain.terraceStep && stGoct == T.terrain.grade.oct) return shapeTag;
+            stAmp = T.terrain.amp; stCell = T.terrain.cell; stOct = T.terrain.octaves; stWarp = T.terrain.warp; stRidge = T.terrain.ridge; stTerr = T.terrain.terrace; stStep = T.terrain.terraceStep; stGoct = T.terrain.grade.oct;
+            return shapeTag = "|" + N(T.terrain.amp) + "," + N(T.terrain.cell) + "," + T.terrain.octaves + "," + N(T.terrain.warp) + "," + N(T.terrain.ridge) + "," + N(T.terrain.terrace) + "," + N(T.terrain.terraceStep) + "," + T.terrain.grade.oct;
+        }
         static string N(Num v) => ((double)v).ToString("R", System.Globalization.CultureInfo.InvariantCulture);
         /// The ground's height: the shape times the modifier, flat when the terrain modifier is 0 and round the home
         /// tree, damped under built-up land, graded under streets, lots, squares and buildings. The sim works in height above it.
@@ -794,7 +847,7 @@ namespace Sting.Core
         public static int FootingCount(ulong seed, int cx, int cz, Settings st) => FootingsOf(seed, cx, cz, st).Count;
         static List<Pad> FootingsOf(ulong seed, int cx, int cz, Settings st)
         {
-            var F = Features(st); string tag = seed + ":" + F.woods + "," + F.towns + "," + N(F.water) + "," + N(F.hives) + "," + F.settled + ShapeTag();
+            var F = Features(st); string tag = seed + ":" + F.woods + "," + F.towns + "," + N(F.water) + "," + N(F.hives) + "," + F.settled + "," + F.terrain + ShapeTag();
             lock (feet)
             {
                 if (feetTag != tag) { feetTag = tag; feet.Clear(); }
@@ -872,7 +925,7 @@ namespace Sting.Core
         }
         static Num StreetAt(ulong seed, Num x, Num z0, Settings st, int terrain)
         {
-            var F = Features(st); string tag = seed + ":" + F.woods + "," + F.towns + "," + N(F.water) + "," + N(F.hives) + "," + F.settled + ShapeTag();
+            var F = Features(st); string tag = seed + ":" + F.woods + "," + F.towns + "," + N(F.water) + "," + N(F.hives) + "," + F.settled + "," + F.terrain + ShapeTag();
             lock (streetNodes) { if (streetTag != tag) { streetTag = tag; streetNodes.Clear(); streetLevels.Clear(); } }
             Num Nn = T.terrain.grade.node; int row = (int)Floor(z0 / CS + 0.5); Num u = x / Nn - 0.5; int i = (int)Floor(u); Num f = u - i;
             Num a = StreetLevel(seed, i, row, z0, st, terrain), b = StreetLevel(seed, i + 1, row, z0, st, terrain), c = StreetLevel(seed, i + 2, row, z0, st, terrain);

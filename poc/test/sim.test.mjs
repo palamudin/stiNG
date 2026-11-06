@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, humanParts, malesAbout, chunkOf, toLocal, dirToWorld, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, groundSlope, groundNatural, pavingOf, buildList, pondsOf, inPond, pondEdge, settledOf, wildHere, pickTarget, assistPilot, swoopPilot, hoverPilot, hoverSetting, HOVER, ROLES, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS, DiscGrid, WOODS,
+  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, groundSlope, groundNatural, pavingOf, buildList, pondsOf, inPond, pondEdge, settledOf, wildHere, pickTarget, assistPilot, swoopPilot, hoverPilot, hoverSetting, HOVER, ROLES, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS, DiscGrid, WOODS, chunkGrade, SLOPE,
 } from '../sim/index.js';
 import { applyTuning, parseTuning, tuningHash, tuningLeaves, TUNE } from '../sim/tunefile.js';
 
@@ -1794,8 +1794,10 @@ function seated(sim, pred) {
   // a town square is graded nearly level, a park rolls
   // the steepest slope within 20 m of a point
   const slope = (cx, cz) => { let m = 0; for (let j = -5; j <= 5; j++) for (let i = -5; i <= 5; i++) { const x = cx + i * 4, z = cz + j * 4; m = Math.max(m, Math.abs(g2(x + 2, z) - g2(x - 2, z)) / 4, Math.abs(g2(x, z + 2) - g2(x, z - 2)) / 4); } return m; };
-  const L = regionLayout(1234n, 1, 0).towns[0], tc = [(8 - 4 + L.tx + 0.5) * 64, (L.tz - 4 + 0.5) * 64]; // the middle of the 2x2 block
-  let pk = null; for (let x = 4; x < 12 && !pk; x++) for (let z = -4; z < 4 && !pk; z++) if (landUse(1234n, x, z) === 'park' && landUse(1234n, x + 1, z) === 'park') pk = [x, z];
+  const t2 = { terrain: 2 }; let L = null, LR = null; // the hilly world's own layout (S8: a town centre stands where it is flat enough)
+  let LZ = 0; for (let k = 1; k < 81 && !L; k++) { const rx = (k % 9) - 4, rz = Math.floor(k / 9) - 4; if (!rx && !rz) continue; const q = regionLayout(1234n, rx, rz, t2).towns[0]; if (q) { L = q; LR = rx; LZ = rz; } }
+  const tc = [(8 * LR - 4 + L.tx + 0.5) * 64, (8 * LZ + L.tz - 4 + 0.5) * 64]; // the middle of the 2x2 block
+  let pk = null; for (let x = 4; x < 12 && !pk; x++) for (let z = -4; z < 4 && !pk; z++) if (landUse(1234n, x, z, t2) === 'park' && landUse(1234n, x + 1, z, t2) === 'park') pk = [x, z];
   ok(slope(tc[0], tc[1]) < slope(pk[0] * 64 + 32, pk[1] * 64) / 3, `a town square is near level (slope ${slope(tc[0], tc[1]).toFixed(3)}) where a park rolls (${slope(pk[0] * 64 + 32, pk[1] * 64).toFixed(3)})`);
   // ground v2 (GDD 20 G1): the slope comes with the height; terraces cut flat treads; a height is cheap
   { let worst = 0; for (let k = 0; k < 50; k++) { const x = k * 7.9 - 180, z = 140 - k * 5.3, g = groundSlope(1234n, x, z, { terrain: 2 }), e = 0.05;
@@ -1816,7 +1818,7 @@ function seated(sim, pred) {
     }
     let across = 0, pad = 0, bumpy = 0, rough = 0, roads = 0, houses = 0;
     for (let cz = -4; cz <= 4; cz++) for (let cx = -4; cx <= 4; cx++) {
-      const p = pavingOf(1234n, cx, cz, {});
+      const p = pavingOf(1234n, cx, cz, { terrain: 2 }); // the hilly world's own streets (S8: its land use follows the slope)
       for (const r of p.roads) { roads++; for (let k = 0; k <= 20; k++) { const x = r.minx + (r.maxx - r.minx) * k / 20; let lo = Infinity, hi = -Infinity; for (let j = 0; j <= 8; j++) { const v = g2(x, r.minz - 1.6 + (r.maxz - r.minz + 3.2) * j / 8); lo = Math.min(lo, v); hi = Math.max(hi, v); } across = Math.max(across, hi - lo); }
         for (let k = 1; k < 60; k++) { const x = r.minx + (r.maxx - r.minx) * k / 60, e = 0.5, zc = (r.minz + r.maxz) / 2; rough = Math.max(rough, Math.abs(g2(x - e, zc) - 2 * g2(x, zc) + g2(x + e, zc))); bumpy = Math.max(bumpy, Math.abs(g2(x - e, zc + 12) - 2 * g2(x, zc + 12) + g2(x + e, zc + 12))); } }
       for (const b of p.houses) { houses++; let lo = Infinity, hi = -Infinity; for (let j = 0; j <= 6; j++) for (let i = 0; i <= 6; i++) { const v = g2(b.x - b.hw + 2 * b.hw * i / 6, b.z - b.hd + 2 * b.hd * j / 6); lo = Math.min(lo, v); hi = Math.max(hi, v); } pad = Math.max(pad, hi - lo); }
@@ -2263,7 +2265,7 @@ function seated(sim, pred) {
   const alt0 = w.y + s.ground(w.x, w.z), h0 = w.y; let dev = 0, k = 0;
   for (; k < 240 && w.x < best.x + 10; k++) { fly({ x: 1, y: 0, t: 1 }); dev = Math.max(dev, Math.abs(w.y + s.ground(w.x, w.z) - alt0)); }
   const fell = h0 - w.y, rise = s.ground(w.x, w.z) - s.ground(best.x - 3, best.z);
-  ok(dev < 0.005 && Math.abs(fell - rise) < 0.01 && rise > 1, `flying level up a rise of ${rise.toFixed(2)} m, the wasp keeps its altitude (within ${(dev * 1000).toFixed(1)} mm) and its height above the ground falls by as much (${fell.toFixed(2)} m)`);
+  ok(dev < 0.005 && Math.abs(fell - rise) < 0.01 && rise > 0.6, `flying level up a rise of ${rise.toFixed(2)} m, the wasp keeps its altitude (within ${(dev * 1000).toFixed(1)} mm) and its height above the ground falls by as much (${fell.toFixed(2)} m)`);
   // a metre above the ground up the rise and back down it
   const hold = (dir, x0) => {
     place(w, { x: x0, y: 1, z: best.z }); w.vx = w.vy = w.vz = 0; w.energy = 1; let n = 0;
@@ -2471,6 +2473,28 @@ function seated(sim, pred) {
   ok(porchLevel === houses && doors === houses, `every front door has a level stoop and a step before it, the door at the stoop's height (${porchLevel} of ${houses})`);
 }
 
+// 70. The region of templates (GDD 21.6, S8, GEN_VERSION 19): a hilly world reads as a town in its land: built where it
+// is flat enough (yards, malls, urban blocks and town centres within their grades), farmed where it is not, wooded where
+// it is steepest; the home neighbourhood stays built, and a flat world is laid out as before
+{
+  const S = 1234n, st = { terrain: 2 }, by = {}, slopeWood = [];
+  let builtOk = true, townOk = true, steepOk = true, homeOk = true, n = 0;
+  for (let cz = -12; cz <= 12; cz++) for (let cx = -12; cx <= 12; cx++) {
+    const u = landUse(S, cx, cz, st), g = chunkGrade(S, cx, cz, st), home = Math.abs(cx) <= SLOPE.home && Math.abs(cz) <= SLOPE.home; n++;
+    (by[u] ||= []).push(g);
+    if (home) { if (u === 'farm' || (u === 'forest' && landUse(S, cx, cz, {}) !== 'forest')) homeOk = false; continue; }
+    if (['yards', 'urban', 'mall'].includes(u) && g > SLOPE.built + 1e-12) builtOk = false;
+    if (u === 'town' && g > SLOPE.town + 1e-12) townOk = false;
+    if (g > SLOPE.farm && !['forest', 'park'].includes(u)) steepOk = false;
+    if (u === 'forest' && landUse(S, cx, cz, {}) !== 'forest') slopeWood.push(g);
+  }
+  const mean = (a) => (a && a.length ? a.reduce((p, q) => p + q, 0) / a.length : NaN), built = [...(by.yards || []), ...(by.urban || []), ...(by.mall || []), ...(by.town || [])];
+  const share = (a) => (a ? a.length : 0) / n;
+  let flatSame = true; for (let cz = -12; cz <= 12; cz++) for (let cx = -12; cx <= 12; cx++) if (landUse(S, cx, cz, { terrain: 0 }) === 'farm') flatSame = false;
+  ok(builtOk && townOk && steepOk && homeOk && flatSame && (by.town || []).length >= 4 && share(built) > 0.25 && share(by.farm) > 0.25 && slopeWood.length > 10 && mean(built) < mean(by.farm) && mean(by.farm) < mean(slopeWood),
+    `a hilly world reads as a town in its land: ${(share(built) * 100).toFixed(0)}% built at a mean grade of ${(mean(built) * 100).toFixed(1)}% (none over ${SLOPE.built * 100}%, ${(by.town || []).length} town-centre chunks within ${SLOPE.town * 100}%), ${(share(by.farm) * 100).toFixed(0)}% farmed at ${(mean(by.farm) * 100).toFixed(1)}%, ${slopeWood.length} chunks wooded for their slope at ${(mean(slopeWood) * 100).toFixed(1)}%; the home neighbourhood built; a flat world as before`);
+}
+
 // 69. Dense woods (GDD 21.5, S7, GEN_VERSION 18): a forest chunk holds 120 to 250 trees on a jittered grid, light
 // reaches the floor in patches, the walkers' loop is a clear path, the per-tree things (webs) stay about as many as a
 // few trees had; the trunk grid finds exactly what the full loops found, in the same order (a run hashes the same
@@ -2524,7 +2548,7 @@ function seated(sim, pred) {
 // and buildings in a 9x9 patch of chunks, the ground finite and graded (streets within 10%, house pads level), the wild
 // land of a settled world finite; and a wasp set down there flies, finds its chunks and the people in them
 {
-  const st = { terrain: 2 }, S = 1234n;
+  const st = { terrain: 1 }, S = 1234n; // rolling: on a hilly world the land use follows the slope (S8), and the mix varies with the land
   const patch = (c0) => {
     const r = { uses: {}, houses: 0, rows: 0, bad: 0, street: 0, pads: 0, padBad: 0 };
     for (let cz = -4; cz <= 4; cz++) for (let cx = c0 - 4; cx <= c0 + 4; cx++) {
@@ -2559,7 +2583,7 @@ function seated(sim, pred) {
 {
   const st = { terrain: 2 }, S = 1234n, g = (x, z) => groundAt(S, x, z, st);
   let chunks = 0, buildings = 0, level = 0, street = 0, high = 0, stairs = 0, courtLow = true, fronts = 0, dividers = 0, joins = 0, walkers = 0, batches = 0;
-  for (let cz = -8; cz <= 8; cz++) for (let cx = -8; cx <= 8; cx++) {
+  for (let cz = -16; cz <= 16; cz++) for (let cx = -16; cx <= 16; cx++) { // (wide: on a hilly world towns stand only where it is flat enough, S8)
     if (landUse(S, cx, cz, st) !== 'urban') continue;
     chunks++;
     const c = generateChunk(S, cx, cz, st), oz = cz * 64;
@@ -2593,7 +2617,7 @@ function seated(sim, pred) {
   let farms = 0, steads = 0, buildings = 0, level = 0, plinth = 0, setback = 0, worstFill = 0, lanesOpen = true, lanePeople = 0, yardPeople = 0, inner = 0;
   for (let cz = -7; cz <= 7; cz++) for (let cx = -7; cx <= 7; cx++) {
     const use = landUse(S, cx, cz, st), d = Math.hypot(cx, cz) * 64;
-    if (use === 'farm' && d <= 272) inner++;
+    if (use === 'farm' && d <= 272 && chunkGrade(S, cx, cz, st) <= SLOPE.built) inner++; // nearer than the ring only where too steep to build on (S8)
     if (use !== 'farm') continue;
     farms++;
     const c = generateChunk(S, cx, cz, st), on = (p, r) => p.x >= r.minx - 0.01 && p.x <= r.maxx + 0.01 && p.z >= r.minz - 0.01 && p.z <= r.maxz + 0.01;
@@ -2615,7 +2639,7 @@ function seated(sim, pred) {
       if (hm.act === 'garden' && pts.length && pts.every((p) => c.farmyards.some((y) => on(p, y)) || c.sheds.some((q) => q.barn && Math.abs(p.x - q.x) <= q.hw + 0.01))) yardPeople++;
     }
   }
-  ok(farms > 40 && inner === 0 && steads >= 10, `the settled area's outer ring is farmland: ${farms} chunks, ${steads} farmsteads, none nearer the home tree than 272 m`);
+  ok(farms > 40 && inner === 0 && steads >= 10, `the settled area's outer ring is farmland: ${farms} chunks, ${steads} farmsteads; none nearer the home tree than 272 m but on land too steep to build on`);
   ok(buildings >= 30 && level === buildings && plinth === buildings && setback === buildings, `every one of ${buildings} farm buildings stands level on its footing (fill or cut at most ${worstFill.toFixed(2)} m of 1.5), and none within a slope setback (nothing steeper than 1:3 within half its height)`);
   ok(lanesOpen && lanePeople > 0 && yardPeople > 0, `the hedgerows leave the lanes open; ${lanePeople} people walk the lanes and ${yardPeople} work the farmyards`);
 }

@@ -2483,6 +2483,38 @@ On a jump the CPU path no longer blurs a level out to its parent: the window it 
 
 The game now asks for a square at least 16 m across (`causticsMin`), pushed 30% of its size ahead along the view (`causticsAhead`), on a 512 texture with a 384 grid. That is about the old detail (3 cm texels, 7 cm cells, against 2.3 and 5 cm) over 2.7 times the width. Water seen at a slant still clouds with distance: that is the water, not the caustics.
 
+### 18.97 The region of templates (S8, GEN_VERSION 19)
+
+**The land decides.** On a world with terrain, each chunk's land is graded before anything is built on it (`chunkGrade`, world.js `SLOPE`).
+- **The grade.** It is the steepest rise over 16 m across a 5 × 5 grid of the ground's broad shape: two octaves, the terrain modifier and the home ring. It does not count the land use, because the ground's roll follows the land use, so the land use cannot follow the roll. It is a table per chunk: computed once, then read.
+- **The rules.** The layout's yards and malls stand where the grade is at most 12%, and a town centre needs all four of its chunks within 10%. Land too steep to build on is farmed up to 20% and wooded past it.
+- **What stays.** Parks and the layout's forest corners stay where they are. The chunks round the home park (within one chunk) stay built: the colony's neighbourhood is always suburbia (Q-06). A flat world is laid out exactly as before.
+
+**What it gives.** Over 25 × 25 chunks of a hilly world (seed 1234, terrain 2):
+
+| land | share | mean grade |
+|---|---|---|
+| built | 38% | 9.8% |
+| farmed | 40% | 15.2% |
+| wooded for its slope | 27 chunks | 22.5% |
+
+There are 8 town-centre chunks. A rolling world (terrain 1) stays almost all built: its grades run 4% to 9%. Urban blocks still form round the towns that stand, now only on flat land. Streets meet the farms and woods as they met a forest edge before, in cul-de-sacs and dead ends.
+
+**Caches.** The world tables are now keyed by the terrain modifier and the terrain's shape, in JS and C#. The land use follows the grade, so a retuned shape must not reuse a layout. A test that retunes the terrace had left C# with a stale region layout: the C# build placed one town fewer until the key took the shape in. JS compares the shape's fields on its fast path, and C# rebuilds its shape tag only when the tuning changes.
+
+**Checked.** Block 70, in JS and both C# builds:
+- built land within its grade, town centres within theirs;
+- every chunk steeper than 20% wooded (or a park);
+- the means rising from built to farmed to wooded;
+- the home neighbourhood built, and a flat world unchanged.
+
+Tests that had assumed a hilly world kept its flat layout now read the hilly world's own layout and streets:
+- the town square against a park;
+- streets level across their sidewalks;
+- farms nearer than the settled ring, now only where the land is too steep to build on.
+
+Two more widened their range: the urban blocks are counted over 33 × 33 chunks, and the far-from-home patch is compared on a rolling world. The parity digests changed only for the wild land and motion over hills.
+
 ### 18.96 Dense woods in the sim (S7, GEN_VERSION 18)
 
 **The woods.** A forest chunk now holds 134 to 226 trees, where it held 16 to 26, and a wild chunk holds as many as its forest is thick (`addWoods`, world.js `WOODS`).
@@ -3152,7 +3184,7 @@ Each is built, tested in JS and both C# builds where the sim is touched, documen
   - light reaches the floor in patches;
   - the sim tick is no slower than now in a wood.
 
-**S8. The region of templates.**
+**S8. The region of templates. Built (18.97).**
 - **What.** The region layout chooses templates by slope and place: an urban core, a semi-urban ring, rural land, woods.
 - **Done when** a hilly world reads as a town in its land: built where it is flat enough, farmed where it is not, wooded where it is steepest.
 
