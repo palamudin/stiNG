@@ -50,7 +50,7 @@ float sw3Group(vec2 p, float t) { return 0.45 + 0.55 * (0.5 + 0.5 * w2noise(p / 
 // ---- the shoreline (the swash). Every sea beach; exposure from the way the sand faces (grad: the ground's uphill
 // gradient), the clock's noise from the point itself, the crest of the first train reaching the line (its phase at
 // travel time 0) starting each climb
-const float SW3_UP = ${SWASH.up.toFixed(2)};
+const float SW3_UP = ${SWASH.up.toFixed(2)}; // the share of s that is the climb (its timing is the beach's own: sw3Tup)
 #define SW3_EARLY uSurfX.y // seconds: the shoreline's climb starts this much sooner still (the panel's 'Shore water lead')
 const float SW3_LEAD = 0.58; // radians: the bore (the crest's foam charge, running ahead of it) reaches the line this much before the crest
 void sw3Beach(vec2 p, vec2 grad) {
@@ -67,27 +67,42 @@ float sw3Reach(vec2 p, float tb, float tc, float cyc) {
   float fing = 0.85 + 0.3 * w2noise(p / 1.6 + vec2(cyc * 7.3, cyc * 3.1), 621) + 0.08 * w2noise(p / 0.5 + vec2(cyc * 1.7, -cyc * 2.9), 625);
   return sw3Runup(tb, 2.0 * uSurf.x * gExpo * sw3Group(p, tc), sw3Period()) * fing;
 }
-// the shoreline's climb and drain over one wave (s: the fraction of the period since the crest reached the line)
-float sw3Shape(float s) { return s < SW3_UP ? sin(s / SW3_UP * 1.5707963) : cos((s - SW3_UP) / (1.0 - SW3_UP) * 1.5707963); }
-// the shoreline's height over the still water at p now, and s
+// the run-up's own time, from the beach, not a share of the period: its bore leaves the line at sqrt(2 g R) and
+// climbs the slope tb against gravity, stopping after sqrt(2 R / g) / tb seconds, then runs back the same way. On a
+// steep short beach it is up and back in a second or two (with a splash at the line); on a wide flat one it creeps
+// for longer than a wave, and the next bore runs up over its backwash
+// (friction and the bore's own collapse hold a flat beach's to half a wave each way: it is back at the line as the next
+// bore arrives, and that one pushes up over the last of it)
+float sw3Tup(float R, float tb) { return clamp(sqrt(2.0 * max(R, 0.005) / 9.81) / max(tb, 0.012), 0.35, 0.5 * sw3Period()); }
+// one run-up's height t seconds after its bore reached the line
+float sw3Arc(float t, float R, float tu) { float x = t / tu - 1.0; return t <= 0.0 || t >= 2.0 * tu ? 0.0 : R * (1.0 - x * x); }
+// after sw3Shore: how steep the beach is for a splash (0 gentle .. 1 steep), seconds since the leading run-up's bore
+// reached the line
+float gSwSteep = 0.0, gSwT = 1e3;
+// the shoreline's height over the still water at p now: the highest of this bore's run-up and the ones before it still
+// draining; s: where the leading one is, 0 .. SW3_UP climbing, SW3_UP .. 1 draining, 1 drained (the foam reads it)
 float sw3Shore(vec2 p, float tb, float t, out float s) {
-  float T0 = sw3Period(), f = (sw3Omega(0) * (t + SW3_EARLY) + gPn + SW3_LEAD) / 6.2831853, cyc = floor(f); s = f - cyc;
-  return sw3Reach(p, tb, t - s * T0, cyc) * sw3Shape(s);
+  float T0 = sw3Period(), f = (sw3Omega(0) * (t + SW3_EARLY) + gPn + SW3_LEAD) / 6.2831853, cyc = floor(f), fr = f - cyc;
+  float h = -1.0; s = 1.0; gSwT = fr * T0; gSwSteep = smoothstep(0.08, 0.25, tb);
+  for (int k = 0; k < 3; k++) {
+    float tk = (fr + float(k)) * T0, R = sw3Reach(p, tb, t - tk, cyc - float(k)), tu = sw3Tup(R, tb), hk = sw3Arc(tk, R, tu);
+    if (hk > h) { h = hk; gSwT = tk; s = tk < tu ? SW3_UP * tk / tu : tk < 2.0 * tu ? SW3_UP + (1.0 - SW3_UP) * (tk - tu) / tu : 1.0; }
+  }
+  return max(h, 0.0);
 }
-// the sand at p, hgt over the still water: (darkness 0..1, gloss 0..1, covered 0/1): wet from when the shoreline rose
-// past it (never before) to when it fell back past it, in each of the last waves; drying from then
+// the sand at p, hgt over the still water: (darkness 0..1, gloss 0..1, covered 0/1): wet from when a run-up rose past it
+// (never before) to when it fell back past it, in each of the last waves; drying from then
 vec3 sw3Wet(vec2 p, float hgt, float tb, float t) {
   if (hgt <= 0.0) return vec3(1.0, 1.0, 1.0);
-  float T0 = sw3Period(), f = (sw3Omega(0) * (t + SW3_EARLY) + gPn + SW3_LEAD) / 6.2831853, cyc = floor(f), s = f - cyc;
+  float T0 = sw3Period(), f = (sw3Omega(0) * (t + SW3_EARLY) + gPn + SW3_LEAD) / 6.2831853, cyc = floor(f), fr = f - cyc;
   vec3 o = vec3(0.0);
   for (int k = 0; k < ${SWASH.memory}; k++) {
-    float R = sw3Reach(p, tb, t - (s + float(k)) * T0, cyc - float(k));
+    float tk = (fr + float(k)) * T0, R = sw3Reach(p, tb, t - tk, cyc - float(k));
     if (hgt >= R) continue;
-    float q = hgt / R, sa = SW3_UP * asin(q) / 1.5707963, sl = SW3_UP + (1.0 - SW3_UP) * acos(q) / 1.5707963;
-    float now = s + float(k); // this wave's clock, in periods since its crest reached the line
-    if (now < sa) continue;                        // its water has not reached the point yet
-    if (now <= sl) return vec3(1.0, 1.0, 1.0);     // under it now
-    float age = (now - sl) * T0;
+    float tu = sw3Tup(R, tb), r = sqrt(1.0 - hgt / R), ta = tu * (1.0 - r), tl = tu * (1.0 + r);
+    if (tk < ta) continue;                         // its water has not reached the point yet
+    if (tk <= tl) return vec3(1.0, 1.0, 1.0);      // under it now
+    float age = tk - tl;
     o.x = max(o.x, exp(-age / ${SWASH.dark.toFixed(1)})); o.y = max(o.y, exp(-age / ${SWASH.gloss.toFixed(2)}));
   }
   return o;
@@ -117,8 +132,11 @@ float sw3ShoreFoam(float depth, float th, float s, float wave) {
   float top = zeta - 0.75 * smoothstep(0.3, 1.0, p), reach = 0.75 * smoothstep(0.15, 1.0, p);
   // soft edges both ways (the foam field holds it in half-metre texels: a hard edge drew their steps), and only thinned
   // where the bore's own foam is, not cut out, so the two overlap and join instead of leaving a line between them
-  return smoothstep(0.0, 0.12, top + depth) * (1.0 - smoothstep(0.35 * reach, reach + 0.1, depth)) * smoothstep(0.0, 0.06, s)
+  float mass = smoothstep(0.0, 0.12, top + depth) * (1.0 - smoothstep(0.35 * reach, reach + 0.1, depth)) * smoothstep(0.0, 0.06, s)
        * (s < SW3_UP ? 0.9 : mix(0.85, 0.5, p)) * (1.0 - 0.4 * clamp(wave, 0.0, 1.0));
+  // a steep beach's splash: the bore hits the slope and throws white at the line, for the first second or so
+  float splash = gSwSteep * exp(-gSwT / 0.7) * (1.0 - smoothstep(0.1, 0.6, abs(depth + 0.1)));
+  return max(mass, 0.95 * splash);
 }
 // the waves' sideways shift near the line, faded out: a trough must not pull the water's edge back off the sand
 float sw3EdgeShift(float depth) { return smoothstep(0.4, 2.0, depth); }
