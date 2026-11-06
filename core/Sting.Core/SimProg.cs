@@ -10,6 +10,27 @@ namespace Sting.Core
         public int Rank(string id) => prog.ranks[Skills.Index(id)];
         /// a line's rank in a skill, without making the line if it has none
         public int Rank(string id, string sp) { if (sp == null || sp == species) return Rank(id); return progs.TryGetValue(sp, out var p) ? p.ranks[Skills.Index(id)] : 0; }
+        /// the growth tree (T3-3): a node's rank on a line's tree, and on a line on the AI, never past the line in hand's
+        public int TreeRank(string id) => prog.tree[Growth.Index(id)];
+        public int TreeRank(string id, string sp) { if (sp == null || sp == species) return TreeRank(id); return progs.TryGetValue(sp, out var p) ? p.tree[Growth.Index(id)] : 0; }
+        int TreeCap(string id, string sp) => sp == null ? TreeRank(id) : System.Math.Min(TreeRank(id, sp), TreeRank(id));
+        public int Points() => Growth.Points(prog);
+        /// the share of the gap to full insulation a line's tree closes (Nest: insul)
+        public Num InsGain(string sp = null) => Min(1, T.tree.insul * TreeCap("insul", sp));
+        internal static Num Insul(string site, Num gain) { Num s = T.sites.Of(site).insulation; return s + (1 - s) * gain; }
+        /// lock-on ranges: the landing reach skill and the tree's lock node
+        public Num LockMul(WaspBase wb) => Mul(wb, "landR") * (wb is Wasp w && w.colony == "own" ? 1 + T.tree.@lock * TreeRank("lock") : 1);
+        /// how many colonies of the line there can be (Line: found)
+        internal int LineMax() => T.line.max + (int)Floor(T.tree.found * TreeRank("found"));
+        /// a rank on the growth tree (T3-3): a point, the node open; told to the peers, who audit it against the tree's ranges
+        void Grow(int i)
+        {
+            var P = prog;
+            if (!Growth.Open(i, P.tree) || Growth.Points(P) < 1) { Emit("growDenied", ("id", i >= 0 && i < Growth.NODES.Length ? Growth.NODES[i] : null)); return; }
+            P.tree[i]++;
+            Emit("grew", ("id", Growth.NODES[i]), ("rank", P.tree[i]), ("points", Growth.Points(P)));
+            if (net) Publish(new NetEv { type = "grow", node = i, rank = P.tree[i] });
+        }
         /// a new line takes the experience of the queen that founds it: the line she came from, as it stands (GDD 6.8)
         internal void ForkLine(string from, string to) { if (!progs.ContainsKey(to)) progs[to] = LPW(from).Copy(); }
         /// an insect of the player's line has a skill once the line learned it ("all": every unlock from the start)
@@ -24,7 +45,7 @@ namespace Sting.Core
         public int RoleLevel(string role) => prog.roles[Skills.Role(role)];
         int RoleRank(Wasp w, string id) => Skills.RoleUses(w.role, id) ? RoleLevel(w.role) : 0;
         /// a guard's weight in a fight from its role's level, on top of its species'
-        internal Num FightBonus(Wasp w) => Spw(w).fight + (w.colony == "own" && w.role == "guard" ? T.roles.fight * RoleLevel("guard") : 0);
+        internal Num FightBonus(Wasp w) => Spw(w).fight + (w.colony == "own" && w.role == "guard" ? T.roles.fight * RoleLevel("guard") + T.tree.guard * TreeRank("guard") : 0); // (and the tree's Nest: guard, T3-3)
         internal Pers PersOf(Wasp w) => w.pers ??= new Pers();
         /// it dies: one that mastered its job leaves its role a level better for every worker of it
         internal void Legacy(int id, Pers pers)
@@ -46,12 +67,13 @@ namespace Sting.Core
             if (!p.mastered && sum >= T.roles.mastery) { p.mastered = true; Emit("mastered", ("id", w.id), ("role", Skills.ROLES[ri >= 0 ? ri : 0])); }
         }
         /// the hive skills' multipliers for the player's colony
-        public Boost BoostNow() => new Boost { forage = 1 + T.skills.forage * Rank("forage"), brood = 1 + T.skills.brood * Rank("brood"), lay = 1 + T.skills.lay * Rank("lay"), build = 1 + T.skills.build * Rank("build") };
+        public Boost BoostNow() => new Boost { forage = 1 + T.skills.forage * Rank("forage"), brood = (1 + T.skills.brood * Rank("brood")) * (1 + T.tree.brood * TreeRank("brood")), lay = 1 + T.skills.lay * Rank("lay"), build = (1 + T.skills.build * Rank("build")) * (1 + T.tree.cells * TreeRank("cells")), gyne = 1 + T.tree.gynes * TreeRank("gynes") };
         /// a line's hive skills on the AI: its own tree, but never past the line in hand (GDD 6.8, the level cap)
         Boost CapBoost(string sp)
         {
             int R(string id) => System.Math.Min(Rank(id, sp), Rank(id));
-            return new Boost { forage = 1 + T.skills.forage * R("forage"), brood = 1 + T.skills.brood * R("brood"), lay = 1 + T.skills.lay * R("lay"), build = 1 + T.skills.build * R("build") };
+            int Tc(string id) => TreeCap(id, sp);
+            return new Boost { forage = 1 + T.skills.forage * R("forage"), brood = (1 + T.skills.brood * R("brood")) * (1 + T.tree.brood * Tc("brood")), lay = 1 + T.skills.lay * R("lay"), build = (1 + T.skills.build * R("build")) * (1 + T.tree.cells * Tc("cells")), gyne = 1 + T.tree.gynes * Tc("gynes") };
         }
         /// hand: earned by the player's own play (the gauge counts only that)
         void Gain(bool unit, Num v, bool hand = true, string sp = null) { var P = LPW(sp ?? species); if (unit) { P.unit += v; P.unitTotal += v; } else { P.hive += v; P.hiveTotal += v; } if (hand) player.hand += v; }
@@ -87,7 +109,7 @@ namespace Sting.Core
         public Boost LineBoost(string sp)
         {
             Num g = Gauge(), e = T.gauge.effMin + (1 - T.gauge.effMin) * g; var B = CapBoost(sp);
-            return new Boost { forage = e * (1 + (B.forage - 1) * g), brood = 1 + (B.brood - 1) * g, lay = 1 + (B.lay - 1) * g, build = 1 + (B.build - 1) * g };
+            return new Boost { forage = e * (1 + (B.forage - 1) * g), brood = 1 + (B.brood - 1) * g, lay = 1 + (B.lay - 1) * g, build = 1 + (B.build - 1) * g, gyne = 1 + (B.gyne - 1) * g };
         }
         /// take another colony of the line in hand (GDD 6.8, multi-colony play): yours goes on under the AI at your gauge
         /// the same relay rules as taking a far worker (Q-03): a colony whose nest is within 30 m of your insect is taken at

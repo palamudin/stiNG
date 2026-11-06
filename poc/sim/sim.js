@@ -1,7 +1,7 @@
 // STING simulation core (iteration 2). Mirrors Sting.Core: no rendering, no wall clock.
 // Every wasp, driven or AI, goes through the same flight, contact, sting and swat code.
 import { Domain, hash, unit, rangeInt, u64, h32, hseq, dsin, dcos, clamp, clamp01, fnv32, hex64, rnd, sq, datan2, TAU } from './rng.js';
-import { T, DT, GEN_VERSION, DEFAULT_SETTINGS, SKILLS, SKILL_UNLOCKS, SKILL_RANKED, skillCost, ROLES, ROLE_SKILLS, XP_ROLE } from './tuning.js';
+import { T, DT, GEN_VERSION, DEFAULT_SETTINGS, SKILLS, SKILL_UNLOCKS, SKILL_RANKED, skillCost, ROLES, ROLE_SKILLS, XP_ROLE, TREE_NODES, treeOpen, treePoints } from './tuning.js';
 import {
   Zone, ZONES, SwatKind, SwatKindName, Style, humanTraits, humanClothing, suitClothing, zoneCover, bodyParts, humanParts,
   segClosest, classify, toWorld, toLocal, dirToWorld, resolveSting, windowFor, selfReach, garmentGraph, Top,
@@ -26,7 +26,7 @@ const byHumanId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 // Events that change shared world state. Most commit at the end of the consequence window so every
 // peer applies them on the same tick (GDD 11.5); a few cosmetic or owner-decided ones apply on receipt.
-const IMMEDIATE = new Set(['caught', 'claim', 'denied', 'drop', 'sip', 'beeAlarm', 'died', 'fight', 'fightReq', 'fightJoin', 'fightRefuse', 'fightEnd', 'raid', 'fixReq', 'nest', 'praid']);
+const IMMEDIATE = new Set(['caught', 'claim', 'denied', 'drop', 'sip', 'beeAlarm', 'died', 'fight', 'fightReq', 'fightJoin', 'fightRefuse', 'fightEnd', 'raid', 'fixReq', 'nest', 'praid', 'grow']);
 // a human's fixed parts, from the world; everything else about it is state a late-event correction carries
 const HUMAN_FIXED = new Set(['id', 'hex', 'short', 'tr', 'chunk', 'home', 'parts']); // wasp-level: never touch humans
 
@@ -183,10 +183,10 @@ export class Sim {
   // How fast the brood develops at a minute (GDD 6.6, T1-14): full speed in a comfortable nest; cold snaps and heat
   // slow it, as much as the site lets the weather in. An attic heats up on sunny afternoons.
   // Water the colony has fanned over the comb takes the heat's share away (T2-1)
-  broodSpeed(m = this.minute, site = this.nest.site, cool = this.colony.cool) {
-    const H = T.thermal, S = T.sites[site || 'trunk'], air = this._nestAir(m, site);
+  broodSpeed(m = this.minute, site = this.nest.site, cool = this.colony.cool, gain = this._insGain()) {
+    const H = T.thermal, ins = this._insul(site, gain), air = this._nestAir(m, site); // (the tree's insulation, T3-3)
     const cold = clamp01((H.coldFrom - air) / H.coldSpan), hot = clamp01((air - H.hotFrom) / H.hotSpan) * H.hotWeight * (1 - clamp01(cool ?? 1));
-    return Math.max(H.minSpeed, 1 - (1 - S.insulation) * (cold + hot));
+    return Math.max(H.minSpeed, 1 - (1 - ins) * (cold + hot));
   }
   // the air at a nest: the weather, plus the sun on an attic roof
   _nestAir(m, site = this.nest.site) {
@@ -195,8 +195,8 @@ export class Sim {
   }
   // The nest's heat (GDD 6.6, T2-1): how hot it is past comfort through the site's insulation (0..1), and how far the
   // comb is past the temperature that kills brood (0..1)
-  nestHeat(m = this.minute, site = this.nest.site) {
-    const H = T.thermal, W = T.water, S = T.sites[site || 'trunk'], air = this._nestAir(m, site), keep = 1 - S.insulation;
+  nestHeat(m = this.minute, site = this.nest.site, gain = this._insGain()) {
+    const H = T.thermal, W = T.water, air = this._nestAir(m, site), keep = 1 - this._insul(site, gain);
     const nestT = W.nestBase + Math.max(0, air - W.nestBase) * keep;
     return { heat: keep * clamp01((air - H.hotFrom) / H.hotSpan), cook: clamp01((nestT - W.lethal) / W.lethalSpan), nestT };
   }
@@ -374,6 +374,7 @@ export class Sim {
     if (cmd.alloc > 0 && cmd.alloc <= T.alloc.length && this.colony.alloc !== cmd.alloc - 1) { this.colony.alloc = cmd.alloc - 1; this.emit('alloc', { preset: this.colony.alloc }); }
     let pick = cmd.pick | 0;
     if (pick <= -1000) { this._switchColony(-pick - 1000); pick = 0; } // take another colony of the line in hand (GDD 6.8)
+    else if (pick <= -500) { this._grow(-pick - 500); pick = 0; } // a rank on the growth tree (T3-3)
     else if (pick < 0) { this._learn(-pick - 1); pick = 0; } // a negative pick learns a skill (GDD 6.8)
     if (this.winter) { this._winterStep(pick); pick = 0; } // in winter a pick chooses the queen (T1-15)
     if (edge & Act.Switch) this._possessNearest();
@@ -510,6 +511,10 @@ export class Sim {
     if (ev.tick > this.tick + P.futureTicks) return 'from the future';
     if (ev.type === 'quarantine' && ev.peer !== this.host) return 'only the host rules on peers';
     if (ev.type === 'startle' && !(ev.amount > 0 && ev.amount <= T.swoop.panic)) return 'startle out of range';
+    if (ev.type === 'grow') { // a rank on a peer's growth tree (T3-3): the next rank of an open node, within the tree's ranges
+      const tr = (this.plaus.trees || {})[ev.peer] || TREE_NODES.map(() => 0);
+      if (!treeOpen(ev.node, tr) || ev.rank !== (tr[ev.node] | 0) + 1) return 'growth out of range';
+    }
     if (ev.type === 'deepen' && ev.pain !== undefined && !(ev.pain > 0 && ev.pain <= P.maxPain)) return 'pain out of range';
     if (ev.type === 'praid') { // from that nest's entrance, as its owner or anyone who has heard where it is knows
       const n = ev.toPeer === this.peer ? this.nest.entrance : this.peerNests.get(ev.toPeer);
@@ -678,6 +683,7 @@ export class Sim {
     const mine = ev.peer === this.peer;
     switch (ev.type) {
       case 'fixReq': if (this.chunkAuthority(ev.key) === this.peer) this._owesFix(ev.key); break;
+      case 'grow': if (!mine) { const T2 = this.plaus.trees || (this.plaus.trees = {}), tr = T2[ev.peer] || (T2[ev.peer] = TREE_NODES.map(() => 0)); tr[ev.node] = ev.rank; } break; // a peer's tree, as audited (T3-3)
       case 'nest': if (!mine) this.peerNests.set(ev.peer, { x: ev.x, y: ev.y, z: ev.z, key: ev.key, alive: ev.alive, species: ev.species || 'wasp' }); break;
       case 'praid': // another player's wasp took a larva from my nest: one fewer, and my guards go after it
         if (mine || ev.toPeer !== this.peer || !this.colony.nestAlive) break;
@@ -1305,7 +1311,7 @@ export class Sim {
     const S = T.swoop;
     if (this.tick < (w.swoopReady || 0) || w.energy <= S.energy || w.bodyT < T.cold.flyBody) return;
     w.yaw = cmd.yawQ * 1e-4; w.pitch = clamp(cmd.pitchQ * 1e-4, -1.45, 1.45);
-    w.swoopUntil = this.tick + S.ticks; w.swoopReady = this.tick + S.cooldown; w.energy -= S.energy;
+    w.swoopUntil = this.tick + S.ticks; w.swoopReady = this.tick + (w.colony === 'own' ? Math.floor(S.cooldown * (1 - T.tree.recover * this.treeRank('recover'))) : S.cooldown); // (Flight: recover, T3-3) w.energy -= S.energy;
     w.noLandUntil = this.tick + S.ticks; // the dash does not settle the gentle way: the slam does
     this.emit('swoop', { id: w.id });
   }
@@ -2386,12 +2392,12 @@ export class Sim {
     const sites = [];
     let survivors = 0;
     for (const [i, f] of share) {
-      const s = cands[i], k = Math.floor(col.mated * f * H.survival * s.q + h32(n, i, 952));
+      const s = cands[i], k = Math.floor(col.mated * f * H.survival * s.q * (1 + T.tree.winter * this.treeRank('winter')) + h32(n, i, 952)); // (Line: winter, T3-3)
       if (k >= 1) { sites.push({ kind: s.kind, x: s.x, y: s.y, z: s.z, q: s.q, n: k, scouted: i === pk }); survivors += k; }
     }
     // the sister colonies' mated queens winter by their nests (T2-4)
     for (const sc of this.line) {
-      const k = Math.floor(sc.colony.mated * H.survival * H.q.sister + h32(n, sc.id, 953));
+      const k = Math.floor(sc.colony.mated * H.survival * H.q.sister * (1 + T.tree.winter * this.treeRank('winter')) + h32(n, sc.id, 953));
       if (k >= 1) { sites.push({ kind: 'sister', x: sc.nest.spawn.x, y: sc.nest.spawn.y, z: sc.nest.spawn.z, q: H.q.sister, n: k, scouted: false }); survivors += k; }
     }
     sites.sort((a, b) => b.n - a.n || b.q - a.q || a.x - b.x || a.z - b.z);
@@ -2496,7 +2502,7 @@ export class Sim {
     // the daughter queen left in the hive flies to mate some days on; till she is back the hive lays nothing
     c.virgin = { at: (dayOf(this.minute) + Math.max(1, Math.round(H.mateFrac * this.settings.seasonDays))) * 1440 + H.mateHour };
     const used = [{ x: this.nest.treeX, z: this.nest.treeZ }, ...this.line.map((x) => ({ x: x.nest.treeX, z: x.nest.treeZ })), ...this.swarms.filter((x) => x.nest).map((x) => ({ x: x.nest.treeX, z: x.nest.treeZ }))];
-    const t = this.line.length + this.swarms.length < T.line.max ? this._lineTree({ x: nest.x, z: nest.z }, used) : null;
+    const t = this.line.length + this.swarms.length < this._lineMax() ? this._lineTree({ x: nest.x, z: nest.z }, used) : null;
     // the swarm hangs on a branch of the nearest other tree while its scouts look for a home
     const e = nest.entrance, k = this.swarms.length + this.lineSeq;
     let bv = null, bd = H.bivRange * H.bivRange;
@@ -2628,15 +2634,35 @@ export class Sim {
 
   // ---------------- progression (GDD 6.8): XP, skills, the year's turn
 
-  _newProg() { return { unit: 0, unitTotal: 0, hive: 0, hiveTotal: 0, stabs: 0, ranks: SKILLS.map(() => 0), roles: ROLES.map(() => 0), mark: 0 }; } // mark: the XP the line had at its last winter
+  _newProg() { return { unit: 0, unitTotal: 0, hive: 0, hiveTotal: 0, stabs: 0, ranks: SKILLS.map(() => 0), roles: ROLES.map(() => 0), mark: 0, tree: TREE_NODES.map(() => 0) }; } // mark: the XP the line had at its last winter
   _newPlayer() { return { hand: 0, handSeen: 0, gaugeRate: 0, gaugeDays: 0 }; }
   // Each line keeps its own XP, stabs and tree (GDD 6.8); a line is the player's colonies of one species
   get prog() { return this._lpw(this.species); }
   set prog(v) { this._oldProg = v; } // a save from before lines had their own (persist.js moves it over)
   _lpw(sp) { return this.progs[sp] || (this.progs[sp] = this._newProg()); }
   // a new line takes the experience of the queen that founds it: the line she came from, as it stands (GDD 6.8)
-  _forkLine(from, to) { if (!this.progs[to]) { const P = this._lpw(from); this.progs[to] = { ...P, ranks: P.ranks.slice(), roles: P.roles.slice() }; } }
+  _forkLine(from, to) { if (!this.progs[to]) { const P = this._lpw(from); this.progs[to] = { ...P, ranks: P.ranks.slice(), roles: P.roles.slice(), tree: (P.tree || TREE_NODES.map(() => 0)).slice() }; } }
   rank(id, sp) { const P = sp === undefined || sp === this.species ? this.prog : this.progs[sp]; return P ? P.ranks[SKILLS.indexOf(id)] | 0 : 0; }
+  // the growth tree (T3-3): a node's rank on a line's tree, and on a line on the AI, never past the line in hand's
+  treeRank(id, sp) { const P = sp === undefined || sp === this.species ? this.prog : this.progs[sp]; return P && P.tree ? P.tree[TREE_NODES.indexOf(id)] | 0 : 0; }
+  _treeCap(id, sp) { return sp === undefined ? this.treeRank(id) : Math.min(this.treeRank(id, sp), this.treeRank(id)); }
+  points() { return treePoints(this.prog); }
+  // the share of the gap to full insulation a line's tree closes (Nest: insul)
+  _insGain(sp) { return Math.min(1, T.tree.insul * this._treeCap('insul', sp)); }
+  _insul(site, gain) { const s = T.sites[site || 'trunk'].insulation; return s + (1 - s) * gain; }
+  // lock-on ranges: the landing reach skill and the tree's lock node
+  _lockMul(w) { return this._mul(w, 'landR') * (w && w.colony === 'own' ? 1 + T.tree.lock * this.treeRank('lock') : 1); }
+  // how many colonies of the line there can be (Line: found)
+  _lineMax() { return T.line.max + Math.floor(T.tree.found * this.treeRank('found')); }
+  // a rank on the growth tree (T3-3): a point, the node open; told to the peers, who audit it against the tree's ranges
+  _grow(i) {
+    const P = this.prog;
+    if (!P.tree) P.tree = TREE_NODES.map(() => 0);
+    if (!treeOpen(i, P.tree) || treePoints(P) < 1) { this.emit('growDenied', { id: TREE_NODES[i] || null }); return; }
+    P.tree[i]++;
+    this.emit('grew', { id: TREE_NODES[i], rank: P.tree[i], points: treePoints(P) });
+    if (this.net) this._publish({ type: 'grow', node: i, rank: P.tree[i] });
+  }
   // An insect of the player's line has a skill once the line learned it ('all': every unlock from the start)
   hasSkill(w, id) {
     if (w && w.colony !== 'own') return false;
@@ -2649,7 +2675,7 @@ export class Sim {
   roleLevel(role) { return this.prog.roles[ROLES.indexOf(role)] | 0; }
   _roleRank(w, id) { const k = ROLE_SKILLS[w.role]; return k && k.includes(id) ? this.roleLevel(w.role) : 0; }
   // a guard's weight in a fight from its role's level, on top of its species'
-  _fightBonus(w) { return spw(w).fight + (w.colony === 'own' && w.role === 'guard' ? T.roles.fight * this.roleLevel('guard') : 0); }
+  _fightBonus(w) { return spw(w).fight + (w.colony === 'own' && w.role === 'guard' ? T.roles.fight * this.roleLevel('guard') + T.tree.guard * this.treeRank('guard') : 0); } // (and the tree's Nest: guard, T3-3)
   // An insect's own experience (GDD 6.8): what it earned in each role, what it has to spend, its job ranks, mastery
   _pers(w) { return w.pers || (w.pers = { xp: 0, by: ROLES.map(() => 0), ranks: SKILLS.map(() => 0), mastered: false }); }
   // It dies: one that mastered its job leaves its role a level better for every worker of it
@@ -2663,9 +2689,9 @@ export class Sim {
     this.emit('legacy', { id, role: ROLES[ri], level: P.roles[ri] });
   }
   // the hive skills' multipliers for the player's colony
-  boost() { const K = T.skills; return { forage: 1 + K.forage * this.rank('forage'), brood: 1 + K.brood * this.rank('brood'), lay: 1 + K.lay * this.rank('lay'), build: 1 + K.build * this.rank('build') }; }
+  boost() { const K = T.skills, G = T.tree; return { forage: 1 + K.forage * this.rank('forage'), brood: (1 + K.brood * this.rank('brood')) * (1 + G.brood * this.treeRank('brood')), lay: 1 + K.lay * this.rank('lay'), build: (1 + K.build * this.rank('build')) * (1 + G.cells * this.treeRank('cells')), gyne: 1 + G.gynes * this.treeRank('gynes') }; }
   // a line's hive skills on the AI: its own tree, but never past the line in hand (GDD 6.8, the level cap)
-  _capBoost(sp) { const K = T.skills, r = (id) => Math.min(this.rank(id, sp), this.rank(id)); return { forage: 1 + K.forage * r('forage'), brood: 1 + K.brood * r('brood'), lay: 1 + K.lay * r('lay'), build: 1 + K.build * r('build') }; }
+  _capBoost(sp) { const K = T.skills, G = T.tree, r = (id) => Math.min(this.rank(id, sp), this.rank(id)), t = (id) => this._treeCap(id, sp); return { forage: 1 + K.forage * r('forage'), brood: (1 + K.brood * r('brood')) * (1 + G.brood * t('brood')), lay: 1 + K.lay * r('lay'), build: (1 + K.build * r('build')) * (1 + G.cells * t('cells')), gyne: 1 + G.gynes * t('gynes') }; }
   // hand: earned by the player's own play (the gauge counts only that)
   _gain(pool, v, hand = true, sp = this.species) { const P = this._lpw(sp); P[pool] += v; P[pool + 'Total'] += v; if (hand) this.player.hand += v; }
   // unit XP for what the insect the player flies does: the line's, and its own, in the role the work belongs to; doing
@@ -2701,7 +2727,7 @@ export class Sim {
   // how a colony on the AI works: the hive skills scaled by the gauge, and foraging from effMin to full
   lineBoost(sp = this.species) {
     const g = this.gauge(), G = T.gauge, B = this._capBoost(sp), e = G.effMin + (1 - G.effMin) * g;
-    return { forage: e * (1 + (B.forage - 1) * g), brood: 1 + (B.brood - 1) * g, lay: 1 + (B.lay - 1) * g, build: 1 + (B.build - 1) * g };
+    return { forage: e * (1 + (B.forage - 1) * g), brood: 1 + (B.brood - 1) * g, lay: 1 + (B.lay - 1) * g, build: 1 + (B.build - 1) * g, gyne: 1 + (B.gyne - 1) * g };
   }
   // Take another colony of the line in hand (GDD 6.8, multi-colony play): yours goes on under the AI at your gauge. The
   // same relay rules as taking a far worker (Q-03): a colony whose nest is within 30 m of your insect is taken at once;
@@ -4628,7 +4654,7 @@ export class Sim {
     let left = queens;
     for (let si = 0; si < sites.length; si++) {
       let k = sites[si].n - (si === choice ? 1 : 0);
-      for (; k > 0 && this.line.length < L.max; k--) {
+      for (; k > 0 && this.line.length < this._lineMax(); k--) { // (Line: found, T3-3)
         const t = this._lineTree(sites[si], used);
         if (!t) break;
         let dx = sites[si].x - t.x, dz = sites[si].z - t.z; const d = Math.sqrt(dx * dx + dz * dz) || 1; dx /= d; dz /= d;
@@ -4661,10 +4687,10 @@ export class Sim {
       if (c.adults < 1 && c.queenAlive && daylight) {
         const q = L.queenForage; c.sugar += q.sugar * dt * av.sugar; c.protein += q.protein * dt * av.protein; c.pulp += q.pulp * dt;
       }
-      const h = this.nestHeat(this.minute, sc.nest.site);
+      const h = this.nestHeat(this.minute, sc.nest.site, this._insGain(c.species || 'wasp'));
       this._mateTick(c, false);
       const lb = this.lineBoost(c.species || 'wasp');
-      colonyStep(c, dt, out, daylight, frac, this.bio, this.broodSpeed(this.minute, sc.nest.site, c.cool), av, h, c.virgin ? { ...lb, lay: 0 } : lb);
+      colonyStep(c, dt, out, daylight, frac, this.bio, this.broodSpeed(this.minute, sc.nest.site, c.cool, this._insGain(c.species || 'wasp')), av, h, c.virgin ? { ...lb, lay: 0 } : lb);
       this._hiveXp(c, g, false); // a colony on the AI earns at the player's gauge (GDD 6.8)
       if (spOf(c).perennial) this._swarm(c, sc.nest);
       // the exterminator (abstract; he is drawn only for the player's own nest): called to a sister nest's neighbourhood,

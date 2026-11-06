@@ -6,7 +6,7 @@ import {
   toWorld, toLocal, dirToWorld, chunkKey, chunkOf, hash, Domain, rangeInt, resolveSting, zoneCover, segClosest, classify, predictedKind,
   NEST, NEST_ENTRANCE, flyPos, beePos, fmtClock, minuteOfDay, isLowerZone, broodTotal, sugarCap, proteinCap, waterCap, garmentGraph, dayWeather,
   NetLab, LINKS, generateChunk, wildHere, landUse, pondsOf, pondEdge, POND_PATH, buildList, settledOf, birdPos, dragonPos, shedSites, shedRoof, groundAt, pickTarget, targetPos, targetVel, CHASE, targetLabel, assistPilot, swoopPilot, hoverPilot, hoverSetting, TARGET_KIND, LOCK, snapshot, restore, replayFrom, worldTag, rulesHash, applyTuning, TUNE, SKILLS, SKILL_UNLOCKS, SKILL_RANKED, SKILL_HIVE, skillCost, ROLES,
-  FIELD_NOTES, PLACE_KINDS,
+  FIELD_NOTES, PLACE_KINDS, TREE, TREE_NODES, treeOpen, treePoints,
 } from './sim/index.js';
 import { Rings, RING, ringGrid, ringGLSL } from './view/rings.js';
 import { Batch, place } from './view/merge.js';
@@ -429,7 +429,7 @@ const timeScale = () => {
 };
 function setSpeed(s) { ui.speed = s; SPEEDS.forEach((v) => { const b = $('speed' + v); if (b) b.setAttribute('aria-pressed', v === s); }); }
 function calmTime(why) { if (ui.speed !== 1) { setSpeed(1); toast(why + ' · back to normal time', 'var(--yellow)', 1.6); } }
-function reflex() { if (solo() && opts.reflex && sim.hasSkill(null, 'reflex')) ui.reflexUntil = performance.now() + 900; } // a skill (GDD 6.8)
+function reflex() { if (solo() && opts.reflex && sim.hasSkill(null, 'reflex')) ui.reflexUntil = performance.now() + 900 + 1000 * T.tree.cue * sim.treeRank('cue'); } // a skill (GDD 6.8); the tree's cue lengthens it (T3-3)
 // Focus (a skill, solo): Z slows time for a few seconds, then needs a rest
 function focus() {
   if (!solo() || !sim.hasSkill(null, 'focus')) { toast(solo() ? 'Focus is a skill: learn it in the colony view (N)' : 'Focus works in solo worlds only', 'var(--muted)', 1.4); return; }
@@ -2272,7 +2272,7 @@ function buildCmd() {
     yawQ: Math.round(input.yaw * 1e4), pitchQ: Math.round(input.pitch * 1e4),
     act: (k.has('KeyE') || (gp && gp.b(0)) ? Act.Interact : 0) | (k.has('KeyQ') || (gp && gp.b(3)) ? Act.Switch : 0) | (k.has('KeyR') || (gp && gp.b(2)) ? Act.Rest : 0) | (input.swoopOnce ? (input.swoopOnce = false, Act.Swoop) : 0),
     alloc: input.alloc,
-    pick: input.switchTo ? (input.switchTo = 0, -(1000 + switchOnce)) : input.learn ? (input.learn = 0, -(learnOnce + 1)) : input.pick ? (input.pick = 0, pickOnce) : 0, // negative picks: take a colony in hand, learn a skill (GDD 6.8)
+    pick: input.switchTo ? (input.switchTo = 0, -(1000 + switchOnce)) : input.grow ? (input.grow = 0, -(500 + growOnce)) : input.learn ? (input.learn = 0, -(learnOnce + 1)) : input.pick ? (input.pick = 0, pickOnce) : 0, // negative picks: take a colony in hand, learn a skill (GDD 6.8)
   };
   if (input.eatBurst) { if (cmd.burst) cmd.burst = 0; else input.eatBurst = false; }
   // Auto grab (on by default with touch): prey within reach and nothing in the jaws, and nothing else E would do here (a
@@ -2413,7 +2413,7 @@ function updateAssist(dt) {
   else if (arrived) { toast(arrived, 'var(--yellow)', 1); input.lock = null; input.pilot = null; }
   if (input.lock) {
     const p = targetPos(sim, input.lock);
-    if (!w || !p || (p.x - w.x) ** 2 + (p.y - w.y) ** 2 + (p.z - w.z) ** 2 > LOCK.lostRange ** 2) {
+    if (!w || !p || (p.x - w.x) ** 2 + (p.y - w.y) ** 2 + (p.z - w.z) ** 2 > (LOCK.lostRange * (1 + T.tree.reach * sim.treeRank('reach'))) ** 2) { // (Flight: reach, T3-3)
       if (input.lock) toast(input.pilot ? 'It is gone' : 'Lost the lock', 'var(--muted)', 1);
       input.lock = null; input.pilot = null;
     } else if (w.state === 'fly') {
@@ -2619,7 +2619,29 @@ const SKILL_INFO = {
   forage: ['Foraging yield', 'more from every load'], brood: ['Brood growth', 'brood develops faster'], lay: ['Population', 'the queen lays more'], build: ['Comb building', 'more cells from each load'],
 };
 const ROLE_INFO = { sugar: ['Sugar foragers', 'feeding reach, speed'], protein: ['Hunters', 'grab reach, speed'], pulp: ['Pulp collectors', 'chew faster, speed'], water: ['Water carriers', 'fill faster, feeding reach, speed'], guard: ['Guards', 'weight in a fight, landing reach, speed'] };
-let learnOnce = 0, skillSig = '', switchOnce = 0, lineSig = '';
+let learnOnce = 0, skillSig = '', switchOnce = 0, lineSig = '', growOnce = 0, treeSig = '';
+// The growth tree (T3-3): three branches; points from the line's experience, a rank a point, a node open once the one
+// before it has a rank
+const TREE_INFO = {
+  cells: ['Comb', `+${T.tree.cells * 100}% cells from each load`], brood: ['Brood care', `brood develops ${T.tree.brood * 100}% faster`],
+  insul: ['Insulation', `the nest keeps out ${T.tree.insul * 100}% more of the cold and the heat`], guard: ['Guards', `a guard fights ${T.tree.guard * 100}% harder`],
+  cue: ['Reflex cue', `the Reflex slowdown lasts ${T.tree.cue} s longer (solo)`], recover: ['Swoop recovery', `the dash is ready ${T.tree.recover * 100}% sooner`],
+  lock: ['Lock-on range', `lock on from ${T.tree.lock * 100}% further`], reach: ['Assisted reach', `an assisted flight keeps its lock ${T.tree.reach * 100}% further`],
+  gynes: ['Young queens', `${T.tree.gynes * 100}% more young queens raised`], winter: ['Wintering', `${T.tree.winter * 100}% more queens come through the winter, at any site`],
+  found: ['Founding', `${T.tree.found} more colony of the line can be founded`],
+};
+const BRANCH_NAME = { nest: 'Nest', flight: 'Flight', line: 'Line' };
+function updateTree() {
+  const P = sim.prog, tr = P.tree || TREE_NODES.map(() => 0), pts = treePoints(P), xp = P.unitTotal + P.hiveTotal;
+  const sig = JSON.stringify([tr, pts]);
+  if (sig === treeSig) return;
+  treeSig = sig;
+  const next = T.tree.xpPerPoint - (xp % T.tree.xpPerPoint);
+  $('nTree').innerHTML = `<h4>Growth tree · ${pts} point${pts === 1 ? '' : 's'} to spend · next in ${Math.ceil(next)} XP</h4>` + Object.entries(TREE).map(([b, ids]) => `<h4>${BRANCH_NAME[b]}</h4>` + ids.map((id) => {
+    const i = TREE_NODES.indexOf(id), r = tr[i] | 0, open = treeOpen(i, tr), can = open && pts >= 1, [name, desc] = TREE_INFO[id];
+    return `<button class="ghost${r ? ' have' : ''}" data-g="${i}"${can ? '' : ' disabled'}><b>${name} ${r}/${T.tree.ranks}</b><span>${desc} a rank${!open && r < T.tree.ranks ? ' · needs the one above' : ''}</span></button>`;
+  }).join('')).join('');
+}
 const SPECIES_NAME = { wasp: 'wasps', hornet: 'hornets', bee: 'honeybees' };
 // Colonies of the line (GDD 6.8, multi-colony play): one in hand, the rest on the AI at the player's gauge
 function updateLine() {
@@ -2660,11 +2682,13 @@ function updateSkills() {
   $('nSkills').innerHTML = `<h4>This wasp: its job</h4>${SKILL_RANKED.map(btn).join('')}<h4>Line abilities</h4>${SKILL_UNLOCKS.map(btn).join('')}<h4>Roles: passed on by masters</h4>${ROLES.map(role).join('')}<h4>Hive</h4>${SKILL_HIVE.map(btn).join('')}`;
 }
 $('nSkills').addEventListener('click', (e) => { const b = e.target.closest('button[data-i]'); if (b && !b.disabled) { learnOnce = +b.dataset.i; input.learn = 1; } });
+$('nTree').addEventListener('click', (e) => { const b = e.target.closest('button[data-g]'); if (b && !b.disabled) { growOnce = +b.dataset.g; input.grow = 1; } });
 
 function updateNest() {
   updateWorkers();
   updateLine();
   updateSkills();
+  updateTree();
   const c = sim.colony, out = sim.wasps.length;
   $('nStores').innerHTML = [
     ['Queen', c.queenAlive ? 'laying' : c.nestAlive ? 'dead' : 'nest destroyed'],
@@ -3475,6 +3499,8 @@ function handleEvents(events) {
       case 'legacy': toast(`A master is gone: ${ROLE_INFO[e.role][0].toLowerCase()} are now level ${e.level}`, 'var(--yellow)', 3); logEvent(`${ROLE_INFO[e.role][0].toLowerCase()} level ${e.level}`); skillSig = ''; break;
       case 'learned': toast(`${e.wasp !== undefined ? 'This wasp learned' : 'Learned'}: ${SKILL_INFO[e.id][0]}${SKILL_RANKED.includes(e.id) || SKILL_HIVE.includes(e.id) ? ` (rank ${e.rank})` : ''}`, 'var(--yellow)', 1.6); logEvent(`learned ${SKILL_INFO[e.id][0].toLowerCase()}`); skillSig = ''; break; // GDD 6.8
       case 'learnDenied': toast('Not enough XP', 'var(--muted)', 1); break;
+      case 'grew': toast(`Growth: ${TREE_INFO[e.id][0]} (rank ${e.rank}) · ${e.points} point${e.points === 1 ? '' : 's'} left`, 'var(--yellow)', 2.5); logEvent(`Growth tree: ${TREE_INFO[e.id][0]} ${e.rank}`); break;
+      case 'growDenied': toast('No point to spend, or that node is not open yet', 'var(--muted)', 1.4); break;
       case 'colonySwitch': toast(`You take the ${SPECIES_NAME[e.species]} in hand. The colony you left goes on under the AI.`, 'var(--yellow)', 3); lineSig = ''; skillSig = ''; syncNests(); waspSwitched(sim.drivenId, 0.98); syncChunks(); break; // GDD 6.8
       case 'switchDenied': toast('That colony cannot be taken in hand now', 'var(--muted)', 1.4); break;
       case 'spat': if (e.what === 'firefly') { toast('Spat it out. Fireflies taste foul: their blood carries lucibufagins, a poison most hunters learn to leave alone.', 'var(--muted)', 4); logEvent('a firefly, spat out'); } break;

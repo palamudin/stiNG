@@ -553,7 +553,7 @@ namespace Sting.Core
             if (!HasSkill(w, "swoop")) return; // the dash is a skill (GDD 6.8)
             if (tick < w.swoopReady || w.energy <= T.swoop.energy || w.bodyT < T.cold.flyBody) return;
             w.yaw = cmd.yawQ * 1e-4; w.pitch = Clamp(cmd.pitchQ * 1e-4, -1.45, 1.45);
-            w.swoopUntil = tick + T.swoop.ticks; w.swoopReady = tick + T.swoop.cooldown; w.energy -= T.swoop.energy;
+            w.swoopUntil = tick + T.swoop.ticks; w.swoopReady = tick + (w.colony == "own" ? (int)Floor(T.swoop.cooldown * (1 - T.tree.recover * TreeRank("recover"))) : T.swoop.cooldown); // (Flight: recover, T3-3) w.energy -= T.swoop.energy;
             w.noLandUntil = tick + T.swoop.ticks; // the dash does not settle the gentle way: the slam does
             Emit("swoop", ("id", w.id));
         }
@@ -1689,13 +1689,13 @@ namespace Sting.Core
             Num survivors = 0;
             foreach (var (i, f) in share)
             {
-                var s = cands[i]; int k = (int)Floor(col.mated * f * T.hiber.survival * s.q + H32(sn, i, 952));
+                var s = cands[i]; int k = (int)Floor(col.mated * f * T.hiber.survival * s.q * (1 + T.tree.winter * TreeRank("winter")) + H32(sn, i, 952)); // (Line: winter, T3-3)
                 if (k >= 1) { sites.Add(new HiberSite { kind = s.kind, x = s.x, y = s.y, z = s.z, q = s.q, n = k, scouted = i == pk }); survivors += k; }
             }
             // the sister colonies' mated queens winter by their nests (T2-4)
             foreach (var sc in line)
             {
-                int k = (int)Floor(sc.colony.mated * T.hiber.survival * T.hiber.Q("sister") + H32(sn, sc.id, 953));
+                int k = (int)Floor(sc.colony.mated * T.hiber.survival * T.hiber.Q("sister") * (1 + T.tree.winter * TreeRank("winter")) + H32(sn, sc.id, 953));
                 if (k >= 1) { sites.Add(new HiberSite { kind = "sister", x = sc.nest.spawn.x, y = sc.nest.spawn.y, z = sc.nest.spawn.z, q = T.hiber.Q("sister"), n = k }); survivors += k; }
             }
             sites.Sort((a, b) => a.n != b.n ? b.n.CompareTo(a.n) : a.q != b.q ? (b.q < a.q ? -1 : 1) : a.x != b.x ? (a.x < b.x ? -1 : 1) : a.z != b.z ? (a.z < b.z ? -1 : 1) : 0);
@@ -1810,7 +1810,7 @@ namespace Sting.Core
             var used = new List<(Num x, Num z)> { (nest.treeX, nest.treeZ) };
             foreach (var x in line) used.Add((x.nest.treeX, x.nest.treeZ));
             foreach (var x in swarms) if (x.nest != null) used.Add((x.nest.treeX, x.nest.treeZ));
-            var t = line.Count + swarms.Count < T.line.max ? LineTree(new HiberSite { x = from.x, z = from.z }, used) : null;
+            var t = line.Count + swarms.Count < LineMax() ? LineTree(new HiberSite { x = from.x, z = from.z }, used) : null;
             // the swarm hangs on a branch of the nearest other tree while its scouts look for a home
             var e = from.entrance; int k = swarms.Count + lineSeq;
             Tree bv = null; Num bd = T.hive.bivRange * T.hive.bivRange;

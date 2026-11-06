@@ -1863,6 +1863,22 @@ namespace Sting.Core.Tests
                 Ok(D(I.site.h) >= 10 && D(I.site.h) <= 90 && inside && beyond && step < 3 && wild > 400 && settledChunks > 30 && built == 0 && trees > 300 && wet == 0 && s.wasp.y >= 0 && st.RulesHash() != t1.RulesHash() && st.WorldTag().Contains("wild beyond 400 m"),
                     $"the settled area sits on the wild land {D(I.site.h):0.0} m above the sea at ({D(I.site.x):0}, {D(I.site.z):0}); {settledChunks} settled chunks, {wild} wild ones with nothing built and {trees} trees, none in the water; no step over 3 m across the band ({step:0.00} per 2 m); a sim runs over it");
             }
+            // 72. the growth tree (T3-3; sim.test.mjs): points from XP, nodes open in order, ranks acting in the sim, the audit, the save
+            {
+                var s = new Sim(new Settings { seed = 1234, birds = false }, new SimOpts { noAI = true }); RunS(s, 1);
+                var P = s.prog; bool Grow(string id, string want) => RunS(s, 1, (sim, i) => Idle(c => c.pick = -(500 + Growth.Index(id)))).Any(e => e.type == want);
+                var b0 = s.BoostNow(); Num lock0 = s.LockMul(s.wasp); int max0 = s.LineMax();
+                bool none = Grow("cells", "growDenied"); P.unitTotal = 450; int pts = s.Points();
+                bool closed = Grow("insul", "growDenied"); Grow("cells", "grew"); Grow("brood", "grew"); bool ok3 = Grow("insul", "grew") && s.Points() == 0;
+                var b1 = s.BoostNow();
+                P.unitTotal = 1350; foreach (var id in new[] { "cue", "recover", "lock", "gynes", "winter", "found" }) Grow(id, "grew");
+                NetEv Ev(int node, int rank, int seq) => new NetEv { type = "grow", node = node, rank = rank, peer = 7, seq = seq, tick = (int)s.tick, commit = (int)s.tick + T.net.commitTicks };
+                string bad = s.Implausible(Ev(Growth.Index("insul"), 1, 1)), skip = s.Implausible(Ev(Growth.Index("cells"), 2, 2)), good = s.Implausible(Ev(Growth.Index("cells"), 1, 3));
+                var r = Persist.Restore(Persist.Snapshot(s));
+                Ok(none && pts == 3 && closed && ok3 && D(Abs(b1.build / b0.build - (1 + T.tree.cells))) < 1e-9 && D(Abs(b1.brood / b0.brood - (1 + T.tree.brood))) < 1e-9 && s.LockMul(s.wasp) > lock0 && s.LineMax() == max0 + 1 && s.BoostNow().gyne > 1
+                    && bad == "growth out of range" && skip == "growth out of range" && good == null && r.prog.tree.SequenceEqual(P.tree),
+                    $"no point, no growth; 450 XP gives {pts} points; insulation waits for brood care; comb x{D(b1.build / b0.build):0.00}, brood x{D(b1.brood / b0.brood):0.00}; lock-on x{D(s.LockMul(s.wasp) / lock0):0.00}; {s.LineMax()} colonies of the line; a peer's growth out of range is refused; the tree survives a save");
+            }
             // 71. places of interest and field notes (T3-2; sim.test.mjs)
             {
                 bool notesOk = Places.Notes.Length == 10 && Places.Notes.All(n => n.title.Length > 0 && n.note.Length > 40 && n.source.Length > 8);

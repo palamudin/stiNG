@@ -23,6 +23,7 @@ sim.hornet 8535f0c8
 sim.bee b26047a1
 sim.beesting 1f6b81f6
 sim.skills 816dd1bd
+sim.tree a58f20de
 sim.multi ff2b9ff5
 sim.warm c103786a
 sim.restored 9510d846

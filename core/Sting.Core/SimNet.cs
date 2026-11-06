@@ -116,6 +116,11 @@ namespace Sting.Core
             if (ev.tick > tick + T.plaus.futureTicks) return "from the future";
             if (ev.type == "quarantine" && ev.peer != host) return "only the host rules on peers";
             if (ev.type == "startle" && !(ev.amount > 0 && ev.amount <= T.swoop.panic)) return "startle out of range";
+            if (ev.type == "grow") // a rank on a peer's growth tree (T3-3): the next rank of an open node, within the tree's ranges
+            {
+                var tr = plaus.trees.TryGetValue(ev.peer, out var t0) ? t0 : new int[Growth.NODES.Length];
+                if (!Growth.Open(ev.node, tr) || ev.rank != tr[ev.node] + 1) return "growth out of range";
+            }
             if (ev.type == "deepen" && ev.pain.HasValue && !(ev.pain.Value > 0 && ev.pain.Value <= T.plaus.maxPain)) return "pain out of range";
             if (ev.type == "praid") // from that nest's entrance, as its owner or anyone who has heard where it is knows
             {
@@ -466,6 +471,7 @@ namespace Sting.Core
             switch (ev.type)
             {
                 case "fixReq": if (ChunkAuthority(ev.key) == peer) OwesFix(ev.key); break;
+                case "grow": if (!mine) { if (!plaus.trees.TryGetValue(ev.peer, out var tr)) plaus.trees[ev.peer] = tr = new int[Growth.NODES.Length]; tr[ev.node] = ev.rank; } break; // a peer's tree, as audited (T3-3)
                 case "nest": if (!mine) peerNests[ev.peer] = new PeerNest { x = ev.x, y = ev.y, z = ev.z, key = ev.key, alive = ev.alive, species = ev.species ?? "wasp" }; break;
                 case "praid": // another player's wasp took a larva from my nest: one fewer, and my guards go after it
                     if (mine || ev.toPeer != peer || !colony.nestAlive) break;

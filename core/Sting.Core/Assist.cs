@@ -110,7 +110,7 @@ namespace Sting.Core
 
         static List<(LockTarget t, V3 p)> Candidates(Sim sim, Wasp w)
         {
-            var o = new List<(LockTarget, V3)>(); Num CS = T.chunk.size, R = range * sim.Mul(w, "landR"); // the landing reach skill reaches further (GDD 6.8)
+            var o = new List<(LockTarget, V3)>(); Num CS = T.chunk.size, R = range * sim.LockMul(w); // the landing reach skill reaches further (GDD 6.8)
             void Add(LockTarget t) { var p = TargetPos(sim, t); if (p != null && D2(w, p.Value) <= R * R) o.Add((t, p.Value)); }
             foreach (var rec in sim.activeChunks)
             {
@@ -140,7 +140,7 @@ namespace Sting.Core
             LockTarget best = null; Num bestMiss = Num.MaxValue;
             foreach (var hm in sim.active)
             {
-                if (hm.state == "away" || hm.special || Sq(hm.x - w.x) + Sq(hm.z - w.z) > Sq(humanRange * sim.Mul(w, "landR"))) continue;
+                if (hm.state == "away" || hm.special || Sq(hm.x - w.x) + Sq(hm.z - w.z) > Sq(humanRange * sim.LockMul(w))) continue;
                 V3 o = Body.ToLocal(hm.F, new V3(w.x, w.y, w.z)), e = Body.ToLocal(hm.F, new V3(w.x + aim.x, w.y + aim.y, w.z + aim.z));
                 V3 dv = new V3(e.x - o.x, e.y - o.y, e.z - o.z);
                 foreach (var part in hm.PartsNow)
@@ -184,7 +184,7 @@ namespace Sting.Core
                 if (cos > bc) { bc = cos; best = t; }
             }
             if (best != null) return best;
-            Num nd = Sq(nearRange * sim.Mul(w, "landR"));
+            Num nd = Sq(nearRange * sim.LockMul(w));
             foreach (var (t, p) in cands)
             {
                 var K = Kinds[t.kind];

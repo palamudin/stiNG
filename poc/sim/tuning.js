@@ -252,6 +252,16 @@ export const T = {
   skills: { swoop: 40, assist: 40, reflex: 30, focus: 50, release: 60, ranks: 3, rankCost: 50, landR: 0.4, feedR: 0.2, grabR: 0.2, speed: 0.05,
     hiveCost: 40, forage: 0.08, brood: 0.08, lay: 0.1, build: 0.1, releaseLead: 8, releaseMargin: 0.03, releaseKick: 2.5, focusMs: 3000, focusCooldownMs: 15000 },
 
+  // The growth tree (GDD 6.8, 7.8, T3-3): three branches (TREE), each node ranked up to ranks; a node opens once the node
+  // before it in its branch has a rank. Points come from the line's experience: one for each xpPerPoint XP it has earned
+  // (unit and hive), a few a season; a rank costs one. Per rank: Nest: cells (comb per load), brood (development),
+  // insul (closes this share of the gap between the site's insulation and full), guard (a guard's weight in a fight);
+  // Flight: cue (the Reflex slowdown lasts longer, s), recover (the swoop is ready this share sooner), lock (lock-on
+  // ranges), reach (how far an assisted flight keeps its lock); Line: gynes (young queens raised), winter (wintering
+  // survival at every site), found (more colonies of the line founded in spring). The outcome ones are colony parameters
+  // whose ranges every peer knows: a peer's growth is audited against them (GDD 11.8)
+  tree: { ranks: 3, xpPerPoint: 150, cells: 0.1, brood: 0.06, insul: 0.15, guard: 0.1, cue: 0.3, recover: 0.15, lock: 0.2, reach: 0.2, gynes: 0.1, winter: 0.1, found: 1 },
+
   // Roles and mastery (GDD 6.8, agreed 2026-10-29). The ranked job skills (landR, feedR, grabR, speed) belong to the
   // insect the player drives: it earns personal XP from its work (the same figures as T.xp) and buys its own ranks with it
   // at rankCost times the rank. One whose personal XP earned reaches mastery has mastered its job; when it dies, the line
@@ -420,6 +430,18 @@ export const SKILL_UNLOCKS = ['swoop', 'assist', 'reflex', 'focus', 'release'];
 export const SKILL_RANKED = ['landR', 'feedR', 'grabR', 'speed'];
 export const SKILL_HIVE = ['forage', 'brood', 'lay', 'build'];
 export const SKILLS = [...SKILL_UNLOCKS, ...SKILL_RANKED, ...SKILL_HIVE];
+// The growth tree's branches (T3-3), in the order the grow command numbers their nodes
+export const TREE = { nest: ['cells', 'brood', 'insul', 'guard'], flight: ['cue', 'recover', 'lock', 'reach'], line: ['gynes', 'winter', 'found'] };
+export const TREE_NODES = [...TREE.nest, ...TREE.flight, ...TREE.line];
+// whether node i can take another rank on a line's tree (ranks): not past the top, and the node before it in its branch
+// has a rank
+export function treeOpen(i, ranks) {
+  if (!(i >= 0 && i < TREE_NODES.length)) return false;
+  const id = TREE_NODES[i], br = Object.values(TREE).find((b) => b.includes(id)), k = br.indexOf(id);
+  return (ranks[i] | 0) < T.tree.ranks && (k === 0 || (ranks[TREE_NODES.indexOf(br[k - 1])] | 0) > 0);
+}
+// a line's growth points: one for each xpPerPoint XP earned, less the ranks it has taken
+export function treePoints(P) { return Math.floor((P.unitTotal + P.hiveTotal) / T.tree.xpPerPoint) - (P.tree || []).reduce((a, b) => a + b, 0); }
 // The work roles (GDD 6.8), the job skills a level of each adds a rank to, and the role each kind of XP is earned in
 export const ROLES = ['sugar', 'protein', 'pulp', 'water', 'guard'];
 export const ROLE_SKILLS = { sugar: ['feedR', 'speed'], protein: ['grabR', 'speed'], pulp: ['speed'], water: ['feedR', 'speed'], guard: ['landR', 'speed'] };

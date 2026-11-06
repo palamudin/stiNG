@@ -64,6 +64,12 @@ namespace Sting.Core.Tests
                 var b = Bots.StingBot("full", null, 60); var order = new[] { "speed", "grabR", "forage", "landR", "feedR", "brood", "lay", "build" };
                 return sim => { var c = b(sim); if (sim.tick % 1500 == 1499) c.pick = -(Skills.Index(order[sim.tick / 1500 % order.Length]) + 1); return c; };
             }, true);
+            // the growth tree (T3-3): a line given 1800 XP spends a point every 1000 ticks down all three branches while it stings
+            Run("tree", new Settings { seed = 1234, skills = "all" }, 12000, () =>
+            {
+                var b = Bots.StingBot("full", null, 60); var order = new[] { "cells", "brood", "cue", "recover", "lock", "gynes", "winter", "insul", "found", "guard", "reach" };
+                return sim => { var c = b(sim); if (sim.tick == 1) sim.prog.unitTotal += 1800; if (sim.tick % 1000 == 999) c.pick = -(500 + Growth.Index(order[sim.tick / 1000 % order.Length])); return c; };
+            }, true);
             // multi-colony play (GDD 6.8): a honeybee season with a swarm; every 2000 ticks the colony in hand changes to the line's first
             Run("multi", new Settings { seed = 99, dayMinutes = 0.4, seasonDays = 10, species = "bee" }, 36000, () => sim =>
             {
@@ -109,6 +115,7 @@ namespace Sting.Core.Tests
                     var w = sim.wasp; double x = w != null ? (double)w.x : 0, y = w != null ? (double)w.y : 0, z = w != null ? (double)w.z : 0;
                     trace.Add(string.Join(" ", sim.tick, kinds.ToString("x8"), x.ToString("R", CultureInfo.InvariantCulture), y.ToString("R", CultureInfo.InvariantCulture), z.ToString("R", CultureInfo.InvariantCulture), ((double)sim.colony.adults).ToString("R", CultureInfo.InvariantCulture)));
                 }
+                if (name == "tree" && sim.tick % 60 == 0) { foreach (int r in sim.prog.tree) d.F(r); d.F(sim.Points()); d.F(sim.LockMul(sim.Driven())); d.F(sim.InsGain()); d.F(sim.LineMax()); }
                 if (sim.tick % 600 == 0) { foreach (var pl in sim.Places()) { d.S(pl.kind); d.S(pl.key); d.F(pl.x); d.F(pl.y); d.F(pl.z); } foreach (var k in sim.guideOrder) { d.S(k); d.F(sim.guide[k]); } } // places of interest and the field guide (T3-2)
                 if (prog && sim.tick % 60 == 0) { var P = sim.prog; var Q = sim.player; d.F(P.unit); d.F(P.unitTotal); d.F(P.hive); d.F(P.hiveTotal); d.F(P.stabs); foreach (int r in P.ranks) d.F(r); foreach (int r in P.roles) d.F(r); d.F(Q.hand); d.F(Q.gaugeRate); d.F(Q.gaugeDays); d.F(sim.line.Count); d.F(sim.colony.adults); foreach (var x in sim.line) { d.F(x.id); d.F(x.colony.adults); d.F(x.colony.sugar); } }
             }

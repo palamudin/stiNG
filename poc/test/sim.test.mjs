@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import {
   Sim, Act, hash, Domain, humanTraits, humanParts, malesAbout, chunkOf, toLocal, dirToWorld, resolveSting, ZONES, Zone, ZoneName, toWorld, T, dsin, dcos, newColony, colonyStep,
-  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, groundSlope, groundNatural, pavingOf, buildList, pondsOf, inPond, pondEdge, settledOf, wildHere, pickTarget, assistPilot, swoopPilot, hoverPilot, hoverSetting, HOVER, ROLES, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS, DiscGrid, WOODS, chunkGrade, SLOPE, FIELD_NOTES, PLACE_KINDS,
+  garmentGraph, Top, NEST_ENTRANCE, isRaining, dayWeather, windAt, humanClothing, Style, SwatKind, NEST, chunkKey, clockMinutes, landUse, generateChunk, beePos, flyPos, snapshot, restore, replayFrom, stingBot, worldTag, rulesHash, shedSites, dragonPos, regionLayout, townQuarter, humanWindow, shedRoof, groundAt, groundSlope, groundNatural, pavingOf, buildList, pondsOf, inPond, pondEdge, settledOf, wildHere, pickTarget, assistPilot, swoopPilot, hoverPilot, hoverSetting, HOVER, ROLES, targetPos, targetLabel, speciesAllowed, isDaylight, SKILLS, makeNest, targetVel, CMD_FIELDS, DiscGrid, WOODS, chunkGrade, SLOPE, FIELD_NOTES, PLACE_KINDS, TREE, TREE_NODES, treeOpen, treePoints,
 } from '../sim/index.js';
 import { applyTuning, parseTuning, tuningHash, tuningLeaves, TUNE } from '../sim/tunefile.js';
 
@@ -2471,6 +2471,33 @@ function seated(sim, pred) {
   ok(houses > 40 && garages > houses * 0.6 && garages < houses * 0.95 && inLot === garages && level === garages, `${garages} of ${houses} houses have a garage beside them, every one in its own lot with its door in line with the house's front, on the house's level pad`);
   ok(drives === garages && clear === drives && drive <= 0.15 + 1e-6, `(${drives} drives, ${clear} clear) each garage has a drive from the sidewalk to its door, at most ${(drive * 100).toFixed(1)}% (15% allowed), with nothing set on it or in the garage`);
   ok(porchLevel === houses && doors === houses, `every front door has a level stoop and a step before it, the door at the stoop's height (${porchLevel} of ${houses})`);
+}
+
+// 72. The growth tree (T3-3, GDD 6.8, 7.8): three branches; a point for each 150 XP the line earns, a rank a point, a node
+// open once the one before it has a rank; the ranks act in the sim (comb, brood, insulation, guards, the swoop's
+// recovery, lock-on, young queens, wintering, founding); peers audit a grow against the tree's ranges; the tree is saved
+{
+  const s = new Sim({ seed: 1234, birds: false }, { noAI: true }); run(s, 1);
+  const P = s.prog, idx = (id) => TREE_NODES.indexOf(id), grow = (id) => run(s, 1, () => idle({ pick: -(500 + idx(id)) }));
+  const b0 = s.boost(), lock0 = s._lockMul(s.wasp), max0 = s._lineMax(), cold = (() => { let m = s.minute; for (let k = 0; k < 2880 && s.broodSpeed(m) >= 0.999; k += 30) m += 30; return m; })(), bs0 = s.broodSpeed(cold, 'trunk', 1, 0);
+  const none = grow('cells').some((e) => e.type === 'growDenied'); // no points yet
+  P.unitTotal = 450; const pts = s.points();
+  const closed = grow('insul').some((e) => e.type === 'growDenied'); // brood has no rank yet
+  grow('cells'); grow('brood'); const ok3 = grow('insul').some((e) => e.type === 'grew' && e.points === 0);
+  const b1 = s.boost(), bs1 = s.broodSpeed(cold, 'trunk', 1, s._insGain());
+  P.unitTotal = 1350; for (const id of ['cue', 'recover', 'lock', 'gynes', 'winter', 'found']) grow(id);
+  const lock1 = s._lockMul(s.wasp), max1 = s._lineMax();
+  const w = s.wasp, cd0 = T.swoop.cooldown; w.swoopReady = 0; const before = s.tick;
+  ok(none && pts === 3 && closed && ok3 && P.tree[idx('cells')] === 1 && Math.abs(b1.build / b0.build - (1 + T.tree.cells)) < 1e-12 && Math.abs(b1.brood / b0.brood - (1 + T.tree.brood)) < 1e-12 && bs1 > bs0 && lock1 > lock0 && max1 === max0 + 1 && s.boost().gyne > 1,
+    `no point, no growth; 450 XP gives ${pts} points; insulation waits for brood care; comb ×${(b1.build / b0.build).toFixed(2)}, brood ×${(b1.brood / b0.brood).toFixed(2)}, a cold nest's brood at ${bs1.toFixed(3)} not ${bs0.toFixed(3)}, lock-on ×${(lock1 / lock0).toFixed(2)}, ${max1} colonies of the line not ${max0}, young queens ×${s.boost().gyne.toFixed(2)}`);
+  // more young queens raised from the same colony, with the tree's gyne output
+  const raise = (gy) => { const c = newColony(); c.adults = 400; c.sugar = c.protein = 200; c.rEggs = 0; c.rLarvae = 0; c.rPupae = 40; for (let i = 0; i < 40; i++) colonyStep(c, 0.05, 0, true, 0.8, 1, 1, null, null, { forage: 1, brood: 1, lay: 1, build: 1, gyne: gy }); return c.stats.gynesRaised; };
+  // the audit: a peer's grow of a node not open, or a rank skipped, is implausible; the next rank of an open one is not
+  const ev = (node, rank, seq) => ({ type: 'grow', node, rank, peer: 7, seq, tick: s.tick, commit: s.tick + T.net.commitTicks });
+  const bad = s._implausible(ev(idx('insul'), 1, 1)), skip = s._implausible(ev(idx('cells'), 2, 2)), good = s._implausible(ev(idx('cells'), 1, 3));
+  const r = restore(snapshot(s));
+  ok(raise(1 + T.tree.gynes) > raise(1) * 1.05 && bad === 'growth out of range' && skip === 'growth out of range' && good === null && JSON.stringify(r.prog.tree) === JSON.stringify(P.tree),
+    `young queens raised ${raise(1).toFixed(1)} -> ${raise(1 + T.tree.gynes).toFixed(1)} with a rank of gyne output; a peer's growth out of the tree's ranges is refused (${bad}); the tree survives a save`);
 }
 
 // 71. Places of interest and field notes (T3-2, GDD 10, Appendix C): the sim lists the places worth a pin (the nest, hives,

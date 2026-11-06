@@ -274,7 +274,7 @@ namespace Sting.Core
             for (int si = 0; si < sites.Count; si++)
             {
                 int k = sites[si].n - (si == choice ? 1 : 0);
-                for (; k > 0 && line.Count < T.line.max; k--)
+                for (; k > 0 && line.Count < LineMax(); k--) // (Line: found, T3-3)
                 {
                     var t = LineTree(sites[si], used);
                     if (t == null) break;
@@ -313,10 +313,10 @@ namespace Sting.Core
                 {
                     c.sugar += T.line.queenForage.sugar * dt * av.sugar; c.protein += T.line.queenForage.protein * dt * av.protein; c.pulp += T.line.queenForage.pulp * dt;
                 }
-                var h = NestHeat(minute, sc.nest.site);
+                var h = NestHeat(minute, sc.nest.site, InsGain(c.species ?? "wasp"));
                 MateTick(c, false);
-                var lb = LineBoost(c.species ?? "wasp"); if (c.virgin != null) lb = new Boost { forage = lb.forage, brood = lb.brood, lay = 0, build = lb.build };
-                Colony.Step(c, dt, outN, daylight, frac, bio, BroodSpeed(minute, sc.nest.site, c.cool), av, (h.heat, h.cook), lb);
+                var lb = LineBoost(c.species ?? "wasp"); if (c.virgin != null) lb = new Boost { forage = lb.forage, brood = lb.brood, lay = 0, build = lb.build, gyne = lb.gyne };
+                Colony.Step(c, dt, outN, daylight, frac, bio, BroodSpeed(minute, sc.nest.site, c.cool, InsGain(c.species ?? "wasp")), av, (h.heat, h.cook), lb);
                 HiveXp(c, g, false); // a colony on the AI earns at the player's gauge (GDD 6.8)
                 if (Colony.Sp(c).perennial != 0) Swarm(c, sc.nest);
                 // the exterminator (abstract; he is drawn only for the player's own nest): called to a sister nest's

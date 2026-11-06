@@ -47,7 +47,7 @@ export function beeRepro(c, frac) { const H = T.hive; return frac >= H.swarmFrom
 // avail: what the season offers foragers (T1-8), { sugar, protein } multipliers, 1 when absent
 // hot: the nest's heat (T2-1), { heat: 0..1 through the site's insulation, cook: 0..1 past the brood's lethal temperature }
 // boost: the hive skills' multipliers (GDD 6.8), { forage, brood, lay, build }; the player's colony only
-export const NO_BOOST = Object.freeze({ forage: 1, brood: 1, lay: 1, build: 1 });
+export const NO_BOOST = Object.freeze({ forage: 1, brood: 1, lay: 1, build: 1, gyne: 1 });
 export function colonyStep(c, dtDay, physical, foraging, frac = 0.3, bio = 1, thermal = 1, avail = null, hot = null, boost = null) {
   const C = T.colony, S = T.season, W = T.water, SP = spOf(c), K = boost || NO_BOOST;
   if (!c.nestAlive) return;
@@ -124,7 +124,8 @@ export function colonyStep(c, dtDay, physical, foraging, frac = 0.3, bio = 1, th
   c.adults += newWorkers; c.stats.emerged += newWorkers;
   // new workers stay in a few days before they forage (T1-13)
   c.young += newWorkers - c.young / (C.youngDays * bio) * dtDay;
-  c.gynes += newRepro * S.gyneShare; c.males += newRepro * (1 - S.gyneShare); c.stats.gynesRaised += newRepro * S.gyneShare;
+  const ng = newRepro * S.gyneShare * (K.gyne ?? 1); // the growth tree's gyne output (T3-3)
+  c.gynes += ng; c.males += newRepro * (1 - S.gyneShare); c.stats.gynesRaised += ng;
 
   // Gynes fly out to mate on fair days (GDD 6.7); how many find a male depends on the males about (T2-3)
   if (foraging && c.gynes > 0 && !SP.perennial) { const m = c.gynes * S.matePerDay * dtDay; c.gynes -= m; c.mated += m * S.mateSuccess * malesAbout(c, frac); }

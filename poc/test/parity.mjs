@@ -1,7 +1,7 @@
 // Writes core/fixtures/parity.txt: digests of the JS reference that the C# port (core/) must reproduce bit for bit.
 // Each digest is FNV-1a over the IEEE-754 bytes of numbers in a fixed order. Run: node test/parity.mjs
 import { writeFileSync, readFileSync } from 'node:fs';
-import { T, SKILLS } from '../sim/tuning.js';
+import { T, SKILLS, TREE_NODES } from '../sim/tuning.js';
 import { applyTuning } from '../sim/tunefile.js';
 applyTuning(T, readFileSync(new URL('../../tuning/sting.tune', import.meta.url), 'utf8')); // T1-22: the shipped tuning
 import { generateChunk, buildList, settledOf, wildHere, dayWeather, windAt, humanWindow, flyPos, beePos, birdPos, dragonPos, makeNest, shedSites, shedRoof, groundAt, groundSlope } from '../sim/world.js';
@@ -215,6 +215,12 @@ export const SIM_SCENARIOS = [
     const b = stingBot({ plan: 'full', rest: 60 }), order = ['speed', 'grabR', 'forage', 'landR', 'feedR', 'brood', 'lay', 'build'];
     return (sim) => { const c = b(sim); if (sim.tick % 1500 === 1499) c.pick = -(SKILLS.indexOf(order[Math.floor(sim.tick / 1500) % order.length]) + 1); return c; };
   } },
+  // the growth tree (T3-3): a line given 1800 XP spends a point every 1000 ticks down all three branches while it stings
+  // through the day; the digest takes the tree and the points once a second
+  { name: 'tree', settings: { seed: 1234, skills: 'all' }, ticks: 12000, prog: true, tree: true, bot: () => {
+    const b = stingBot({ plan: 'full', rest: 60 }), order = ['cells', 'brood', 'cue', 'recover', 'lock', 'gynes', 'winter', 'insul', 'found', 'guard', 'reach'];
+    return (sim) => { const c = b(sim); if (sim.tick === 1) sim.prog.unitTotal += 1800; if (sim.tick % 1000 === 999) c.pick = -(500 + TREE_NODES.indexOf(order[Math.floor(sim.tick / 1000) % order.length])); return c; };
+  } },
   // multi-colony play (GDD 6.8): a honeybee season with a swarm; once the line has a second colony, every 2000 ticks the
   // colony in hand changes to the line's first (the one left goes on under the AI at the gauge)
   { name: 'multi', settings: { seed: 99, dayMinutes: 0.4, seasonDays: 10, species: 'bee' }, ticks: 36000, prog: true, bot: () => (sim) => {
@@ -235,6 +241,7 @@ for (const sc of SIM_SCENARIOS) {
     sim.step(bot(sim));
     for (const e of sim.drainEvents()) { d.s(e.type); d.f(e.t); }
     if (sim.tick % 60 === 0) { d.s(sim.stateHash()); d.s(sim.humanHash()); }
+    if (sc.tree && sim.tick % 60 === 0) { for (const r of sim.prog.tree) d.f(r); d.f(sim.points()); d.f(sim._lockMul(sim._driven())); d.f(sim._insGain()); d.f(sim._lineMax()); }
     if (sim.tick % 600 === 0) { for (const p of sim.places()) { d.s(p.kind); d.s(p.key); d.f(p.x); d.f(p.y); d.f(p.z); } for (const k of Object.keys(sim.guide)) { d.s(k); d.f(sim.guide[k]); } } // places of interest and the field guide (T3-2)
     if (sc.prog && sim.tick % 60 === 0) { const P = sim.prog, Q = sim.player; d.f(P.unit); d.f(P.unitTotal); d.f(P.hive); d.f(P.hiveTotal); d.f(P.stabs); for (const r of P.ranks) d.f(r); for (const r of P.roles) d.f(r); d.f(Q.hand); d.f(Q.gaugeRate); d.f(Q.gaugeDays); d.f(sim.line.length); d.f(sim.colony.adults); for (const x of sim.line) { d.f(x.id); d.f(x.colony.adults); d.f(x.colony.sugar); } }
   }

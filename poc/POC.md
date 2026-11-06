@@ -178,6 +178,7 @@ Run the tests from this folder with `node test/sim.test.mjs`, `node test/net.tes
 | 148 | The region of templates (S8): on a hilly world the land use follows each chunk's grade: built up to 12% (town centres 10%), farmed to 20%, wooded past it; the home neighbourhood built, flat worlds as before | 18.97 | 25 |
 | 149 | Places of interest and field notes (T3-2): the sim's place list (nest, line, rivals, hives, swarms, water, town centres, porch lights, nest sites, the exterminator), a true note for each kind unlocking the first time you reach one, kept in the save; map pins, notes on the area cards, the atlas field guide | 18.98 | 25 |
 | 150 | World v3's night adopted: its own moon and stars (reflected in the water, the moon as the night's key light), at the game's lunar phase; the game's own night sky kept for the classic look | 18.99 | 25 |
+| 151 | The growth tree's branches (T3-3): Nest (comb, brood care, insulation, guards), Flight (Reflex cue, swoop recovery, lock-on range, assisted reach), Line (young queens, wintering, founding); a point per 150 XP, nodes open in order, spent in the colony view; ranks audited across peers | 18.100 | 25 |
 
 ## Verified
 

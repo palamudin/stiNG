@@ -2483,6 +2483,39 @@ On a jump the CPU path no longer blurs a level out to its parent: the window it 
 
 The game now asks for a square at least 16 m across (`causticsMin`), pushed 30% of its size ahead along the view (`causticsAhead`), on a 512 texture with a 384 grid. That is about the old detail (3 cm texels, 7 cm cells, against 2.3 and 5 cm) over 2.7 times the width. Water seen at a slant still clouds with distance: that is the water, not the caustics.
 
+### 18.100 The growth tree's branches (T3-3, with T2-7)
+
+**Points.** A line earns a growth point for every 150 XP it gains, unit and hive together: a few a season. A strong wasp season reaches 600 XP, so about four points. A rank costs one point. The colony view's Skills tab lists the tree below the skills, with the points to spend and the XP left to the next. Taking a rank travels as input (`pick` −500 − node), so it replays and is recorded like any other command.
+
+**Branches.** Three branches. A node opens once the node before it in its branch has a rank, and each node goes to rank 3. Per rank (`T.tree`, in the tuning file):
+
+| branch | node | per rank |
+|---|---|---|
+| Nest | comb | +10% cells from each load |
+| | brood care | brood develops 6% faster |
+| | insulation | closes 15% of the gap between the site's insulation and full, for both the brood's speed and the comb's heat |
+| | guards | a guard's weight in a fight +0.1 |
+| Flight | Reflex cue | the solo slowdown lasts 0.3 s longer |
+| | swoop recovery | the dash is ready 15% sooner |
+| | lock-on range | +20% to every lock-on range |
+| | assisted reach | an assisted flight keeps its lock 20% further |
+| Line | young queens | +10% gynes raised |
+| | wintering | +10% queens through the winter, at every site |
+| | founding | one more colony of the line in spring (or from a swarm) |
+
+The Reflex cue and assisted reach act in the game's own handling. The rest are colony parameters in the sim. A line on the AI uses its own tree but never past the line in hand's (the level cap, as with the hive skills), and its hive skills' gauge scaling covers the young queens too. The tree is kept with each line's progression. A new line takes the tree of the queen that founds it. It is saved: in the JS snapshot, and as C# save version 37.
+
+**Audited across peers (11.8).** Taking a rank publishes a `grow` event. Every peer keeps each other peer's tree as audited, and refuses a grow that is not the next rank of an open node within the tree's ranges ("growth out of range"). Such a grow counts toward quarantine like any other implausible event. The outcome nodes are all colony parameters with known maxima: rank 3 of each node.
+
+**Checked.**
+- Block 72, in JS and both C# builds:
+  - no point, no growth; 450 XP gives three points; insulation waits for brood care;
+  - comb ×1.10 and brood ×1.06 at rank 1; a cold nest's brood faster;
+  - lock-on ×1.20; six colonies of the line instead of five;
+  - more young queens raised;
+  - a peer's grow of a closed node, or a skipped rank, refused; the tree saved.
+- A new `sim.tree` parity scenario gives a line 1,800 XP and spends a point every 1,000 ticks down all three branches while it stings. Its digest takes the tree, the points, the lock-on multiplier, the insulation gain and the line's limit once a second, so both builds agree on every effect. Every older digest held: with no ranks taken, nothing changes.
+
 ### 18.99 World v3's night, adopted
 
 The world thread gave World v3 a night of its own (`world/w3` 61b982c): a moon about opposite the sun, at a thirtieth of the sun's light, cool and dimmed by cloud, and a fixed field of stars that shows as the sky darkens. The water reflects both, blurred by its ripples, and carries the moon's path. By night the land's key light and shadows are the moon's, and the exposure counts it. The game adapts in three ways:
@@ -2824,7 +2857,7 @@ Agreed 2026-10-27: Tier 2 is built on the current stack in the order that surviv
 | T2-4 | **Built (18.40).** Lineage colonies as real AI colonies: the queens the player did not wake found colonies of the line, run by AI | 6.7 | L | sim |
 | T2-5 | **Built (18.41).** Town centers and beer gardens: a new land use with dense outdoor seating and drinks | 4.1, 4.3 | M | generator and sim; new art |
 | T2-6 | **Built (18.42, 18.44).** Feature modifiers that need the bigger generator: biome mix, town density, terrain | 4.8 | L | terrain touches all collision |
-| T2-7 | The Reflex skill tree; now the Flight branch of the growth tree (T2-13) | 7.8 | M | mostly UI and progression: after the Unity move |
+| T2-7 | **Built with T3-3 (18.100): the Flight branch.** The Reflex skill tree; now the Flight branch of the growth tree (T2-13) | 7.8 | M | mostly UI and progression: after the Unity move |
 | T2-8 | Colonies of thousands of wasps out at once | 11.12 | L | engine performance: after the Unity move |
 | T2-9 | **Built (18.47).** Species as data: a species table over the one wasp code path, species in the colony record and saves, the `progression` world setting with `open` in test builds and a species pick on the start screen | 6.8 | M | sim; first, everything below needs it |
 | T2-10 | **Built (18.47).** The hornet line: a heavier body, a small colony, yellowjackets and bees as prey, night flight with porch lights | 6.8 | L | sim and generator |
@@ -2842,7 +2875,7 @@ Set 2026-11-03, after T2-14: graphics now belong to the world-building thread (2
 |---|---|---|---|---|
 | T3-1 | **Built (18.72).** **Leftovers from the flight and network work.** <br>• Other players' AI wasps reported inside walls are not drawn there (as players' wasps already are, 18.36). <br>• Assisted flight plans a way round long walls and hedges, not only single obstacles. <br>• A lock on a walking person lands on the exact spot locked. <br>• H's hover distance and orbit can be set. <br>• `CHASE.close` goes. | 11.8, 7.9 | M | each has a check in JS and C# where it touches the sim |
 | T3-2 | **Built (18.98).** **Places of interest and field notes** (the sim half of 20.3 G6). <br>• A place list kept by the sim (C# twin): the nest, colonies of the line, rival nests, hives, swarms, water, town squares and beer gardens, porch lights, the exterminator, nest sites found. <br>• Every kind carries a true field note from Appendix C. <br>• Notes unlock into a field guide the first time the place is reached, kept in the save. <br>• The map and area cards show them. The drawn map tiles are the world thread's. | 10, App. C | M | the list matches in JS and C#; the guide unlocks, saves and restores |
-| T3-3 | **The growth tree's branches** (T2-13 in full, with T2-7). <br>• Nest (cell building, brood speed, insulation, guard strength), Flight (the Reflex cue, swoop recovery, lock-on range, assisted reach) and Line (gyne output, winter survival by site, how many lineage colonies found). <br>• Points come from experience, a few a season. <br>• Every node that changes an outcome is a colony parameter in ranges the plausibility checks know (11.8). | 6.8, 7.8 | L | nodes act in the sim, ranges are audited across peers, the colony view spends points |
+| T3-3 | **Built (18.100).** **The growth tree's branches** (T2-13 in full, with T2-7). <br>• Nest (cell building, brood speed, insulation, guard strength), Flight (the Reflex cue, swoop recovery, lock-on range, assisted reach) and Line (gyne output, winter survival by site, how many lineage colonies found). <br>• Points come from experience, a few a season. <br>• Every node that changes an outcome is a colony parameter in ranges the plausibility checks know (11.8). | 6.8, 7.8 | L | nodes act in the sim, ranges are audited across peers, the colony view spends points |
 | T3-4 | **The player's own colonies meeting across species.** <br>• A player's hornets hunt the same player's yellowjackets and bees ball them, unless the player marks the colonies kin. <br>• Kin is colony state every peer reads. | 6.8 | S | a kin mark stops the hunting and balling; unmarked, they fight |
 | T3-5 | **How many colonies a player holds,** as a world setting, with colonies far from the player run at the abstract tier. | 6.8, 11.12 | M | the setting caps the held colonies; a far colony steps abstractly and comes back in step |
 

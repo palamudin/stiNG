@@ -670,6 +670,21 @@ releaseKick = 2.5
 focusMs = 3000
 focusCooldownMs = 15000
 
+[tree]
+ranks = 3
+xpPerPoint = 150
+cells = 0.1
+brood = 0.06
+insul = 0.15
+guard = 0.1
+cue = 0.3
+recover = 0.15
+lock = 0.2
+reach = 0.2
+gynes = 0.1
+winter = 0.1
+found = 1
+
 [roles]
 max = 5
 mastery = 150

@@ -145,6 +145,8 @@ namespace Sting.Core
         public List<(string hex, byte[] s)> fixHumans; public byte[] fixChunk;
         /// a player's nest is alive (the `nest` event)
         public bool alive;
+        /// a rank on a peer's growth tree (the `grow` event, T3-3): the node and its new rank
+        public int node, rank;
         /// the species (GDD 6.8): a fighter's weight, a sting's pain (null on events that carry none), a nest's species
         public Num fb; public Num? pain; public string species;
         public NetEv() { mk = "ev"; }
@@ -285,6 +287,8 @@ namespace Sting.Core
         public Dictionary<int, int> strikes = new Dictionary<int, int>(); public List<int> quarantined = new List<int>();
         public Dictionary<int, int> lastSeq = new Dictionary<int, int>(); public Dictionary<string, List<int>> stingTicks = new Dictionary<string, List<int>>();
         public List<int> ruled = new List<int>();
+        /// each peer's growth tree, as audited (T3-3)
+        public SortedDictionary<int, int[]> trees = new SortedDictionary<int, int[]>();
         /// T1-20: which of other peers' wasps hold a load they picked up ("peer:wasp"), and each one's recent sips
         public Dictionary<string, int> held = new Dictionary<string, int>(); public Dictionary<string, List<SipRec>> sips = new Dictionary<string, List<SipRec>>();
     }
@@ -306,10 +310,10 @@ namespace Sting.Core
     /// a line's XP, stabs, skills and role levels (GDD 6.8); a line is the player's colonies of one species
     public sealed class Prog
     {
-        public Num unit, unitTotal, hive, hiveTotal; public int stabs; public int[] ranks = new int[Skills.ALL.Length]; public int[] roles = new int[Skills.ROLES.Length];
+        public Num unit, unitTotal, hive, hiveTotal; public int stabs; public int[] ranks = new int[Skills.ALL.Length]; public int[] roles = new int[Skills.ROLES.Length]; public int[] tree = new int[Growth.NODES.Length]; // tree: the growth tree's ranks (T3-3)
         /// the XP the line had at its last winter: a year is measured from here (Q-19)
         public Num mark;
-        public Prog Copy() => new Prog { unit = unit, unitTotal = unitTotal, hive = hive, hiveTotal = hiveTotal, stabs = stabs, ranks = (int[])ranks.Clone(), roles = (int[])roles.Clone(), mark = mark };
+        public Prog Copy() => new Prog { unit = unit, unitTotal = unitTotal, hive = hive, hiveTotal = hiveTotal, stabs = stabs, ranks = (int[])ranks.Clone(), roles = (int[])roles.Clone(), mark = mark, tree = (int[])tree.Clone() };
     }
     /// the player gauge (GDD 6.8): XP earned in hand, the part counted, the smoothed rate per day, days measured; the player's, across lines
     public sealed class Player { public Num hand, handSeen, gaugeRate, gaugeDays; }

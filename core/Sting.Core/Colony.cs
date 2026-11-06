@@ -43,7 +43,7 @@ namespace Sting.Core
     }
 
     /// the hive skills' multipliers (GDD 6.8)
-    public sealed class Boost { public Num forage = 1, brood = 1, lay = 1, build = 1; public static readonly Boost None = new Boost(); }
+    public sealed class Boost { public Num forage = 1, brood = 1, lay = 1, build = 1, gyne = 1; public static readonly Boost None = new Boost(); }
 
     public static class Colony
     {
@@ -160,7 +160,8 @@ namespace Sting.Core
             c.adults += newWorkers; c.stats.emerged += newWorkers;
             // new workers stay in a few days before they forage (T1-13)
             c.young += newWorkers - c.young / (T.colony.youngDays * bio) * dtDay;
-            c.gynes += newRepro * T.season.gyneShare; c.males += newRepro * (1 - T.season.gyneShare); c.stats.gynesRaised += newRepro * T.season.gyneShare;
+            Num ng = newRepro * T.season.gyneShare * K.gyne; // the growth tree's gyne output (T3-3)
+            c.gynes += ng; c.males += newRepro * (1 - T.season.gyneShare); c.stats.gynesRaised += ng;
 
             if (foraging && c.gynes > 0 && SP.perennial == 0) { Num m = c.gynes * T.season.matePerDay * dtDay; c.gynes -= m; c.mated += m * T.season.mateSuccess * MalesAbout(c, frac); } // T2-3
 

@@ -14,7 +14,7 @@ namespace Sting.Core
         static Num D2(V3 a, V3 b) { Num dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z; return dx * dx + dy * dy + dz * dz; }
         static Num D2(WaspBase a, V3 b) => D2(a.P, b);
         static Num D2(WaspBase a, WaspBase b) => D2(a.P, b.P);
-        static readonly HashSet<string> IMMEDIATE = new HashSet<string> { "caught", "claim", "denied", "drop", "sip", "beeAlarm", "died", "fight", "fightReq", "fightJoin", "fightRefuse", "fightEnd", "raid", "fixReq", "nest", "praid" };
+        static readonly HashSet<string> IMMEDIATE = new HashSet<string> { "caught", "claim", "denied", "drop", "sip", "beeAlarm", "died", "fight", "fightReq", "fightJoin", "fightRefuse", "fightEnd", "raid", "fixReq", "nest", "praid" , "grow" };
 
         public Settings settings;
         public int peer; public bool net, noAI;
@@ -192,11 +192,12 @@ namespace Sting.Core
         /// slow it, as much as the site lets the weather in. An attic heats up on sunny afternoons.
         /// Water the colony has fanned over the comb takes the heat's share away (T2-1)
         public Num BroodSpeed(long m) => BroodSpeed(m, nest.site, colony.cool);
-        public Num BroodSpeed(long m, string site, Num cool)
+        public Num BroodSpeed(long m, string site, Num cool) => BroodSpeed(m, site, cool, InsGain());
+        public Num BroodSpeed(long m, string site, Num cool, Num gain)
         {
-            var S = T.sites.Of(site); Num air = NestAir(m, site);
+            Num ins = Insul(site, gain), air = NestAir(m, site); // (the tree's insulation, T3-3)
             Num cold = Clamp01((T.thermal.coldFrom - air) / T.thermal.coldSpan), hot = Clamp01((air - T.thermal.hotFrom) / T.thermal.hotSpan) * T.thermal.hotWeight * (1 - Clamp01(cool));
-            return Max(T.thermal.minSpeed, 1 - (1 - S.insulation) * (cold + hot));
+            return Max(T.thermal.minSpeed, 1 - (1 - ins) * (cold + hot));
         }
         /// the air at a nest: the weather, plus the sun on an attic roof
         Num NestAir(long m, string site)
@@ -207,9 +208,10 @@ namespace Sting.Core
         /// The nest's heat (GDD 6.6, T2-1): past comfort through the site's insulation (0..1), and how far the comb is past
         /// the temperature that kills brood (0..1)
         public (Num heat, Num cook, Num nestT) NestHeat(long m) => NestHeat(m, nest.site);
-        public (Num heat, Num cook, Num nestT) NestHeat(long m, string site)
+        public (Num heat, Num cook, Num nestT) NestHeat(long m, string site) => NestHeat(m, site, InsGain());
+        public (Num heat, Num cook, Num nestT) NestHeat(long m, string site, Num gain)
         {
-            var S = T.sites.Of(site); Num air = NestAir(m, site), keep = 1 - S.insulation;
+            Num air = NestAir(m, site), keep = 1 - Insul(site, gain);
             Num nestT = T.water.nestBase + Max(0, air - T.water.nestBase) * keep;
             return (keep * Clamp01((air - T.thermal.hotFrom) / T.thermal.hotSpan), Clamp01((nestT - T.water.lethal) / T.water.lethalSpan), nestT);
         }
@@ -421,6 +423,7 @@ namespace Sting.Core
             if (cmd.alloc > 0 && cmd.alloc <= T.alloc.Length && colony.alloc != cmd.alloc - 1) { colony.alloc = cmd.alloc - 1; Emit("alloc", ("preset", colony.alloc)); }
             int pick = cmd.pick;
             if (pick <= -1000) { SwitchColony(-pick - 1000); pick = 0; } // take another colony of the line in hand (GDD 6.8)
+            else if (pick <= -500) { Grow(-pick - 500); pick = 0; } // a rank on the growth tree (T3-3)
             else if (pick < 0) { Learn(-pick - 1); pick = 0; } // a negative pick learns a skill (GDD 6.8)
             if (winter != null) { WinterStep(pick); pick = 0; } // in winter a pick chooses the queen (T1-15)
             if ((edge & Act.Switch) != 0) PossessNearest();

@@ -86,7 +86,7 @@ namespace Sting.Core
 
     public static class Persist
     {
-        public const int SAVE_VERSION = 36; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home); 14: barbecue meat taken; 15: regions, pulp taken from wood; 16: strolls and garden rounds; 17: the carry ledger and sips (T1-20); 18: water (T2-1); 19: young queens on their mating flight (T2-3); 20: lineage colonies (T2-4); 21: feature modifiers (T2-6); 22: the exterminator called to a sister colony; 23: terrain; 24: the swoop; 25: species (wasps, hornets, honeybees); 26: XP and skills; 27: the player gauge, hives kept over a wasp winter; 28: wintering in somewhere warm; 29: a person's pace, for a lock; 30: each line's own progression, insects' own experience, role levels; 31: a colony switch on its way through the relay; 32: the year's mark and a honeybee line's wasp offer; 33: a firefly spat out; 34: swarms on their way and a young queen's mating flight; 35: the settled area; 36: the field guide (T3-2)
+        public const int SAVE_VERSION = 37; // 2: records which number build wrote it; 3: body temperature and drowning; 4: remembered stings; 5: spray fetching and the exterminator's search; 6: young workers; 7: winter with choices; 8: landing on any surface; 9: surface heading, hollow cups; 10: seasonal ecology; 11: feral hives and robbing; 12: the tuning hash; 13: senses (search, remembered sources, the scent brought home); 14: barbecue meat taken; 15: regions, pulp taken from wood; 16: strolls and garden rounds; 17: the carry ledger and sips (T1-20); 18: water (T2-1); 19: young queens on their mating flight (T2-3); 20: lineage colonies (T2-4); 21: feature modifiers (T2-6); 22: the exterminator called to a sister colony; 23: terrain; 24: the swoop; 25: species (wasps, hornets, honeybees); 26: XP and skills; 27: the player gauge, hives kept over a wasp winter; 28: wintering in somewhere warm; 29: a person's pace, for a lock; 30: each line's own progression, insects' own experience, role levels; 31: a colony switch on its way through the relay; 32: the year's mark and a honeybee line's wasp offer; 33: a firefly spat out; 34: swarms on their way and a young queen's mating flight; 35: the settled area; 36: the field guide (T3-2); 37: the growth tree (T3-3)
         const uint MAGIC = 0x474E4953; // "SING"
 
         // ---------------------------------------------------------------- one Io per type
@@ -192,6 +192,7 @@ namespace Sting.Core
             for (int k = 0; k < P.ranks.Length; k++) a.I(ref P.ranks[k]);
             for (int k = 0; k < P.roles.Length; k++) a.I(ref P.roles[k]);
             a.D(ref P.mark);
+            for (int k = 0; k < P.tree.Length; k++) a.I(ref P.tree[k]); // the growth tree (T3-3)
         }
         static void IoPers(Archive a, Pers p)
         {
@@ -282,6 +283,11 @@ namespace Sting.Core
             if (a.Reading) { p.stingTicks.Clear(); for (int i = 0; i < n; i++) { string k = null; a.S(ref k); List<int> l = null; a.Ints(ref l); p.stingTicks[k] = l; } }
             else { var ks = new List<string>(p.stingTicks.Keys); ks.Sort(string.CompareOrdinal); foreach (var k in ks) { string kk = k; a.S(ref kk); var l = p.stingTicks[k]; a.Ints(ref l); } }
             a.Ints(ref p.ruled);
+            { // the peers' growth trees, as audited (T3-3)
+                int tn = p.trees.Count; a.I(ref tn);
+                if (a.Reading) { p.trees.Clear(); for (int i = 0; i < tn; i++) { int k = 0; a.I(ref k); var r = new int[Growth.NODES.Length]; for (int j = 0; j < r.Length; j++) a.I(ref r[j]); p.trees[k] = r; } }
+                else foreach (var kv in p.trees) { int k = kv.Key; a.I(ref k); var r = kv.Value; for (int j = 0; j < r.Length; j++) a.I(ref r[j]); }
+            }
             int hn = p.held.Count; a.I(ref hn);
             if (a.Reading) { p.held.Clear(); for (int i = 0; i < hn; i++) { string k = null; a.S(ref k); int v = 0; a.I(ref v); p.held[k] = v; } }
             else { var hk = new List<string>(p.held.Keys); hk.Sort(string.CompareOrdinal); foreach (var k in hk) { string kk = k; a.S(ref kk); int v = p.held[k]; a.I(ref v); } }
