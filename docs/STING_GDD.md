@@ -2483,6 +2483,27 @@ On a jump the CPU path no longer blurs a level out to its parent: the window it 
 
 The game now asks for a square at least 16 m across (`causticsMin`), pushed 30% of its size ahead along the view (`causticsAhead`), on a 512 texture with a 384 grid. That is about the old detail (3 cm texels, 7 cm cells, against 2.3 and 5 cm) over 2.7 times the width. Water seen at a slant still clouds with distance: that is the water, not the caustics.
 
+### 18.101 Grass that stays calm, matte grass, and the performance overlay
+
+**The bug.** The grass's sway went wild as the game ran on, and wherever the wind kept changing it jittered like 2 frames a second; at night, in calm air, it was smooth. The sway was `sin(time × rate)`, and the gusts and eddies were the same kind of expression, with the rate depending on the wind. Every change of wind jumped the phase by the whole clock times the change. The game feeds the grass the wind at the wasp, which shifts a little every frame, so the longer the game had run, the wilder each jump.
+
+**The motion, tabulated.** A sway table is computed once (`SWAY`, 256 steps by 8 wind levels; world/grass.js): a blade's swing across the wind and its nod along it over one cycle, from a smooth sway in a breath of air to a quick dip and slow return in a gale. The shader reads the table at a phase and the wind's row; the texture's filter interpolates between steps and between wind states. Every input that moves with time is integrated on the CPU in double precision and kept bounded (`Grass.update(eye, ground, dt)`):
+- one phase pair per way of moving (eight, in 0..1);
+- the gusts' travel (0..2π);
+- the eddies' drift (wrapped at 4096 m).
+
+The wind itself eases toward the weather's with a 1.5 s time constant. A change of wind therefore changes how fast the phases turn, never where they are, and the blades blend from one state to the next.
+
+**Matte grass.** A blade no longer has a specular highlight. Light comes through it instead: the sun on its far side shines through, greener and warmer toward the thin tip, most when looking into the light. The switch is `World.grass.matte`, on the start screen as "Grass (World v3)" and in Options. Off restores the old glossy look, to compare.
+
+**The performance overlay** (start screen "Performance", Options, or F3), measured in the game rather than in the engine alone, averaged over half a second:
+- frames a second and milliseconds a frame;
+- the CPU's milliseconds, split into the sim's steps, the rest of the frame's own work and handing the frame to the GPU, each as a share of the frame (load);
+- the GPU's milliseconds, where the browser gives timer queries (desktop Chrome and Edge): the whole frame in the classic look, the six costliest passes in World v3;
+- draw calls and triangles.
+
+**Presence (agreed 2026-11-07).** Everything in the game is computed and drawn by the player's presence: what is not near the player costs only what matters. The sim already steps only the chunks round the player and takes far colonies to the abstract tier. The overlay is the measure for the drawing: whatever it shows costing far from the player is next to cut.
+
 ### 18.100 The growth tree's branches (T3-3, with T2-7)
 
 **Points.** A line earns a growth point for every 150 XP it gains, unit and hive together: a few a season. A strong wasp season reaches 600 XP, so about four points. A rank costs one point. The colony view's Skills tab lists the tree below the skills, with the points to spend and the XP left to the next. Taking a rank travels as input (`pick` −500 − node), so it replays and is recorded like any other command.

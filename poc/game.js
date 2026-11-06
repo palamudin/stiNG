@@ -10,6 +10,7 @@ import {
 } from './sim/index.js';
 import { Rings, RING, ringGrid, ringGLSL } from './view/rings.js';
 import { Batch, place } from './view/merge.js';
+import { GpuTimer } from './world/gputimer.js';
 // World v2 (GDD 20.4): the ground, forests, grass, sky and post chain of world/, drawing the sim's own world. Chosen on
 // the menu (Look) or with ?world2, read once at load: every lifted material is compiled against one ground or the other.
 const W2_ASKED = (() => { try { return new URLSearchParams(location.search).has('world2') || localStorage.getItem('sting.world2') === '1'; } catch { return false; } })();
@@ -410,7 +411,7 @@ let running = false, paused = false;
 const input = { pick: 0, keys: new Set(), lmb: false, yaw: 0, pitch: 0, alloc: 1, autopilot: null, free: { yaw: 0, pitch: 0, held: false },
   lock: null, pilot: null, autoTurn: false, turning: false, gazeOff: 0, gDown: 0, gLong: false }; // lock-on, assisted flight, eye turn (GDD 7.9)
 // Player options from the Esc menu, kept per browser
-const opts = { volume: 0.7, sens: 1, invert: false, reflex: true, autoGrab: null, autoRes: true }; // autoGrab null: on for touch, off otherwise
+const opts = { volume: 0.7, sens: 1, invert: false, reflex: true, autoGrab: null, autoRes: true, perf: false, grassMatte: true }; // autoGrab null: on for touch, off otherwise
 try { Object.assign(opts, JSON.parse(localStorage.getItem('sting.options') || '{}')); } catch { /* optional */ }
 const saveOpts = () => { try { localStorage.setItem('sting.options', JSON.stringify(opts)); } catch { /* optional */ } };
 const ySign = () => (opts.invert ? -1 : 1);
@@ -2517,7 +2518,12 @@ function showOpts() {
   $('optReflex').checked = opts.reflex;
   $('optGrab').checked = opts.autoGrab ?? touch.on;
   $('optRes').checked = opts.autoRes;
+  $('optPerf').checked = !!opts.perf; $('optGrass').checked = opts.grassMatte !== false;
+  $('perfOpt').value = opts.perf ? '1' : '0'; $('grassLook').value = opts.grassMatte !== false ? 'matte' : 'gloss';
 }
+// the performance overlay and the grass's look (both on the start screen and in Options; F3 toggles the overlay)
+function setPerf(on) { opts.perf = !!on; saveOpts(); showOpts(); if (!on && PERF.el) PERF.el.hidden = true; }
+function setGrass(matte) { opts.grassMatte = !!matte; saveOpts(); showOpts(); if (world2 && world2.grass) world2.grass.matte = opts.grassMatte; }
 showOpts();
 $('optVol').addEventListener('input', (e) => {
   opts.volume = +e.target.value / 100; saveOpts(); showOpts();
@@ -2527,6 +2533,11 @@ $('optSens').addEventListener('input', (e) => { opts.sens = +e.target.value / 10
 $('optInvert').addEventListener('change', (e) => { opts.invert = e.target.checked; saveOpts(); });
 $('optReflex').addEventListener('change', (e) => { opts.reflex = e.target.checked; saveOpts(); });
 $('optGrab').addEventListener('change', (e) => { opts.autoGrab = e.target.checked; saveOpts(); });
+$('optPerf').addEventListener('change', (e) => setPerf(e.target.checked));
+$('optGrass').addEventListener('change', (e) => setGrass(e.target.checked));
+$('perfOpt').addEventListener('change', (e) => setPerf(e.target.value === '1'));
+$('grassLook').addEventListener('change', (e) => setGrass(e.target.value === 'matte'));
+addEventListener('keydown', (e) => { if (e.code === 'F3') { e.preventDefault(); setPerf(!opts.perf); } });
 $('optRes').addEventListener('change', (e) => { opts.autoRes = e.target.checked; saveOpts(); if (!opts.autoRes) { quality.scale = 1; applyPixelRatio(); } });
 $('bQuit').addEventListener('click', () => {
   if (!lab) saveWorld(true);
@@ -3832,9 +3843,31 @@ function updateCamera(p, dt) {
 }
 
 let last = performance.now(), acc = 0, panelTimer = 0;
+// The performance overlay (Options, the start screen, or F3): frames a second; the CPU's milliseconds a frame, split into
+// the sim's steps, the rest of the frame's own work (views, HUD, audio) and handing the frame to the GPU; the GPU's
+// milliseconds a frame where the browser gives timer queries (EXT_disjoint_timer_query_webgl2: desktop Chrome and Edge),
+// per pass in World v3; each as a share of the frame (load); the draw calls and triangles. Averaged over half a second.
+const PERF = { gpu: new GpuTimer(renderer), acc: { n: 0, frame: 0, sim: 0, cpu: 0, submit: 0 }, t0: 0, el: null };
+function perfFrame(raw, sim, cpu, submit) {
+  if (!opts.perf) { if (PERF.el && !PERF.el.hidden) PERF.el.hidden = true; return; }
+  const A = PERF.acc; A.n++; A.frame += raw * 1000; A.sim += sim; A.cpu += cpu; A.submit += submit;
+  const now = performance.now(); if (now - PERF.t0 < 500) return;
+  PERF.t0 = now;
+  const el = PERF.el || (PERF.el = $('perf')), n = Math.max(1, A.n), fr = A.frame / n, sm = A.sim / n, cp = A.cpu / n, sb = A.submit / n;
+  const G = world2 && sim ? world2.timer : PERF.gpu, g = G.on ? (G.ms.total || G.ms.frame || 0) : null, info = renderer.info.render;
+  const pct = (v) => `${Math.round(Math.min(999, v / Math.max(fr, 0.01) * 100))}%`;
+  const passes = G.on && world2 && sim ? Object.entries(G.ms).filter(([k]) => k !== 'total').sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => `${k} ${v.toFixed(1)}`).join(' · ') : '';
+  el.innerHTML = `<b>${Math.round(1000 / Math.max(fr, 0.01))} fps</b> · ${fr.toFixed(1)} ms a frame<br>`
+    + `CPU ${(cp + sb).toFixed(1)} ms (${pct(cp + sb)}): sim ${sm.toFixed(1)} · frame ${(cp - sm).toFixed(1)} · submit ${sb.toFixed(1)}<br>`
+    + (g === null ? 'GPU: no timer queries in this browser' : `GPU ${g.toFixed(1)} ms (${pct(g)})${passes ? `<br><span>${passes}</span>` : ''}`)
+    + `<br>${info.calls} calls · ${(info.triangles / 1e6).toFixed(2)} M triangles · ${world2 ? 'World v3' : 'classic'}${world2 && world2.grass ? ` · grass ${world2.grass.matte ? 'matte' : 'glossy'}` : ''}`;
+  el.hidden = false;
+  A.n = A.frame = A.sim = A.cpu = A.submit = 0;
+}
 function frame(now) {
   const raw = (now - last) / 1000, dt = Math.min(0.1, raw);
   last = now;
+  const pf0 = performance.now(); let pfSim = 0; // the performance overlay's clocks (PERF)
   qualityFrame(raw);
   padUI(now); // menus with a controller (Xbox)
   if (atlas.open) atlasControls(dt); // the big map has the controls until it is closed
@@ -3846,7 +3879,9 @@ function frame(now) {
     let n = 0;
     while (acc >= DT && n < cap) {
       for (const w of sim.wasps) { const e = pos.get(w.id); if (e) e.p.copy(e.c); }
+      const ps0 = performance.now();
       if (lab) { lab.step(buildCmd()); if (sim.tick % 30 === 0) lab.check(); } else sim.step(buildCmd());
+      pfSim += performance.now() - ps0;
       for (const w of sim.wasps) { const e = pos.get(w.id); if (e) e.c.set(w.x, w.y, w.z); else pos.set(w.id, { p: V(w), c: V(w) }); }
       handleEvents(sim.drainEvents());
       acc -= DT; n++;
@@ -3904,7 +3939,11 @@ function frame(now) {
   }
   const r0 = performance.now();
   renderer.shadowMap.needsUpdate = SHADOW.frame++ % SHADOW.every === 0;
+  const pr0 = performance.now();
+  if (!world2 || !sim) PERF.gpu.begin('frame'); // the classic look's whole frame on the card (World v3 times its passes itself)
   if (world2 && sim) world2.render(); else renderer.render(scene, camera);
+  if (!world2 || !sim) { PERF.gpu.end(); PERF.gpu.frame(); }
+  perfFrame(raw, pfSim, pr0 - pf0, performance.now() - pr0);
   if (window.__prof) window.__prof.render = (window.__prof.render || 0) + performance.now() - r0;
   requestAnimationFrame(frame);
 }
@@ -3925,6 +3964,7 @@ function w2Attach() {
   }
   if (world2) { world2.setSource(src, w.x, w.z); return; }
   world2 = new W2M[0].World(renderer, scene, camera, src, { quality: $('gfx').value === 'low' || touch.on ? 'low' : 'medium', clip: { levels: W2_LEVELS }, sun, hemi, shadowBox: SHADOW.half, shadowAhead: SHADOW.ahead, shadowMap: SHADOW.map, caustics: [512], dof: false, grass: $('gfx').value === 'low' || touch.on ? undefined : 0.75 }); // depth of field at a wasp's distance blurs the whole world away
+  if (world2.grass) world2.grass.matte = opts.grassMatte !== false; // the grass's look (Options: matte, or the old glossy one)
   Object.assign(LIFT, world2.clip.uniforms);
   world2.build(w.x, w.z);
   WATER_MAT.visible = !world2.drawsWater; // World v2 draws the birdbaths', fountains' and puddles' water (WORLD.md, W2)

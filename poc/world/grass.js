@@ -47,6 +47,30 @@ export const GRASS = {
   bladeW: { root: 0.0065, from: 1.5, power: 0.9 }, // a blade's width: root * max(1, distance / from) ^ power, so far blades cover as near ones do
   flowers: { spacing: 0.55, radius: 18 },
 };
+// The sway table (computed once): a blade's sway over one cycle of its motion (256 steps), across the wind (red) and
+// along it (green), for 8 wind levels from a breath of air to a gale (rows). In a breeze a blade swings smoothly side
+// to side; as the wind rises the swing tightens and the nod along the wind turns into a quick dip and a slow return,
+// as a blade does when the wind lays it over and lets it up. Each row's swing peaks at 1. The shader reads it at a
+// phase and the wind's row, and the texture's filter interpolates between the steps and between the wind states.
+export const SWAY = { steps: 256, levels: 8 };
+function swayTable() {
+  const N = SWAY.steps, L = SWAY.levels, data = new Uint8Array(N * L * 4);
+  for (let j = 0; j < L; j++) {
+    const w = j / (L - 1), row = [];
+    for (let i = 0; i < N; i++) {
+      const p = i / N * Math.PI * 2;
+      const across = Math.sin(p) * (1 - 0.3 * w) + 0.3 * w * Math.sin(2 * p + 0.8);
+      const dip = Math.sin(p - 0.9 * w * Math.sin(p)); // the nod skews: a quick dip, a slower return
+      const along = dip * (1 - 0.25 * w) + 0.25 * w * Math.sin(2 * p);
+      row.push([across, along]);
+    }
+    const mx = Math.max(...row.map((r) => Math.abs(r[0]))), my = Math.max(...row.map((r) => Math.abs(r[1])));
+    row.forEach(([a, b], i) => { const o = (j * N + i) * 4; data[o] = Math.round((a / mx * 0.5 + 0.5) * 255); data[o + 1] = Math.round((b / my * 0.5 + 0.5) * 255); data[o + 2] = 128; data[o + 3] = 255; });
+  }
+  const t = new THREE.DataTexture(data, N, L, THREE.RGBAFormat, THREE.UnsignedByteType);
+  t.wrapS = THREE.RepeatWrapping; t.wrapT = THREE.ClampToEdgeWrapping; t.magFilter = t.minFilter = THREE.LinearFilter; t.generateMipmaps = false; t.needsUpdate = true;
+  return t;
+}
 // The ground's wear, read the same way by the grass and the ground under it
 export const WEAR_GLSL = /* glsl */ `
 float w2wear(float w) { return w < 0.3 ? clamp(w / 0.2, 0.0, 1.0) : 0.0; } // 0 untouched .. 1 trodden
@@ -83,6 +107,11 @@ function clumpGeometry(blades, segs, seed = 45) {
 const GRASS_VERT_HEAD = /* glsl */ `
 attribute float aT, aSide, aBi; attribute vec4 aB; attribute vec2 aCell;
 uniform int uK; uniform float uS0, uRin, uRout, uNextBlades, uTime, uSea, uDensity, uFlower, uAlt, uShore, uSnowLine, uWoodH, uZ0, uBloom, uSnowCover, uWildFrom; uniform vec3 uGrassTint; uniform vec2 uWildH; uniform vec2 uGrassH; uniform vec2 uWind; uniform vec3 uCamG;
+// the sway, tabulated (the sway table below) and driven by phases the CPU integrates (Grass.update): every input that
+// moves with time is bounded (a phase in 0..1 per way of moving, the gust's in 0..2 pi, the eddies' drift wrapped), so
+// the motion never depends on how long the game has run, and a change of wind changes how fast the phases turn, never
+// where they are (it used to jump them, by the whole clock times the change: the grass went wild as the game ran on)
+uniform sampler2D tSway; uniform vec2 uPh[8]; uniform float uGustPh, uSwayRow; uniform vec2 uEddy;
 varying float vT, vCol, vRootK, vFade, vDith; varying vec3 vGW, vGR; varying vec3 vTint, vPetal; varying float vKill;
 vec3 gPos; vec3 gNor; vec3 gRel; // gRel: the vertex from the eye (GDD 18.95)
 `;
@@ -157,8 +186,8 @@ const GRASS_BUILD = /* glsl */ `
   // Smooth, never jittery: every motion here is a slow sine or a broad noise, so a blade glides from pose to pose.
   // A breeze sways blades wide and slowly; a strong wind lays them over and only then quickens them a little.
   float wk = smoothstep(0.25, 2.0, Uh); // 0 in a breath of air, 1 in a stiff wind
-  float gust = 0.6 + 0.4 * sin(1.571 * dot(bL, wd) - mod(1.571 * (0.5 + 1.2 * Uh) * uTime, 6.2831853) + 3.0 * w2noise(bL / 7.0, 205)); // 4 m waves
-  float eddy = 0.5 + 0.5 * w2noise((bL - wd * mod(uTime * (0.3 + 0.9 * Uh), 4096.0)) / 1.6, 206); // 0..1, broad and slow, carried downwind
+  float gust = 0.6 + 0.4 * sin(1.571 * dot(bL, wd) - uGustPh + 3.0 * w2noise(bL / 7.0, 205)); // 4 m waves, travelling downwind (uGustPh)
+  float eddy = 0.5 + 0.5 * w2noise((bL - uEddy) / 1.6, 206); // 0..1, broad and slow, carried downwind (uEddy)
   float mv = floor(fract(aB.w * 7.31 + rnd * 3.7) * 8.0); // which of the eight
   float bph = mv * 2.39996, bk = (mv + 0.5) / 8.0; // phases a golden angle apart
   float stiff = 0.65 + 0.7 * bk; // how far this blade gives
@@ -166,7 +195,11 @@ const GRASS_BUILD = /* glsl */ `
   float ug = Uh * gust * (0.8 + 0.4 * eddy) * stiff / 1.5;
   float lay = min(0.85, 0.05 + ug * ug * 0.35); // 1.5 m/s at the tips lays a blade about a third over
   float amp = mix(0.16, 0.1, wk) * (0.75 + 0.5 * eddy); // a wide, slow sway in a breeze; tighter once laid over
-  vec2 flutter = (wp * sin(mod(uTime * rate, 6.2831853) + bph) + wd * 0.5 * sin(mod(uTime * rate * 0.71, 6.2831853) + bph * 1.7)) * amp;
+  // the sway from the table: this way of moving's two phases (across the wind, and a slower nod along it), offset by the
+  // blade's own, at the wind's row (the table interpolates between its wind states)
+  vec2 ph = uPh[int(mv)];
+  float sx = texture(tSway, vec2(ph.x + bph / 6.2831853, uSwayRow)).r * 2.0 - 1.0, sy = texture(tSway, vec2(ph.y + bph * 1.7 / 6.2831853, uSwayRow)).g * 2.0 - 1.0;
+  vec2 flutter = (wp * sx + wd * 0.5 * sy) * amp;
   vec2 bend = fdir * lean * t * t + (wd * lay + flutter) * H * t * t;
   float drop = (dot(bend, bend) / max(H, 1e-3)) * 0.45; // a bent blade is shorter
   vec2 bw = off + side * aSide * W * (1.0 - t * 0.85) + bend; // the blade's vertex from its clump: millimetres, kept exact
@@ -223,6 +256,7 @@ export class Grass {
         uWoodH: { value: world.source.grassWood ?? 1 },
         uZ0: { value: 0.1 * ((world.source.grassHeight || [0.1, 0.42])[0] + (world.source.grassHeight || [0.1, 0.42])[1]) / 2 }, // roughness length
         uWind: shared.uWind, uCamG: shared.uCamG, uAlt: shared.uAlt,
+        tSway: shared.tSway, uPh: shared.uPh, uGustPh: shared.uGustPh, uSwayRow: shared.uSwayRow, uEddy: shared.uEddy, uGrassMatte: shared.uGrassMatte,
         uGrassH: { value: new THREE.Vector2(...(world.source.grassHeight || [0.1, 0.42])) }, // metres, dry to wet ground
       };
       const mat = new THREE.MeshStandardMaterial({ roughness: 0.75, metalness: 0, side: THREE.DoubleSide });
@@ -233,7 +267,7 @@ export class Grass {
           .replace('#include <begin_vertex>', 'vec3 transformed = gPos;')
           // projected from the eye (GDD 18.95): viewMatrix * an absolute position cancels two large 32-bit numbers
           .replace('#include <project_vertex>', 'vec4 mvPosition = vec4(mat3(viewMatrix) * gRel, 1.0); gl_Position = projectionMatrix * mvPosition;\n  if (vKill > 0.5) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);');
-        sh.fragmentShader = `${CLOUD_SHADOW_GLSL}\nuniform vec3 uSunDir, uSunColor; varying float vT, vCol, vRootK, vFade, vDith; varying vec3 vGW, vGR, vTint, vPetal; varying float vKill;
+        sh.fragmentShader = `${CLOUD_SHADOW_GLSL}\nuniform vec3 uSunDir, uSunColor; uniform float uGrassMatte; varying float vT, vCol, vRootK, vFade, vDith; varying vec3 vGW, vGR, vTint, vPetal; varying float vKill;
 float w2ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); } // interleaved gradient noise\n` + sh.fragmentShader
           .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n  if (vFade < 1.0 && fract(w2ign(gl_FragCoord.xy) + vDith) > vFade) discard; // dissolving, never shrinking')
           .replace('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb = vPetal.x >= 0.0 && vT > 0.9 ? vPetal : vTint;')
@@ -243,9 +277,16 @@ float w2ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.
           .replace('#include <lights_fragment_end>', /* glsl */ `#include <lights_fragment_end>
   { // the sun through the blade, toward the tip, strongest looking into the light; the root sits in its neighbours' shade
     vec3 V = normalize(vGR); // from the eye (GDD 18.95)
-    float back = pow(clamp(dot(V, uSunDir), 0.0, 1.0), 3.0);
-    { float cs = cloudShadow(vGW.xz); reflectedLight.directDiffuse *= cs; reflectedLight.directSpecular *= cs; }
-    reflectedLight.directDiffuse += uSunColor * diffuseColor.rgb * back * 0.5 * vT;
+    float back = pow(clamp(dot(V, uSunDir), 0.0, 1.0), 3.0), cs = cloudShadow(vGW.xz);
+    reflectedLight.directDiffuse *= cs; reflectedLight.directSpecular *= cs;
+    if (uGrassMatte > 0.5) {
+      // matte and translucent (the switch, World.grassMatte): a blade has no gloss, and light comes through it: the sun
+      // on its far side shines through, greener and warmer, more toward the thin tip, most looking into the light
+      reflectedLight.directSpecular = vec3(0.0); reflectedLight.indirectSpecular = vec3(0.0);
+      vec3 nW = normalize((vec4(normal, 0.0) * viewMatrix).xyz);
+      float through = 0.6 * clamp(-dot(nW, uSunDir), 0.0, 1.0) + back;
+      reflectedLight.directDiffuse += uSunColor * diffuseColor.rgb * vec3(0.85, 1.15, 0.5) * through * 0.55 * (0.4 + 0.6 * vT) * cs;
+    } else reflectedLight.directDiffuse += uSunColor * diffuseColor.rgb * back * 0.5 * vT; // the old look: glossy, a little back light
     reflectedLight.indirectDiffuse *= mix(1.0, 0.55 + 0.45 * vT, vRootK);
     reflectedLight.directDiffuse *= mix(1.0, 0.7 + 0.3 * vT, vRootK);
   }`);
@@ -256,7 +297,10 @@ float w2ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.
       mesh.userData.U = U; mesh.userData.instances = cells.length / 2; mesh.userData.radii = radii; mesh.userData.rin = rin; mesh.userData.slack = slack;
       this.group.add(mesh); this.meshes.push(mesh);
     };
-    const shared = { uWind: { value: new THREE.Vector2(0.8, 0.3) }, uCamG: { value: new THREE.Vector3() }, uAlt: { value: 0 } };
+    const shared = { uWind: { value: new THREE.Vector2(0.8, 0.3) }, uCamG: { value: new THREE.Vector3() }, uAlt: { value: 0 },
+      tSway: { value: swayTable() }, uPh: { value: Array.from({ length: 8 }, () => new THREE.Vector2()) }, uGustPh: { value: 0 }, uSwayRow: { value: 0.5 / SWAY.levels }, uEddy: { value: new THREE.Vector2() },
+      uGrassMatte: { value: opts.matte === false ? 0 : 1 } };
+    this.sway = { wind: null, gust: 0, eddy: [0, 0], ph: Array.from({ length: 8 }, (_, m) => [m * 0.618 % 1, m * 0.382 % 1]) }; // the phases, integrated here (doubles)
     this.shared = shared;
     GRASS.rings.forEach((R, k) => {
       const next = GRASS.rings[k + 1];
@@ -268,9 +312,26 @@ float w2ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.
   }
   // the season (seasons.js): the flowers' share in bloom, the blades' tint, the snow cover
   season(bloom, tint, snow) { for (const m of this.meshes) { const U = m.userData.U; U.uBloom.value = bloom; U.uGrassTint.value.set(...tint); U.uSnowCover.value = snow; } }
-  update(eye, ground) {
+  // the switch for the blades' look: matte and translucent (true), or the old glossy one (false), to compare
+  set matte(on) { this.shared.uGrassMatte.value = on ? 1 : 0; }
+  get matte() { return this.shared.uGrassMatte.value > 0.5; }
+  update(eye, ground, dt = 1 / 60) {
     const alt = Math.max(0.05, eye.y - ground), S = this.shared;
-    S.uCamG.value.copy(eye); S.uAlt.value = alt; const E = this.world.env, w10 = E.wind10 || [E.wind[0] * 8, E.wind[1] * 8]; S.uWind.value.set(w10[0], w10[1]); // m/s at 10 m (as the waves)
+    S.uCamG.value.copy(eye); S.uAlt.value = alt; const E = this.world.env, w10 = E.wind10 || [E.wind[0] * 8, E.wind[1] * 8]; // m/s at 10 m (as the waves)
+    // the wind the grass moves in eases toward the weather's (a time constant of 1.5 s), so a change of wind blends the
+    // blades from one state to the next; the phases then turn at the eased wind's pace, integrated here in doubles and
+    // kept bounded, so nothing in the shader grows with the time the game has run
+    const W = this.sway; dt = Math.min(Math.max(dt, 0), 0.25);
+    if (!W.wind) W.wind = [w10[0], w10[1]];
+    const k = 1 - Math.exp(-dt / 1.5); W.wind[0] += (w10[0] - W.wind[0]) * k; W.wind[1] += (w10[1] - W.wind[1]) * k;
+    S.uWind.value.set(W.wind[0], W.wind[1]);
+    const U10 = Math.hypot(W.wind[0], W.wind[1]), wd = U10 > 0.01 ? [W.wind[0] / U10, W.wind[1] / U10] : [0.83, 0.55];
+    const z0 = this.meshes[0].userData.U.uZ0.value, Hm = Math.max(1.5 * z0, 0.75 * (this.meshes[0].userData.U.uGrassH.value.x + this.meshes[0].userData.U.uGrassH.value.y) / 2);
+    const Uh = Math.max(U10 * Math.log(Hm / z0) / Math.log(10 / z0), 0.25), t = Math.min(1, Math.max(0, (Uh - 0.25) / 1.75)), wk = t * t * (3 - 2 * t); // the wind at a typical blade's top, and how stiff a wind it is (0..1)
+    for (let m = 0; m < 8; m++) { const bk = (m + 0.5) / 8, rate = (1.7 + 1.4 * bk) * (1 + 0.5 * wk) / (Math.PI * 2); W.ph[m][0] = (W.ph[m][0] + dt * rate) % 1; W.ph[m][1] = (W.ph[m][1] + dt * rate * 0.71) % 1; S.uPh.value[m].set(W.ph[m][0], W.ph[m][1]); }
+    W.gust = (W.gust + dt * 1.571 * (0.5 + 1.2 * Uh)) % (Math.PI * 2); S.uGustPh.value = W.gust;
+    const de = dt * (0.3 + 0.9 * Uh); W.eddy[0] = (W.eddy[0] + wd[0] * de) % 4096; W.eddy[1] = (W.eddy[1] + wd[1] * de) % 4096; S.uEddy.value.set(W.eddy[0], W.eddy[1]);
+    S.uSwayRow.value = (wk * (SWAY.levels - 1) + 0.5) / SWAY.levels;
     this.group.visible = alt < 30;
     // each ring draws its cells down to where a clump can still be past the last ring's reach, seen from this height
     const hk = GRASS.altK * alt;

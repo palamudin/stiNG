@@ -308,7 +308,7 @@ ${this.shore ? '  else if (q.y == 1) { vec4 sh = shoreAt(p); o = vec4(sh.x, sh.w
     this.uniforms.uWet.value = E.wet;
     this.uniforms.uTime.value = this.time; // the grass and the trees sway on this clock (the post chain has its own)
     this.forest.update(eye, dt, box);
-    this.grass.update(eye, Math.max(this.heightAt(eye.x, eye.z), this.waterAt(eye.x, eye.z)));
+    this.grass.update(eye, Math.max(this.heightAt(eye.x, eye.z), this.waterAt(eye.x, eye.z)), dt);
     this.rain.update(this.time, eye, this.camera, E.wind10 || [E.wind[0] * 8, E.wind[1] * 8], E.rain || 0, E.snow, this.sky.skyUp);
     this.uniforms.uGrassR.value = this.grass.reach;
     // clouds: the weather's cover, drifting with the wind

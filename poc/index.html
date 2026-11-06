@@ -109,6 +109,8 @@
   #atlasCard .lv { display: inline-block; min-width: 34px; font-weight: 700; }
   #atlasCard .lv.low { color: var(--muted); } #atlasCard .lv.mid { color: var(--yellow); } #atlasCard .lv.high { color: var(--orange); }
   #atlasCard .here { color: var(--yellow); margin-top: 3px; }
+  #perf { position: fixed; z-index: 30; right: 8px; bottom: 8px; max-width: min(420px, calc(100% - 16px)); padding: 5px 8px; background: rgba(13,12,10,.82); border: 1px solid var(--line); font: 11px/1.45 ui-monospace, monospace; color: var(--fg); pointer-events: none; }
+  #perf b { color: var(--yellow); } #perf span { color: var(--muted); }
   #atlasCard .note, #guide .note { margin-top: 5px; padding-top: 4px; border-top: 1px solid var(--line); }
   #atlasCard .note em, #guide .note em { display: block; color: var(--muted); font-size: 10.5px; font-style: normal; margin-top: 2px; }
   #atlasCard .note b, #guide .note b { display: inline; font-size: 12px; margin: 0; color: var(--yellow); }
@@ -428,6 +430,7 @@
     <p class="err" id="bootErr" hidden></p>
   </div>
 </div>
+<div id="perf" hidden></div>
 <div class="screen" id="startScreen" hidden>
   <div class="card">
     <div class="titlerow"><h1 class="title">STI<span>NG</span></h1><span class="seal" aria-hidden="true">螫</span></div>
@@ -474,6 +477,8 @@
       <label class="label" for="dev">Dev tools<select id="dev"><option value="0" selected>Off</option><option value="1">On: click the map, teleport there; J jumps far (200 km, 1,000 km, 10,000 km, home)</option></select></label>
       <label class="label" for="gfx">Graphics<select id="gfx"><option value="high" selected>High</option><option value="low">Low (no shadows)</option></select></label>
       <label class="label" for="look">Look<select id="look"><option value="classic" selected>Classic</option><option value="v2">World v2 (sky, forests, grass; experimental)</option></select></label>
+      <label class="label" for="perfOpt">Performance<select id="perfOpt"><option value="0" selected>Off</option><option value="1">On: FPS, CPU and GPU load (F3)</option></select></label>
+      <label class="label" for="grassLook">Grass (World v3)<select id="grassLook"><option value="matte" selected>Matte, light through it</option><option value="gloss">Glossy (the old look)</option></select></label>
       <label class="label" for="hudMode">HUD<select id="hudMode"><option value="full" selected>Full</option><option value="hardcore">Hardcore</option></select></label>
       <label class="label" for="netMode">Second player<select id="netMode"><option value="off" selected>Off</option><option value="lan">Bot over LAN</option><option value="good">Bot over good internet</option><option value="bad">Bot over bad internet</option><option value="awful">Bot past the window</option><option value="over">Bot well past the window</option><option value="good+late">Bot joins after 1 min</option></select></label>
       <fieldset class="systems"><legend class="label">Threats</legend>
@@ -502,6 +507,8 @@
       <label class="check" for="optInvert"><input type="checkbox" id="optInvert"><span class="label">Invert look up / down</span></label>
       <label class="check" for="optGrab"><input type="checkbox" id="optGrab"><span class="label">Auto grab: catch prey in reach without pressing (on by default on touch screens)</span></label>
       <label class="check" for="optRes"><input type="checkbox" id="optRes" checked><span class="label">Auto resolution: lower the render resolution to hold the frame rate</span></label>
+      <label class="check" for="optPerf"><input type="checkbox" id="optPerf"><span class="label">Performance overlay: FPS, CPU and GPU load (F3)</span></label>
+      <label class="check" for="optGrass"><input type="checkbox" id="optGrass" checked><span class="label">Matte grass, light through it (World v3; off: the old glossy look)</span></label>
       <label class="check" for="optReflex"><input type="checkbox" id="optReflex"><span class="label">Reflex: slow time when a hand is coming (solo, once learned)</span></label>
       <span class="label">Colony view speed</span>
       <div class="row" id="nSpeed" style="justify-content:center"></div>
