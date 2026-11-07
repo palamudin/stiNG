@@ -333,7 +333,7 @@ requestAnimationFrame(frame);
 // tests (headless): ?offscreen draws into a target instead of the canvas (a headless browser's WebGPU may not
 // present), and snap() reads it back tone-mapped (ACES, sRGB) as a PNG data URL
 const off = q.has('offscreen') ? new THREE.RenderTarget(1, 1, { type: THREE.HalfFloatType }) : null;
-function draw() { { const sz = renderer.getDrawingBufferSize(new THREE.Vector2()); clouds.render(camera, off ? off.width : sz.x, off ? off.height : sz.y); clouds.shadow(camera, sunDir, state.cshadow); }
+function draw() { { const sz = renderer.getDrawingBufferSize(new THREE.Vector2()); clouds.render(camera, off ? off.width : sz.x, off ? off.height : sz.y); clouds.shadow(camera, sunDir, state.cshadow); clouds.renderEnv(); }
   draw2(); }
 function draw2() { if (off) { const w = innerWidth, h = innerHeight; if (off.width !== w || off.height !== h) off.setSize(w, h); renderer.setRenderTarget(off); renderer.render(scene, camera); renderer.setRenderTarget(null); } else renderer.render(scene, camera); }
 async function snap() {

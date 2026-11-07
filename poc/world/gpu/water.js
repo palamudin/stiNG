@@ -9,7 +9,7 @@
 // Still to come over from surface.js: the shore table's coastal swell and swash, the foam fields and lace, the
 // screen-space reflection and the mirror, glints, rain rings, caustics.
 import * as THREE from 'three/webgpu';
-import { Fn, If, float, int, vec2, vec3, vec4, uniform, uniformArray, texture, positionLocal, positionWorld, cameraPosition, screenUV, viewportSharedTexture, abs, max, min, mix, clamp, smoothstep, pow, exp, sqrt, length, normalize, dot, reflect, select, varyingProperty, wgslFn, wgsl, Discard, Loop, Break, cross, dFdx, dFdy, cameraProjectionMatrix, cameraViewMatrix, cameraNear, cameraFar, viewportDepthTexture, perspectiveDepthToViewZ } from 'three/tsl';
+import { Fn, If, float, int, vec2, vec3, vec4, uniform, uniformArray, texture, positionLocal, positionWorld, cameraPosition, screenUV, viewportSharedTexture, abs, max, min, mix, clamp, smoothstep, pow, exp, sqrt, log2, length, normalize, dot, reflect, select, varyingProperty, wgslFn, wgsl, Discard, Loop, Break, cross, dFdx, dFdy, cameraProjectionMatrix, cameraViewMatrix, cameraNear, cameraFar, viewportDepthTexture, perspectiveDepthToViewZ } from 'three/tsl';
 import { COAST_WGSL } from './coast.wgsl.js';
 import { bakeFoamTexture } from './foamtex.js';
 
@@ -295,13 +295,10 @@ export function gpuWater(clip, waves, opts = {}) {
     // the sky in the water: the sky-view table (gpu/sky.js) by the reflected direction, held above the horizon, with the
     // night's moon and stars, blurred by the ripples, and the clouds where the reflected direction falls on the screen
     const Ru = normalize(vec3(R.x, R.y.max(0.02), R.z));
-    const skyC = (opts.sky ? opts.sky.skyAt(Ru).add(opts.sky.night(Ru, 0.004)) : mix(uSkyHz, uSkyUp, smoothstep(0, 0.45, R.y.max(0)))).toVar();
-    if (opts.clouds) {
-      const cc = cameraProjectionMatrix.mul(cameraViewMatrix).mul(vec4(cameraPosition.add(Ru.mul(5000)), 1)), cuv = vec2(cc.x.div(cc.w).mul(0.5).add(0.5), float(0.5).sub(cc.y.div(cc.w).mul(0.5)));
-      If(cc.w.greaterThan(0).and(cuv.x.greaterThan(0)).and(cuv.x.lessThan(1)).and(cuv.y.greaterThan(0)).and(cuv.y.lessThan(1)), () => {
-        const cl = texture(opts.clouds.rt.texture, cuv); skyC.assign(skyC.mul(cl.a).add(cl.rgb));
-      });
-    }
+    // the sky and the clouds by the reflected direction from their map (gpu/clouds.js envMap: whatever the screen
+    // shows), blurred by the footprint's roughness; without it, the sky's table alone
+    const env = opts.clouds && opts.sky ? opts.clouds.envMap(opts.sky) : null;
+    const skyC = (env ? texture(env, opts.clouds.envUV(Ru)).level(log2(float(1).add(sv.x.add(sv.y).mul(calm).mul(900))).add(0.3).clamp(0, 6)).rgb : opts.sky ? opts.sky.skyAt(Ru).add(opts.sky.night(Ru, 0.004)) : mix(uSkyHz, uSkyUp, smoothstep(0, 0.45, R.y.max(0)))).toVar();
     // the scene in the water (post.js's screen-space march): along the reflected ray in growing steps, each projected
     // and tested against the scene's depth; a crossing refined by halving; faded at the screen's edges
     const hitC = vec3(0).toVar(), hitK = float(0).toVar();
@@ -367,7 +364,7 @@ export function gpuWater(clip, waves, opts = {}) {
       const spf = laceD(PT, lt, 5.3 * ls, vec2(uTime.mul(0.006), uTime.mul(-0.004))).mul(0.55).add(laceD(PT, lt, 1.9 * ls, vec2(uTime.mul(-0.012), 0)).mul(0.45)).add(0.15);
       const sfz = vCoastF.x.clamp(0, 1);
       fm.assign(max(fm, smoothstep(float(0.98).sub(sfz.mul(0.3)), float(1.08).sub(sfz.mul(0.3)), spf).mul(smoothstep(-0.35, 0.45, nz({ p: PT.div(0.22).add(uTime.mul(0.05)), s: int(629) }))).mul(sfz.mul(0.25).add(0.15))));
-      fm.assign(max(fm, smoothstep(float(1).sub(coastFoam.mul(0.55)), float(1.1).sub(coastFoam.mul(0.55)), pat).mul(0.75).mul(coastFoam)));
+      fm.assign(max(fm, smoothstep(float(1).sub(coastFoam.mul(0.55)), float(1.1).sub(coastFoam.mul(0.55)), pat).mul(0.75).mul(coastFoam).mul(float(1).sub(inField)))); // (where a foam field is, the shoreline's foam is its: one linger, carried with the swash)
       // the lip's tip tearing into white as it throws
       const tip = smoothstep(0.45, 0.9, vCurl).mul(0.7);
       fm.assign(max(fm, smoothstep(float(1).sub(tip.mul(0.6)), float(1.1).sub(tip.mul(0.6)), pat.add(nz({ p: PT.div(0.35).add(uTime.mul(0.4)), s: int(631) }).mul(0.15))).mul(tip)));

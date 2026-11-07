@@ -11,6 +11,8 @@
 import * as THREE from 'three/webgpu';
 import { Fn, If, Return, float, int, vec2, vec3, vec4, uniform, storage, instanceIndex, texture, wgslFn, wgsl, max, min, exp, clamp, smoothstep, floor, mix, select, log2 } from 'three/tsl';
 import { COAST_WGSL } from './coast.wgsl.js';
+import { SWASH } from '../water3/swash.js';
+const SWASH_UP = SWASH.up;
 
 export const GFOAM = { near: { n: 256, texel: 0.5 }, far: { n: 256, texel: 8.0 } }; // 128 m and 2 km round the camera
 const coastCode = wgsl(COAST_WGSL);
@@ -77,6 +79,11 @@ export class GpuFoamField {
           const grad = vec2(RC.clipAtSmooth(p.add(vec2(e, 0))).x.sub(RC.clipAtSmooth(p.sub(vec2(e, 0))).x), RC.clipAtSmooth(p.add(vec2(0, e))).x.sub(RC.clipAtSmooth(p.sub(vec2(0, e))).x)).div(e.mul(2));
           const sf = cFoam({ xz: p, depth, grad, wave, fl: float(0), ...surf }).toVar();
           If(sf.y.greaterThan(0), () => { wet.assign(true); make.assign(max(make, sf.x.mul(0.9))); });
+          // the foam rides the swash: up the slope with the climb, back down with the backwash, so it leaves the sand the
+          // way it came (seaward), never sideways; its fading is the same linger as the water's foam
+          const gl = grad.length(), down = select(gl.greaterThan(1e-4), grad.div(gl).negate(), vec2(0));
+          const climb = sf.z.lessThan(SWASH_UP), spd = S.uSurf.x.mul(9.81).mul(2).sqrt().mul(0.6);
+          v.addAssign(down.mul(select(climb, spd.negate(), spd.mul(0.7))).mul(smoothstep(-0.05, 0.05, sf.y)));
         });
       }
       If(wet.not(), () => { B.element(t).assign(0); Return(); });

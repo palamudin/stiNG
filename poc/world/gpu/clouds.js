@@ -60,6 +60,31 @@ export class GpuClouds {
     this.renderer.compute(this.kProbe);
     this.renderer.getArrayBufferAsync(this.probeAttr).then((b) => { this.light = this.uShOn.value ? new Float32Array(b)[0] : 1; this._busy = false; }, () => { this._busy = false; });
   }
+  // the reflected sky (the water's): sky, night and clouds over the upper hemisphere from the eye, into a small
+  // mipmapped map by direction (azimuth across, elevation down from the zenith, finer near the horizon), so a
+  // reflection reads the clouds whatever the screen shows and blurs them by the surface's roughness
+  envMap(sky) {
+    if (this.envRT) return this.envRT.texture;
+    const W = 512, H = 256;
+    this.envRT = new THREE.RenderTarget(W, H, { type: THREE.HalfFloatType, depthBuffer: false, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter });
+    const t = this.envRT.texture; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.wrapS = THREE.RepeatWrapping;
+    const mat = new THREE.MeshBasicNodeMaterial();
+    mat.outputNode = Fn(() => {
+      const az = screenUV.x.mul(6.2831853), e = float(1).sub(screenUV.y), el = e.mul(e).mul(1.5707963).max(0.004);
+      const v = vec3(az.sin().mul(el.cos()), el.sin(), az.cos().mul(el.cos()));
+      const jit = fract(ign({ p: screenCoordinate.xy }).add(fract(this.uFrame.mul(0.618)).mul(17)));
+      const cl = fMarch({ ro: this.uCamPos, rd: v, tmax: float(1e9), jit, sunCol: sky.uSunColor, sunDir: sky.uSun, amb: sky.uSkyUp, cover: this.uCover, dens: this.uDens, drift: this.uDrift });
+      return vec4(sky.skyAt(v).add(sky.night(v, 0.004)).mul(cl.a).add(cl.rgb), 1);
+    })();
+    this.envQuad = new THREE.QuadMesh(mat); this._envF = 0;
+    return t;
+  }
+  // (the direction to its texel: the inverse of the above)
+  envUV(d) { const el = d.y.clamp(0.004, 1).asin(), az = d.x.atan(d.z); return vec2(fract(az.div(6.2831853)), float(1).sub(el.div(1.5707963).sqrt())); }
+  renderEnv() {
+    if (!this.envRT || this._envF++ % 2) return;
+    const r = this.renderer, prev = r.getRenderTarget(); r.setRenderTarget(this.envRT); this.envQuad.render(r); r.setRenderTarget(prev);
+  }
   // the sun's light through the clouds at a world point (a node); 1 off the map and when the shadow is off
   shadowAt(p = positionWorld) {
     const S = this.uShSun, q = p.xz.sub(S.xz.mul(p.y.div(max(S.y, 0.03)))); // the ground point under the same column
