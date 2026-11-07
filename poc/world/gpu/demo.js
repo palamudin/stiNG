@@ -23,7 +23,7 @@ import { weatherAt, seasonAt } from '../seasons.js';
 import { GpuSky } from './sky.js';
 import { GpuClouds } from './clouds.js';
 import { MAP, Places, placeCard } from '../map.js';
-import { uniform } from 'three/tsl';
+import { uniform, texture, uv } from 'three/tsl';
 import { WAVES, swellState } from '../waves.js';
 
 const $ = (id) => document.getElementById(id);
@@ -280,7 +280,7 @@ function updatePins() {
     for (const p of [{ kind: 'you', name: 'you', x: cam.fx, z: cam.fz }, ...places.list]) {
       V.set(p.x, ground(p.x, p.z), p.z).project(camera);
       if (V.z > 1 || Math.abs(V.x) > 1.05 || Math.abs(V.y) > 1.05) continue;
-      const sx = (V.x * 0.5 + 0.5) * W, sy = (-V.y * 0.5 + 0.5) * H;
+      const sx = ((V.x * 0.5 + 0.5) * (1 + 2 * (over ? OVER : 0)) - (over ? OVER : 0)) * W, sy = ((-V.y * 0.5 + 0.5) * (1 + 2 * (over ? OVER : 0)) - (over ? OVER : 0)) * H; // (the guard band's view)
       const near = shown.find((s) => s.kind === p.kind && Math.hypot(s.sx - sx, s.sy - sy) < 34);
       if (near && p.kind !== 'you') { near.n++; continue; }
       shown.push({ p, sx, sy, n: 1, kind: p.kind }); if (shown.length > 60) break;
@@ -299,7 +299,17 @@ function openCard(p) {
 }
 $('bCardX').addEventListener('click', () => { $('card').hidden = true; });
 $('bCardGo').addEventListener('click', () => { if (cardPlace) { cam.fx = cardPlace.x; cam.fz = cardPlace.z; cam.dist = 60; } $('card').hidden = true; });
-function resize() { const w = innerWidth, h = innerHeight; renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }
+// the guard band (OVER of the view on each side): the scene is drawn over a view 10% larger than the screen and the
+// screen shows its middle, so the GPU's culling (trees, grass), the reflections and the refraction all see past the
+// screen's edges (no reflection starting late at the sides, a turn of the view finds things already drawn)
+const OVER = 0.05;
+const over = q.has('offscreen') ? null : new THREE.RenderTarget(1, 1, { type: THREE.HalfFloatType, samples: q.has('noaa') ? 0 : 4 });
+const overQuad = over ? new THREE.QuadMesh(Object.assign(new THREE.MeshBasicNodeMaterial(), { colorNode: texture(over.texture, uv().mul(1 / (1 + 2 * OVER)).add(OVER / (1 + 2 * OVER))) })) : null;
+function resize() {
+  const w = innerWidth, h = innerHeight; renderer.setSize(w, h); camera.aspect = w / h;
+  if (over) { camera.setViewOffset(w, h, -OVER * w, -OVER * h, w * (1 + 2 * OVER), h * (1 + 2 * OVER)); const d = renderer.getPixelRatio(); over.setSize(Math.round(w * (1 + 2 * OVER) * d), Math.round(h * (1 + 2 * OVER) * d)); }
+  camera.updateProjectionMatrix();
+}
 addEventListener('resize', resize); resize();
 $('treeDist').addEventListener('input', (e) => { state.treeDist = parseFloat(e.target.value); $('oTreeDist').textContent = Math.round(state.treeDist * 100) + '%'; });
 $('oTreeDist').textContent = '100%';
@@ -333,9 +343,9 @@ requestAnimationFrame(frame);
 // tests (headless): ?offscreen draws into a target instead of the canvas (a headless browser's WebGPU may not
 // present), and snap() reads it back tone-mapped (ACES, sRGB) as a PNG data URL
 const off = q.has('offscreen') ? new THREE.RenderTarget(1, 1, { type: THREE.HalfFloatType }) : null;
-function draw() { { const sz = renderer.getDrawingBufferSize(new THREE.Vector2()); clouds.render(camera, off ? off.width : sz.x, off ? off.height : sz.y); clouds.shadow(camera, sunDir, state.cshadow); clouds.renderEnv(); }
+function draw() { { const sz = renderer.getDrawingBufferSize(new THREE.Vector2()); clouds.render(camera, off ? off.width : over ? over.width : sz.x, off ? off.height : over ? over.height : sz.y); clouds.shadow(camera, sunDir, state.cshadow); clouds.renderEnv(); }
   draw2(); }
-function draw2() { if (off) { const w = innerWidth, h = innerHeight; if (off.width !== w || off.height !== h) off.setSize(w, h); renderer.setRenderTarget(off); renderer.render(scene, camera); renderer.setRenderTarget(null); } else renderer.render(scene, camera); }
+function draw2() { if (off) { const w = innerWidth, h = innerHeight; if (off.width !== w || off.height !== h) off.setSize(w, h); renderer.setRenderTarget(off); renderer.render(scene, camera); renderer.setRenderTarget(null); } else { renderer.setRenderTarget(over); renderer.render(scene, camera); renderer.setRenderTarget(null); overQuad.render(renderer); } }
 async function snap() {
   const w = off.width, h = off.height, px = await renderer.readRenderTargetPixelsAsync(off, 0, 0, w, h), cv2 = document.createElement('canvas'); cv2.width = w; cv2.height = h;
   const c2 = cv2.getContext('2d'), im = c2.createImageData(w, h), toF = THREE.DataUtils.fromHalfFloat, aces = (x) => Math.min(1, Math.max(0, (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14))), srgb = (x) => (x <= 0.0031308 ? 12.92 * x : 1.055 * Math.pow(x, 1 / 2.4) - 0.055);
