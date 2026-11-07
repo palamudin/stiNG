@@ -167,13 +167,19 @@ export function gpuWater(clip, waves, opts = {}) {
     const ls = 0.9, lt = smoothstep(0, 3, depth).toVar();
     const fpatch = mix(float(1), nz({ p: P.div(9 * ls).add(vec2(uTime.mul(0.01), 0)), s: int(842) }).mul(0.5).add(0.5).mul(1.1).add(0.45), uLace.z).toVar();
     const fm = float(0).toVar();
+    // the foam field (gpu/foamfield.js): what the whitecaps and breakers made, carried in and lingering; past its window
+    // the folds' own whitecaps, this frame's
+    const ff = float(0).toVar(), inField = float(0).toVar();
+    if (opts.fields) for (const fr of opts.fields.map((f) => f.read())) { const q = fr(P); ff.assign(mix(ff, q.v, q.k)); inField.assign(max(inField, q.k)); }
+    ff.assign(ff.clamp(0, 1).mul(fpatch));
     if (tFoam) {
-      fm.assign(J.mul(-1).add(0.65).mul(1.3).clamp(0, 1).mul(smoothstep(0.25, 0.6, laceD(P, lt, 1.4 * ls, vec2(0)).add(0.2))).mul(fpatch).mul(calm));
+      fm.assign(J.mul(-1).add(0.65).mul(1.3).clamp(0, 1).mul(smoothstep(0.25, 0.6, laceD(P, lt, 1.4 * ls, vec2(0)).add(0.2))).mul(fpatch).mul(calm).mul(float(1).sub(inField)));
       const pn = smoothstep(0.6, 0.85, nz({ p: P.div(23).add(vec2(uTime.mul(0.07), uTime.mul(-0.05))), s: int(851) }).mul(0.5).add(0.5)).mul(smoothstep(0.5, 0.8, nz({ p: P.div(61).sub(vec2(uTime.mul(0.03), uTime.mul(0.04))), s: int(852) }).mul(0.5).add(0.5)));
       const slosh = pn.mul(smoothstep(1.03, 0.88, J)).mul(smoothstep(0.8, 2.5, depth));
       fm.assign(max(fm, slosh.mul(smoothstep(0.3, 0.65, laceD(P, lt, 1.6 * ls, vec2(uTime.mul(0.02), uTime.mul(0.013))).add(0.15))).mul(0.6).mul(fpatch)));
       const pat = laceD(P, lt, 3.1 * ls, vec2(uTime.mul(0.011), uTime.mul(-0.007))).mul(0.62).add(laceD(P, lt, 1.17 * ls, vec2(uTime.mul(-0.017), uTime.mul(-0.005))).mul(0.38)).add(0.12).toVar();
-      const wf = vCoast.z.clamp(0, 1), lc = vCoast.w.clamp(0, 1);
+      const wf = vCoast.z.clamp(0, 1), lc = vCoast.w.clamp(0, 1).mul(float(1).sub(inField.mul(0.6)));
+      fm.assign(max(fm, smoothstep(float(1).sub(ff.mul(0.6)), float(1.1).sub(ff.mul(0.6)), pat).mul(ff.mul(0.55).add(0.3)).mul(smoothstep(0, 0.02, ff)))); // the field's foam: thick where fresh, eroding into lace as it fades
       fm.assign(max(fm, smoothstep(float(1).sub(wf.mul(0.6)), float(1.12).sub(wf.mul(0.6)), pat).mul(wf.mul(0.4).add(0.6))));
       fm.assign(max(fm, smoothstep(float(1).sub(lc.mul(0.5)), float(1.1).sub(lc.mul(0.5)), pat).mul(0.45)));
       const spf = laceD(P, lt, 5.3 * ls, vec2(uTime.mul(0.006), uTime.mul(-0.004))).mul(0.55).add(laceD(P, lt, 1.9 * ls, vec2(uTime.mul(-0.012), 0)).mul(0.45)).add(0.15);

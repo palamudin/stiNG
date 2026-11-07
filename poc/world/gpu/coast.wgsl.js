@@ -1303,26 +1303,80 @@ fn coastShoreFoam(xz_6: vec2<f32>, depth_9: f32, grad_6: vec2<f32>, wave_2: f32,
     return vec4<f32>(_e64, _e65, _e66, 0f);
 }
 
-fn coastWet(xz_8: vec2<f32>, hgt_2: f32, grad_8: vec2<f32>, surf_8: vec4<f32>, surfX_8: vec4<f32>, t_20: f32, swDir_8: vec2<f32>) -> vec3<f32> {
-    var xz_9: vec2<f32>;
-    var hgt_3: f32;
-    var grad_9: vec2<f32>;
+fn coastFieldAt(p_23: vec2<f32>, sh_3: vec4<f32>, know_2: f32, depth_11: f32, cell_4: f32, surf_8: vec4<f32>, surfX_8: vec4<f32>, t_20: f32, swDir_8: vec2<f32>) -> mat4x4<f32> {
+    var p_24: vec2<f32>;
+    var sh_4: vec4<f32>;
+    var know_3: f32;
+    var depth_12: f32;
+    var cell_5: f32;
     var surf_9: vec4<f32>;
     var surfX_9: vec4<f32>;
     var t_21: f32;
     var swDir_9: vec2<f32>;
+    var a_2: vec4<f32> = vec4(0f);
+    var b_1: vec4<f32> = vec4(0f);
 
-    xz_9 = xz_8;
-    hgt_3 = hgt_2;
-    grad_9 = grad_8;
+    p_24 = p_23;
+    sh_4 = sh_3;
+    know_3 = know_2;
+    depth_12 = depth_11;
+    cell_5 = cell_4;
     surf_9 = surf_8;
     surfX_9 = surfX_8;
     t_21 = t_20;
     swDir_9 = swDir_8;
-    let _e34 = surf_9;
-    let _e35 = surfX_9;
-    let _e36 = t_21;
-    let _e37 = swDir_9;
+    let _e38 = surf_9;
+    let _e39 = surfX_9;
+    let _e40 = t_21;
+    let _e41 = swDir_9;
+    coastSet(_e38, _e39, _e40, _e41);
+    let _e42 = sh_4;
+    gShoreIn = _e42;
+    let _e43 = know_3;
+    gKnowIn = _e43;
+    let _e50 = depth_12;
+    let _e53 = uSurf;
+    let _e58 = p_24;
+    let _e59 = sw3Ctx(_e58);
+    if (((_e50 > 0f) && (_e53.x > 0f)) && _e59) {
+        {
+            let _e61 = p_24;
+            let _e62 = depth_12;
+            let _e63 = cell_5;
+            let _e64 = w3Coast(_e61, _e62, _e63);
+            let _e65 = gCoastFoam;
+            let _e67 = gNear;
+            let _e68 = gExpo;
+            a_2 = vec4<f32>(_e65.x, _e67, _e68, 1f);
+            let _e71 = gDir;
+            b_1 = vec4<f32>(_e71.x, _e71.y, 0f, 0f);
+        }
+    }
+    let _e77 = a_2;
+    let _e78 = b_1;
+    return mat4x4<f32>(vec4<f32>(_e77.x, _e77.y, _e77.z, _e77.w), vec4<f32>(_e78.x, _e78.y, _e78.z, _e78.w), vec4<f32>(0f, 0f, 0f, 0f), vec4<f32>(0f, 0f, 0f, 0f));
+}
+
+fn coastWet(xz_8: vec2<f32>, hgt_2: f32, grad_8: vec2<f32>, surf_10: vec4<f32>, surfX_10: vec4<f32>, t_22: f32, swDir_10: vec2<f32>) -> vec3<f32> {
+    var xz_9: vec2<f32>;
+    var hgt_3: f32;
+    var grad_9: vec2<f32>;
+    var surf_11: vec4<f32>;
+    var surfX_11: vec4<f32>;
+    var t_23: f32;
+    var swDir_11: vec2<f32>;
+
+    xz_9 = xz_8;
+    hgt_3 = hgt_2;
+    grad_9 = grad_8;
+    surf_11 = surf_10;
+    surfX_11 = surfX_10;
+    t_23 = t_22;
+    swDir_11 = swDir_10;
+    let _e34 = surf_11;
+    let _e35 = surfX_11;
+    let _e36 = t_23;
+    let _e37 = swDir_11;
     coastSet(_e34, _e35, _e36, _e37);
     let _e38 = xz_9;
     let _e39 = grad_9;
@@ -1330,7 +1384,7 @@ fn coastWet(xz_8: vec2<f32>, hgt_2: f32, grad_8: vec2<f32>, surf_8: vec4<f32>, s
     let _e40 = xz_9;
     let _e41 = hgt_3;
     let _e42 = grad_9;
-    let _e44 = t_21;
+    let _e44 = t_23;
     let _e45 = sw3Wet(_e40, _e41, length(_e42), _e44);
     return _e45;
 }

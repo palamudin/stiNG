@@ -9,6 +9,7 @@ import { GpuForest } from './forest.js';
 import { GpuWaves } from './waves.js';
 import { gpuWater, surfUniforms } from './water.js';
 import { GpuShore } from './shore.js';
+import { GpuFoamField, GFOAM } from './foamfield.js';
 import { WAVES, swellState } from '../waves.js';
 
 const $ = (id) => document.getElementById(id);
@@ -32,7 +33,7 @@ scene.add(sun, sun.target, hemi);
 const sunDir = new THREE.Vector3(0.45, 0.62, 0.3).normalize();
 
 const state = { seed: 7, treeDist: 1, wind: 4 };
-let src, clip, terrain, forest, waves, water, shore, wtime = 0;
+let src, clip, terrain, forest, waves, water, shore, fields, wtime = 0;
 function build() {
   if (terrain) { scene.remove(terrain, forest.group, water.mesh); }
   src = wildSource({ seed: state.seed });
@@ -42,7 +43,8 @@ function build() {
   terrain = gpuTerrain(clip, { sea: src.sea, bands: forest.uBands, surf: q.has('noshore') ? null : surfU });
   waves = new GpuWaves(renderer, { cascades: src.water.cascades, fetch: src.water.fetch, salt: src.cosmetic | 0 });
   shore = q.has('noshore') ? null : new GpuShore(renderer, src);
-  water = gpuWater(clip, waves, { waterAt: (x, z) => src.waterAt(x, z), shore, sea: src.sea, renderer, surfU, debug: +(q.get('wdebug') || 0) });
+  fields = q.has('nofield') ? null : [GFOAM.far, GFOAM.near].map((level) => new GpuFoamField(renderer, { clip, waves, shore, surfU, level }));
+  water = gpuWater(clip, waves, { waterAt: (x, z) => src.waterAt(x, z), shore, sea: src.sea, renderer, surfU, fields, debug: +(q.get('wdebug') || 0) });
   if (!q.has('nowater')) scene.add(water.mesh);
   if (!q.has('noterrain')) scene.add(terrain);
   if (!q.has('noforest')) scene.add(forest.group);
@@ -119,6 +121,7 @@ function step(dt) {
   water.U.uSurf.value.set(Math.min(1.5, Math.max(0.2, 0.35 + 0.55 * swell.Hs)), Math.min(60, Math.max(12, 0.45 * 9.81 * swell.T * swell.T / (2 * Math.PI))), 1, 1);
   water.U.uWTime.value = wtime; water.U.uTime.value = wtime; water.U.uSwDir.value.copy(waves.U.swDir.value);
   if (shore) shore.update(camera.position, !shore._built); if (shore) shore._built = true;
+  if (fields) for (const f of fields) f.update(dt, camera, w10, 4);
   water.U.uSunDir.value.copy(sunDir);
 }
 
