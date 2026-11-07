@@ -1,0 +1,33 @@
+<!doctype html><html><body><script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.webgpu.js","three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.webgpu.js","three/tsl":"https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.tsl.js"}}</script>
+<script type="module">
+import * as THREE from 'three/webgpu';
+import { Fn, instanceIndex, storage, uniform, wgslFn, wgsl, int, float } from 'three/tsl';
+import { WILD_WGSL } from '../../gpu/wild.wgsl.js';
+import { wildSource, wildUniforms, wildSample } from '../../sources/wild.js';
+const out = {};
+try {
+  const r = new THREE.WebGPURenderer(); r.setSize(64, 64); await r.init(); out.backend = r.backend.isWebGPUBackend ? 'webgpu' : 'webgl2';
+  const src = wildSource({ seed: 7 }), U = wildUniforms(src.params);
+  const N = 64 * 64, X0 = -2000, Z0 = 1500, ST = 37.3;
+  const g = new THREE.StorageBufferAttribute(new Float32Array(N * 4), 4), w = new THREE.StorageBufferAttribute(new Float32Array(N * 4), 4);
+  const G = storage(g, 'vec4', N), Wb = storage(w, 'vec4', N);
+  const at = wgslFn(`fn wildAt(i: u32, x0: f32, z0: f32, st: f32, seed: i32, sea: f32, relief: f32, blocky: f32, rivers: f32, forests: f32, trails: f32, which: i32) -> vec4<f32> {
+    let k = wildParams(seed, sea, relief, blocky, rivers, forests, trails);
+    let p = vec2<f32>(x0 + f32(i % 64u) * st, z0 + f32(i / 64u) * st);
+    if (which == 0) { return wildSample(p); }
+    return wildWaterFlow_1(p, 0.25);
+  }`, [wgsl(WILD_WGSL)]);
+  const args = (which) => ({ i: instanceIndex, x0: float(X0), z0: float(Z0), st: float(ST), seed: int(U.wSeed.value), sea: float(U.wSea.value), relief: float(U.wRelief.value), blocky: float(U.wBlocky.value), rivers: float(U.wRivers.value), forests: float(U.wForests.value), trails: float(U.wTrails.value), which: int(which) });
+  const k = Fn(() => { G.element(instanceIndex).assign(at(args(0))); Wb.element(instanceIndex).assign(at(args(1))); })().compute(N);
+  const t0 = performance.now(); await r.computeAsync(k); out.ms = performance.now() - t0;
+  const ga = new Float32Array(await r.getArrayBufferAsync(g)), wa = new Float32Array(await r.getArrayBufferAsync(w));
+  let maxH = 0, maxW = 0, maxF = 0, rivers = 0; const o = [0, 0, 0, 0, 0, 0];
+  for (let i = 0; i < N; i++) {
+    const x = X0 + (i % 64) * ST, z = Z0 + Math.floor(i / 64) * ST; wildSample(src.params, x, z, o);
+    maxH = Math.max(maxH, Math.abs(o[0] - ga[i * 4])); maxF = Math.max(maxF, Math.abs(o[2] - ga[i * 4 + 2])); maxW = Math.max(maxW, Math.abs(o[4] - wa[i * 4]));
+    if (wa[i * 4 + 1] > 0) rivers++;
+  }
+  Object.assign(out, { maxH, maxForest: maxF, maxWater: maxW, riverTexels: rivers, sample: [ga[0], ga[1], ga[2], ga[3]] });
+} catch (e) { out.err = String(e && e.stack || e).slice(0, 1500); }
+document.title = 'done'; window.__out = out;
+</script></body></html>
