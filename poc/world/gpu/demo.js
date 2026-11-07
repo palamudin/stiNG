@@ -17,7 +17,7 @@ import { GpuWaterQuery } from './waterquery.js';
 import { GpuSpray } from './spray.js';
 import { GpuSwellField } from './swellfield.js';
 import { GpuCurrents } from './currents.js';
-import { GpuSWE } from './swe.js';
+import { GpuTide } from './tide.js';
 import { Floaters } from './floaters/floaters.js';
 import { GWATER_PRESETS } from './water.js';
 import { weatherAt, seasonAt } from '../seasons.js';
@@ -96,9 +96,9 @@ async function build() {
   await stage('the waves'); waves = new GpuWaves(renderer, { cascades: src.water.cascades, fetch: src.water.fetch, salt: src.cosmetic | 0 });
   await stage('the shore table'); shore = q.has('noshore') ? null : new GpuShore(renderer, src);
   await stage('the swell field and the currents'); swellF = q.has('noswell') ? null : new GpuSwellField(renderer, src);
-  swe = q.has('noswe') ? null : new GpuSWE(renderer, src);
+  swe = q.has('notide') ? null : new GpuTide(renderer, src); // the tide, baked and replayed (gpu/tide.js)
   currents = swellF && !q.has('nocurrents') ? new GpuCurrents(renderer, src, swellF) : null;
-  await stage('the foam, the water'); fields = q.has('nofield') ? null : [GFOAM.far, GFOAM.near].map((level) => new GpuFoamField(renderer, { clip, waves, shore, surfU, level, swell: swellF, currents, swe: gpuLimits.maxStorageBuffersPerShaderStage >= 10 ? swe : null }));
+  await stage('the foam, the water'); fields = q.has('nofield') ? null : [GFOAM.far, GFOAM.near].map((level) => new GpuFoamField(renderer, { clip, waves, shore, surfU, level, swell: swellF, currents, swe: gpuLimits.maxStorageBuffersPerShaderStage >= 9 ? swe : null }));
   water = gpuWater(clip, waves, { swe, swell: swellF, sky, clouds, ssr: !q.has('nossr'), sunColor: sky.uSunColor, skyUp: sky.uSkyUp, skyHz: sky.uSkyHz, waterAt: (x, z) => src.waterAt(x, z), shore, sea: src.sea, renderer, surfU, fields, map: mapU, debug: +(q.get('wdebug') || 0) });
   if (!q.has('nowater')) scene.add(water.mesh);
   if (!q.has('noterrain')) scene.add(terrain);
