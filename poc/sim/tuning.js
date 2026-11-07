@@ -429,6 +429,9 @@ export const DEFAULT_SETTINGS = {
   // how many colonies a player may hold, the one in hand counted (T3-5, GDD 6.8): the line founds no more past it; 9
   // never binds (one in hand, the line's five, three more from the tree's Line: found)
   colonies: 9,
+  // dev (GDD 18.109): the driven insect is a ghost: nothing notices or harms it, it acts on nothing, it flies at full
+  // burst with the swoop ready; solo only, and a rule (a ghost world never matches a normal one). Not in the C# core
+  ghost: false,
 };
 export const SPECIES = ['wasp', 'hornet', 'bee'];
 // The skills (GDD 6.8), in the order the learn command numbers them: unlocks and ranked unit skills, then hive skills
@@ -473,7 +476,7 @@ const RULE_KEYS = ['dayMinutes', 'humanDensity', 'beeAggression', 'seasonDays', 
 export function rulesHash(settings) {
   const s = { ...DEFAULT_SETTINGS, ...settings };
   let h = 0x811c9dc5;
-  const str = 'gen' + GEN_VERSION + '|' + RULE_KEYS.map((k) => k + '=' + s[k]).join('|') + (s.settled ? '|settled=' + s.settled : '') + (s.colonies !== DEFAULT_SETTINGS.colonies ? '|colonies=' + s.colonies : '') + '|tune=' + TUNE.hash; // peers must share the tuning file too (T1-22)
+  const str = 'gen' + GEN_VERSION + '|' + RULE_KEYS.map((k) => k + '=' + s[k]).join('|') + (s.settled ? '|settled=' + s.settled : '') + (s.colonies !== DEFAULT_SETTINGS.colonies ? '|colonies=' + s.colonies : '') + (s.ghost ? '|ghost' : '') + '|tune=' + TUNE.hash; // peers must share the tuning file too (T1-22)
   for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
   return (h >>> 0).toString(16).padStart(8, '0');
 }
@@ -499,6 +502,7 @@ export function worldTag(settings) {
   if (s.terrain !== d.terrain) t.push(s.terrain > 1 ? 'hilly' : 'rolling');
   if (s.settled) t.push(`wild beyond ${s.settled} m`);
   if (s.colonies !== d.colonies) t.push(`${s.colonies} colonies a player`);
+  if (s.ghost) t.push('dev ghost');
   if (s.skills !== d.skills) t.push(s.skills === 'all' ? 'all skills' : s.skills);
   if (s.progression !== d.progression) t.push(s.progression === 'earned' ? 'species earned' : s.progression.startsWith('fixed:') ? s.progression.slice(6) + 's only' : s.progression);
   return t.join(' · ');

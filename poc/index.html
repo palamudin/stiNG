@@ -152,6 +152,26 @@
   .winter-sites { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
   .winter-sites button { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; text-align: left; text-transform: none; letter-spacing: 0; }
   .winter-sites span { font-weight: 400; opacity: .75; }
+  /* the skills: tiles with rank pips, the text in one line under them (skTip) */
+  .sk-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .sk-chips .chip { font: 600 11px var(--mono); padding: 3px 7px; border: 1px solid rgba(243,238,226,.25); color: var(--muted); }
+  .sk-chips .chip b { color: var(--yellow); font-weight: 600; }
+  .sk-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 10px; }
+  .sk-col { display: grid; gap: 8px; align-content: start; }
+  .sk-head { font: 600 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin: 6px 0 2px; }
+  .sk-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+  .tile { position: relative; width: 74px; min-height: 70px; display: grid; justify-items: center; align-content: center; gap: 3px; padding: 6px 4px; text-transform: none; letter-spacing: 0; color: var(--fg); background: rgba(243,238,226,.04); border: 1px solid rgba(243,238,226,.22); }
+  .sk-col .tile { width: 100%; }
+  .sk-col .tile + .tile::before { content: ''; position: absolute; top: -9px; left: 50%; width: 2px; height: 8px; background: rgba(243,238,226,.3); }
+  .tile .ic { font-size: 22px; line-height: 1; }
+  .tile .nm { font: 600 10px/1.2 var(--mono); text-align: center; }
+  .tile .pp { font-size: 9px; letter-spacing: 2px; color: var(--yellow); min-height: 1em; }
+  .tile.have { border-color: rgba(246,199,0,.7); }
+  .tile.max { background: rgba(246,199,0,.16); }
+  .tile.can { box-shadow: inset 0 0 0 2px var(--yellow); }
+  .tile.off { opacity: .42; cursor: default; }
+  .tile.info { cursor: default; }
+  .sk-tip { min-height: 2.8em; margin: 4px 0 0; font-size: 12px; line-height: 1.45; color: var(--fg); border-top: 1px solid rgba(243,238,226,.2); padding-top: 6px; }
   .skills { display: flex; flex-direction: column; gap: 4px; }
   .skills button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; text-transform: none; letter-spacing: 0; padding: 6px 8px; }
   .skills button span { font-weight: 400; opacity: .75; font-size: 12px; }
@@ -181,6 +201,25 @@
   .opts output { font: 500 12px var(--mono); color: var(--fg); }
   .opts input[type=range] { width: 100%; accent-color: var(--yellow); margin: 0 0 6px; }
   .opts input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--yellow); margin: 0; }
+  .title-card { width: min(520px, 100%); }
+  .main-start { align-items: end; }
+  .main-start input { width: 18ch; }
+  .main-start button { padding: 10px 22px; font-size: 14px; }
+  .checks { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12px; color: var(--muted); }
+  .checks label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .checks input { width: 16px; height: 16px; accent-color: var(--yellow); margin: 0; }
+  .menu-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .menu-grid button { padding: 12px; font-size: 13px; }
+  .menu-card { width: min(720px, 100%); }
+  .menu-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 2px solid rgba(237,227,204,.35); padding-bottom: 10px; }
+  .menu-title { font-family: var(--display); font-weight: 800; font-size: 34px; letter-spacing: .03em; margin: 0; text-transform: uppercase; }
+  .mpane { display: grid; gap: 14px; }
+  .codex { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+  .codex .note { border: 1px solid rgba(243,238,226,.25); padding: 10px 12px; display: grid; gap: 6px; font-size: 12px; line-height: 1.5; }
+  .codex .note b { font: 600 13px var(--mono); color: var(--yellow); text-transform: uppercase; letter-spacing: .04em; }
+  .codex .note.locked { opacity: .45; }
+  .codex .note .src { color: var(--muted); font-size: 11px; }
+  #optsHome .opts { width: 100%; }
   .systems { flex-basis: 100%; box-sizing: border-box; border: 1px solid rgba(243,238,226,.3); padding: 6px 10px 8px; margin: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--fg); }
   .systems legend { padding: 0 4px; }
   .start .systems label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
@@ -372,10 +411,10 @@
   </section>
   <section>
     <h3>Skills</h3>
-    <dl id="nXp"></dl>
-    <div id="nSkills" class="skills"></div>
-    <div id="nTree" class="skills"></div>
-    <p class="label" style="margin:8px 0 0">The wasp you fly earns its own XP and learns its own job skills; it also earns the line's XP, which buys abilities every wasp you fly has. A wasp that masters its job leaves every worker of its role a level better when it dies. Hive XP comes from what the colony does. Each species line keeps its own.</p>
+    <div id="nXp" class="sk-chips"></div>
+    <div id="nTree"></div>
+    <div id="nSkills"></div>
+    <p class="sk-tip" id="skTip">Point at a tile to read it. Lit tiles can take a point.</p>
   </section>
 </aside>
 
@@ -432,11 +471,36 @@
 </div>
 <div id="perf" hidden></div>
 <div class="screen" id="startScreen" hidden>
-  <div class="card">
+  <div class="card title-card">
     <div class="titlerow"><h1 class="title">STI<span>NG</span></h1><span class="seal" aria-hidden="true">螫</span></div>
     <p class="sub">stung 0 / 8,200,000,000</p>
-    <p>You drive one worker of a wasp colony. Every human reacts to a sting the same way every time. Learn them, sting, and be gone before the slap lands. Bring flies, caterpillars and pulp home so the brood keeps coming. Sting too much in one place and the neighborhood escalates: covered food, sprays, traps, and finally the exterminator. Beehives cook intruders, birds take wasps in open air, spiders wait in webs by the trees, and rival colonies guard their nests. Every autumn the colony dies; young queens carry the line into spring.</p>
-    <div class="keys">
+    <div class="start main-start">
+      <label class="label" for="seed">World seed or lobby<input id="seed" value="1234" autocomplete="off" spellcheck="false"></label>
+      <button id="bStart">Fly</button>
+      <button class="ghost" id="bContinue" hidden>Resume</button>
+    </div>
+    <div class="checks">
+      <label><input type="checkbox" id="devTp">Dev: teleport</label>
+      <label><input type="checkbox" id="devGhost">Dev: ghost</label>
+    </div>
+    <div class="menu-grid">
+      <button class="ghost" data-menu="guide">Game guide</button>
+      <button class="ghost" data-menu="codex">Codex</button>
+      <button class="ghost" data-menu="settings">Settings</button>
+      <button class="ghost" data-menu="mode">Game mode</button>
+    </div>
+    <p class="label" id="worldTag">Standard rules</p>
+    <p class="label" id="startNote"></p>
+  </div>
+</div>
+
+<!-- the menus behind the title and the pause screen: one pane at a time, Back (or B, or Esc) returns -->
+<div class="screen" id="menuScreen" hidden>
+  <div class="card menu-card">
+    <div class="menu-head"><h2 class="menu-title" id="menuTitle">Menu</h2><button class="ghost" id="bMenuBack">Back</button></div>
+    <div class="mpane" data-pane="guide" hidden>
+      <p>You drive one worker of a wasp colony. Every human reacts to a sting the same way every time. Learn them, sting, and be gone before the slap lands. Bring flies, caterpillars and pulp home so the brood keeps coming. Sting too much in one place and the neighborhood escalates: covered food, sprays, traps, and finally the exterminator. Beehives cook intruders, birds take wasps in open air, spiders wait in webs by the trees, and rival colonies guard their nests. Every autumn the colony dies; young queens carry the line into spring.</p>
+      <div class="keys">
       <div><kbd>Mouse</kbd>look</div>
       <div><kbd>Hold RMB</kbd>look around from the wasp's eyes</div>
       <div><kbd>W A S D</kbd>fly</div>
@@ -457,50 +521,21 @@
       <div><kbd>Esc</kbd>pause</div>
       <div><kbd>Gamepad</kbd>sticks fly and look · RT sting · LT burst · A act · Y switch · X rest · R3 lock · L3 turn to look · d-pad up swoop · d-pad down hover · View colony · Start pause · d-pad left atlas · d-pad right map size</div>
     </div>
-    <div class="start">
-      <label class="label" for="seed">World seed<input id="seed" value="1234" inputmode="numeric" autocomplete="off"></label>
-      <label class="label" for="skillsSet">Skills<select id="skillsSet"><option value="earned" selected>Earned with XP</option><option value="all">All unlocked (test)</option></select></label>
-      <label class="label" for="species">Play as<select id="species"><option value="wasp" selected>Wasps (yellowjackets)</option><option value="hornet">Hornets</option><option value="bee">Honeybees</option></select></label>
-      <label class="label" for="dayLen">Day length<select id="dayLen"><option value="2" selected>2 min (test)</option><option value="5">5 min (ultrafast)</option><option value="10">10 min (fast)</option><option value="30">30 min (medium)</option><option value="60">1 h (slow)</option><option value="120">2 h (ultraslow)</option><option value="1440">24 h (real time)</option></select></label>
-      <label class="label" for="density">People<select id="density"><option value="0.7">Fewer</option><option value="1" selected>Normal</option><option value="1.15">Busy</option></select></label>
-      <label class="label" for="seasonLen">Season<select id="seasonLen"><option value="20">20 days</option><option value="40" selected>40 days</option><option value="80">80 days</option><option value="200">200 days (real)</option></select></label>
-      <label class="label" for="bees">Bees<select id="bees"><option value="0.7">Calm</option><option value="1" selected>Normal</option><option value="1.5">Vicious</option></select></label>
-      <label class="label" for="reaction">Humans react<select id="reaction"><option value="0.7">Fast</option><option value="1" selected>Normal</option><option value="1.4">Slow</option></select></label>
-      <label class="label" for="escRate">Neighborhood<select id="escRate"><option value="0.6">Easygoing</option><option value="1" selected>Normal</option><option value="1.6">Touchy</option></select></label>
-      <label class="label" for="woods">Woods<select id="woods"><option value="0">None</option><option value="1" selected>Normal</option><option value="2">Wooded</option></select></label>
-      <label class="label" for="towns">Towns<select id="towns"><option value="0">None</option><option value="1" selected>One a region</option><option value="2">Two a region</option></select></label>
-      <label class="label" for="water">Water<select id="water"><option value="0.5">Dry</option><option value="1" selected>Normal</option><option value="2">Wet</option></select></label>
-      <label class="label" for="hives">Beehives<select id="hives"><option value="0">None</option><option value="0.5">Few</option><option value="1" selected>Normal</option><option value="2">Many</option></select></label>
-      <label class="label" for="terrain">Ground<select id="terrain"><option value="0" selected>Flat</option><option value="1">Rolling</option><option value="2">Hilly</option></select></label>
-      <label class="label" for="settled">Settled<select id="settled"><option value="0">Everywhere</option><option value="1000">A town, wild beyond 1 km</option><option value="400" selected>A village, wild beyond 400 m</option><option value="150">The wild, a park at home</option></select></label>
-      <label class="label" for="colHeld">Colonies a player<select id="colHeld"><option value="9" selected>As many as the line founds</option><option value="6">Up to 6</option><option value="3">Up to 3</option><option value="1">Just the one in hand</option></select></label>
-      <label class="label" for="fog">Map<select id="fog"><option value="1" selected>Fog of war: fly to map it</option><option value="0">Revealed: the whole map</option></select></label>
-      <label class="label" for="dev">Dev tools<select id="dev"><option value="0" selected>Off</option><option value="1">On: click the map, teleport there; J jumps far (200 km, 1,000 km, 10,000 km, home)</option></select></label>
+      <p class="label">Keyboard and mouse, or a controller (Xbox included): d-pad to move, A to press, left and right to change, B back, Start to pause.</p>
+    </div>
+    <div class="mpane" data-pane="codex" hidden>
+      <p class="label" id="codexNote">Field notes: true facts, each with its source. A note opens the first time your insect reaches what it is about, in any world.</p>
+      <div id="codexList" class="codex"></div>
+    </div>
+    <div class="mpane" data-pane="settings" hidden>
+      <div class="start">
       <label class="label" for="gfx">Graphics<select id="gfx"><option value="high" selected>High</option><option value="low">Low (no shadows)</option></select></label>
       <label class="label" for="look">Look<select id="look"><option value="classic" selected>Classic</option><option value="v2">World v2 (sky, forests, grass; experimental)</option></select></label>
-      <label class="label" for="perfOpt">Performance<select id="perfOpt"><option value="0" selected>Off</option><option value="1">On: FPS, CPU and GPU load (F3)</option></select></label>
-      <label class="label" for="grassLook">Grass (World v3)<select id="grassLook"><option value="matte" selected>Matte, light through it</option><option value="gloss">Glossy (the old look)</option></select></label>
+      <label class="label" for="perfOpt" hidden>Performance<select id="perfOpt"><option value="0" selected>Off</option><option value="1">On: FPS, CPU and GPU load (F3)</option></select></label>
+      <label class="label" for="grassLook" hidden>Grass (World v3)<select id="grassLook"><option value="matte" selected>Matte, light through it</option><option value="gloss">Glossy (the old look)</option></select></label>
       <label class="label" for="hudMode">HUD<select id="hudMode"><option value="full" selected>Full</option><option value="hardcore">Hardcore</option></select></label>
-      <label class="label" for="netMode">Second player<select id="netMode"><option value="off" selected>Off</option><option value="lan">Bot over LAN</option><option value="good">Bot over good internet</option><option value="bad">Bot over bad internet</option><option value="awful">Bot past the window</option><option value="over">Bot well past the window</option><option value="good+late">Bot joins after 1 min</option></select></label>
-      <fieldset class="systems"><legend class="label">Threats</legend>
-        <label><input type="checkbox" id="sysExt" checked>Exterminators</label>
-        <label><input type="checkbox" id="sysMuni" checked>Pest control</label>
-        <label><input type="checkbox" id="sysBirds" checked>Birds</label>
-        <label><input type="checkbox" id="sysRivals" checked>Rival colonies</label>
-      </fieldset>
-      <button id="bStart">Fly</button>
-      <button class="ghost" id="bContinue" hidden>Continue</button>
-    </div>
-    <p class="label" id="worldTag">Standard rules</p>
-    <p class="label" id="startNote">Personal world. Keyboard and mouse, or a controller (Xbox included): d-pad to move, A to press, left and right to change, B back, Start to pause.</p>
-  </div>
-</div>
-
-<div class="screen" id="pauseScreen" hidden>
-  <div class="card" style="text-align:center;justify-items:center">
-    <p class="sub">Paused</p>
-    <p class="label" id="pauseTag"></p>
-    <div class="opts">
+      </div>
+      <div class="opts" id="optsHome">
       <label for="optVol"><span class="label">Volume</span><output id="optVolOut" for="optVol">70%</output></label>
       <input type="range" id="optVol" min="0" max="100" step="1" value="70">
       <label for="optSens"><span class="label">Mouse sensitivity</span><output id="optSensOut" for="optSens">1.00×</output></label>
@@ -511,12 +546,51 @@
       <label class="check" for="optPerf"><input type="checkbox" id="optPerf"><span class="label">Performance overlay: FPS, CPU and GPU load (F3)</span></label>
       <label class="check" for="optGrass"><input type="checkbox" id="optGrass" checked><span class="label">Matte grass, light through it (World v3; off: the old glossy look)</span></label>
       <label class="check" for="optReflex"><input type="checkbox" id="optReflex"><span class="label">Reflex: slow time when a hand is coming (solo, once learned)</span></label>
+    </div>
+    </div>
+    <div class="mpane" data-pane="mode" hidden>
+      <p class="label">The world a new game makes. Rules a world was made with stay with it.</p>
+      <div class="start">
+      <label class="label" for="species">Play as<select id="species"><option value="wasp" selected>Wasps (yellowjackets)</option><option value="hornet">Hornets</option><option value="bee">Honeybees</option></select></label>
+      <label class="label" for="skillsSet">Skills<select id="skillsSet"><option value="earned" selected>Earned with XP</option><option value="all">All unlocked (test)</option></select></label>
+      <label class="label" for="dayLen">Day length<select id="dayLen"><option value="2" selected>2 min (test)</option><option value="5">5 min (ultrafast)</option><option value="10">10 min (fast)</option><option value="30">30 min (medium)</option><option value="60">1 h (slow)</option><option value="120">2 h (ultraslow)</option><option value="1440">24 h (real time)</option></select></label>
+      <label class="label" for="seasonLen">Season<select id="seasonLen"><option value="20">20 days</option><option value="40" selected>40 days</option><option value="80">80 days</option><option value="200">200 days (real)</option></select></label>
+      <label class="label" for="density">People<select id="density"><option value="0.7">Fewer</option><option value="1" selected>Normal</option><option value="1.15">Busy</option></select></label>
+      <label class="label" for="reaction">Humans react<select id="reaction"><option value="0.7">Fast</option><option value="1" selected>Normal</option><option value="1.4">Slow</option></select></label>
+      <label class="label" for="escRate">Neighborhood<select id="escRate"><option value="0.6">Easygoing</option><option value="1" selected>Normal</option><option value="1.6">Touchy</option></select></label>
+      <label class="label" for="bees">Bees<select id="bees"><option value="0.7">Calm</option><option value="1" selected>Normal</option><option value="1.5">Vicious</option></select></label>
+      <label class="label" for="woods">Woods<select id="woods"><option value="0">None</option><option value="1" selected>Normal</option><option value="2">Wooded</option></select></label>
+      <label class="label" for="towns">Towns<select id="towns"><option value="0">None</option><option value="1" selected>One a region</option><option value="2">Two a region</option></select></label>
+      <label class="label" for="water">Water<select id="water"><option value="0.5">Dry</option><option value="1" selected>Normal</option><option value="2">Wet</option></select></label>
+      <label class="label" for="hives">Beehives<select id="hives"><option value="0">None</option><option value="0.5">Few</option><option value="1" selected>Normal</option><option value="2">Many</option></select></label>
+      <label class="label" for="terrain">Ground<select id="terrain"><option value="0" selected>Flat</option><option value="1">Rolling</option><option value="2">Hilly</option></select></label>
+      <label class="label" for="settled">Settled<select id="settled"><option value="0">Everywhere</option><option value="1000">A town, wild beyond 1 km</option><option value="400" selected>A village, wild beyond 400 m</option><option value="150">The wild, a park at home</option></select></label>
+      <label class="label" for="colHeld">Colonies a player<select id="colHeld"><option value="9" selected>As many as the line founds</option><option value="6">Up to 6</option><option value="3">Up to 3</option><option value="1">Just the one in hand</option></select></label>
+      <label class="label" for="fog">Map<select id="fog"><option value="1" selected>Fog of war: fly to map it</option><option value="0">Revealed: the whole map</option></select></label>
+      <label class="label" for="netMode">Second player<select id="netMode"><option value="off" selected>Off</option><option value="lan">Bot over LAN</option><option value="good">Bot over good internet</option><option value="bad">Bot over bad internet</option><option value="awful">Bot past the window</option><option value="over">Bot well past the window</option><option value="good+late">Bot joins after 1 min</option></select></label>
+      <fieldset class="systems"><legend class="label">Threats</legend>
+        <label><input type="checkbox" id="sysExt" checked>Exterminators</label>
+        <label><input type="checkbox" id="sysMuni" checked>Pest control</label>
+        <label><input type="checkbox" id="sysBirds" checked>Birds</label>
+        <label><input type="checkbox" id="sysRivals" checked>Rival colonies</label>
+      </fieldset>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="screen" id="pauseScreen" hidden>
+  <div class="card" style="text-align:center;justify-items:center">
+    <p class="sub">Paused</p>
+    <p class="label" id="pauseTag"></p>
+    <div class="opts">
       <span class="label">Colony view speed</span>
       <div class="row" id="nSpeed" style="justify-content:center"></div>
       <p class="label" style="margin:0" id="nSpeedNote">Solo worlds only. Time runs at this speed while the colony view (N) is open; anything coming for your wasp drops it back to 1×. <kbd>T</kbd> in the colony view cycles it.</p>
     </div>
     <div class="row" style="justify-content:center">
       <button id="bResume">Return to game</button>
+      <button class="ghost" id="bPauseSettings">Settings</button>
       <button class="ghost" id="bSave">Save world</button>
       <button class="ghost" id="bQuit">Quit to title</button>
     </div>

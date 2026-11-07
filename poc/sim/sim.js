@@ -222,6 +222,11 @@ export class Sim {
   get physicalCount() { return this._own().length; }
   _own() { return this.wasps.filter((w) => w.colony === 'own'); }
   // Another colony's wasp that fights the line: a rival, not one of the line's sister colonies (T2-4)
+  // Dev (GDD 18.109, settings.ghost, solo): the driven insect is a ghost. Nothing notices or harms it (people, bees,
+  // birds, dragonflies, webs, water, traps, rain, rivals, cold, hunger, age), it acts on nothing (no sting, no catch, no
+  // feeding, no contact with people, the nest left alone), and it flies at full burst, the swoop always ready (a dash
+  // that slams onto nothing). For looking the world over without the world getting in the way. Not in the C# core
+  _ghost(w) { return !!this.settings.ghost && !this.net && !!w && w.id === this.drivenId; }
   isRival(w) { return w.colony !== 'own' && !(typeof w.colony === 'string' && w.colony.startsWith('line:')); }
   // the colony of the player's an insect belongs to (its own, or one of the line's), or null for a rival's
   _colOf(w) { if (w.colony === 'own') return this.colony; const sc = typeof w.colony === 'string' && w.colony.startsWith('line:') ? this.line.find((x) => 'line:' + x.id === w.colony) : null; return sc ? sc.colony : null; }
@@ -1039,8 +1044,13 @@ export class Sim {
   lifespanMinutes(w) { return (w.caste === 'male' ? T.males.maleLifeDays : 1 / T.colony.adultMortality) * this.bio * 1440 * (0.8 + 0.4 * h32(w.id, 7)); }
 
   _stepWasp(w, cmd, edge, driven) {
+    if (this._ghost(w)) { // (GDD 18.109)
+      w.energy = 1; w.bodyT = Math.max(w.bodyT ?? 30, 30); w.swoopReady = 0; w.carry = null;
+      cmd = { ...cmd, sting: 0, burst: 1 }; edge &= ~Act.Interact;
+      if (w.state !== 'fly' && w.state !== 'stunned' && w.state !== 'landed') { w.state = 'fly'; w.web = null; w.ball = null; w.drown = null; w.fight = null; w.perch = null; }
+    }
     if (w.spent) { this._die(w, 'left its sting in a person', null); return; } // a bee that stung a person (T2-11)
-    if (driven && w.caste !== 'queen' && w.colony === 'own' && this.minute - (w.born ?? this.minute) > this.lifespanMinutes(w) && (w.state === 'fly' || w.state === 'landed')) {
+    if (driven && !this._ghost(w) && w.caste !== 'queen' && w.colony === 'own' && this.minute - (w.born ?? this.minute) > this.lifespanMinutes(w) && (w.state === 'fly' || w.state === 'landed')) {
       this._die(w, 'old age', null);
       return;
     }
@@ -1051,10 +1061,10 @@ export class Sim {
         this._flight(w, cmd);
         if (w.state === 'stunned' && --w.stateTicks <= 0) { w.state = 'fly'; this.emit('recovered', { id: w.id }); }
         if (w.state !== 'fly') break;
-        if (driven || w.ai.mode === 'attack') this._contactQuery(w); else w.contact = null;
-        this._feed(w, driven);
+        if ((driven || w.ai.mode === 'attack') && !this._ghost(w)) this._contactQuery(w); else w.contact = null;
+        if (!this._ghost(w)) this._feed(w, driven);
         if (w.state !== 'fly') break;
-        this._nestTouch(w);
+        if (!this._ghost(w)) this._nestTouch(w);
         if (driven) {
           if (edge & Act.Interact) this._interact(w);
           if ((edge & Act.Swoop) && w.state === 'fly') this._startSwoop(w, cmd);
@@ -1181,10 +1191,10 @@ export class Sim {
       const X = T.extreme, air0 = this.temperature;
       if (air0 > X.heatFrom) drain *= 1 + X.heatDrain * (air0 - X.heatFrom); // flying in heat costs more (T2-2)
       drain *= spw(w).drain;
-      w.energy -= drain;
+      if (!this._ghost(w)) w.energy -= drain; // (a ghost never tires, GDD 18.109)
       if (w.energy < 0) { w.energy = 0; this.emit('exhausted', { id: w.id }); }
       // a downpour knocks a wasp in the open out of the air (T2-2)
-      if (rain && this.weatherToday.pour > 1 && !this._sheltered(w) && h32(w.id, this.tick, 71) < X.knockPerSec * DT) {
+      if (rain && this.weatherToday.pour > 1 && !this._sheltered(w) && h32(w.id, this.tick, 71) < X.knockPerSec * DT && !this._ghost(w)) {
         w.state = 'stunned'; w.stateTicks = X.knockTicks; w.vy = -1.2; w.land = null;
         this.emit('knockedDown', { id: w.id, driven: w.id === this.drivenId });
       }
@@ -1336,6 +1346,7 @@ export class Sim {
   // Within reach of something during the swoop: prey is caught, a person is perched on and startled, a surface the wasp
   // flies into is landed on. Anyone near a slam is startled too.
   _swoopHit(w, v, cmd) {
+    if (this._ghost(w)) return false; // a ghost's dash slams onto nothing
     const S = T.swoop, speed = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z) || 1;
     let hit = null;
     const prey = !w.carry ? this._preyNear(w, S.reach) : null;
@@ -1739,7 +1750,7 @@ export class Sim {
     const r2 = reach * reach, SP = spw(w);
     if (!SP.hunts) return null; // bees take no prey (T2-11)
     // a hornet takes another colony's wasp on the wing (T2-10)
-    if (SP.fight > 0) for (const x of this.wasps) if ((this.isRival(x) || this._foeOwn(w, x)) && spw(x).fight < SP.fight && (x.state === 'fly' || x.state === 'landed') && dist2(w, x) <= r2) return { kind: 'wasp', id: x.id, protein: T.moths.waspProtein };
+    if (SP.fight > 0) for (const x of this.wasps) if (!this._ghost(x) && (this.isRival(x) || this._foeOwn(w, x)) && spw(x).fight < SP.fight && (x.state === 'fly' || x.state === 'landed') && dist2(w, x) <= r2) return { kind: 'wasp', id: x.id, protein: T.moths.waspProtein };
     for (const rec of this.activeChunks) {
       const mk = chunkKey(rec.cx, rec.cz);
       for (const mo of this.mothsIn(rec)) if (dist2(w, mo) <= r2) return { kind: 'moth', key: mk, i: mo.i, protein: T.moths.protein };
@@ -2006,6 +2017,7 @@ export class Sim {
   // Calm water bears a wasp (it stands on it and drinks at it); rough water does not: touching the surface it goes
   // under, and must fight its way out (_drownStep) or drown. Returns true if it went under.
   _waterCheck(w) {
+    if (this._ghost(w)) return false;
     const W = T.water, v = this.wind;
     if (Math.sqrt(v.x * v.x + v.z * v.z) < W.roughCalm + W.sinkAt * (W.roughWild - W.roughCalm)) return false; // no water is that rough now
     if (w.state !== 'fly' && w.state !== 'stunned' && w.state !== 'landed' && w.state !== 'chewing') return false;
@@ -2027,6 +2039,7 @@ export class Sim {
   }
 
   _fallIn(w, cup, key, driven) {
+    if (this._ghost(w)) return;
     w.state = 'drowning'; w.vx = w.vy = w.vz = 0; w.land = null;
     w.x = cup.x; w.y = cup.level; w.z = cup.z;
     w.drown = { key, i: cup.i, until: this.tick + T.drown.ticks, progress: 0, prevBurst: 1 };
@@ -2062,6 +2075,7 @@ export class Sim {
   }
   // Inside a cup: touching the drink pulls a wasp in; a covered cup shuts it in to drown. Returns true if it did.
   _cupCheck(w) {
+    if (this._ghost(w)) return false;
     if (w.state !== 'fly' && w.state !== 'stunned' && w.state !== 'landed') return false;
     const k = this._inCup(w);
     if (!k) return false;
@@ -2290,12 +2304,14 @@ export class Sim {
   }
 
   _stun(w) {
+    if (this._ghost(w)) return;
     if (w.state === 'attached') this._detach(w, 'stunned');
     w.state = 'stunned'; w.stateTicks = T.stunTicks;
     this.emit('stunned', { id: w.id, driven: w.id === this.drivenId });
   }
 
   _die(w, cause, byHex, detail = null) {
+    if (this._ghost(w)) { w.state = 'fly'; return; } // nothing kills a ghost (GDD 18.109)
     const driven = w.id === this.drivenId;
     this.wasps = this.wasps.filter((x) => x !== w);
     w.state = 'dead';
@@ -3109,7 +3125,7 @@ export class Sim {
     let target = null, why = null, cupHit = null;
     const hrec = this.records.get(hm.chunk), meat = hrec && this.grillsIn(hrec).length ? this.meatIn(hrec) : null;
     for (const w of this.wasps) {
-      if (!(w.state === 'fly' || w.state === 'chewing' || w.state === 'landed')) continue;
+      if (!(w.state === 'fly' || w.state === 'chewing' || w.state === 'landed') || this._ghost(w)) continue;
       const dx = w.x - hm.x, dz = w.z - hm.z;
       if (dx * dx + dz * dz > 4) continue;
       const lp = toLocal(hm, w);
@@ -3321,7 +3337,7 @@ export class Sim {
       const key = chunkKey(rec.cx, rec.cz);
       this.hivesIn(rec).forEach((hv, h) => {
         for (const w of this.wasps) {
-          if (w.state !== 'fly' && w.state !== 'chewing' && w.state !== 'landed') continue;
+          if ((w.state !== 'fly' && w.state !== 'chewing' && w.state !== 'landed') || this._ghost(w)) continue;
           const dx = w.x - hv.ex, dy = w.y - hv.ey, dz = w.z - hv.ez;
           if (dx * dx + dy * dy + dz * dz < sq(T.bees.entranceAlarm)) { this._alarmHive(key, h, w, 2); break; }
         }
@@ -3370,7 +3386,7 @@ export class Sim {
     for (const [id, n] of attached) {
       const w = this.waspById(id);
       if (!w) continue;
-      if (w.state !== 'balled' && n >= B.ballMin && w.state !== 'under' && w.state !== 'trapped' && w.state !== 'robbing') { // inside the hive it is the bees inside that count (T1-9)
+      if (w.state !== 'balled' && !this._ghost(w) && n >= B.ballMin && w.state !== 'under' && w.state !== 'trapped' && w.state !== 'robbing') { // inside the hive it is the bees inside that count (T1-9)
         if (w.state === 'attached') this._detach(w, 'balled');
         w.state = 'balled'; w.ball = { temp: B.startTemp, progress: 0, prevBurst: 0 }; w.vx = w.vy = w.vz = 0;
         this.emit('balled', { id: w.id, driven: w.id === this.drivenId });
@@ -3388,6 +3404,7 @@ export class Sim {
 
   // The bees of the line ball another colony's wasp that touches one of them (T2-11)
   _ownBall(t) {
+    if (this._ghost(t)) return;
     if (t.state === 'attached') this._detach(t, 'balled');
     t.state = 'balled'; t.ball = { temp: T.bees.startTemp, progress: 0, prevBurst: 0, own: true, bees: 1, idle: 0 }; t.vx = t.vy = t.vz = 0;
     for (const g of this.wasps) if (g.role === 'guard' && !this.isRival(g) && spw(g).perennial && g.id !== this.drivenId) { g.ai.mode = 'hunt'; g.ai.huntId = t.id; g.ai.timer = this.tick + T.guard.huntTicks; }
@@ -3939,6 +3956,7 @@ export class Sim {
 
   // A wasp that flies through a web sticks where it crossed the web's plane
   _webCheck(w, p0) {
+    if (this._ghost(w)) return;
     if (w.state !== 'fly' && w.state !== 'stunned') return;
     for (const rec of this.activeChunks) {
       const webs = rec.content.webs;
@@ -4012,7 +4030,7 @@ export class Sim {
           const p = posFn(bd, this.tick);
           let target = null, best = B.sight * B.sight;
           for (const w of this.wasps) {
-            if (w.state !== 'fly' || !canSee(w)) continue;
+            if (w.state !== 'fly' || !canSee(w) || this._ghost(w)) continue;
             const q = dist2(w, p);
             if (q < best && !this._underCanopy(w)) { best = q; target = w; }
           }
@@ -4501,6 +4519,7 @@ export class Sim {
 
   // Wasps of different colonies that touch grapple; the weaker one dies (GDD 9.3)
   _startRemoteFight(a, otherId, peer) {
+    if (this._ghost(a)) return;
     a.state = 'fighting'; a.vx = a.vy = a.vz = 0;
     a.fight = { other: otherId, remote: true, starter: true, peer, start: this.tick, until: this.tick + T.rival.fightTicks, myVenom: a.venom, mash: 0 };
     this._publish({ type: 'fight', a: a.id, b: otherId, toPeer: peer, venom: a.venom, queen: a.caste === 'queen', fb: this._fightBonus(a) });
@@ -4539,7 +4558,7 @@ export class Sim {
       this._spoils(win);
       this.emit('fightOver', { winner: win.id, loser: lose.id });
     }
-    const free = this.wasps.filter((w) => w.state === 'fly' || w.state === 'landed' || w.state === 'chewing');
+    const free = this.wasps.filter((w) => (w.state === 'fly' || w.state === 'landed' || w.state === 'chewing') && !this._ghost(w));
     for (let i = 0; i < free.length; i++) for (let j = i + 1; j < free.length; j++) {
       const a = free[i], b = free[j];
       if (a.colony === b.colony || (!this.isRival(a) && !this.isRival(b) && !this._foeOwn(a, b)) || a.state === 'fighting' || b.state === 'fighting') continue; // the line's colonies are sisters, and the player's other species too once marked kin (T3-4)

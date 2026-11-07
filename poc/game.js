@@ -2259,7 +2259,7 @@ canvas.addEventListener('touchend', lookEnd); canvas.addEventListener('touchcanc
 // resumes. The keyboard's arrows and Enter work the same while a menu is open and the mouse is free.
 const padNav = { prev: [], at: null, repeatAt: 0, dir: 0, used: false };
 function activeMenu() {
-  for (const id of ['winterScreen', 'extinctScreen', 'pauseScreen', 'startScreen']) { const el = $(id); if (el && !el.hidden) return el; }
+  for (const id of ['winterScreen', 'extinctScreen', 'menuScreen', 'pauseScreen', 'startScreen']) { const el = $(id); if (el && !el.hidden) return el; }
   if (atlas.open) return $('atlas');
   if (ui.nest) return $('nest');
   return null;
@@ -2296,7 +2296,8 @@ function navPress() {
   el.click();
 }
 function navBack(root) {
-  if (root.id === 'pauseScreen') { setPaused(false); lock(); }
+  if (root.id === 'menuScreen') closeMenu();
+  else if (root.id === 'pauseScreen') { setPaused(false); lock(); }
   else if (root.id === 'atlas') closeAtlas();
   else if (root.id === 'nest') toggleNest();
 }
@@ -2629,6 +2630,42 @@ $('bQuit').addEventListener('click', () => {
   $('pauseScreen').hidden = true; $('startScreen').hidden = false;
   showContinue();
 });
+// The menus behind the title and the pause screen (game guide, codex, settings, game mode): one pane at a time over
+// the screen that opened it; Back, B or Esc returns there
+const MENU_TITLE = { guide: 'Game guide', codex: 'Codex', settings: 'Settings', mode: 'Game mode' };
+let menuFrom = null;
+function openMenu(pane, from) {
+  menuFrom = from; $(from).hidden = true;
+  for (const el of document.querySelectorAll('#menuScreen .mpane')) el.hidden = el.dataset.pane !== pane;
+  $('menuTitle').textContent = MENU_TITLE[pane] || 'Menu';
+  if (pane === 'codex') drawCodex();
+  if (pane === 'settings') showOpts();
+  $('menuScreen').hidden = false; $('menuScreen').scrollTop = 0;
+}
+function closeMenu() {
+  if ($('menuScreen').hidden) return;
+  $('menuScreen').hidden = true;
+  if (menuFrom) $(menuFrom).hidden = false;
+  if (menuFrom === 'startScreen') showTag();
+  menuFrom = null;
+}
+for (const b of document.querySelectorAll('#startScreen [data-menu]')) b.addEventListener('click', () => openMenu(b.dataset.menu, 'startScreen'));
+$('bPauseSettings').addEventListener('click', () => openMenu('settings', 'pauseScreen'));
+$('bMenuBack').addEventListener('click', closeMenu);
+addEventListener('keydown', (e) => { if (e.code === 'Escape' && !$('menuScreen').hidden) { e.preventDefault(); closeMenu(); } }, true);
+// The codex (GDD 10): every field note found, in any world, kept in this browser; the rest by title only
+const CODEX_KEY = 'sting.codex';
+function codexFound() { try { return new Set(JSON.parse(localStorage.getItem(CODEX_KEY) || '[]')); } catch { return new Set(); } }
+function codexAdd(kinds) {
+  const f = codexFound(), n = f.size; for (const k of kinds) if (FIELD_NOTES[k]) f.add(k);
+  if (f.size !== n) try { localStorage.setItem(CODEX_KEY, JSON.stringify([...f])); } catch { /* optional */ }
+}
+function drawCodex() {
+  if (sim && sim.guide) codexAdd(Object.keys(sim.guide));
+  const f = codexFound();
+  $('codexList').innerHTML = PLACE_KINDS.map((k) => { const n = FIELD_NOTES[k]; return f.has(k) ? `<div class="note"><b>${n.title}</b><span>${n.note}</span><span class="src">${n.source}</span></div>` : `<div class="note locked"><b>${n.title}</b><span>Not found yet.</span></div>`; }).join('');
+  $('codexNote').textContent = `${f.size} of ${PLACE_KINDS.length} field notes found. Each is a true fact with its source, opened the first time your insect reaches what it is about, in any world.`;
+}
 // Esc opens the menu even when the mouse was never captured (the browser handles Esc itself while it is)
 addEventListener('keydown', (e) => {
   if (e.code !== 'Escape' || !running || document.pointerLockElement === canvas || e.defaultPrevented) return;
@@ -2726,16 +2763,26 @@ const TREE_INFO = {
   found: ['Founding', `${T.tree.found} more colony of the line can be founded`],
 };
 const BRANCH_NAME = { nest: 'Nest', flight: 'Flight', line: 'Line' };
+// a glyph a tile: no images, no fonts beyond the page's
+const SK_ICON = {
+  cells: '⬡', brood: '◉', insul: '❄', guard: '⛨', cue: '◷', recover: '↻', lock: '◎', reach: '➚', gynes: '♛', winter: '❅', found: '⌂',
+  swoop: '➹', assist: '⇢', reflex: '⧗', focus: '◔', release: '↺', landR: '⤓', feedR: '◌', grabR: '✧', speed: '»', forage: '✿', lay: '◍', build: '⬢',
+  sugar: '✿', protein: '✧', pulp: '▤', water: '≈',
+};
+const pips = (r, n) => '●'.repeat(r) + '○'.repeat(Math.max(0, n - r));
+// a tile: glyph, short name, pips; the text goes to the tip line when pointed at
+const tile = (attr, icon, name, pp, tip, cls) => `<button class="ghost tile ${cls}" ${attr} data-tip="${tip.replace(/"/g, '&quot;')}" title="${tip.replace(/"/g, '&quot;')}"><span class="ic">${icon}</span><span class="nm">${name}</span><span class="pp">${pp}</span></button>`;
 function updateTree() {
   const P = sim.prog, tr = P.tree || TREE_NODES.map(() => 0), pts = treePoints(P), xp = P.unitTotal + P.hiveTotal;
   const sig = JSON.stringify([tr, pts]);
   if (sig === treeSig) return;
   treeSig = sig;
   const next = T.tree.xpPerPoint - (xp % T.tree.xpPerPoint);
-  $('nTree').innerHTML = `<h4>Growth tree · ${pts} point${pts === 1 ? '' : 's'} to spend · next in ${Math.ceil(next)} XP</h4>` + Object.entries(TREE).map(([b, ids]) => `<h4>${BRANCH_NAME[b]}</h4>` + ids.map((id) => {
-    const i = TREE_NODES.indexOf(id), r = tr[i] | 0, open = treeOpen(i, tr), can = open && pts >= 1, [name, desc] = TREE_INFO[id];
-    return `<button class="ghost${r ? ' have' : ''}" data-g="${i}"${can ? '' : ' disabled'}><b>${name} ${r}/${T.tree.ranks}</b><span>${desc} a rank${!open && r < T.tree.ranks ? ' · needs the one above' : ''}</span></button>`;
-  }).join('')).join('');
+  $('nTree').innerHTML = `<div class="sk-head">Growth tree · <b style="color:var(--yellow)">${pts}</b> point${pts === 1 ? '' : 's'} · next in ${Math.ceil(next)} XP</div><div class="sk-grid">` + Object.entries(TREE).map(([b, ids]) => `<div class="sk-col"><div class="sk-head">${BRANCH_NAME[b]}</div>` + ids.map((id) => {
+    const i = TREE_NODES.indexOf(id), r = tr[i] | 0, open = treeOpen(i, tr), can = open && pts >= 1, [name, desc] = TREE_INFO[id], max = r >= T.tree.ranks;
+    const tip = `${name} (${r}/${T.tree.ranks}): ${desc} a rank.${max ? ' Full.' : !open ? ' Opens once the tile above has a rank.' : can ? ' Click to take a rank.' : ' Needs a point.'}`;
+    return tile(`data-g="${i}"`, SK_ICON[id], name, pips(r, T.tree.ranks), tip, `${r ? 'have' : ''} ${max ? 'max' : ''} ${can ? 'can' : ''} ${!open && !max ? 'off' : ''}`);
+  }).join('') + '</div>').join('') + '</div>';
 }
 const SPECIES_NAME = { wasp: 'wasps', hornet: 'hornets', bee: 'honeybees' };
 // Colonies of the line (GDD 6.8, multi-colony play): one in hand, the rest on the AI at the player's gauge
@@ -2765,26 +2812,32 @@ function updateSkills() {
   const P = sim.prog, X = T.xp, all = sim.settings.skills === 'all', xp = P.unitTotal + P.hiveTotal, w = sim._driven();
   const p = w && w.colony === 'own' ? (w.pers || { xp: 0, by: ROLES.map(() => 0), ranks: SKILLS.map(() => 0), mastered: false }) : null;
   const earned = p ? p.by.reduce((a, b) => a + b, 0) : 0, lead = p && earned > 0 ? ROLES[p.by.indexOf(Math.max(...p.by))] : null;
-  $('nXp').innerHTML = [
+  const chip = (k, v) => `<span class="chip">${k} <b>${v}</b></span>`;
+  $('nXp').innerHTML = [chip('Line', Math.floor(P.unit)), chip('Hive', Math.floor(P.hive)), ...(p ? [chip('This wasp', Math.floor(p.xp))] : []), chip('Stabs', P.stabs)].join('');
+  $('nXp').title = [
     ...(p ? [['This wasp', `${Math.floor(p.xp)} XP to spend · ${p.mastered ? `<b>master</b> ${lead ? `${ROLE_INFO[lead][0].toLowerCase()}: when it dies, they gain a level` : ''}` : `${Math.floor(earned)} of ${T.roles.mastery} to master its job${lead ? ` (mostly ${ROLE_INFO[lead][0].toLowerCase()})` : ''}`}`]] : []),
     ['Line XP', `${Math.floor(P.unit)} for abilities · ${Math.floor(P.hive)} for the hive · ${Math.floor(xp)} earned`],
     ['Stabs', `${P.stabs} people nobody had stung`],
     ...(sim.species === 'wasp' && !String(sim.settings.progression || 'open').startsWith('fixed:') ? [['Year\'s turn', xp >= X.hornetXp && P.stabs >= X.hornetStabs ? 'strong enough to wake as hornets' : xp < X.beeXp && P.stabs < X.beeStabs ? `bees will be offered unless the line reaches ${X.beeXp} XP or ${X.beeStabs} stabs` : `hornets at ${X.hornetXp} XP and ${X.hornetStabs} stabs (${Math.floor(xp)}, ${P.stabs})`]] : []),
-  ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+  ].map(([k, v]) => `${k}: ${String(v).replace(/<[^>]+>/g, '')}`).join('\n');
   const sig = JSON.stringify([P.ranks, P.roles, Math.floor(P.unit), Math.floor(P.hive), all, w && w.id, p && p.ranks, p && Math.floor(p.xp)]);
   if (sig === skillSig) return;
   skillSig = sig;
   const btn = (id) => {
     const i = SKILLS.indexOf(id), job = SKILL_RANKED.includes(id), ranks = job ? (p ? p.ranks : SKILLS.map(() => 0)) : P.ranks, r = ranks[i], unlock = SKILL_UNLOCKS.includes(id), have = unlock ? r > 0 || all : r > 0;
     const c = unlock && all ? null : job && !p ? null : skillCost(i, ranks), can = !!c && (c.pool === 'wasp' ? p.xp : P[c.pool]) >= c.cost, [name, desc] = SKILL_INFO[id];
-    const tag = unlock ? (have ? ' ✓' : '') : ` ${r}/${T.skills.ranks}`, cost = c ? ` · ${c.cost} ${c.pool === 'wasp' ? 'of its' : c.pool === 'unit' ? 'line' : 'hive'} XP` : unlock && !have ? ' · needs Reflex' : '';
-    return `<button class="ghost${have ? ' have' : ''}" data-i="${i}"${can ? '' : ' disabled'}><b>${name}${tag}</b><span>${desc}${cost}</span></button>`;
+    const max = unlock ? have : r >= T.skills.ranks, cost = c ? `${c.cost} ${c.pool === 'wasp' ? 'of this wasp\'s' : c.pool === 'unit' ? 'line' : 'hive'} XP` : '';
+    const tip = `${name}: ${desc}.${max ? (unlock ? ' Learned.' : ' Full.') : c ? ` Next ${unlock ? 'learn' : 'rank'}: ${cost}.${can ? ' Click to learn.' : ''}` : unlock ? ' Needs Reflex first.' : job ? ' Fly a worker of your own to learn it.' : ''}`;
+    return tile(`data-i="${i}"`, SK_ICON[id] || '•', name, unlock ? (have ? '✓' : '') : pips(r, T.skills.ranks), tip, `${have ? 'have' : ''} ${max ? 'max' : ''} ${can ? 'can' : ''} ${!can && !max ? 'off' : ''}`);
   };
-  const role = (r, k) => `<button class="ghost${P.roles[k] ? ' have' : ''}" disabled><b>${ROLE_INFO[r][0]} ${P.roles[k]}/${T.roles.max}</b><span>${ROLE_INFO[r][1]}</span></button>`;
-  $('nSkills').innerHTML = `<h4>This wasp: its job</h4>${SKILL_RANKED.map(btn).join('')}<h4>Line abilities</h4>${SKILL_UNLOCKS.map(btn).join('')}<h4>Roles: passed on by masters</h4>${ROLES.map(role).join('')}<h4>Hive</h4>${SKILL_HIVE.map(btn).join('')}`;
+  const role = (r, k) => tile('data-role="1"', SK_ICON[r] || '•', ROLE_INFO[r][0].replace(/s$/, ''), pips(P.roles[k], T.roles.max), `${ROLE_INFO[r][0]} (level ${P.roles[k]} of ${T.roles.max}): ${ROLE_INFO[r][1]}. A wasp that masters this job raises every worker of it a level when it dies.`, `info ${P.roles[k] ? 'have' : ''}`);
+  const row = (h, items) => `<div class="sk-head">${h}</div><div class="sk-row">${items.join('')}</div>`;
+  $('nSkills').innerHTML = row('Abilities · line XP', SKILL_UNLOCKS.map(btn)) + row('This wasp · its own XP', SKILL_RANKED.map(btn)) + row('Hive · hive XP', SKILL_HIVE.map(btn)) + row('Roles · passed on by masters', ROLES.map(role));
 }
-$('nSkills').addEventListener('click', (e) => { const b = e.target.closest('button[data-i]'); if (b && !b.disabled) { learnOnce = +b.dataset.i; input.learn = 1; } });
-$('nTree').addEventListener('click', (e) => { const b = e.target.closest('button[data-g]'); if (b && !b.disabled) { growOnce = +b.dataset.g; input.grow = 1; } });
+$('nSkills').addEventListener('click', (e) => { const b = e.target.closest('button[data-i]'); if (b && b.classList.contains('can')) { learnOnce = +b.dataset.i; input.learn = 1; } });
+$('nTree').addEventListener('click', (e) => { const b = e.target.closest('button[data-g]'); if (b && b.classList.contains('can')) { growOnce = +b.dataset.g; input.grow = 1; } });
+// the one line of text under the tiles: whatever tile is pointed at or focused (mouse, keys, a pad)
+for (const ev of ['mouseover', 'focusin']) for (const id of ['nSkills', 'nTree']) $(id).addEventListener(ev, (e) => { const t = e.target.closest('.tile'); if (t) $('skTip').textContent = t.dataset.tip; });
 
 function updateNest() {
   updateWorkers();
@@ -3497,7 +3550,7 @@ function handleEvents(events) {
       case 'caught': if (e.id === sim.drivenId) { toast(e.kind === 'wasp' ? 'Took a wasp · carry it home for the brood' : `Caught a ${e.kind}`, 'var(--yellow)', 1.4); blip(900, 600, 0.08, 0.05, 'square'); } break;
       case 'pollen': if (e.driven) { toast('Pollen packed · bring it home', 'var(--yellow)', 1.4); blip(700, 900, 0.08, 0.05, 'triangle'); } break; // T2-11
       case 'swarm': toast(`The old queen swarmed with ${fmt(e.adults)} workers. They hang in a clump on a branch ${Math.round(Math.hypot(e.x - sim.nest.x, e.z - sim.nest.z))} m off while their scouts look for a home. A daughter queen keeps the hive; it lays nothing until she has mated.`, 'var(--yellow)', 5); logEvent('swarm'); break;
-      case 'fieldNote': { const N = FIELD_NOTES[e.kind]; if (N) { toast(`Field note found: ${N.title}. Read it in the atlas guide (M).`, 'var(--yellow)', 3.5); logEvent(`Field note: ${N.title}`); if (atlas.open) drawGuide(); } break; }
+      case 'fieldNote': { const N = FIELD_NOTES[e.kind]; codexAdd([e.kind]); if (N) { toast(`Field note found: ${N.title}. Read it in the atlas guide (M).`, 'var(--yellow)', 3.5); logEvent(`Field note: ${N.title}`); if (atlas.open) drawGuide(); } break; }
       case 'swarmSettled': toast(`The swarm moved into a tree ${Math.round(Math.hypot(e.x - sim.nest.x, e.z - sim.nest.z))} m away: a new colony of the line.`, 'var(--yellow)', 4); logEvent('swarm settled'); syncNests(); lineSig = ''; break;
       case 'swarmGone': toast('The swarm flew off out of the area.', 'var(--muted)', 3); break;
       case 'queenMated': if (e.own) toast('The young queen is back from her mating flight. The hive lays again.', 'var(--yellow)', 3.5); logEvent('queen mated'); break;
@@ -3754,7 +3807,7 @@ function ovZoom(f) {
 }
 addEventListener('wheel', (e) => {
   if (!sim || !running || paused || atlas.open || ui.nest || (input.pilot && input.pilotMode === 'hover')) return;
-  if (e.target && e.target.closest && e.target.closest('#map, .panel, #startScreen')) return;
+  if (e.target && e.target.closest && e.target.closest('#map, .panel, #startScreen, #menuScreen')) return;
   if (!ov.on) { if (e.deltaY > 0) ovStart(); else return; }
   ovZoom(e.deltaY > 0 ? 1.22 : 1 / 1.22);
 }, { passive: true });
@@ -4059,7 +4112,7 @@ function frame(now) {
     if (n === cap) acc = 0;
   }
   // the start menu's backdrop (GDD 12.1): no HUD, and the camera drifts slowly round the wasp
-  const atMenu = !$('startScreen').hidden || !$('boot').hidden;
+  const atMenu = !$('startScreen').hidden || !$('boot').hidden || menuFrom === 'startScreen';
   document.body.classList.toggle('atmenu', atMenu);
   if (atMenu && sim && !running) input.yaw += dt * 0.06;
   if (sim) {
@@ -4217,13 +4270,14 @@ function readSettings() {
     reaction: +$('reaction').value, escalation: +$('escRate').value,
     woods: +$('woods').value, towns: +$('towns').value, water: +$('water').value, hives: +$('hives').value, terrain: +$('terrain').value, settled: +$('settled').value, // T2-6, GDD 21.6
     colonies: +$('colHeld').value, // T3-5
+    ghost: $('devGhost').checked && $('netMode').value === 'off', // dev: the driven insect a ghost (solo only; GDD 18.109)
     species: $('species').value, progression: 'open', skills: $('skillsSet').value, // GDD 6.8: test builds open all three species
     exterminator: $('sysExt').checked, pestControl: $('sysMuni').checked, birds: $('sysBirds').checked, rivals: $('sysRivals').checked,
   };
 }
 const tagText = (st) => worldTag(st) || 'Standard rules';
 function showTag() { $('worldTag').textContent = 'World: ' + tagText(readSettings()); }
-for (const id of ['dayLen', 'density', 'seasonLen', 'bees', 'reaction', 'escRate', 'woods', 'towns', 'water', 'hives', 'terrain', 'colHeld', 'sysExt', 'sysMuni', 'sysBirds', 'sysRivals']) $(id).addEventListener('change', showTag);
+for (const id of ['dayLen', 'density', 'seasonLen', 'bees', 'reaction', 'escRate', 'woods', 'towns', 'water', 'hives', 'terrain', 'colHeld', 'devGhost', 'netMode', 'sysExt', 'sysMuni', 'sysBirds', 'sysRivals']) $(id).addEventListener('change', showTag);
 showTag();
 
 function applyDisplaySettings() {
@@ -4261,7 +4315,7 @@ function showContinue() {
   let meta = null;
   try { meta = JSON.parse(localStorage.getItem('sting.saveMeta') || 'null'); } catch { /* optional */ }
   $('bContinue').hidden = !meta;
-  if (meta) $('bContinue').textContent = `Continue · day ${meta.day}, season ${meta.season}${meta.tag ? ' · ' + meta.tag : ''}`;
+  if (meta) $('bContinue').textContent = `Resume · day ${meta.day}, season ${meta.season}`;
 }
 $('bSave').addEventListener('click', () => saveWorld(true));
 $('bContinue').addEventListener('click', () => {
@@ -4271,6 +4325,7 @@ $('bContinue').addEventListener('click', () => {
   try {
     initAudio(); applyDisplaySettings();
     newWorld(null, { sim: restore(json), json });
+    devOpts.dev = $('devTp').checked;
     $('startScreen').hidden = true; running = true; lock();
     toast(`Day ${sim.day + 1} · season ${sim.season.n}`, 'var(--yellow)', 2);
     if (sim.winter) showWinter('Winter. The young queens of your line are asleep. Choose which one you wake as.');
@@ -4300,7 +4355,7 @@ $('bStart').addEventListener('click', async () => {
   initAudio();
   if (warm.p) await warm.p; // still warming the menu's world
   const st = readSettings();
-  devOpts.reveal = $('fog').value === '0'; devOpts.dev = $('dev').value === '1'; revealedT.clear(); mapTiles.clear(); // the map's fog and the dev tools (not rules)
+  devOpts.reveal = $('fog').value === '0'; devOpts.dev = $('devTp').checked; revealedT.clear(); mapTiles.clear(); // the map's fog and the dev tools (not rules; the ghost is: settings.ghost)
   if (!sim || sim.tick > 0 || warm.key !== warmKey(st)) { warm.rebuilt++; BOOT.begin("Building the world"); await warmWorld(st); BOOT.done(); }
   else applyDisplaySettings();
   $('startScreen').hidden = true; running = true; lock();

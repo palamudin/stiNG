@@ -2473,6 +2473,22 @@ function seated(sim, pred) {
   ok(porchLevel === houses && doors === houses, `every front door has a level stoop and a step before it, the door at the stoop's height (${porchLevel} of ${houses})`);
 }
 
+// 75. Dev ghost (GDD 18.109; JS only, not in the C# core): with settings.ghost the driven insect is not harmed or
+// noticed (a death, a stun, water, a web, the bees at a hive, the hunters), acts on nothing (no sting, no feeding), flies
+// at full burst with no drain; a ghost world is a rule apart; without the setting nothing changes
+{
+  const g = new Sim({ seed: 1234, birds: false, ghost: true }, { noAI: true }); run(g, 1);
+  const w = g.wasp; w.energy = 0.2;
+  g._die(w, 'test', null); const alive = g.wasps.includes(w) && w.state === 'fly';
+  g._stun(w); const unstunned = w.state === 'fly';
+  const hv = g.places().find((p) => p.kind === 'hive');
+  place(w, { x: hv.x + 0.1, y: hv.y, z: hv.z }); w.state = 'fly';
+  const ev = run(g, 120, () => idle({ sting: 1, act: 1, mz: 10 }));
+  const n = new Sim({ seed: 1234, birds: false }, { noAI: true }); run(n, 1);
+  ok(alive && unstunned && !ev.some((e) => ['beeAlarm', 'balled', 'stung', 'notice', 'trapped', 'fellIn', 'webbed', 'waspDied'].includes(e.type)) && w.energy === 1 && rulesHash({ ghost: true }) !== rulesHash({}) && worldTag({ ghost: true }).includes('dev ghost') && n._ghost(n.wasp) === false,
+    `the ghost does not die or stun, flies by a hive without an alarm, keeps full energy; a ghost world has its own rules hash ("${worldTag({ ghost: true })}"); a normal world has no ghost`);
+}
+
 // 74. How many colonies a player holds (T3-5, GDD 6.8, 11.12): a world setting caps the colonies held, the one in hand
 // counted (the line founds no more past it), and it is a rule (in the rules hash and the world's tag); a colony of the
 // line far from the player's insect steps at the abstract tier, once every far.every colony ticks with the time owed, and

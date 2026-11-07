@@ -30,7 +30,7 @@
 7. The wasp
 8. Humans
 9. Bees and ecology
-10. Player control and UI
+10. Player control and UI, menus (10.6), the tutorial (10.7), the dev ghost (10.8)
 11. Multiplayer
 12. Presentation contract (Unity), with boot and warm-up (12.1)
 13. Data and tuning
@@ -816,6 +816,95 @@ Flight (pitch, yaw, climb, throttle), land and grip, sting (tap for jab, hold fo
 ### 10.5 Pause **[T0]**
 
 Solo only. Multiplayer never pauses.
+
+### 10.6 Menus **[T0]** (agreed 2026-11-07)
+
+The front of the game is a game menu, not a manual. Whoever wants to read clicks into it; everyone else flies.
+
+- **Title:** the name and the counter (stung 0 / 8,200,000,000), one field (world seed, or a lobby code once there are lobbies), **Fly** (a new world) and **Resume** (the saved one), and a few checkboxes:
+  - Dev: teleport (click the map, J jumps far);
+  - Dev: ghost (10.8);
+  - Tutorial, once it is built (10.7).
+- **Four buttons into small menus,** one pane at a time with Back (B on a pad, Esc on a keyboard). The look is Minecraft-like: square buttons, plain labels, nothing to scroll past.
+  - **Game guide:** what the game is, in a paragraph, and the controls.
+  - **Codex:** the field notes found, in any world, kept in the browser; the rest show by title, locked. Every note is a true fact with its source (Appendix C, T3-2).
+  - **Settings:** graphics, look, HUD, sound, mouse, the assists. The pause menu opens the same pane.
+  - **Game mode:** the world a new game makes: species, skills, day and season length, people, the land (woods, towns, water, hives, ground, settled), colonies a player, map fog, threats, the bot for a second player. These are the rules a world is made with (4.8).
+- **Pause:** Return, Settings, Save, Quit to title, and the colony view's speed.
+
+### 10.7 The tutorial: the first hour **[T0] [P]** (agreed 2026-11-07)
+
+**Why.** STING asks a new player to fly a 1.5 cm insect in 3D, read people, and run a colony. Without a guided start most players are lost before their first sting, and the first sting is the hook. The tutorial's one job is to get the player to that moment, and to the moment they understand that the colony is them and any one wasp is not. It must feel like playing, never like reading.
+
+**Principles**
+- **Play first.** The game starts flying. The first prompt shows within 5 seconds of Fly, and the first sting comes within 5 minutes.
+- **One verb at a time,** each taught at the moment it is needed, then never again.
+- **Prompts are short.** At most six words and the key, shown as a key chip (pad glyphs on a pad). A prompt disappears when the thing is done, not on a timer.
+- **The world points, not arrows.** The wasp's own senses (6, 7) carry the guidance: a scent ribbon to the nearest sugar, prey, or home. It is the same scent cue the HUD already shows, made visible for the beat. No floating waypoints.
+- **Never block play.** Nothing pauses and no door is locked. A player who goes off and does something else is left alone; the next beat waits for its trigger.
+- **The sim is untouched.** The tutorial is presentation only: it reads the sim (events, the driven insect, the people near it) and draws prompts. The world, its people and their reactions are the ones the seed made, so a tutorial world is an ordinary world and determinism holds. Where it needs a "right" target, it picks one from what exists (the nearest flower; the slowest person at the nearest table, by their reaction trait).
+- **Skippable and remembered.** A checkbox on the title, on for a first world and off after it is finished (kept in the browser). It is always off in shared worlds and with the hardcore HUD. Any beat is skipped once its verb has been done on the player's own.
+- **Death teaches.** The first death screen names the one thing that killed the wasp ("the hand came 0.4 s after the sting: be gone before it lands") and Q takes the next worker. This teaches the game's core truth: a wasp is spent, the colony is you.
+
+**The beats.** Each beat has a trigger, a prompt, a success condition and a reward. The times are targets for a new player.
+
+| # | When | Beat | Prompt | Done when | Reward |
+|---|---|---|---|---|---|
+| 0 | Fly (0:00) | A worker leaves the nest at mid-morning; the camera is behind it | Mouse to look · W to fly | flown 5 m | the HUD fades in, piece by piece |
+| 1 | 0:10 | **Sugar.** A scent ribbon to the nearest flower or open can | Follow the scent · E to drink | crop full | the crop gauge fills; "Bring it home" |
+| 2 | crop full | **Home.** The ribbon turns to the nest | Fly home · in at the entrance | deposited | hive XP chip pops; the colony grows |
+| 3 | 1:30 | **The hunt.** A fly at the nearest table | V to lock on · E to catch | prey carried home | the brood bar moves |
+| 4 | 3:00 | **The first sting.** A person sitting at a table, the slowest to react in reach | Hold LMB on skin · then get out | a sting lands | the counter: **stung 1 / 8,200,000,000**, with a beat of silence and a sound |
+| 5 | first slap or swat that misses | **The window.** Their flinch, highlighted once | Watch the hand · go before it lands | out of reach in time, twice | Reflex shown as the line's first ability to buy |
+| 6 | first death | **Death.** The death screen names the cause in one line | Q: the next worker | flying again | none: a wasp is spent |
+| 7 | first XP point | **The colony.** The colony view (N), and one lit tile in the tree | N: the colony · spend a point | a point spent | the tile's effect, said in one line |
+| 8 | neighborhood alert 1 | **Escalation.** The alert bar explained once | Too many stings here · they fight back | — | — |
+| 9 | dusk, day 1 | **Night.** Rest in the nest | R to rest | rested | the day's tally, and the season ahead in one line: autumn kills the colony; young queens carry the line |
+
+**Just in time.** Each threat gets one line, the first time it matters:
+- a web: "Mash Shift to break free";
+- a bee alarm: "Bees cook intruders: get out";
+- a bird's dive: "Land, or duck under trees";
+- a dragonfly: "Stay high or land";
+- a drink: "Hand over the cup: get out";
+- cold: "Too cold to fly: get in the sun or home";
+- the first spray, trap and exterminator.
+
+These run in every world for a player who has not seen them, tutorial or not, through the field notes' trigger (T3-2).
+
+**The season, taught by living it.** Nothing explains the year up front. Each phase is said once, as it arrives:
+- the brood turning to young queens;
+- the sugar crisis;
+- the collapse;
+- the winter choice;
+- spring.
+
+Each line points at the one thing to do now.
+
+**What drags the player in, beyond the tutorial**
+- **The counter.** 8.2 billion people, none stung by the player yet. Every first sting is a world event in a shared world (8.11).
+- **The first ten seconds:** sound and the wasp's wings before any text.
+- **The loading screen's field notes** (12.1): true, strange facts.
+- **The codex filling up,** across worlds.
+- **A death that is the player's fault** and teaches one thing.
+- **The colony's needs:** a bar that is short is a reason to fly.
+- **The year's turn:** hornets earned, not given (6.8).
+
+**Measured.** In playtests, including the friends and kids who try the PoC:
+- the time to the first sting;
+- the share of new players reaching each beat;
+- where they quit.
+
+The tutorial is done when a new player stings within 5 minutes and most reach beat 7 in their first session.
+
+### 10.8 Dev ghost **[dev]** (agreed 2026-11-07)
+
+A dev mode for looking the world over without the world getting in the way: inspecting a beach, a town or a forest at length. With the title's Dev: ghost checkbox on (solo worlds only), the driven insect is a ghost:
+- **Nothing notices or harms it:** people, bees, birds, dragonflies, spiders' webs, rivals, water, traps, cups, rain, cold, hunger and age.
+- **It acts on nothing:** no sting, catch, feeding, carrying, contact with people, or entering the nest.
+- **It flies at full burst** with no drain, the dash always ready; the dash slams onto nothing.
+
+A ghost world is a rule apart: in the rules hash and the tag ("dev ghost"), so it never matches a normal world. It is built in the PoC's sim only, not in the C# core: a dev tool, not game logic.
 
 ---
 
@@ -2483,6 +2572,35 @@ On a jump the CPU path no longer blurs a level out to its parent: the window it 
 
 The game now asks for a square at least 16 m across (`causticsMin`), pushed 30% of its size ahead along the view (`causticsAhead`), on a 512 texture with a 384 grid. That is about the old detail (3 cm texels, 7 cm cells, against 2.3 and 5 cm) over 2.7 times the width. Water seen at a slant still clouds with distance: that is the water, not the caustics.
 
+### 18.109 The front menu, the skill tiles, and the dev ghost
+
+**The front menu** (10.6). The title screen used to hold a page of explanation, every control, and every world option. It now holds:
+- the name and the counter;
+- one field, for the world seed or a lobby;
+- **Fly** and **Resume**;
+- two dev checkboxes;
+- four buttons into small menus: Game guide, Codex, Settings and Game mode.
+
+The menus are one screen (`#menuScreen`), one pane at a time, with Back, B or Esc returning to whatever opened it.
+- The pause menu's options moved into Settings, and the pause menu opens that same pane.
+- The codex is kept in the browser across worlds (`sting.codex`): a note found in any world stays found.
+- The controller and keyboard menu navigation reads the new screen as it does the others.
+
+**The skill tiles** (6.8). The colony view's skills were a column of buttons, each with a sentence. They are now tiles:
+- **Tiles:** a glyph, a short name and rank pips (●●○).
+- **Tree:** in three columns (Nest, Flight, Line), each a chain from top to bottom.
+- **Other skills:** rows for the line's abilities, this wasp's job skills, the hive and the roles.
+- **Points:** chips at the top (line, hive, this wasp, stabs).
+- **States:** a lit outline marks a tile that can take a point; a dim one is closed.
+- **Text:** one line under the tiles says what the tile pointed at (or focused, on a pad) does, what the next rank costs and why it is closed. Every tile still carries its text as a tooltip.
+
+**The dev ghost** (10.8; sim.js `_ghost`, `settings.ghost`).
+- **Unharmed:** the driven insect's death, stun, the storm's knockdown, water, cups, traps and webs pass over it. The bees, people's swats, birds, dragonflies, the hornets' prey choice and the rivals' wrestles leave it out.
+- **Acts on nothing:** sting, the act key, feeding, contact and the nest are off for it.
+- **Flies at full burst:** energy held at full, body warm, the swoop always ready, and the swoop's slam disabled.
+- **Solo, and a rule apart:** only without a network, and in the rules hash and the tag.
+- **Tests:** block 75 in sim.test.mjs. The ghost does not die or stun and flies by a hive with no alarm at full energy; a ghost world has its own rules hash; a normal world has no ghost. JS only: not in the C# core.
+
 ### 18.108 How many colonies a player holds, and the abstract tier (T3-5)
 
 **The setting.** `colonies` (settings, both twins) is how many colonies a player may hold, the one in hand counted. The line founds no more past it, in spring or by a swarm: `_lineMax` is now the smaller of the line's own max (5, plus the tree's Line: found) and the setting less one.
@@ -3052,6 +3170,8 @@ Set 2026-11-03, after T2-14: graphics now belong to the world-building thread (2
 | T3-3 | **Built (18.100).** **The growth tree's branches** (T2-13 in full, with T2-7). <br>• Nest (cell building, brood speed, insulation, guard strength), Flight (the Reflex cue, swoop recovery, lock-on range, assisted reach) and Line (gyne output, winter survival by site, how many lineage colonies found). <br>• Points come from experience, a few a season. <br>• Every node that changes an outcome is a colony parameter in ranges the plausibility checks know (11.8). | 6.8, 7.8 | L | nodes act in the sim, ranges are audited across peers, the colony view spends points |
 | T3-4 | **Built (18.107).** **The player's own colonies meeting across species.** <br>• A player's hornets hunt the same player's yellowjackets and bees ball them, unless the player marks the colonies kin. <br>• Kin is colony state every peer reads. | 6.8 | S | a kin mark stops the hunting and balling; unmarked, they fight |
 | T3-5 | **Built (18.108).** **How many colonies a player holds,** as a world setting, with colonies far from the player run at the abstract tier. | 6.8, 11.12 | M | the setting caps the held colonies; a far colony steps abstractly and comes back in step |
+| T3-6 | **Built (18.109).** **The front menu and the skill tiles.** <br>• A title with Fly, Resume, the seed or lobby field and the dev checkboxes; Game guide, Codex, Settings and Game mode as small menus behind it (10.6). <br>• The skill tree and skills as tiles with rank pips, the text in one line (6.8). <br>• The dev ghost (10.8). | 10.6, 10.8, 6.8 | S | the title fits one screen; every option is one click into a menu; every skill reads from its tile |
+| T3-7 | **The tutorial** (10.7): the beats from first flight to the first night, prompts of six words and a key, the scent ribbon, the death screen's one line, the just-in-time threat lines; presentation only, skippable, remembered, off in shared worlds. | 10.7 | M | a new player stings within 5 minutes; most reach beat 7 in a first session; a returning player never sees it |
 
 **Waiting on decisions.** The genus progression beyond hornets and bees (6.9, T4: ants, termites, cockroaches) waits on Q-22 (what a removed tree means in a persistent world) and Q-23 (how alliances are formed and audited). Offshoot modes need their own design passes.
 
