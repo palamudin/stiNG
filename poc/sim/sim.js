@@ -107,6 +107,7 @@ export class Sim {
     this.colony = newColony(false, this.species);
     this.swarms = []; // swarms on their way to a new home (T2-11)
     this.guide = {}; // the field guide (T3-2): kind -> the day its note was found
+    this.tut = { founded: 0, usurped: 0, ext: false, moved: false, done: false }; // the tutorial world's script (GDD 10.7)
     this.progs = {}; // each line's XP, stabs and skills, by species (GDD 6.8); this.prog is the line in hand
     this.player = this._newPlayer(); // the player gauge: what the player earns in hand, whichever line
     this.nest = makeNest(NEST.treeX, NEST.treeZ, NEST.x, NEST.y, NEST.z);
@@ -395,7 +396,8 @@ export class Sim {
     this.prevAct = act;
     if (cmd.alloc > 0 && cmd.alloc <= T.alloc.length && this.colony.alloc !== cmd.alloc - 1) { this.colony.alloc = cmd.alloc - 1; this.emit('alloc', { preset: this.colony.alloc }); }
     let pick = cmd.pick | 0;
-    if (pick <= -2000000) { this._kinMark(-pick - 2000000); pick = 0; } // mark a colony of the player's kin, or not (T3-4)
+    if (pick === -3000000) { this._raiseQueen(); pick = 0; } // raise a queen to found a colony (GDD 6.10)
+    else if (pick <= -2000000) { this._kinMark(-pick - 2000000); pick = 0; } // mark a colony of the player's kin, or not (T3-4)
     else if (pick <= -1000) { this._switchColony(-pick - 1000); pick = 0; } // take another colony of the line in hand (GDD 6.8)
     else if (pick <= -500) { this._grow(-pick - 500); pick = 0; } // a rank on the growth tree (T3-3)
     else if (pick < 0) { this._learn(-pick - 1); pick = 0; } // a negative pick learns a skill (GDD 6.8)
@@ -974,7 +976,7 @@ export class Sim {
     if (pick) {
       // the colony view asked for this one
       const w = this.waspById(pick);
-      if (!w || w.colony !== 'own' || w === d || w.caste === 'gyne') return;
+      if (!w || w.colony !== 'own' || w === d || (w.caste === 'gyne' && !w.foundress)) return; // a young queen out to found may be flown (GDD 6.10)
       best = w; bd = dist2(w, d);
     } else for (const w of this.wasps) {
       if (w === d || w.state === 'dead' || w.colony !== 'own' || w.caste === 'gyne') continue; // a young queen is not yours to fly (T2-3)
@@ -990,7 +992,7 @@ export class Sim {
   }
 
   _possess(d, best) {
-    d.ai = { mode: 'pick', target: null, timer: 0, humanHex: null, stings: 0, stingHold: 0 };
+    d.ai = { mode: d.foundress ? 'found' : 'pick', target: null, timer: 0, humanHex: null, stings: 0, stingHold: 0, found: null };
     if (d.state === 'attached') this._detach(d, null);
     this.drivenId = best.id;
     if (best.state === 'attached') this._detach(best, null);
@@ -1515,6 +1517,11 @@ export class Sim {
   // ---------------- interactions (E): crawl under, catch prey, chew pulp
 
   _interact(w) {
+    if (w.foundress || (w.caste === 'queen' && !this.colony.sited)) { // a queen at a small rival nest takes it (GDD 6.10)
+      const r = this._rivalNestNear(w, T.found.reach * 0.1);
+      if (r) { this._usurp(w, r); return; }
+    }
+    if (w.foundress) { this._foundHere(w); return; }
     if (w.caste === 'male') { if (w.contact && w.state === 'fly') this._perch(w, w.contact); return; } // a male does no work (T2-3)
     if (w.caste === 'queen' && !this.colony.sited) { const site = this._siteNear(w); if (site) { this._foundNest(w, site); return; } }
     if (w.caste !== 'queen' && !spw(w).perennial && this.seasonFrac >= T.season.reproStart && this.colony.mated + this.colony.gynes >= 1) {
@@ -3180,7 +3187,7 @@ export class Sim {
         e.state = 'scheduled';
         this.emit('extScheduled', { visit: e.visit, arriveMinute: e.arriveMinute, why: crowded ? 'house' : 'stings' });
       }
-    } else if (e.state === 'scheduled' && this._nestAreaLevel() < 3 && !crowded) {
+    } else if (e.state === 'scheduled' && this._nestAreaLevel() < 3 && !crowded && !e.forced) {
       e.state = 'cancelled';
       this.emit('extCancelled', { visit: e.visit });
     } else if (e.state === 'scheduled' && this.minute >= e.arriveMinute) {
@@ -4353,10 +4360,10 @@ export class Sim {
 
   // ---------------- rival colonies (GDD 9.3)
 
-  _rivalNestNear(w) {
+  _rivalNestNear(w, reach = 0.08) {
     for (const rec of this.activeChunks) {
-      const rv = rec.content.rival;
-      if (rv && sq(w.x - rv.ex) + sq(w.y - rv.ey) + sq(w.z - rv.ez) < 0.08 * 0.08) return { rv, key: chunkKey(rec.cx, rec.cz) };
+      const rv = this._rivalOf(rec);
+      if (rv && sq(w.x - rv.ex) + sq(w.y - rv.ey) + sq(w.z - rv.ez) < reach * reach) return { rv, key: chunkKey(rec.cx, rec.cz) };
     }
     return null;
   }
@@ -4373,7 +4380,7 @@ export class Sim {
   _raidTarget(home) {
     let best = null, bd = sq(T.rival.raidRange);
     if (this.settings.rivals) for (const rec of this.activeChunks) {
-      const rv = rec.content.rival;
+      const rv = this._rivalOf(rec);
       if (!rv) continue;
       const d = sq(rv.ex - home.x) + sq(rv.ey - home.y) + sq(rv.ez - home.z);
       if (d < bd) { bd = d; best = { kind: 'rnest', key: chunkKey(rec.cx, rec.cz), i: 0, c: 998 }; }
@@ -4441,7 +4448,7 @@ export class Sim {
     for (const w of this.wasps.slice()) if (this.isRival(w) && !activeKeys.has(w.colony)) this._despawn(w);
     if (!daylight) return;
     for (const rec of this.activeChunks) {
-      const rv = rec.content.rival;
+      const rv = this._rivalOf(rec);
       if (!rv) continue;
       const key = chunkKey(rec.cx, rec.cz);
       const n = this.wasps.filter((x) => x.colony === key).length;
@@ -4454,7 +4461,7 @@ export class Sim {
   }
 
   _thinkRival(w, cmd) {
-    const ai = w.ai, rec = this.records.get(w.colony), rv = rec && rec.content.rival;
+    const ai = w.ai, rec = this.records.get(w.colony), rv = rec && this._rivalOf(rec);
     if (!rv) { this._despawn(w); return cmd; }
     const home = { x: rv.ex, y: rv.ey - 0.02, z: rv.ez };
     if (!isDaylight(this.minute) || this.raining) ai.mode = 'home';
@@ -4647,6 +4654,8 @@ export class Sim {
       col.adults -= cold; col.stats.died += cold;
     }
     if (spOf(col).perennial) this._swarm(col, this.nest);
+    this._queenTick(col, this.nest, frac); // a queen raised on order, an emergency queen (GDD 6.10)
+    if (this.settings.tutorial) this._tutorialTick();
     const ph = seasonPhase(frac);
     if (ph !== this.season.phase) { this.season.phase = ph; this.emit('season', { phase: ph }); }
     if (frac >= 1) { this._endSeason('autumn'); return; }
@@ -4736,6 +4745,7 @@ export class Sim {
       colonyStep(c, dt, out, daylight, frac, this.bio, this.broodSpeed(this.minute, sc.nest.site, c.cool, this._insGain(c.species || 'wasp')), av, h, c.virgin ? { ...lb, lay: 0 } : lb);
       this._hiveXp(c, g, false); // a colony on the AI earns at the player's gauge (GDD 6.8)
       if (spOf(c).perennial) this._swarm(c, sc.nest);
+      this._heirTick(c, sc.nest, frac, 'line:' + sc.id);
       // the exterminator (abstract; he is drawn only for the player's own nest): called to a sister nest's neighbourhood,
       // he comes the next morning, or in two hours before mid-afternoon, and destroys it unless things calm down first
       if (this.settings.exterminator && c.nestAlive) {
@@ -4744,7 +4754,7 @@ export class Sim {
           const md = minuteOfDay(this.minute);
           sc.ext = md < 15 * 60 && md >= T.time.dawn ? this.minute + 120 : (md >= T.time.dawn ? this.day + 1 : this.day) * 1440 + T.ext.arriveMinute;
           this.emit('sisterExtScheduled', { id: sc.id, arriveMinute: sc.ext });
-        } else if (sc.ext > 0 && lv < 3 && !this._crowded(c)) sc.ext = 0;
+        } else if (sc.ext > 0 && lv < 3 && !this._crowded(c) && !sc.extForced) sc.ext = 0;
         else if (sc.ext > 0 && this.minute >= sc.ext) {
           sc.ext = 0; destroyNest(c);
           for (const w of this.wasps.slice()) if (w.colony === 'line:' + sc.id) this._despawn(w);
@@ -4793,6 +4803,151 @@ export class Sim {
       const w = at(this._spawnWasp(false));
       w.role = h32(w.id, 9) < 0.5 ? 'sugar' : 'protein'; w.ai.mode = 'pick';
     }
+  }
+  // ---------------------------------------------------------------- spreading the line (GDD 6.10)
+
+  // A rival nest as it stands: none once a queen of the player's has taken it (the chunk's state)
+  _rivalOf(rec) { const rv = rec.content.rival; return rv && !(this.cs(chunkKey(rec.cx, rec.cz)).taken > 0) ? rv : null; }
+  // A way of spreading the line a colony has: its species' trait (true to the insects that do it), or every one in the
+  // tutorial world (GDD 10.7)
+  _trait(id, c = this.colony) { return !!this.settings.tutorial || (spOf(c)[id] | 0) > 0; }
+  _foundresses() { return this.wasps.filter((w) => w.foundress).length; }
+  _lineRoom() { return this.line.length + this.swarms.length + this._foundresses() + (this.colony.queenOrder ? 1 : 0) < this._lineMax(); }
+  // Raise a queen to found a colony (swarmFound): from the colony in hand, for protein and sugar, in some days
+  _raiseQueen() {
+    const c = this.colony, F = T.found;
+    const why = !this._trait('swarmFound') ? 'trait' : !c.sited || !c.nestAlive || !c.queenAlive || this.winter ? 'nest' : c.queenOrder ? 'raising'
+      : !this._lineRoom() ? 'cap' : c.adults < F.adults ? 'adults' : c.protein < F.protein || c.sugar < F.sugar ? 'food' : null;
+    if (why) { this.emit('queenDenied', { why }); return; }
+    c.protein -= F.protein; c.sugar -= F.sugar;
+    c.queenOrder = { at: this.tick + Math.max(60, Math.round(F.days * this.dayTicks * (this.settings.tutorial ? F.tutorial : 1))) };
+    this.emit('queenOrdered', { at: c.queenOrder.at });
+  }
+  // at the colony's tick: the queen raised on order comes out, mated, to found; an emergency queen for a queenless colony
+  _queenTick(c, nest, frac) {
+    const o = c.queenOrder;
+    if (o && this.tick >= o.at) {
+      c.queenOrder = null;
+      if (c.nestAlive) {
+        const q = this._spawnWasp(false, 'gyne'); q.role = 'gyne'; q.foundress = true; q.mated = true; q.venom = 1;
+        q.ai.mode = 'found'; q.ai.found = null; q.x = nest.entrance.x; q.y = nest.entrance.y - 0.03; q.z = nest.entrance.z;
+        this.emit('queenRaised', { id: q.id });
+      }
+    }
+    this._heirTick(c, nest, frac, 'own');
+  }
+  // emergency: a queenless colony with brood and food raises a new queen (honeybees; GDD 6.10)
+  _heirTick(c, nest, frac, who) {
+    const F = T.found;
+    if (c.queenAlive || !c.nestAlive || !this._trait('emergency', c) || frac >= T.season.collapseFrom) { if (c.heir && (c.queenAlive || !c.nestAlive)) c.heir = null; return; }
+    if (!c.heir) { if (broodTotal(c) >= F.heirBrood && c.sugar + c.protein > 1) c.heir = { at: this.tick + Math.max(60, Math.round(F.heirDays * this.dayTicks * (this.settings.tutorial ? F.tutorial : 1))) }; return; }
+    if (this.tick < c.heir.at) return;
+    c.heir = null; c.queenAlive = true; c.sugarlessDays = 0;
+    this.emit('heirRaised', { colony: who });
+    this._fieldNote('emergency');
+  }
+  // The nearest free tree for a foundress: no nest of the player's, a swarm's or another foundress's within minGap of it
+  _freeTree(w) {
+    const used = [{ x: this.nest.treeX, z: this.nest.treeZ }, ...this.line.map((x) => ({ x: x.nest.treeX, z: x.nest.treeZ })), ...this.swarms.filter((x) => x.nest).map((x) => ({ x: x.nest.treeX, z: x.nest.treeZ }))];
+    for (const q of this.wasps) if (q.foundress && q !== w && q.ai.found) used.push({ x: q.ai.found.tx, z: q.ai.found.tz });
+    return this._lineTree({ x: w.x, z: w.z }, used);
+  }
+  _treeNest(t, from) {
+    let dx = from.x - t.x, dz = from.z - t.z; const d = Math.sqrt(dx * dx + dz * dz) || 1; dx /= d; dz /= d;
+    return { tx: t.x, tz: t.z, x: t.x + dx * (t.r + 0.2), y: clamp(1.6, 1.2, Math.max(1.2, t.h - 0.6)), z: t.z + dz * (t.r + 0.2) };
+  }
+  // A foundress on her own flies to the nearest free tree and founds there; flown by the player, she founds where E is
+  // pressed by a free trunk, or takes a small rival nest at its entrance
+  _thinkFoundress(w, cmd) {
+    const ai = w.ai;
+    if (!ai.found) { const t = this._freeTree(w); if (!t) { this._steer(w, { x: this.nest.entrance.x + 0.6, y: this.nest.entrance.y + 0.4, z: this.nest.entrance.z }, cmd); return cmd; } ai.found = this._treeNest(t, w); }
+    const f = ai.found;
+    this._steer(w, f, cmd);
+    if (dist2(w, f) < 0.3 * 0.3) this._found(w, f);
+    return cmd;
+  }
+  _foundHere(w) {
+    const t = this._freeTree(w), f = t ? this._treeNest(t, w) : null;
+    if (!f || sq(w.x - f.x) + sq(w.z - f.z) > T.found.reach * T.found.reach) { this.emit('foundDenied', { id: w.id, why: 'site' }); return; }
+    this._found(w, f);
+  }
+  // the young queen's colony: a founding queen and the workers about her (the escort), a colony of the line
+  _found(q, f) {
+    if (this.line.length + this.swarms.length >= this._lineMax()) { this.emit('foundDenied', { id: q.id, why: 'cap' }); return; }
+    const sp = q.sp || this.species, nest = makeNest(f.tx, f.tz, f.x, f.y, f.z, NEST.r, 'trunk');
+    const colony = newColony(true, sp); colony.sited = true; colony.maxCells = this._maxCells('trunk', sp); colony.alloc = 0;
+    let escort = 0;
+    const R2 = T.found.escortR * T.found.escortR;
+    for (const w of this.wasps.slice()) {
+      if (w === q || w.id === this.drivenId || w.colony !== 'own' || w.caste !== 'worker' || dist2(w, q) > R2 || (w.state !== 'fly' && w.state !== 'landed')) continue;
+      this.wasps = this.wasps.filter((x) => x !== w); this.colony.adults = Math.max(0, this.colony.adults - 1); colony.adults += 1; escort++;
+    }
+    const sc = { id: ++this.lineSeq, nest, colony, season: this.season.n, ext: 0 };
+    this.line.push(sc);
+    this._queenGone(q);
+    if (this.settings.tutorial) this.tut.founded = sc.id;
+    this.emit('founded', { id: sc.id, x: nest.x, z: nest.z, escort, species: sp });
+    this._fieldNote('swarmfound');
+  }
+  // A queen takes a small rival nest whose guards are down (usurp): she kills its queen and its workers raise her brood
+  _usurp(q, r) {
+    const F = T.found, c = q.foundress ? null : this.colony, frac = this.seasonFrac;
+    const e = { x: r.rv.ex, y: r.rv.ey, z: r.rv.ez }, guards = this.wasps.filter((x) => x.colony === r.key && x.state !== 'dead' && dist2(x, e) < T.rival.guardRadius * T.rival.guardRadius).length; // its defenders at the door
+    const why = !this._trait('usurp', q.foundress ? { species: q.sp } : this.colony) ? 'trait' : !this.settings.tutorial && frac >= F.usurpFrac ? 'late'
+      : guards > 0 ? 'guards' : q.foundress && this.line.length + this.swarms.length >= this._lineMax() ? 'cap' : null;
+    if (why) { this.emit('usurpDenied', { id: q.id, why, guards }); if (why === 'guards') for (const x of this.wasps) if (x.colony === r.key && dist2(x, e) < T.rival.guardRadius * T.rival.guardRadius) { x.ai.mode = 'hunt'; x.ai.huntId = q.id; x.ai.timer = this.tick + T.rival.huntTicks; } return; }
+    const rv = r.rv, sp = q.sp || this.species;
+    let workers = 0;
+    for (const x of this.wasps.slice()) if (x.colony === r.key) { this.wasps = this.wasps.filter((y) => y !== x); workers++; } // the host's workers out are hers now
+    const nest = makeNest(rv.x - rv.r - 0.25, rv.z, rv.x, rv.y, rv.z, rv.r, 'branch'); nest.entrance = { x: rv.ex, y: rv.ey, z: rv.ez };
+    const colony = newColony(true, sp);
+    Object.assign(colony, { sited: true, maxCells: this._maxCells('branch', sp), alloc: 0, adults: F.hostAdults + rv.workers * F.hostWorker, eggs: 0, larvae: F.hostBrood, pupae: F.hostBrood / 2, cells: F.hostBrood * 4, protein: 1, sugar: 1.5, pulp: 1 });
+    this.cs(r.key).taken = 1;
+    if (c) { // the player's own queen, not yet nested: this is her nest now
+      colony.stats = c.stats; colony.xpSeen = c.xpSeen; colony.vets = c.vets || [];
+      this.colony = colony; nest.key = r.key; this.nest = nest;
+      this.emit('usurped', { id: q.id, key: r.key, own: true, workers: Math.floor(colony.adults) });
+    } else {
+      const sc = { id: ++this.lineSeq, nest, colony, season: this.season.n, ext: 0 };
+      this.line.push(sc);
+      this._queenGone(q);
+      if (this.settings.tutorial) this.tut.usurped = sc.id;
+      this.emit('usurped', { id: q.id, key: r.key, own: false, line: sc.id, workers: Math.floor(colony.adults) });
+    }
+    this._fieldNote('usurp');
+  }
+  // a foundress gone into her nest: off the wing; flown by the player, the player goes on in a worker of the hand
+  _queenGone(q) {
+    const driven = q.id === this.drivenId;
+    this.wasps = this.wasps.filter((x) => x !== q);
+    if (!driven) return;
+    let best = null, bd = Infinity;
+    for (const w of this.wasps) if (w.colony === 'own' && w.caste === 'worker') { const d = dist2(w, q); if (d < bd) { bd = d; best = w; } }
+    const w = best || this._spawnWasp(true);
+    this.drivenId = w.id;
+    this.emit('possess', { id: w.id, from: q.id });
+  }
+  // a field note found by doing (the ways of spreading): as places are found by reaching them (T3-2)
+  _fieldNote(kind) { if (this.guide[kind] !== undefined) return; this.guide[kind] = this.day; this.emit('fieldNote', { kind, day: this.day }); }
+  // The tutorial world (GDD 10.7): once the player has founded a colony and taken one, the exterminator is called to the
+  // home nest and the taken one; with them gone the player goes on in the colony they founded
+  _tutorialTick() {
+    const t = this.tut;
+    if (t.done) return;
+    if (!t.ext && t.founded && t.usurped && this.settings.exterminator) {
+      t.ext = true;
+      const e = this.ext;
+      if (this.colony.nestAlive && e.state !== 'active') { e.visit++; e.state = 'scheduled'; e.forced = true; e.arriveMinute = this.minute + 30; this.emit('extScheduled', { visit: e.visit, arriveMinute: e.arriveMinute, why: 'tutorial' }); }
+      const sc = this.line.find((x) => x.id === t.usurped);
+      if (sc && sc.colony.nestAlive) { sc.ext = this.minute + 45; sc.extForced = true; this.emit('sisterExtScheduled', { id: sc.id, arriveMinute: sc.ext }); }
+    }
+    // the home nest gone: the player goes on in the colony they founded, at once
+    if (t.ext && !t.moved && !this.colony.nestAlive) {
+      const sc = this.line.find((x) => x.id === t.founded && x.colony.nestAlive);
+      t.moved = true;
+      if (sc) { this._takeColony(sc); this.emit('tutorialHome', { id: sc.id }); }
+    }
+    if (t.moved && !this.line.some((x) => x.id === t.usurped && x.colony.nestAlive)) { t.done = true; this.emit('tutorialDone', {}); }
   }
   // Your colony is gone: you go on in the strongest sister colony
   _takeOverSister() {
@@ -4901,6 +5056,7 @@ export class Sim {
     if (w.state !== 'fly') return cmd;
     if (w.colony !== 'own') return this.isRival(w) ? this._thinkRival(w, cmd) : this._thinkSister(w, cmd);
     if (w.caste === 'male') return this._thinkMale(w, cmd); // T2-3
+    if (w.foundress) return this._thinkFoundress(w, cmd);
     if (w.caste === 'gyne') return this._thinkGyne(w, cmd);
     // alarm pheromone pulls nearby workers into an attack
     if (ai.mode !== 'attack' && ai.mode !== 'evade') {
@@ -5211,7 +5367,7 @@ export class Sim {
     if (t.kind === 'trap') return c.traps[t.i];
     if (t.kind === 'pollen') { const f = c.flowers[t.i]; return f && this.inBloom(rec, t.i) ? { x: f.x, y: f.y + 0.012, z: f.z } : null; }
     if (t.kind === 'phive') return this.colony.nestAlive ? this.nest.entrance : null;
-    if (t.kind === 'rnest') return c.rival ? { x: c.rival.ex, y: c.rival.ey, z: c.rival.ez } : null;
+    if (t.kind === 'rnest') { const rv = this._rivalOf(rec); return rv ? { x: rv.ex, y: rv.ey, z: rv.ez } : null; }
     if (t.kind === 'pnest') { const n = this.peerNests.get(t.i); return n && n.alive && !this.plaus.quarantined.includes(t.i) ? n : null; }
     if (t.kind === 'hive') { const hv = this.hivesIn(rec)[t.i]; return hv ? { x: hv.ex, y: hv.ey, z: hv.ez } : null; }
     if (t.kind === 'fruit') { const f = this.fruitIn(rec).find((x) => x.i === t.i); return f ? { x: f.x, y: f.y + 0.015, z: f.z } : null; }
@@ -5284,7 +5440,7 @@ export class Sim {
     for (const sc of this.line) if (sc.colony.nestAlive) { const e = sc.nest.entrance; add('line', e.x, e.y, e.z, sc.id); }
     for (const rec of this.activeChunks) {
       const c = rec.content, k = chunkKey(rec.cx, rec.cz);
-      if (c.rival) add('rival', c.rival.ex, c.rival.ey, c.rival.ez, k);
+      const rv = this._rivalOf(rec); if (rv) add('rival', rv.ex, rv.ey, rv.ez, k);
       this.hivesIn(rec).forEach((h, j) => add('hive', h.ex, h.ey, h.ez, k + ':' + j));
       for (const wt of this.waterIn(rec)) if (wt.kind !== 'puddle') add('water', wt.x, wt.y, wt.z, k + ':' + wt.i);
       if (c.use === 'town') add('town', rec.cx * CS, 0, rec.cz * CS, k);

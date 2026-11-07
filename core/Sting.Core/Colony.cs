@@ -35,6 +35,8 @@ namespace Sting.Core
         public System.Collections.Generic.List<Vet> vets = new System.Collections.Generic.List<Vet>();
         /// a daughter queen not yet mated, and when she flies (T2-11): the hive lays nothing till she is back
         public Virgin virgin;
+        /// the tick a queen raised on order comes out to found (GDD 6.10), and the tick an emergency queen is raised
+        public int? queenOrder, heir;
         public ColonyStats stats = new ColonyStats();
         public ColonyState Clone() { var c = (ColonyState)MemberwiseClone(); c.stats = stats.Clone(); return c; }
         public Num this[string k]

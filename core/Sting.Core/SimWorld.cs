@@ -361,7 +361,7 @@ namespace Sting.Core
                     Emit("extScheduled", ("visit", e.visit), ("arriveMinute", e.arriveMinute), ("why", crowded ? "house" : "stings"));
                 }
             }
-            else if (e.state == "scheduled" && NestAreaLevel() < 3 && !crowded)
+            else if (e.state == "scheduled" && NestAreaLevel() < 3 && !crowded && !e.forced)
             {
                 e.state = "cancelled";
                 Emit("extCancelled", ("visit", e.visit));
@@ -1312,13 +1312,14 @@ namespace Sting.Core
 
         // ---------------- rival colonies (GDD 9.3)
 
-        (Rival rv, string key)? RivalNestNear(Wasp w)
+        (Rival rv, string key)? RivalNestNear(Wasp w) => RivalNestNear(w, 0.08);
+        (Rival rv, string key)? RivalNestNear(Wasp w, Num reach)
         {
             foreach (var rec in activeChunks)
             {
                 if (!Near(rec, w.x, w.z)) continue;
-                var rv = rec.content.rival;
-                if (rv != null && Sq(w.x - rv.ex) + Sq(w.y - rv.ey) + Sq(w.z - rv.ez) < 0.08 * 0.08) return (rv, rec.key);
+                var rv = RivalOf(rec);
+                if (rv != null && Sq(w.x - rv.ex) + Sq(w.y - rv.ey) + Sq(w.z - rv.ez) < reach * reach) return (rv, rec.key);
             }
             return null;
         }
@@ -1339,7 +1340,7 @@ namespace Sting.Core
             AiTarget best = null; Num bd = Sq(T.rival.raidRange);
             if (settings.rivals) foreach (var rec in activeChunks)
             {
-                var rv = rec.content.rival;
+                var rv = RivalOf(rec);
                 if (rv == null) continue;
                 Num d = Sq(rv.ex - home.x) + Sq(rv.ey - home.y) + Sq(rv.ez - home.z);
                 if (d < bd) { bd = d; best = new AiTarget { kind = "rnest", key = rec.key, i = 0, c = 998 }; }
@@ -1378,7 +1379,7 @@ namespace Sting.Core
             if (!daylight) return;
             foreach (var rec in activeChunks)
             {
-                var rv = rec.content.rival;
+                var rv = RivalOf(rec);
                 if (rv == null) continue;
                 string key = rec.key;
                 int n = 0; foreach (var x in wasps) if (x.colony == key) n++;
@@ -1392,7 +1393,7 @@ namespace Sting.Core
 
         Cmd ThinkRival(Wasp w, Cmd cmd)
         {
-            var ai = w.ai; var rec = records.Get(w.colony); var rv = rec?.content.rival;
+            var ai = w.ai; var rec = records.Get(w.colony); var rv = rec != null ? RivalOf(rec) : null;
             if (rv == null) { Despawn(w); return cmd; }
             var home = new V3(rv.ex, rv.ey - 0.02, rv.ez);
             if (!IsDaylight(minute) || Raining) ai.mode = "home";
@@ -1652,6 +1653,8 @@ namespace Sting.Core
                 col.adults -= cold; col.stats.died += cold;
             }
             if (Colony.Sp(col).perennial != 0) Swarm(col, nest);
+            QueenTick(col, nest, frac); // a queen raised on order, an emergency queen (GDD 6.10)
+            if (settings.tutorial) TutorialTick();
             string ph = Colony.SeasonPhase(frac);
             if (ph != season.phase) { season.phase = ph; Emit("season", ("phase", ph)); }
             if (frac >= 1) { EndSeason("autumn"); return; }

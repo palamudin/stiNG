@@ -1863,6 +1863,60 @@ namespace Sting.Core.Tests
                 Ok(D(I.site.h) >= 10 && D(I.site.h) <= 90 && inside && beyond && step < 3 && wild > 400 && settledChunks > 30 && built == 0 && trees > 300 && wet == 0 && s.wasp.y >= 0 && st.RulesHash() != t1.RulesHash() && st.WorldTag().Contains("wild beyond 400 m"),
                     $"the settled area sits on the wild land {D(I.site.h):0.0} m above the sea at ({D(I.site.x):0}, {D(I.site.z):0}); {settledChunks} settled chunks, {wild} wild ones with nothing built and {trees} trees, none in the water; no step over 3 m across the band ({step:0.00} per 2 m); a sim runs over it");
             }
+            // 76. spreading the line (GDD 6.10, 10.7; sim.test.mjs): a queen raised on order founds at a free tree; a queen takes a
+            // small rival nest once its guards are down; a queenless bee colony raises an emergency queen; the tutorial calls the exterminator
+            {
+                Sim Mk(Settings st) { var s = new Sim(st, new SimOpts { noAI = true }); RunS(s, 1); return s; }
+                var t = Mk(new Settings { seed = 1234, birds = false, tutorial = true }); var c = t.colony;
+                c.adults = 60; c.protein = 1; c.sugar = 1;
+                bool poor = RunS(t, 1, (sim, i) => Idle(k => k.pick = -3000000)).Any(e => e.type == "queenDenied" && (string)e["why"] == "food");
+                c.protein = c.sugar = 20;
+                bool ord = RunS(t, 1, (sim, i) => Idle(k => k.pick = -3000000)).Any(e => e.type == "queenOrdered");
+                int at = c.queenOrder.Value;
+                Cmd Hold(Sim sim, int i) { if (sim.wasp != null && sim.wasp.caste == "worker") Place(sim.wasp, P(sim.nest.entrance.x + 1, 1.5, sim.nest.entrance.z)); return Idle(); }
+                var ev = RunS(t, at - t.tick + 61, Hold); var q = t.wasps.FirstOrDefault(w => w.foundress);
+                bool raised = ev.Any(e => e.type == "queenRaised") && q != null && q.mated;
+                var r0 = Persist.Restore(Persist.Snapshot(t)); bool savedQ = r0.wasps.Any(w => w.foundress && w.id == q.id);
+                int n0 = t.line.Count; SimEvent founded = null;
+                for (int i = 0; i < 40 && founded == null; i++) founded = RunS(t, 120, Hold).FirstOrDefault(e => e.type == "founded");
+                var sc = founded != null ? t.line.FirstOrDefault(x => x.id == (int)founded["id"]) : null;
+                Ok(poor && ord && raised && savedQ && founded != null && t.line.Count == n0 + 1 && sc.colony.queenAlive && sc.colony.sited && !t.wasps.Contains(q) && t.guide.ContainsKey("swarmfound"),
+                    $"a queen is raised on order for protein and sugar (refused when short), comes out mated, survives a save, and founds at a free tree on her own ({(founded != null ? $"colony {founded["id"]}, escort {founded["escort"]}" : "none")}); its field note opens");
+                // the takeover: the player flies a second queen to the rival nest
+                c.protein = c.sugar = 20; RunS(t, 1, (sim, i) => Idle(k => k.pick = -3000000)); RunS(t, c.queenOrder.Value - t.tick + 61, Hold);
+                var q2 = t.wasps.First(w => w.foundress); var rv = t.Places().First(p => p.kind == "rival");
+                RunS(t, 1, (sim, i) => Idle(k => k.pick = q2.id)); bool flown = t.drivenId == q2.id;
+                string key = rv.key.Substring(6); void At2() { Place(q2, P(rv.x, rv.y, rv.z)); q2.state = "fly"; }
+                RunS(t, 2, (sim, i) => { At2(); return Idle(); });
+                var g = t.SpawnWasp(false); g.colony = key; g.sp = "wasp"; g.role = "guard"; g.ai.mode = "guard"; Place(g, P(rv.x + 0.3, rv.y + 0.1, rv.z));
+                At2(); bool denied = RunS(t, 1, (sim, i) => Idle(k => k.act = Act.Interact)).Any(e => e.type == "usurpDenied" && (string)e["why"] == "guards");
+                foreach (var w in t.wasps.ToList()) if (w.colony == key) t.Despawn(w);
+                RunS(t, 1); At2(); ev = RunS(t, 1, (sim, i) => Idle(k => k.act = Act.Interact));
+                var us = ev.FirstOrDefault(e => e.type == "usurped"); var taken = us != null ? t.line.FirstOrDefault(x => x.id == (int)us["line"]) : null;
+                Ok(flown && denied && us != null && taken != null && taken.colony.queenAlive && taken.colony.adults >= T.found.hostAdults && !t.Places().Any(p => p.kind == "rival" && p.key == rv.key) && t.drivenId != q2.id && t.guide.ContainsKey("usurp"),
+                    $"the player flies the young queen (picked by id) to the rival nest: refused while its defenders are at the door, taken once they are down ({(us != null ? us["workers"] : 0)} workers); the rival nest is gone and the player is back in a worker");
+                ev = RunS(t, 61);
+                Ok(ev.Any(e => e.type == "extScheduled" && (string)e["why"] == "tutorial") && ev.Any(e => e.type == "sisterExtScheduled" && (int)e["id"] == (int)us["line"]) && t.tut.ext,
+                    "with a colony founded and one taken, the tutorial calls the exterminator to the home nest and to the taken one");
+                var tr = Persist.Restore(Persist.Snapshot(t));
+                Ok(tr.tut.ext && tr.tut.founded == t.tut.founded && tr.tut.usurped == t.tut.usurped && tr.ext.forced && tr.line.First(x => x.id == taken.id).extForced && tr.settings.tutorial
+                    && tr.chunkState.Get(key).taken == 1 && new Settings { tutorial = true }.RulesHash() != new Settings().RulesHash() && new Settings { tutorial = true }.WorldTag() == "tutorial",
+                    "the tutorial's script, the called exterminators and the taken nest survive a save; a tutorial world is a rule apart");
+                // outside the tutorial: a wasp line cannot raise a queen on order; its own queen, not yet nested, takes a rival nest in spring
+                var n = Mk(new Settings { seed = 1234, birds = false }); n.colony.protein = n.colony.sugar = 50; n.colony.adults = 60;
+                bool noTrait = RunS(n, 1, (sim, i) => Idle(k => k.pick = -3000000)).Any(e => e.type == "queenDenied" && (string)e["why"] == "trait");
+                var rvn = n.Places().First(p => p.kind == "rival"); string kn = rvn.key.Substring(6); var wq = n.wasp;
+                foreach (var x in n.wasps.ToList()) if (x.colony == kn) n.Despawn(x);
+                n.colony.sited = false; wq.caste = "queen"; n.settings.rivals = false; Place(wq, P(rvn.x, rvn.y, rvn.z));
+                ev = RunS(n, 1, (sim, i) => Idle(k => k.act = Act.Interact));
+                var own = ev.FirstOrDefault(e => e.type == "usurped" && (bool)e["own"]);
+                Ok(noTrait && own != null && n.colony.sited && n.colony.adults >= T.found.hostAdults && System.Math.Abs(D(n.nest.entrance.x - rvn.x)) < 1e-9,
+                    $"in a normal world a wasp line raises no queen on order, and a queen not yet nested takes a small rival nest as her own ({(own != null ? own["workers"] : 0)} workers)");
+                // honeybees: a queenless colony with brood raises an emergency queen
+                var b = Mk(new Settings { seed = 1234, birds = false, species = "bee" }); b.colony.queenAlive = false; b.colony.larvae = 20; b.colony.sugar = 30;
+                ev = RunS(b, 60 * 60 * 2);
+                Ok(ev.Any(e => e.type == "heirRaised") && b.colony.queenAlive && b.guide.ContainsKey("emergency"), "a honeybee colony that loses its queen raises an emergency queen from its brood; its field note opens");
+            }
             // 74. how many colonies a player holds (T3-5; sim.test.mjs): the world's cap on colonies held is a rule; a far colony
             // of the line steps at the abstract tier and comes back in step, close to one stepped every tick
             {
@@ -1947,7 +2001,7 @@ namespace Sting.Core.Tests
             }
             // 71. places of interest and field notes (T3-2; sim.test.mjs)
             {
-                bool notesOk = Places.Notes.Length == 10 && Places.Notes.All(n => n.title.Length > 0 && n.note.Length > 40 && n.source.Length > 8);
+                bool notesOk = Places.Notes.Length == 13 && Places.Notes.All(n => n.title.Length > 0 && n.note.Length > 40 && n.source.Length > 8);
                 var s = new Sim(new Settings { seed = 1234, birds = false }, new SimOpts { noAI = true }); RunS(s, 31); // (the guide looks every 30 ticks)
                 var PL = s.Places(); var kinds = new HashSet<string>(PL.Select(p => p.kind)); var keys = new HashSet<string>(PL.Select(p => p.key));
                 bool before = s.guide.Count == 1 && s.guide.ContainsKey("nest");

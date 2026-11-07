@@ -2188,6 +2188,11 @@ function readPad() {
   const b = (i) => !!(gp.buttons[i] && (gp.buttons[i].pressed || gp.buttons[i].value > 0.5));
   const edge = (i) => b(i) && !pad.prev[i];
   if (atlas.open) { pad.prev = gp.buttons.map((x) => !!(x && (x.pressed || x.value > 0.5))); return null; } // the pad works the atlas (padUI)
+  if (wmap.open) { // the worker map: the right stick moves the pointer, A flies the one under it, B or Y closes
+    wmap.cx += dz(gp.axes[2] || 0) * 6; wmap.cy += dz(gp.axes[3] || 0) * 6;
+    if (edge(0)) wmapPick(); else if (edge(1) || edge(3)) closeWorkerMap();
+    pad.prev = gp.buttons.map((x) => !!(x && (x.pressed || x.value > 0.5))); return null;
+  }
   if (ui.nest) { // the colony view has the buttons (padUI); the sticks still fly
     if (edge(8)) toggleNest();
     pad.prev = gp.buttons.map((x) => !!(x && (x.pressed || x.value > 0.5)));
@@ -2336,7 +2341,8 @@ addEventListener('keydown', (e) => {
 
 function buildCmd() {
   if (input.autopilot) return input.autopilot(sim); // test hook: scripted pilots use the same input path
-  if (atlas.open || ov.on) { readPad(); return { mx: 0, my: 0, mz: 0, burst: 0, sting: 0, yawQ: Math.round(input.yaw * 1e4), pitchQ: Math.round(input.pitch * 1e4), act: 0, alloc: input.alloc, pick: 0 }; } // the big map has the controls: the wasp holds
+  qTick(); // Q: a tap takes a worker near, a hold opens the worker map (GDD 10.7)
+  if (atlas.open || ov.on || wmap.open) { readPad(); return { mx: 0, my: 0, mz: 0, burst: 0, sting: 0, yawQ: Math.round(input.yaw * 1e4), pitchQ: Math.round(input.pitch * 1e4), act: 0, alloc: input.alloc, pick: 0 }; } // the big map has the controls: the wasp holds
   const gp = readPad();
   if (gp) {
     input.yaw -= gp.rx * 2.4 * opts.sens * DT;
@@ -2356,9 +2362,9 @@ function buildCmd() {
     burst: k.has('ShiftLeft') || k.has('ShiftRight') || (gp && gp.b(6)) ? 1 : 0,
     sting: input.lmb || k.has('KeyF') || (gp && gp.b(7)) ? 1 : 0,
     yawQ: Math.round(input.yaw * 1e4), pitchQ: Math.round(input.pitch * 1e4),
-    act: (k.has('KeyE') || (gp && gp.b(0)) ? Act.Interact : 0) | (k.has('KeyQ') || (gp && gp.b(3)) ? Act.Switch : 0) | (k.has('KeyR') || (gp && gp.b(2)) ? Act.Rest : 0) | (input.swoopOnce ? (input.swoopOnce = false, Act.Swoop) : 0),
+    act: (k.has('KeyE') || (gp && gp.b(0)) ? Act.Interact : 0) | (input.qTap ? (input.qTap = 0, Act.Switch) : 0) | (k.has('KeyR') || (gp && gp.b(2)) ? Act.Rest : 0) | (input.swoopOnce ? (input.swoopOnce = false, Act.Swoop) : 0),
     alloc: input.alloc,
-    pick: input.kin ? (input.kin = 0, -(2000000 + kinOnce)) : input.switchTo ? (input.switchTo = 0, -(1000 + switchOnce)) : input.grow ? (input.grow = 0, -(500 + growOnce)) : input.learn ? (input.learn = 0, -(learnOnce + 1)) : input.pick ? (input.pick = 0, pickOnce) : 0, // negative picks: take a colony in hand, learn a skill (GDD 6.8)
+    pick: input.raise ? (input.raise = 0, -3000000) : input.kin ? (input.kin = 0, -(2000000 + kinOnce)) : input.switchTo ? (input.switchTo = 0, -(1000 + switchOnce)) : input.grow ? (input.grow = 0, -(500 + growOnce)) : input.learn ? (input.learn = 0, -(learnOnce + 1)) : input.pick ? (input.pick = 0, pickOnce) : 0, // negative picks: take a colony in hand, learn a skill (GDD 6.8)
   };
   if (input.eatBurst) { if (cmd.burst) cmd.burst = 0; else input.eatBurst = false; }
   // Auto grab (on by default with touch): prey within reach and nothing in the jaws, and nothing else E would do here (a
@@ -2554,16 +2560,27 @@ addEventListener('keydown', (e) => {
   if (atlas.open && e.code === 'Escape') { e.preventDefault(); closeAtlas(); return; }
   if ((e.code === 'Minus' || e.code === 'Equal') && !e.repeat) { mapStep('size', e.code === 'Equal' ? 1 : -1); return; }
   if ((e.code === 'BracketLeft' || e.code === 'BracketRight') && !e.repeat) { mapStep('zoom', e.code === 'BracketRight' ? 1 : -1); return; }
+  if (wmap.open) { // the worker map: 1 to 9 fly that one, E flies the one under the pointer, Esc closes
+    const n = e.code.startsWith('Digit') ? +e.code.slice(5) : 0;
+    if (n >= 1 && n <= 9) { const o = wmap.list[n - 1]; if (o) wmapFly(o.w.id); return; }
+    if (e.code === 'KeyE' && !e.repeat) { wmapPick(); return; }
+    if (e.code === 'Escape') { e.preventDefault(); closeWorkerMap(); return; }
+  }
+  if (e.code === 'KeyQ' && !e.repeat && running && !paused && !atlas.open && !ov.on) { if (wmap.open) closeWorkerMap(); else input.qDown = performance.now(); return; }
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
   input.keys.add(e.code);
 });
-addEventListener('keyup', (e) => { input.keys.delete(e.code); if (e.code === 'KeyG') eyeTurnUp(); });
+addEventListener('keyup', (e) => {
+  input.keys.delete(e.code); if (e.code === 'KeyG') eyeTurnUp();
+  if (e.code === 'KeyQ' && input.qDown) { const held = performance.now() - input.qDown; input.qDown = 0; if (held < Q_HOLD && !wmap.open) qShort(); }
+});
 addEventListener('blur', () => { input.keys.clear(); input.lmb = false; input.free.held = false; });
 let lockFailed = false, pointerLockWorked = false;
 document.addEventListener('pointerlockerror', () => { lockFailed = true; if (!padNav.used && !touch.on) toast('Mouse capture unavailable · drag with right button to look', 'var(--muted)', 3); });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('mousedown', (e) => {
   if (!running || paused || ov.on) return; // zoomed out, the mouse drags the map
+  if (wmap.open) { if (e.button === 0) wmapPick(); else closeWorkerMap(); return; }
   if (ui.nest && document.pointerLockElement !== canvas) return; // clicking about in the colony view does not sting
   if (document.pointerLockElement !== canvas && !lockFailed) { lock(); return; } // a click takes the mouse back (after the colony view, say)
   if (e.button === 0) input.lmb = true;
@@ -2573,6 +2590,7 @@ canvas.addEventListener('mousedown', (e) => {
 addEventListener('mouseup', (e) => { if (e.button === 0) input.lmb = false; if (e.button === 2) input.free.held = false; });
 addEventListener('mousemove', (e) => {
   if (ov.on) return;
+  if (wmap.open) { wmap.cx += e.movementX; wmap.cy += e.movementY; return; }
   if (document.pointerLockElement !== canvas && !(e.buttons & 2)) return;
   if (paused) return;
   const k = 0.0022 * opts.sens;
@@ -2594,7 +2612,7 @@ document.addEventListener('pointerlockchange', () => {
   if (!locked && pointerLockWorked && !ui.nest && !atlas.open && !ov.on && $('winterScreen').hidden && $('extinctScreen').hidden) setPaused(true); // the colony view and the atlas free the mouse on purpose
   if (locked) { pointerLockWorked = true; setPaused(false); }
 });
-function setPaused(p) { paused = p; if (p) showOpts(); if (p && sim) $('pauseTag').textContent = `${tagText(sim.settings)} · rules ${rulesHash(sim.settings)} · tuning ${TUNE.hash}`; input.free.held = false; $('pauseScreen').hidden = !p; input.lmb = false; input.keys.clear(); if (p) { $('saveNote').textContent = ''; saveWorld(false); } }
+function setPaused(p) { paused = p; if (p) closeWorkerMap(); if (p) showOpts(); if (p && sim) $('pauseTag').textContent = `${tagText(sim.settings)} · rules ${rulesHash(sim.settings)} · tuning ${TUNE.hash}`; input.free.held = false; $('pauseScreen').hidden = !p; input.lmb = false; input.keys.clear(); if (p) { $('saveNote').textContent = ''; saveWorld(false); } }
 $('bResume').addEventListener('click', () => { setPaused(false); lock(); });
 function showOpts() {
   $('optVol').value = Math.round(opts.volume * 100); $('optVolOut').textContent = Math.round(opts.volume * 100) + '%';
@@ -2792,22 +2810,167 @@ function updateLine() {
     ['In hand', `${SPECIES_NAME[sim.species]} · ${fmt(sim.colony.adults)} adults`],
     ['Your gauge', measured ? `${Math.round(g * 100)}% · ${P.gaugeRate.toFixed(0)} XP a day in hand (full at ${T.gauge.ref})` : `not measured yet (${P.gaugeDays.toFixed(1)} of ${T.gauge.minDays} days played); the AI works at ${Math.round(g * 100)}%`],
   ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
-  const sig = sim.line.map((x) => `${x.id}:${Math.round(x.colony.adults)}:${x.colony.nestAlive}:${!!x.colony.kin}`).join(',') + '|' + sim.colony.sited + '|' + !!sim.colony.kin;
+  const F = T.found, c0 = sim.colony, canRaise = sim._trait('swarmFound'), ord = c0.queenOrder, haveFor = c0.protein >= F.protein && c0.sugar >= F.sugar && c0.adults >= F.adults;
+  const sig = sim.line.map((x) => `${x.id}:${Math.round(x.colony.adults)}:${x.colony.nestAlive}:${!!x.colony.kin}`).join(',') + '|' + sim.colony.sited + '|' + !!sim.colony.kin
+    + `|${canRaise}|${ord ? Math.ceil((ord.at - sim.tick) / 300) : '-'}|${haveFor}|${sim._foundresses()}`;
   if (sig === lineSig) return;
   lineSig = sig;
   // kin (T3-4): the player's colonies of other species fight yours (hornets hunt yellowjackets, bees ball them) unless
   // one of the two is marked kin; offered only where the player holds more than one species
   const sp0 = sim.species || 'wasp', mixed = sim.line.some((x) => (x.colony.species || 'wasp') !== sp0);
   const kinBtn = (id, c, label) => `<button class="ghost" data-kin="${id}"><b>${c.kin ? 'Kin ✓' : 'Not kin'}: ${label}</b><span>${c.kin ? 'at peace with your other species' : 'your other species fight it, and it fights them'}</span></button>`;
-  $('nLine').innerHTML = (mixed ? kinBtn(0, sim.colony, `your ${SPECIES_NAME[sp0]} in hand`) : '') + (sim.line.length ? sim.line.map((x) => {
+  // raise a queen to found a colony (GDD 6.10): the swarm-founding trait (every species in the tutorial world)
+  const raise = canRaise ? `<button class="ghost" data-raise="1"${ord ? ' disabled' : ''}><b>${SK_ICON.gynes} ${ord ? 'Raising a queen' : 'Raise a queen to found a colony'}</b><span>${ord ? `she comes out in about ${Math.max(1, Math.ceil((ord.at - sim.tick) / 60))} s` : `${F.protein} protein and ${F.sugar} sugar, with ${F.adults} adults home${haveFor ? '' : ' (not yet)'} · she flies to a free tree and founds there, with the workers near her; hold Q to fly her yourself`}</span></button>` : '';
+  $('nLine').innerHTML = raise + (mixed ? kinBtn(0, sim.colony, `your ${SPECIES_NAME[sp0]} in hand`) : '') + (sim.line.length ? sim.line.map((x) => {
     const d = Math.round(Math.hypot(x.nest.x - sim.nest.x, x.nest.z - sim.nest.z)), ok = x.colony.nestAlive && sim.colony.sited, sp = x.colony.species || 'wasp';
     return (sp !== sp0 ? kinBtn(x.id, x.colony, `the ${SPECIES_NAME[sp]} ${d} m off`) : '') + `<button class="ghost" data-sw="${x.id}"${ok ? '' : ' disabled'}><b>Take in hand: ${SPECIES_NAME[sp]}</b><span>${fmt(x.colony.adults)} adults, ${fmt(broodTotal(x.colony))} brood, ${d} m off${x.colony.nestAlive ? '' : ' · destroyed'}</span></button>`;
-  }).join('') : '<span class="label">No other colony of the line yet. Queens that winter well found them in spring; honeybees swarm.</span>');
+  }).join('') : `<span class="label">No other colony of the line yet. Queens that winter well found them in spring; honeybees swarm${canRaise ? '; or raise a queen' : ''}.</span>`);
 }
 $('nLine').addEventListener('click', (e) => {
+  const q = e.target.closest('button[data-raise]'); if (q) { if (!q.disabled) input.raise = 1; return; }
   const k = e.target.closest('button[data-kin]'); if (k) { kinOnce = +k.dataset.kin; input.kin = 1; return; }
   const b = e.target.closest('button[data-sw]'); if (b && !b.disabled) { switchOnce = +b.dataset.sw; input.switchTo = 1; }
 });
+// ------------------------------------------------------------------ Q: a tap, a hold, the worker map (GDD 10.7)
+// A tap of Q takes a worker of the hand within reach, at random (the nearest one, by relay, when none is); a hold opens
+// the worker map: every insect of the hand round the one flown, top-down with the view's forward up, to pick one.
+const Q_HOLD = 350;
+const wmap = { open: false, cx: 0, cy: 0, list: [], hover: null, R: 40 };
+function qShort() {
+  const d = sim && sim._driven(); if (!d) { input.qTap = 1; return; }
+  const R2 = T.possess.freeRange * T.possess.freeRange;
+  const near = sim.wasps.filter((w) => w !== d && w.colony === 'own' && w.state !== 'dead' && w.caste === 'worker' && (w.x - d.x) ** 2 + (w.y - d.y) ** 2 + (w.z - d.z) ** 2 <= R2);
+  if (near.length) { pickOnce = near[Math.floor(Math.random() * near.length)].id; input.pick = 1; } else input.qTap = 1;
+}
+function qTick() {
+  const now = performance.now(), live = running && !paused && !ui.nest && !atlas.open && !ov.on;
+  if (input.qDown && now - input.qDown >= Q_HOLD) { input.qDown = 0; if (live) openWorkerMap(); }
+  const gp = navigator.getGamepads ? [...navigator.getGamepads()].find((g) => g && g.connected) : null;
+  const y = !!(gp && gp.buttons[3] && (gp.buttons[3].pressed || gp.buttons[3].value > 0.5));
+  if (y && !input.padQ) input.padQ = wmap.open || !live ? -1 : now;
+  else if (!y && input.padQ) { const t0 = input.padQ; input.padQ = 0; if (t0 > 0 && now - t0 < Q_HOLD) qShort(); }
+  else if (y && input.padQ > 0 && now - input.padQ >= Q_HOLD) { input.padQ = -1; openWorkerMap(); }
+}
+function wmapList() {
+  const d = sim._driven(); if (!d) return [];
+  return sim.wasps.filter((w) => w !== d && w.colony === 'own' && w.state !== 'dead' && (w.caste === 'worker' || w.foundress))
+    .map((w) => ({ w, d: Math.hypot(w.x - d.x, w.z - d.z) })).filter((o) => o.d <= wmap.R).sort((a, b) => a.d - b.d).slice(0, 60);
+}
+function openWorkerMap() { if (!sim || !sim._driven()) return; wmap.open = true; wmap.cx = wmap.cy = 0; input.lmb = false; input.keys.clear(); $('wmap').hidden = false; drawWorkerMap(); }
+function closeWorkerMap() { wmap.open = false; $('wmap').hidden = true; }
+function wmapFly(id) { pickOnce = id; input.pick = 1; closeWorkerMap(); }
+function wmapPick() { if (wmap.hover) wmapFly(wmap.hover.w.id); }
+const ROLE_ICON = { sugar: '✿', protein: '✧', pulp: '▤', water: '≈', guard: '⛨' };
+function drawWorkerMap() {
+  const cv = $('wmapC'), S = cv.width, ctx = cv.getContext('2d'), d = sim._driven();
+  if (!d) { closeWorkerMap(); return; }
+  const half = S / 2, k = (half - 18) / wmap.R, f = [Math.sin(input.yaw), Math.cos(input.yaw)], r = [-Math.cos(input.yaw), Math.sin(input.yaw)];
+  const toS = (x, z) => { const dx = x - d.x, dz = z - d.z; return [half + (dx * r[0] + dz * r[1]) * k, half - (dx * f[0] + dz * f[1]) * k]; };
+  wmap.cx = Math.max(-half, Math.min(half, wmap.cx)); wmap.cy = Math.max(-half, Math.min(half, wmap.cy));
+  wmap.list = wmapList();
+  ctx.clearRect(0, 0, S, S);
+  ctx.fillStyle = 'rgba(14,12,9,.82)'; ctx.beginPath(); ctx.arc(half, half, half - 2, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(236,232,220,.18)'; ctx.lineWidth = 1;
+  for (const m of [10, 20, 30, 40]) { ctx.beginPath(); ctx.arc(half, half, m * k, 0, Math.PI * 2); ctx.stroke(); }
+  ctx.strokeStyle = 'rgba(245,197,24,.5)'; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.arc(half, half, T.possess.freeRange * k, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+  if (sim.colony.nestAlive && sim.colony.sited) { const [x, y] = toS(sim.nest.x, sim.nest.z); ctx.fillStyle = '#ece8dc'; ctx.font = '16px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('⌂', x, y); }
+  const px = half + wmap.cx, py = half + wmap.cy;
+  let best = null, bd = 28 * 28;
+  for (const o of wmap.list) { const [x, y] = toS(o.w.x, o.w.z), q = (x - px) ** 2 + (y - py) ** 2; o.s = [x, y]; if (q < bd) { bd = q; best = o; } }
+  if (!best && wmap.list.length && !wmap.cx && !wmap.cy) best = wmap.list[0];
+  wmap.hover = best;
+  ctx.font = '13px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  wmap.list.forEach((o, i) => {
+    const [x, y] = o.s, w = o.w, q = w.foundress;
+    ctx.fillStyle = o === best ? '#f5c518' : q ? '#ff9e3d' : w.carry ? '#e8d48a' : '#cfc8b4';
+    ctx.font = q ? '18px system-ui' : '13px system-ui';
+    ctx.fillText(q ? '♛' : ROLE_ICON[w.role] || '•', x, y);
+    if (i < 9) { ctx.font = '10px system-ui'; ctx.fillStyle = 'rgba(236,232,220,.7)'; ctx.fillText(String(i + 1), x + 9, y - 8); }
+  });
+  ctx.fillStyle = '#e5412d'; ctx.beginPath(); ctx.moveTo(half, half - 7); ctx.lineTo(half - 5, half + 5); ctx.lineTo(half + 5, half + 5); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = '#f5c518'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(px, py, 7, 0, Math.PI * 2); ctx.stroke();
+  const h = best && best.w;
+  $('wmapT').innerHTML = h ? `<b>${h.foundress ? 'Young queen' : noun() + ' ' + h.id}</b> · ${h.foundress ? 'out to found' : h.role}${h.carry ? ' · carrying ' + h.carry.what : ''} · ${Math.round(best.d)} m${best.d > T.possess.freeRange ? ' (by relay)' : ''}<br>${kbd('LMB')} or ${kbd('E')} fly it · ${kbd('1')}–${kbd('9')} · ${kbd('Q')} or ${kbd('Esc')} close`
+    : `No ${noun().toLowerCase()} of yours within ${wmap.R} m · ${kbd('Q')} or ${kbd('Esc')} close`;
+}
+
+// ------------------------------------------------------------------ the tutorial (GDD 10.7)
+// Presentation only: it reads the sim (the tutorial world's queens raised faster, every way of spreading open, the
+// exterminator called once a colony is founded and one taken) and shows one short prompt at a time, with a pointer to
+// where to go when there is somewhere to go. Nothing pauses; a beat already done is passed over.
+const tutor = { i: -1, f: {}, from: null, t: 0, sig: '' };
+const rivalNear = () => { const d = sim._driven(); let b = null, bd = Infinity; for (const p of sim.places()) if (p.kind === 'rival') { const q = d ? Math.hypot(p.x - d.x, p.z - d.z) : 0; if (q < bd) { bd = q; b = p; } } return b; };
+const QWHY = { food: `the stores need ${T.found.protein} protein and ${T.found.sugar} sugar: forage`, adults: `the colony needs ${T.found.adults} adults home`, raising: 'one is being raised already', cap: 'the line holds all the colonies it can', nest: 'only a living nest with its queen can', trait: 'this species cannot (yet)' };
+const TUT = [
+  { say: () => `Mouse to look · ${kbd('W')} to fly`, done: (w) => tutor.from && Math.hypot(w.x - tutor.from.x, w.z - tutor.from.z) > 5 },
+  { say: () => `Find sugar · ${kbd('E')} to drink`, sub: 'Flowers, cans and spills: follow the sugar scent at the top', done: (w) => (w.carry && w.carry.kind === 'sugar') || tutor.f.sugar },
+  { say: () => 'Fly home · in at the entrance', aim: () => sim.nest.entrance, aimName: 'your nest', done: () => tutor.f.sugar },
+  { say: () => `Hunt · ${kbd('V')} lock on · ${kbd('E')} catch`, sub: 'Flies at the tables, caterpillars on the flowers: protein for the brood', done: (w) => (w.carry && w.carry.kind === 'protein') || tutor.f.protein },
+  { say: () => `Tap ${kbd('Q')}: fly another worker`, sub: 'A wasp is spent; the colony is you', done: () => tutor.f.possess },
+  { say: () => `${kbd('N')} colony view · Raise a queen`, sub: () => tutor.f.qWhy ? `Not yet: ${QWHY[tutor.f.qWhy] || tutor.f.qWhy}` : `${T.found.protein} protein, ${T.found.sugar} sugar, ${T.found.adults} adults`, done: () => sim.colony.queenOrder || sim._foundresses() > 0 || sim.tut.founded },
+  { say: () => 'A queen is being raised · keep foraging', sub: () => sim.colony.queenOrder ? `She comes out in about ${Math.max(1, Math.ceil((sim.colony.queenOrder.at - sim.tick) / 60))} s` : '', done: () => sim._foundresses() > 0 || sim.tut.founded },
+  { say: () => `Hold ${kbd('Q')}: pick the queen ♛`, sub: 'Or let her go: she founds by herself', done: (w) => w.foundress || sim.tut.founded },
+  { say: () => `Fly her to a free tree · ${kbd('E')}`, sub: 'Workers near her when she founds go with her', done: () => sim.tut.founded },
+  { say: () => `Raid the rival nest · ${kbd('E')} at its door`, sub: 'As a worker: steal a larva; its workers will hunt you, sting to fight', aim: () => rivalNear(), aimName: 'rival nest', done: () => tutor.f.raid || sim.tut.usurped },
+  { say: () => 'Raise a queen · take that nest', sub: () => tutor.f.guards ? `${tutor.f.guards} guard${tutor.f.guards === 1 ? '' : 's'} at the door: down them first` : `Fly the queen (hold ${kbd('Q')}) to its door · ${kbd('E')} to take it`, aim: () => rivalNear(), aimName: 'rival nest', done: () => sim.tut.usurped },
+  { say: () => 'The exterminator is coming', sub: 'For your first nest and the one you took. The colony you founded will carry on', done: () => tutor.f.home || sim.tut.done },
+  { say: () => 'Your founded colony is home now', sub: 'Every colony of the line is yours to take in hand (N)', timed: true, done: () => sim.tut.done && performance.now() - tutor.t > 8000 },
+  { say: () => 'On your own now', sub: 'Raise queens whenever the stores allow; take nests in spring', timed: true, done: () => sim.tut.done && performance.now() - tutor.t > 9000 },
+];
+function tutorReset() {
+  tutor.f = {}; tutor.from = null; tutor.sig = ''; tutor.t = performance.now();
+  tutor.i = sim.settings.tutorial && !sim.tut.done ? (sim.tut.usurped ? 11 : sim.tut.founded ? 9 : 0) : -1;
+  $('tut').hidden = tutor.i < 0;
+}
+function tutorEvent(e) {
+  if (tutor.i < 0) return;
+  const f = tutor.f;
+  if (e.type === 'deposit' && e.id === sim.drivenId) { if (e.kind === 'sugar') f.sugar = true; if (e.kind === 'protein') f.protein = true; }
+  else if (e.type === 'possess') f.possess = true;
+  else if (e.type === 'queenDenied') f.qWhy = e.why;
+  else if (e.type === 'raid' && e.driven) f.raid = true;
+  else if (e.type === 'usurpDenied') f.guards = e.why === 'guards' ? e.guards : 0;
+  else if (e.type === 'tutorialHome') f.home = true;
+  else if (e.type === 'tutorialDone') { f.done = true; try { localStorage.setItem('sting.tutDone', '1'); } catch { /* optional */ } }
+}
+function tutorTick() {
+  if (tutor.i < 0 || !sim) return;
+  const w = sim._driven();
+  if (!w) return;
+  if (!tutor.from) tutor.from = { x: w.x, z: w.z };
+  // a beat already done on the player's own is passed over, with every one before it
+  for (let k = TUT.length - 1; k > tutor.i; k--) if (!TUT[k].timed && TUT[k].done(w)) { tutor.i = k + 1; tutor.t = performance.now(); break; }
+  while (tutor.i < TUT.length && TUT[tutor.i].done(w)) { tutor.i++; tutor.t = performance.now(); }
+  if (tutor.i >= TUT.length) { tutor.i = -1; $('tut').hidden = true; return; }
+  const b = TUT[tutor.i], sub = typeof b.sub === 'function' ? b.sub() : b.sub || '';
+  let aim = '';
+  const p = b.aim && b.aim();
+  if (p) {
+    const dx = p.x - w.x, dz = p.z - w.z, dist = Math.hypot(dx, dz);
+    if (dist > 2) { const rel = Math.atan2(dx, dz) - input.yaw; aim = `<span class="tut-aim"><i style="transform:rotate(${(-rel).toFixed(3)}rad)">↑</i>${b.aimName} · ${Math.round(dist)} m</span>`; }
+  }
+  const html = `<div class="tut-say">${b.say()}</div>${sub ? `<div class="tut-sub">${sub}</div>` : ''}${aim}`;
+  if (html !== tutor.sig) { tutor.sig = html; $('tut').innerHTML = html; }
+  $('tut').hidden = false;
+}
+// the events of spreading the line (GDD 6.10) as the player sees them
+function spreadEvent(e) {
+  const F = T.found;
+  switch (e.type) {
+    case 'queenDenied': toast(`No queen raised: ${QWHY[e.why] || e.why}`, 'var(--muted)', 2.6); break;
+    case 'queenOrdered': toast(`A queen is being raised · out in about ${Math.max(1, Math.round((e.at - sim.tick) / 60))} s`, 'var(--yellow)', 2.6); lineSig = ''; break;
+    case 'queenRaised': toast(`A young queen is out to found · hold Q to fly her, or let her go`, 'var(--yellow)', 3.4); logEvent(`young queen ${e.id} raised to found a colony`); lineSig = ''; break;
+    case 'founded': toast(`A new colony of the line, ${Math.round(Math.hypot(e.x - sim.nest.x, e.z - sim.nest.z))} m off${e.escort ? `, with ${e.escort} workers` : ''}`, 'var(--yellow)', 3.4); logEvent(`a young queen founded colony ${e.id}`); syncNests(); lineSig = ''; break;
+    case 'foundDenied': toast(e.why === 'cap' ? 'The line holds all the colonies it can' : `No free tree here · a trunk with no nest of yours within ${T.line.minGap} m`, 'var(--muted)', 2.6); break;
+    case 'usurped': toast(e.own ? 'This nest is yours now · its workers raise your brood' : `Nest taken · a colony of the line with ${e.workers} workers`, 'var(--yellow)', 3.4); logEvent(`a queen took the rival nest ${e.key}`); syncNests(); lineSig = ''; mapTiles.clear(); break;
+    case 'usurpDenied': toast(e.why === 'guards' ? `${e.guards} guard${e.guards === 1 ? '' : 's'} at the door · they are after the queen` : e.why === 'late' ? 'Too late in the year: queens take nests in spring' : e.why === 'cap' ? 'The line holds all the colonies it can' : 'This species does not take nests (yet)', 'var(--red)', 2.6); break;
+    case 'heirRaised': if (e.colony === 'own') toast('The colony raised an emergency queen from its brood', 'var(--yellow)', 3); logEvent(`an emergency queen in ${e.colony === 'own' ? 'your colony' : 'a colony of the line'}`); break;
+    case 'tutorialHome': toast('Your first nest is gone · the colony you founded is home now', 'var(--yellow)', 4); lineSig = ''; skillSig = ''; syncNests(); waspSwitched(sim.drivenId, 0.98); syncChunks(); break;
+    case 'tutorialDone': toast('Tutorial done · the line is yours', 'var(--yellow)', 3.4); break;
+    default: return false;
+  }
+  return true;
+}
 function updateSkills() {
   const P = sim.prog, X = T.xp, all = sim.settings.skills === 'all', xp = P.unitTotal + P.hiveTotal, w = sim._driven();
   const p = w && w.colony === 'own' ? (w.pers || { xp: 0, by: ROLES.map(() => 0), ranks: SKILLS.map(() => 0), mastered: false }) : null;
@@ -2959,6 +3122,8 @@ function toast(text, color = 'var(--fg)', secs = 2.2) {
 const kbd = (k) => `<kbd>${k}</kbd>`;
 function updateHud() {
   const w = sim.wasp, c = sim.colony;
+  if (wmap.open) drawWorkerMap();
+  tutorTick();
   $('stungN').textContent = fmt(sim.stung.size);
   $('adults').textContent = fmt(c.adults);
   $('brood').textContent = fmt(broodTotal(c));
@@ -3016,6 +3181,7 @@ function updateHud() {
   else if (w.state === 'webbed') hint = `Mash ${kbd('Shift')} to tear free`;
   else if (w.state === 'drowning') hint = w.drown.water ? `Mash ${kbd('Space')} or ${kbd('Shift')} to break the surface and fly` : `Mash ${kbd('Space')} or ${kbd('Shift')} to climb out over the side`;
   else if (w.state === 'fighting') hint = `Mash ${kbd('LMB')} to sting it first`;
+  else if (w.foundress && w.state === 'fly') hint = sim._rivalNestNear(w, T.found.reach * 0.1) ? `${kbd('E')} take this nest: kill its queen, its workers raise yours` : `By a free tree trunk: ${kbd('E')} found a colony here · the workers near you go with you`; // GDD 6.10
   else if (w.state === 'landed') hint = w.walking ? 'Walking · it follows the surface round edges, up trunks and under tables · look where you want to go' : `Resting costs no sugar in the warmth · mouse turns · ${kbd('W')}${kbd('A')}${kbd('S')}${kbd('D')} walk on any surface · ${kbd('LMB')} sting someone within reach · ${kbd('Space')} or ${kbd('Shift')} take off`;
   else if (w.state === 'perched') hint = `${kbd('W')}${kbd('A')}${kbd('S')}${kbd('D')} crawl (look up or down to climb) · ${kbd('LMB')} sting · ${kbd('Space')} take off · ${kbd('E')} crawl under at an opening`;
   else if (input.pilot && input.pilotMode === 'hover') hint = `Hovering round the ${targetLabel(sim, input.pilot)} · ${TARGET_KIND[input.pilot.kind] && TARGET_KIND[input.pilot.kind].go ? `${kbd('E')} ${TARGET_KIND[input.pilot.kind].go} · ` : ''}${kbd('H')} stop · any move key takes over`;
@@ -3162,7 +3328,7 @@ function drawMapTo(ctx, W, H, ox, oz, cell, o = {}) {
       if (lv) { ctx.fillStyle = `rgba(229,65,45,${0.1 + lv * 0.1})`; ctx.fillRect(sx + 1, sy + 1, cell - 2, cell - 2); }
       ctx.fillStyle = '#ece8dc';
       for (const hv of sim.hivesIn(rec)) { const [x, y] = toS(hv.x, hv.z); ctx.fillRect(x - 3 * k, y - 3 * k, 6 * k, 6 * k); }
-      if (rec.content.rival) { const [x, y] = toS(rec.content.rival.x, rec.content.rival.z); ctx.strokeStyle = orange; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 4 * k, 0, Math.PI * 2); ctx.stroke(); }
+      if (sim._rivalOf(rec)) { const [x, y] = toS(rec.content.rival.x, rec.content.rival.z); ctx.strokeStyle = orange; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 4 * k, 0, Math.PI * 2); ctx.stroke(); }
     } else {
       if (!o.detail || cell > 14) { ctx.strokeStyle = 'rgba(165,157,138,.2)'; ctx.strokeRect(sx + 1.5, sy + 1.5, cell - 3, cell - 3); }
       // ponds show before their chunk is found: water is a landmark (pondsOf is a pure function of the seed, kept in a table)
@@ -3348,11 +3514,11 @@ function atlasCard(key, px, py, card = $('atlasCard'), box = $('atlas').getBound
     const bloom = c.flowers.filter((f, i) => sim.inBloom(rec, i)).length, cups = sim.cupsIn(rec).length;
     const prey = c.caterpillars.filter((x, i) => sim.catActive(rec, i)).length + c.flies.filter((x, i) => sim.flyActive(rec, i)).length;
     const hives = sim.hivesIn(rec).length, webs = (c.webs || []).length, birds = (c.birds || []).length, baths = (c.baths || []).length, lv = sim.escLevel(key);
-    const food = bloom + 2 * cups + prey, danger = 3 * hives + webs + birds + (c.rival ? 3 : 0);
+    const food = bloom + 2 * cups + prey, danger = 3 * hives + webs + birds + (sim._rivalOf(rec) ? 3 : 0);
     const here = [];
     if (chunkKey(chunkOf(sim.nest.x), chunkOf(sim.nest.z)) === key) here.push(sim.colony.nestAlive ? 'your nest' : 'your nest (destroyed)');
     for (const x of sim.line) if (chunkKey(chunkOf(x.nest.x), chunkOf(x.nest.z)) === key) here.push(`your ${SPECIES_NAME[x.colony.species || 'wasp']}`);
-    if (c.rival) here.push('a rival nest');
+    if (sim._rivalOf(rec)) here.push('a rival nest');
     for (const [, n] of sim.peerNests) if (n.alive && n.key === key) here.push("another player's nest");
     if (sim.ext && sim.ext.hm && sim.ext.hm.chunk === key) here.push('the exterminator');
     for (const sw of sim.swarms) { const p = sim.swarmAt(sw, sim.minute); if (chunkKey(chunkOf(p.x), chunkOf(p.z)) === key) here.push(p.hang ? 'a swarm hanging in a tree' : 'a swarm on the move'); }
@@ -3512,6 +3678,8 @@ function threatCue(e) {
 function handleEvents(events) {
   for (const e of events) {
     threatCue(e);
+    tutorEvent(e); // the tutorial reads the events too (GDD 10.7)
+    if (spreadEvent(e)) continue; // spreading the line (GDD 6.10)
     switch (e.type) {
       case 'chunksActive':
       case 'humansActive': syncChunks(); break;
@@ -3568,7 +3736,7 @@ function handleEvents(events) {
       case 'ballEscape': if (e.id === sim.drivenId) toast('Broke free', 'var(--yellow)', 1.4); break;
       case 'aiAttack': logEvent(`worker ${e.id} attacks #${e.humanHex.slice(0, 4)}`); break;
       case 'alarm': logEvent('alarm pheromone'); break;
-      case 'extScheduled': toast(e.why === 'house' ? `The people in the house found the nest. Exterminator booked for ${dayLabel(e.arriveMinute)}` : `Exterminator booked for ${dayLabel(e.arriveMinute)}`, 'var(--red)', 3); logEvent(e.why === 'house' ? 'the household found the nest · exterminator booked' : 'exterminator booked'); break;
+      case 'extScheduled': toast(e.why === 'tutorial' ? `Someone called the exterminator on your first nest · ${dayLabel(e.arriveMinute)}` : e.why === 'house' ? `The people in the house found the nest. Exterminator booked for ${dayLabel(e.arriveMinute)}` : `Exterminator booked for ${dayLabel(e.arriveMinute)}`, 'var(--red)', 3); logEvent(e.why === 'house' ? 'the household found the nest · exterminator booked' : 'exterminator booked'); break;
       case 'spill': logEvent('a drink went over · open sugar on the table'); break;
       case 'quarantine': toast('Player 2 failed the plausibility checks and was cut off', 'var(--red)', 3); logEvent(`peer ${e.peer} quarantined`); break;
       case 'implausible': logEvent(`rejected ${e.evType} from peer ${e.peer}: ${e.why}`); break;
@@ -4255,6 +4423,7 @@ function newWorld(s, restored = null) {
   syncChunks();
   syncNests();
   const w = sim.wasp;
+  closeWorkerMap(); tutorReset();
   input.yaw = w.yaw; input.pitch = 0; input.alloc = 1;
   pos.set(w.id, { p: V(w), c: V(w) });
   camOff.set(-Math.sin(input.yaw) * 0.6, 0.2, -Math.cos(input.yaw) * 0.6);
@@ -4265,19 +4434,23 @@ function readSettings() {
   const raw = $('seed').value.trim();
   let seed;
   try { seed = BigInt.asUintN(64, BigInt(raw || '0')); } catch { seed = BigInt(Array.from(raw).reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7)); }
+  if ($('tutorial').checked && $('netMode').value === 'off') seed = 1234n; // the tutorial world is one world: a rival nest near the first (GDD 10.7)
   return {
     seed, dayMinutes: +$('dayLen').value, humanDensity: +$('density').value, beeAggression: +$('bees').value, seasonDays: +$('seasonLen').value, net: $('netMode').value,
     reaction: +$('reaction').value, escalation: +$('escRate').value,
     woods: +$('woods').value, towns: +$('towns').value, water: +$('water').value, hives: +$('hives').value, terrain: +$('terrain').value, settled: +$('settled').value, // T2-6, GDD 21.6
     colonies: +$('colHeld').value, // T3-5
+    tutorial: $('tutorial').checked && $('netMode').value === 'off', // the tutorial world (GDD 10.7): solo only
     ghost: $('devGhost').checked && $('netMode').value === 'off', // dev: the driven insect a ghost (solo only; GDD 18.109)
     species: $('species').value, progression: 'open', skills: $('skillsSet').value, // GDD 6.8: test builds open all three species
     exterminator: $('sysExt').checked, pestControl: $('sysMuni').checked, birds: $('sysBirds').checked, rivals: $('sysRivals').checked,
   };
 }
 const tagText = (st) => worldTag(st) || 'Standard rules';
+// the tutorial is on for a first world and off once one is finished (kept in the browser)
+try { $('tutorial').checked = !localStorage.getItem('sting.tutDone'); } catch { $('tutorial').checked = true; }
 function showTag() { $('worldTag').textContent = 'World: ' + tagText(readSettings()); }
-for (const id of ['dayLen', 'density', 'seasonLen', 'bees', 'reaction', 'escRate', 'woods', 'towns', 'water', 'hives', 'terrain', 'colHeld', 'devGhost', 'netMode', 'sysExt', 'sysMuni', 'sysBirds', 'sysRivals']) $(id).addEventListener('change', showTag);
+for (const id of ['dayLen', 'density', 'seasonLen', 'bees', 'reaction', 'escRate', 'woods', 'towns', 'water', 'hives', 'terrain', 'colHeld', 'devGhost', 'tutorial', 'netMode', 'sysExt', 'sysMuni', 'sysBirds', 'sysRivals']) $(id).addEventListener('change', showTag);
 showTag();
 
 function applyDisplaySettings() {

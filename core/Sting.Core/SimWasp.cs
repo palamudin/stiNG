@@ -495,6 +495,12 @@ namespace Sting.Core
 
         internal void Interact(Wasp w)
         {
+            if (w.foundress || (w.caste == "queen" && !colony.sited)) // a queen at a small rival nest takes it (GDD 6.10)
+            {
+                var r = RivalNestNear(w, T.found.reach * 0.1);
+                if (r != null) { Usurp(w, r.Value); return; }
+            }
+            if (w.foundress) { FoundHere(w); return; }
             if (w.caste == "male") { var mc = w.contact; if (mc != null && w.state == "fly") PerchOn(w, mc.humanHex, mc.zone, mc.surf, mc.n, mc.part); return; } // a male does no work (T2-3)
             if (w.caste == "queen" && !colony.sited) { var site = SiteNear(w); if (site != null) { FoundNest(w, site); return; } }
             if (w.caste != "queen" && Spw(w).perennial == 0 && SeasonFrac >= T.season.reproStart && colony.mated + colony.gynes >= 1)

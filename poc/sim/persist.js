@@ -38,7 +38,7 @@ export function snapshot(sim) {
   out.humans = [...sim.humans.values()].map((hm) => { const o = {}; for (const k of Object.keys(hm)) if (!HUMAN_FIXED.has(k)) o[k] = hm[k]; o.hex = hm.hex; return o; });
   out.active = sim.active.map((hm) => hm.hex);
   const e = sim.ext;
-  out.ext = { visit: e.visit, state: e.state, arriveMinute: e.arriveMinute, lead: e.lead || null, hm: e.hm ? Object.fromEntries(Object.entries(e.hm).filter(([k]) => !['id', 'tr', 'parts'].includes(k))) : null };
+  out.ext = { visit: e.visit, state: e.state, arriveMinute: e.arriveMinute, forced: !!e.forced, lead: e.lead || null, hm: e.hm ? Object.fromEntries(Object.entries(e.hm).filter(([k]) => !['id', 'tr', 'parts'].includes(k))) : null };
   return JSON.stringify(out, replacer);
 }
 
@@ -68,6 +68,7 @@ export function restore(json) {
   if (!sim.line) { sim.line = []; sim.lineSeq = 0; } // saves from before lineage colonies (T2-4)
   if (!sim.swarms) sim.swarms = []; // saves from before swarms were seen
   if (!sim.guide) sim.guide = {}; // saves from before the field guide (T3-2)
+  if (!sim.tut) sim.tut = { founded: 0, usurped: 0, ext: false, moved: false, done: false }; // saves from before the tutorial (GDD 10.7)
   if (!sim.plaus.held) { sim.plaus.held = {}; sim.plaus.sips = {}; } // saves from before the carry ledger (T1-20)
   // saves from before body temperature (T1-2): wasps come out warm
   for (const w of [...sim.wasps, ...(sim.ghost ? [sim.ghost] : [])]) if (w.bodyT === undefined) { w.bodyT = T.cold.nestTemp; w.chill = 0; }
@@ -89,7 +90,7 @@ export function restore(json) {
     });
   }
   // the exterminator, if one is on the job
-  sim.ext = { visit: d.ext.visit, state: d.ext.state, arriveMinute: d.ext.arriveMinute, lead: d.ext.lead || null, hm: null };
+  sim.ext = { visit: d.ext.visit, state: d.ext.state, arriveMinute: d.ext.arriveMinute, forced: !!d.ext.forced, lead: d.ext.lead || null, hm: null };
   if (d.ext.hm) {
     const id = hash(sim.seed, Domain.WorldGen, 0xE77n, BigInt(d.ext.visit));
     const tr = { ...humanTraits(sim.seed, id), height: 1.8, armRatio: 1, girth: 0.4, reactionTicks: 12, style: Style.Precise, accuracy: 0.9, panicSusceptibility: 0.45, sociability: 0, escalation: 1 };

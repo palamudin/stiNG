@@ -80,6 +80,19 @@
   #barTop { top: 0; } #barBot { bottom: 0; }
   #lockMark { position: fixed; width: 34px; height: 34px; margin: -17px 0 0 -17px; border: 2px solid var(--yellow); border-radius: 50%; pointer-events: none; z-index: 5; box-shadow: 0 0 0 1px rgba(0,0,0,.4); }
   #lockMark[data-hazard="1"] { border-color: var(--red); }
+  /* the tutorial's prompt (GDD 10.7): one line, a smaller line under it, and where to go */
+  #tut { top: 13%; left: 50%; transform: translateX(-50%); text-align: center; max-width: min(560px, 92vw); padding: 0 16px; pointer-events: none; }
+  #tut .tut-say { font-family: var(--display); font-weight: 800; font-size: 19px; letter-spacing: .04em; text-transform: uppercase; color: var(--fg); }
+  #tut .tut-sub { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+  #tut .tut-aim { display: inline-flex; align-items: center; gap: 6px; margin-top: 5px; font: 600 12px var(--mono); color: var(--yellow); }
+  #tut .tut-aim i { display: inline-block; font-style: normal; font-size: 16px; }
+  #tut kbd { font: 600 12px var(--mono); border: 1px solid rgba(243,238,226,.5); padding: 0 5px; margin: 0 2px; text-transform: none; }
+  /* the worker map (long Q): the insects of the hand round the one flown */
+  #wmap { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 6; display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; }
+  #wmap canvas { width: min(360px, 80vw); height: min(360px, 80vw); }
+  #wmapT { font-size: 12.5px; text-align: center; color: var(--fg); }
+  #wmapT kbd { font: 600 11px var(--mono); border: 1px solid rgba(243,238,226,.4); padding: 0 4px; margin: 0 2px; }
+  body.touch #tut .tut-say { font-size: 14px; }
   #lockMark span { position: absolute; left: 40px; top: 6px; white-space: nowrap; font: 700 12px var(--mono, ui-monospace, monospace); color: var(--fg); text-shadow: 0 1px 2px #000; text-transform: uppercase; letter-spacing: .06em; }
   #toast { top: 24%; left: 50%; transform: translateX(-50%); text-align: center; font-family: var(--display); font-weight: 800; font-size: 22px; letter-spacing: .05em; text-transform: uppercase; opacity: 0; transition: opacity .3s; max-width: 90vw; }
 
@@ -351,6 +364,8 @@
 <div class="lbox" id="barTop"></div><div class="lbox" id="barBot"></div>
 <div class="hud shadow" id="toast"></div>
 <div id="lockMark" hidden><span></span></div>
+<div class="hud shadow" id="tut" hidden></div>
+<div id="wmap" hidden><canvas id="wmapC" width="360" height="360"></canvas><div id="wmapT" class="shadow"></div></div>
 
 <div class="hud shadow" id="vitals">
   <div id="status"></div>
@@ -480,6 +495,7 @@
       <button class="ghost" id="bContinue" hidden>Resume</button>
     </div>
     <div class="checks">
+      <label title="A guided first hour: foraging, the colony, raising a queen, founding and taking a nest (solo)"><input type="checkbox" id="tutorial">Tutorial</label>
       <label><input type="checkbox" id="devTp">Dev: teleport</label>
       <label><input type="checkbox" id="devGhost">Dev: ghost</label>
     </div>
@@ -511,7 +527,7 @@
       <div><kbd>V</kbd>/<kbd>MMB</kbd> lock on: the spot you aim at on a person, else the nearest prey or danger · <kbd>E</kbd> fly there and land · <kbd>H</kbd> hover round it (wheel: how far off · Shift+wheel: how fast round)</div>
       <div><kbd>X</kbd>swoop: a short dash that slams onto whatever it reaches (grabs prey, lands, lands on people) · locked on, it homes in</div>
       <div><kbd>G</kbd>turn to where you look · hold 1 s: auto turn</div>
-      <div><kbd>Q</kbd>take over nearest worker</div>
+      <div><kbd>Q</kbd>tap: take over a worker near you · hold: the worker map, to pick one</div>
       <div><kbd>R</kbd>rest in the nest at night</div>
       <div><kbd>N</kbd>nest panel</div>
       <div><kbd>Tab</kbd>lab overlay</div>

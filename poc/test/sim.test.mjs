@@ -2473,6 +2473,62 @@ function seated(sim, pred) {
   ok(porchLevel === houses && doors === houses, `every front door has a level stoop and a step before it, the door at the stoop's height (${porchLevel} of ${houses})`);
 }
 
+// 76. Spreading the line (GDD 6.10, 10.7): a queen raised on order founds at a free tree with the workers about her
+// (swarmFound: the tutorial world, or a species with it), a queen takes a small rival nest once its guards are down
+// (usurp: wasps and hornets, in spring; any time in the tutorial), a queenless bee colony raises an emergency queen;
+// each a field note; the tutorial world then sends the exterminator to the home nest and the taken one
+{
+  const mk = (o = {}) => { const s = new Sim({ seed: 1234, birds: false, ...o }, { noAI: true }); run(s, 1); return s; };
+  const t = mk({ tutorial: true }), c = t.colony;
+  c.adults = 60; c.protein = 1; c.sugar = 1;
+  const poor = run(t, 1, () => idle({ pick: -3000000 })).some((e) => e.type === 'queenDenied' && e.why === 'food');
+  c.protein = c.sugar = 20;
+  const ord = run(t, 1, () => idle({ pick: -3000000 })).some((e) => e.type === 'queenOrdered');
+  const at = c.queenOrder.at, hold = (sim) => { if (sim.wasp && sim.wasp.caste === 'worker') place(sim.wasp, { x: sim.nest.entrance.x + 1, y: 1.5, z: sim.nest.entrance.z }); return idle(); };
+  let ev = run(t, at - t.tick + 61, hold); const q = t.wasps.find((w) => w.foundress);
+  const raised = ev.some((e) => e.type === 'queenRaised') && !!q && q.mated;
+  const r0 = restore(snapshot(t)), savedQ = r0.wasps.some((w) => w.foundress && w.id === q.id);
+  const n0 = t.line.length; let founded = null;
+  for (let i = 0; i < 40 && !founded; i++) founded = run(t, 120, hold).find((e) => e.type === 'founded');
+  const sc = founded && t.line.find((x) => x.id === founded.id);
+  ok(poor && ord && raised && savedQ && !!founded && t.line.length === n0 + 1 && sc.colony.queenAlive && sc.colony.sited && !t.wasps.includes(q) && t.guide.swarmfound !== undefined,
+    `a queen is raised on order for protein and sugar (refused when short), comes out mated, survives a save, and founds at a free tree on her own (${founded ? `colony ${founded.id}, escort ${founded.escort}` : 'none'}); its field note opens`);
+  // the takeover: the player flies a second queen to the rival nest
+  c.protein = c.sugar = 20; run(t, 1, () => idle({ pick: -3000000 })); run(t, c.queenOrder.at - t.tick + 61, hold);
+  const q2 = t.wasps.find((w) => w.foundress), rv = t.places().find((p) => p.kind === 'rival');
+  run(t, 1, () => idle({ pick: q2.id })); const flown = t.drivenId === q2.id;
+  const key = rv.key.slice(6), at2 = () => { place(q2, { x: rv.x, y: rv.y, z: rv.z }); q2.state = 'fly'; };
+  run(t, 2, () => { at2(); return idle(); }); // (the rival's chunk in play)
+  const g = t._spawnWasp(false); g.colony = key; g.sp = 'wasp'; g.role = 'guard'; g.ai.mode = 'guard'; place(g, { x: rv.x + 0.3, y: rv.y + 0.1, z: rv.z }); // a defender at the door
+  at2(); const denied = run(t, 1, () => idle({ act: 1 })).some((e) => e.type === 'usurpDenied' && e.why === 'guards');
+  for (const w of t.wasps.slice()) if (w.colony === key) t._despawn(w);
+  run(t, 1); at2(); ev = run(t, 1, () => idle({ act: 1 }));
+  const us = ev.find((e) => e.type === 'usurped'), taken = us && t.line.find((x) => x.id === us.line);
+  ok(flown && denied && !!us && !!taken && taken.colony.queenAlive && taken.colony.adults >= T.found.hostAdults && !t.places().some((p) => p.kind === 'rival' && p.key === rv.key) && t.drivenId !== q2.id && t.guide.usurp !== undefined,
+    `the player flies the young queen (picked by id) to the rival nest: refused while its defenders are at the door, taken once they are down (${us ? Math.round(us.workers) : 0} workers); the rival nest is gone from the map and the player is back in a worker`);
+  ev = run(t, 61);
+  ok(ev.some((e) => e.type === 'extScheduled' && e.why === 'tutorial') && ev.some((e) => e.type === 'sisterExtScheduled' && e.id === us.line) && t.tut.ext,
+    'with a colony founded and one taken, the tutorial calls the exterminator to the home nest and to the taken one');
+  const tr = restore(snapshot(t));
+  ok(tr.tut.ext && tr.tut.founded === t.tut.founded && tr.tut.usurped === t.tut.usurped && tr.ext.forced && tr.line.find((x) => x.id === taken.id).extForced && tr.settings.tutorial
+    && tr.cs(key).taken === 1 && rulesHash({ tutorial: true }) !== rulesHash({}) && worldTag({ tutorial: true }) === 'tutorial',
+    "the tutorial's script, the called exterminators and the taken nest survive a save; a tutorial world is a rule apart");
+  // outside the tutorial: a wasp line cannot raise a queen on order; its own queen, not yet nested, takes a rival nest in spring
+  const n = mk(); n.colony.protein = n.colony.sugar = 50; n.colony.adults = 60;
+  const noTrait = run(n, 1, () => idle({ pick: -3000000 })).some((e) => e.type === 'queenDenied' && e.why === 'trait');
+  const rvn = n.places().find((p) => p.kind === 'rival'), kn = rvn.key.slice(6), w = n.wasp;
+  for (const x of n.wasps.slice()) if (x.colony === kn) n._despawn(x);
+  n.colony.sited = false; w.caste = 'queen'; n.settings.rivals = false; place(w, { x: rvn.x, y: rvn.y, z: rvn.z });
+  ev = run(n, 1, () => idle({ act: 1 }));
+  const own = ev.find((e) => e.type === 'usurped' && e.own);
+  ok(noTrait && !!own && n.colony.sited && n.colony.adults >= T.found.hostAdults && Math.abs(n.nest.entrance.x - rvn.x) < 1e-9,
+    `in a normal world a wasp line raises no queen on order (no swarm founding), and a queen not yet nested takes a small rival nest as her own (${own ? Math.round(own.workers) : 0} workers)`);
+  // honeybees: a queenless colony with brood raises an emergency queen
+  const b = mk({ species: 'bee' }); b.colony.queenAlive = false; b.colony.larvae = 20; b.colony.sugar = 30;
+  ev = run(b, 60 * 60 * 2);
+  ok(ev.some((e) => e.type === 'heirRaised') && b.colony.queenAlive && b.guide.emergency !== undefined, 'a honeybee colony that loses its queen raises an emergency queen from its brood; its field note opens');
+}
+
 // 75. Dev ghost (GDD 18.109; JS only, not in the C# core): with settings.ghost the driven insect is not harmed or
 // noticed (a death, a stun, water, a web, the bees at a hive, the hunters), acts on nothing (no sting, no feeding), flies
 // at full burst with no drain; a ghost world is a rule apart; without the setting nothing changes
@@ -2585,7 +2641,7 @@ function seated(sim, pred) {
 // porch lights, water, nest sites, a rival nest...) with keys that name them the same every time; every kind has a true
 // note with its source; a note unlocks the first time the wasp reaches its kind, once, with an event; the guide is saved
 {
-  const notesOk = PLACE_KINDS.length === 10 && PLACE_KINDS.every((k) => { const n = FIELD_NOTES[k]; return n.title && n.note.length > 40 && n.source.length > 8; });
+  const notesOk = PLACE_KINDS.length === 13 && PLACE_KINDS.every((k) => { const n = FIELD_NOTES[k]; return n.title && n.note.length > 40 && n.source.length > 8; });
   const s = new Sim({ seed: 1234, birds: false }, { noAI: true }); run(s, 31); // (the guide looks every 30 ticks)
   const P = s.places(), kinds = new Set(P.map((p) => p.kind)), keys = new Set(P.map((p) => p.key));
   const same = JSON.stringify(P) === JSON.stringify(s.places());

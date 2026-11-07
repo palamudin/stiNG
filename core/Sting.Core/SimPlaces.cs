@@ -24,6 +24,9 @@ namespace Sting.Core
             ("light", "Porch lights", "The European hornet flies at night and is drawn to porch lights. It hunts grasshoppers, flies and yellowjackets.", "Penn State Extension, European Hornet"),
             ("site", "Nest sites", "Yellowjackets nest in old rodent burrows, holes and voids in walls; hornets in hollow trees and wall voids.", "Utah State University Extension, Western Yellowjacket; Penn State Extension, European Hornet"),
             ("exterminator", "The exterminator", "Nests are treated at night or at dusk, when it is cooler and the wasps are less active.", "Utah State University Extension, Western Yellowjacket; UMass Extension, Yellowjackets"),
+            ("swarmfound", "Founding with a swarm", "Honeybees and the tropical Polybia paper wasps found new nests with a swarm: a queen leaves with many workers. A yellowjacket queen founds alone, in spring; in the game any species can found this way once it has the trait.", "University of Georgia Honey Bee Program, Honey Bee Biology; Wikipedia, Polybia"),
+            ("usurp", "Taking a nest", "A Vespula infernalis queen waits until a host nest has its first workers, stings the host queen, and the host workers raise her brood. The southern yellowjacket takes other yellowjackets' nests the same way, and Vespa dybowskii other hornets'.", "Wikipedia, Vespula infernalis; Wikipedia, Vespula squamosa; Wikipedia, Vespa dybowskii"),
+            ("emergency", "Emergency queens", "A honeybee colony that loses its queen raises a new one from a worker larva a few days old, fed royal jelly. Wasp workers cannot: a queenless wasp nest raises only males, and dies.", "University of Georgia Honey Bee Program, Honey Bee Biology; Wikipedia, Vespula"),
         };
     }
 
@@ -44,7 +47,7 @@ namespace Sting.Core
             foreach (var rec in activeChunks)
             {
                 var c = rec.content; string k = World.ChunkKey(rec.cx, rec.cz);
-                if (c.rival != null) Add("rival", c.rival.ex, c.rival.ey, c.rival.ez, k);
+                var rv = RivalOf(rec); if (rv != null) Add("rival", rv.ex, rv.ey, rv.ez, k);
                 var hv = HivesIn(rec); for (int j = 0; j < hv.Count; j++) Add("hive", hv[j].ex, hv[j].ey, hv[j].ez, k + ":" + j);
                 foreach (var wt in WaterIn(rec)) if (wt.kind != "puddle") Add("water", wt.x, wt.y, wt.z, k + ":" + wt.i);
                 if (c.use == "town") Add("town", (Num)rec.cx * T.chunk.size, 0, (Num)rec.cz * T.chunk.size, k);

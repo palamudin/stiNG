@@ -51,6 +51,7 @@ namespace Sting.Core
             if (w.state != "fly") return cmd;
             if (w.colony != "own") return IsRival(w) ? ThinkRival(w, cmd) : ThinkSister(w, cmd);
             if (w.caste == "male") return ThinkMale(w, cmd); // T2-3
+            if (w.foundress) return ThinkFoundress(w, cmd);
             if (w.caste == "gyne") return ThinkGyne(w, cmd);
             // alarm pheromone pulls nearby workers into an attack
             if (ai.mode != "attack" && ai.mode != "evade")
@@ -325,6 +326,7 @@ namespace Sting.Core
                 Colony.Step(c, dt, outN, daylight, frac, bio, BroodSpeed(minute, sc.nest.site, c.cool, InsGain(c.species ?? "wasp")), av, (h.heat, h.cook), lb);
                 HiveXp(c, g, false); // a colony on the AI earns at the player's gauge (GDD 6.8)
                 if (Colony.Sp(c).perennial != 0) Swarm(c, sc.nest);
+                HeirTick(c, sc.nest, frac, key);
                 // the exterminator (abstract; he is drawn only for the player's own nest): called to a sister nest's
                 // neighbourhood, he comes the next morning, or in two hours before mid-afternoon, and destroys it unless things
                 // calm down first (sim.js)
@@ -337,7 +339,7 @@ namespace Sting.Core
                         sc.ext = md < 15 * 60 && md >= (long)T.time.dawn ? minute + 120 : (md >= (long)T.time.dawn ? day + 1 : day) * 1440 + (long)T.ext.arriveMinute;
                         Emit("sisterExtScheduled", ("id", sc.id), ("arriveMinute", sc.ext));
                     }
-                    else if (sc.ext > 0 && lv < 3 && !Crowded(c)) sc.ext = 0;
+                    else if (sc.ext > 0 && lv < 3 && !Crowded(c) && !sc.extForced) sc.ext = 0;
                     else if (sc.ext > 0 && minute >= sc.ext)
                     {
                         sc.ext = 0; Colony.DestroyNest(c);
@@ -593,7 +595,7 @@ namespace Sting.Core
             if (t.kind == "trap") { var tr = c.traps[t.i]; return new V3(tr.x, tr.y, tr.z); }
             if (t.kind == "pollen") { if (t.i >= c.flowers.Count || !InBloom(rec, t.i)) return null; var f = c.flowers[t.i]; return new V3(f.x, f.y + 0.012, f.z); }
             if (t.kind == "phive") return colony.nestAlive ? nest.entrance : (V3?)null;
-            if (t.kind == "rnest") return c.rival != null ? new V3(c.rival.ex, c.rival.ey, c.rival.ez) : (V3?)null;
+            if (t.kind == "rnest") { var rv = RivalOf(rec); return rv != null ? new V3(rv.ex, rv.ey, rv.ez) : (V3?)null; }
             if (t.kind == "pnest") return peerNests.TryGetValue(t.i, out var pn) && pn.alive && !plaus.quarantined.Contains(t.i) ? new V3(pn.x, pn.y, pn.z) : (V3?)null;
             if (t.kind == "hive") { var hvs = HivesIn(rec); return t.i < hvs.Count ? new V3(hvs[t.i].ex, hvs[t.i].ey, hvs[t.i].ez) : (V3?)null; }
             if (t.kind == "fruit") { foreach (var f in FruitIn(rec)) if (f.i == t.i) return new V3(f.x, f.y + 0.015, f.z); return null; }

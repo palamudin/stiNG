@@ -26,7 +26,7 @@
 3. Simulation architecture
 4. World: generation, discovery, persistence
 5. Time, seasons, weather
-6. The colony
+6. The colony, spreading the line (6.10)
 7. The wasp
 8. Humans
 9. Bees and ecology
@@ -516,6 +516,28 @@ For testing, the PoC and the core run `open`: all three species can be picked on
 
 **Open questions.** Q-22: what a removed tree means for a persistent world. Q-23: how alliances are formed and audited in shared worlds.
 
+### 6.10 Spreading the line: founding, taking a nest, emergency queens **[T0] [P]** (agreed 2026-11-07)
+
+**Why.** Until now the line only grew in spring: queens that came through the winter founded colonies (6.7), and honeybees swarmed (T2-11). A player could not decide to spread. The tutorial needs a colony founded and a nest taken in the first hour (10.7), and the game needs colony propagation the player can choose whenever the stores allow. It is an educational game, so each way of spreading is the one a real insect uses, and the codex says which.
+
+**Three ways, each a species trait** (`swarmFound`, `usurp`, `emergency` in the species rows; tuning `[found]`):
+
+| Way | What happens in the game | Who does it in nature | Species with it at the start |
+|---|---|---|---|
+| **Founding with a swarm** (`swarmFound`) | The colony view's "Raise a queen" spends protein and sugar (6 and 6, with 25 adults home). Some days later (1.5) a young queen comes out, mated, and flies to the nearest free tree (no nest of the player's within 8 m). There she founds a colony of the line, and the workers near her (2.5 m) go with her. The player can hold Q, pick her on the worker map and fly her: E by a free trunk founds there. | Honeybees, and the tropical Polybia paper wasps. A yellowjacket queen founds alone, in spring. | none (a mutation to come) |
+| **Taking a nest** (`usurp`) | A mated queen at a rival nest's door presses E. If any of its wasps are at the door she is refused, and they hunt her. Once the guards are down she takes the nest: its queen is killed, its workers (6, plus 2 for each of the rival's) raise her brood, and the rival nest is gone from the map. A queen not yet nested makes it her own nest. A young queen of the line makes it a colony of the line. Spring only: before 35% of the season. | Vespula infernalis waits for a host nest's first workers and stings the host queen. The southern yellowjacket (V. squamosa) takes other yellowjackets' nests; Vespa dybowskii takes other hornets'. | yellowjackets and hornets |
+| **Emergency queens** (`emergency`) | A queenless colony with brood (3 at least) and some food raises a new queen in half a day, before the collapse. | Honeybees: a worker larva a few days old, fed royal jelly. Wasp workers cannot: a queenless wasp nest raises only males, and dies. | honeybees |
+
+- **Each is a field note** found by doing it ("Founding with a swarm", "Taking a nest", "Emergency queens"). The note gives the real insects and its source, and for a trait the game gives more widely, it says so.
+- **The cap holds.** A young queen, or one being raised, counts against the colonies a player may hold (6.8, T3-5). Founding or taking past it is refused.
+- **Progression.** The traits are rows in the species table, so the mutations of the growth tree (6.8, 6.9) can open them: a wasp line that mutates into swarm founding, a honeybee line that never takes nests. The tutorial world opens all three for every species: an amalgam of what progression will give, with the codex saying which species does what.
+
+**In the sim** (sim.js and C#: `_raiseQueen`, `_queenTick`, `_heirTick`, `_thinkFoundress`, `_found`, `_usurp`, `_rivalOf`):
+- The order is colony state (`queenOrder`, `heir`: the tick due), saved.
+- The young queen is a gyne with `foundress`, `mated` and a founding spot (`ai.found`).
+- A taken rival nest is chunk state (`taken`), so the chunk's rival is no longer one: no rival wasps, raids, map ring or field-guide place.
+- The pick `-3,000,000` raises a queen. The events are `queenOrdered`, `queenRaised`, `founded`, `usurped`, `heirRaised`, and a `...Denied` for each with the reason.
+
 ## 7. The wasp
 
 ### 7.1 Body *(bio, tune)* **[T0]**
@@ -824,7 +846,7 @@ The front of the game is a game menu, not a manual. Whoever wants to read clicks
 - **Title:** the name and the counter (stung 0 / 8,200,000,000), one field (world seed, or a lobby code once there are lobbies), **Fly** (a new world) and **Resume** (the saved one), and a few checkboxes:
   - Dev: teleport (click the map, J jumps far);
   - Dev: ghost (10.8);
-  - Tutorial, once it is built (10.7).
+  - Tutorial (10.7), on until one is finished.
 - **Four buttons into small menus,** one pane at a time with Back (B on a pad, Esc on a keyboard). The look is Minecraft-like: square buttons, plain labels, nothing to scroll past.
   - **Game guide:** what the game is, in a paragraph, and the controls.
   - **Codex:** the field notes found, in any world, kept in the browser; the rest show by title, locked. Every note is a true fact with its source (Appendix C, T3-2).
@@ -842,24 +864,32 @@ The front of the game is a game menu, not a manual. Whoever wants to read clicks
 - **Prompts are short.** At most six words and the key, shown as a key chip (pad glyphs on a pad). A prompt disappears when the thing is done, not on a timer.
 - **The world points, not arrows.** The wasp's own senses (6, 7) carry the guidance: a scent ribbon to the nearest sugar, prey, or home. It is the same scent cue the HUD already shows, made visible for the beat. No floating waypoints.
 - **Never block play.** Nothing pauses and no door is locked. A player who goes off and does something else is left alone; the next beat waits for its trigger.
-- **The sim is untouched.** The tutorial is presentation only: it reads the sim (events, the driven insect, the people near it) and draws prompts. The world, its people and their reactions are the ones the seed made, so a tutorial world is an ordinary world and determinism holds. Where it needs a "right" target, it picks one from what exists (the nearest flower; the slowest person at the nearest table, by their reaction trait).
-- **Skippable and remembered.** A checkbox on the title, on for a first world and off after it is finished (kept in the browser). It is always off in shared worlds and with the hardcore HUD. Any beat is skipped once its verb has been done on the player's own.
+- **A world of its own, prompts on top.** The tutorial world is seed 1234 with `settings.tutorial` on, a rule apart (in the rules hash and the tag). Its rules open every way of spreading the line (6.10), raise queens five times faster, and call the exterminator to the home nest and the taken one once the player has founded a colony and taken a nest. Everything else is the ordinary sim: the people and their reactions are the ones the seed made, and determinism holds. The prompts are presentation only: they read the sim's events and state and draw one line at a time.
+- **Skippable and remembered.** A checkbox on the title, on until a tutorial is finished (kept in the browser, `sting.tutDone`), and solo only. Any beat is passed over once its verb has been done on the player's own, with every beat before it.
 - **Death teaches.** The first death screen names the one thing that killed the wasp ("the hand came 0.4 s after the sting: be gone before it lands") and Q takes the next worker. This teaches the game's core truth: a wasp is spent, the colony is you.
 
-**The beats.** Each beat has a trigger, a prompt, a success condition and a reward. The times are targets for a new player.
+**The beats** (built, 18.110). One prompt at a time, at most six words and the keys, with a smaller line under it; where there is somewhere to go, a pointer and the distance (the nest, the rival nest). The flow teaches survival and foraging, then the colony, then spreading the line.
 
-| # | When | Beat | Prompt | Done when | Reward |
-|---|---|---|---|---|---|
-| 0 | Fly (0:00) | A worker leaves the nest at mid-morning; the camera is behind it | Mouse to look · W to fly | flown 5 m | the HUD fades in, piece by piece |
-| 1 | 0:10 | **Sugar.** A scent ribbon to the nearest flower or open can | Follow the scent · E to drink | crop full | the crop gauge fills; "Bring it home" |
-| 2 | crop full | **Home.** The ribbon turns to the nest | Fly home · in at the entrance | deposited | hive XP chip pops; the colony grows |
-| 3 | 1:30 | **The hunt.** A fly at the nearest table | V to lock on · E to catch | prey carried home | the brood bar moves |
-| 4 | 3:00 | **The first sting.** A person sitting at a table, the slowest to react in reach | Hold LMB on skin · then get out | a sting lands | the counter: **stung 1 / 8,200,000,000**, with a beat of silence and a sound |
-| 5 | first slap or swat that misses | **The window.** Their flinch, highlighted once | Watch the hand · go before it lands | out of reach in time, twice | Reflex shown as the line's first ability to buy |
-| 6 | first death | **Death.** The death screen names the cause in one line | Q: the next worker | flying again | none: a wasp is spent |
-| 7 | first XP point | **The colony.** The colony view (N), and one lit tile in the tree | N: the colony · spend a point | a point spent | the tile's effect, said in one line |
-| 8 | neighborhood alert 1 | **Escalation.** The alert bar explained once | Too many stings here · they fight back | — | — |
-| 9 | dusk, day 1 | **Night.** Rest in the nest | R to rest | rested | the day's tally, and the season ahead in one line: autumn kills the colony; young queens carry the line |
+| # | Beat | Prompt | Done when |
+|---|---|---|---|
+| 0 | First flight | Mouse to look · W to fly | flown 5 m |
+| 1 | **Sugar** | Find sugar · E to drink | sugar in the crop |
+| 2 | **Home** (pointer: the nest) | Fly home · in at the entrance | sugar delivered |
+| 3 | **The hunt** | Hunt · V lock on · E catch | prey carried or delivered |
+| 4 | **Switching** | Tap Q: fly another worker ("a wasp is spent; the colony is you") | a switch |
+| 5 | **The colony** | N colony view · Raise a queen (the cost, or why not yet) | a queen ordered |
+| 6 | Waiting | A queen is being raised · keep foraging (seconds left) | she is out |
+| 7 | **The worker map** | Hold Q: pick the queen ♛ ("or let her go: she founds by herself") | flying her, or founded |
+| 8 | **Founding** | Fly her to a free tree · E ("workers near her go with her") | a colony founded |
+| 9 | **The first raid** (pointer: the rival nest) | Raid the rival nest · E at its door ("its workers will hunt you, sting to fight") | a larva stolen, or the nest taken |
+| 10 | **Taking a nest** (pointer: the rival nest) | Raise a queen · take that nest (the guards at the door, or how) | the nest taken |
+| 11 | **The exterminator** | The exterminator is coming ("the colony you founded will carry on") | the home nest gone |
+| 12 | **A new home** | Your founded colony is home now | the tutorial done, 8 s |
+| 13 | On your own | On your own now ("raise queens whenever the stores allow; take nests in spring") | 9 s |
+
+The escort is optional: the player can fly the young queen with workers about her, or stay with the home colony and let her go; either way the player has flown more than one insect by then. Once a colony is founded and one taken, the exterminator is booked for the home nest (in 30 game minutes) and the taken one (45); calming down does not call him off. With the home nest gone the player is moved to the colony they founded, which is home from then on. The tutorial is done when the taken nest is gone too.
+
+**Still to build** (from the first design): the first sting as a beat with the counter's moment, the window (watch the hand), the death screen's one line, the first XP point and a tile spent, the escalation bar, the first night; and the scent ribbon in place of the pointer.
 
 **Just in time.** Each threat gets one line, the first time it matters:
 - a web: "Mash Shift to break free";
@@ -2572,6 +2602,32 @@ On a jump the CPU path no longer blurs a level out to its parent: the window it 
 
 The game now asks for a square at least 16 m across (`causticsMin`), pushed 30% of its size ahead along the view (`causticsAhead`), on a 512 texture with a 384 grid. That is about the old detail (3 cm texels, 7 cm cells, against 2.3 and 5 cm) over 2.7 times the width. Water seen at a slant still clouds with distance: that is the water, not the caustics.
 
+### 18.110 Spreading the line, the worker map, and the tutorial
+
+**Spreading the line** (6.10; sim.js and the C# core, a twin each).
+- **Raise a queen:** a button in the colony view's "Colonies of the line" (pick `-3,000,000`). It spends 6 protein and 6 sugar with 25 adults home; the queen comes out in 1.5 days (a fifth of it in the tutorial world). She is mated and flies to the nearest free tree on her own, or the player flies her. The workers within 2.5 m when she founds go with her.
+- **Take a nest:** a mated queen at a rival nest's door presses E. She is refused while any of its wasps are at the door, and they hunt her. Then the nest is hers, with its workers, and the rival is gone from the chunk. A queen not yet nested makes it her own nest; a young queen of the line makes it a colony of the line. Spring only (before 35% of the season), except in the tutorial.
+- **Emergency queens:** a queenless honeybee colony with brood raises a new queen in half a day.
+- **Species traits:** `swarmFound` (none yet), `usurp` (yellowjackets and hornets), `emergency` (honeybees); every one in the tutorial world. Three field notes say which insects really do each, with sources.
+- **Saved:** C# save version 40 (the order and the heir, the young queen, her spot, a taken nest, the exterminator called by the tutorial, the tutorial's script, the setting).
+
+**Q, tapped and held** (10.4).
+- **A tap** takes a worker of the hand within reach, at random (the nearest by relay when none is).
+- **A hold** (0.35 s) opens the **worker map:** a top-down disc, 40 m across each way, with the view's forward up. It shows every worker of the hand by its job's glyph (✿ sugar, ✧ protein, ▤ pulp, ≈ water, ⛨ guard), a young queen as ♛, the nest, the instant-switch range dashed, and the first nine numbered. The mouse (or right stick) moves a pointer; LMB, E or A flies the one under it; 1 to 9 pick by number; Q, Esc, B or Y close. The wasp holds while it is open.
+
+**The tutorial** (10.7). A title checkbox, on until one is finished. The tutorial world is seed 1234 with the tutorial rule. Fourteen beats run from the first flight to a colony founded, a nest taken and the exterminator's visit, which leaves the founded colony as home. Each beat is a prompt of a few words with the keys and a smaller line under it, and a pointer and distance where there is somewhere to go. A beat done early is passed over. The tutorial world calls the exterminator to the home nest and the taken one once both are done (sim.js `_tutorialTick`, the exterminator `forced`), then moves the player to the founded colony.
+
+**Tests.** Block 76 in sim.test.mjs, and its C# twin in Behaviour.cs:
+- A queen raised on order: refused when short of food, out mated, saved, founds by herself, and her note opens.
+- A queen flown to a rival nest: refused while a defender is at the door, then takes it; the rival is gone from the places and the player is back in a worker.
+- The tutorial books the exterminator for both nests; its script, the bookings and the taken nest survive a save; the tutorial world is a rule apart.
+- In a normal world a wasp line raises no queen on order, and its queen not yet nested takes a small rival nest as her own.
+- A honeybee colony that loses its queen raises one from its brood.
+
+Fixtures: the notes digest changed for the three new notes (both builds); no scenario digest moved.
+
+Checked headless: the tutorial's first prompts, a tap and a hold of Q (the map, a pick by number), the raise button, the queen out and on the map.
+
 ### 18.109 The front menu, the skill tiles, and the dev ghost
 
 **The front menu** (10.6). The title screen used to hold a page of explanation, every control, and every world option. It now holds:
@@ -3171,7 +3227,7 @@ Set 2026-11-03, after T2-14: graphics now belong to the world-building thread (2
 | T3-4 | **Built (18.107).** **The player's own colonies meeting across species.** <br>• A player's hornets hunt the same player's yellowjackets and bees ball them, unless the player marks the colonies kin. <br>• Kin is colony state every peer reads. | 6.8 | S | a kin mark stops the hunting and balling; unmarked, they fight |
 | T3-5 | **Built (18.108).** **How many colonies a player holds,** as a world setting, with colonies far from the player run at the abstract tier. | 6.8, 11.12 | M | the setting caps the held colonies; a far colony steps abstractly and comes back in step |
 | T3-6 | **Built (18.109).** **The front menu and the skill tiles.** <br>• A title with Fly, Resume, the seed or lobby field and the dev checkboxes; Game guide, Codex, Settings and Game mode as small menus behind it (10.6). <br>• The skill tree and skills as tiles with rank pips, the text in one line (6.8). <br>• The dev ghost (10.8). | 10.6, 10.8, 6.8 | S | the title fits one screen; every option is one click into a menu; every skill reads from its tile |
-| T3-7 | **The tutorial** (10.7): the beats from first flight to the first night, prompts of six words and a key, the scent ribbon, the death screen's one line, the just-in-time threat lines; presentation only, skippable, remembered, off in shared worlds. | 10.7 | M | a new player stings within 5 minutes; most reach beat 7 in a first session; a returning player never sees it |
+| T3-7 | **Built in part (18.110).** **The tutorial** (10.7): the tutorial world and fourteen beats from first flight to a colony founded, a nest taken and the exterminator's visit; prompts with keys and a pointer; skippable and remembered. **Spreading the line** (6.10): raising a queen to found, taking a nest, emergency queens, as species traits. **Q** tapped or held for the worker map. Still to come: the first-sting, death and night beats, the scent ribbon, the just-in-time threat lines. | 10.7, 6.10 | M | a new player stings within 5 minutes; most reach the founding beat in a first session; a returning player never sees it |
 
 **Waiting on decisions.** The genus progression beyond hornets and bees (6.9, T4: ants, termites, cockroaches) waits on Q-22 (what a removed tree means in a persistent world) and Q-23 (how alliances are formed and audited). Offshoot modes need their own design passes.
 

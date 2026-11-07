@@ -58,5 +58,21 @@ export const FIELD_NOTES = {
     note: 'Nests are treated at night or at dusk, when it is cooler and the wasps are less active.',
     source: 'Utah State University Extension, Western Yellowjacket; UMass Extension, Yellowjackets',
   },
+  // the ways a line spreads (GDD 6.10): found by doing them, not by reaching a place; each says which insects really do it
+  swarmfound: {
+    title: 'Founding with a swarm',
+    note: 'Honeybees and the tropical Polybia paper wasps found new nests with a swarm: a queen leaves with many workers. A yellowjacket queen founds alone, in spring; in the game any species can found this way once it has the trait.',
+    source: 'University of Georgia Honey Bee Program, Honey Bee Biology; Wikipedia, Polybia',
+  },
+  usurp: {
+    title: 'Taking a nest',
+    note: 'A Vespula infernalis queen waits until a host nest has its first workers, stings the host queen, and the host workers raise her brood. The southern yellowjacket takes other yellowjackets\' nests the same way, and Vespa dybowskii other hornets\'.',
+    source: 'Wikipedia, Vespula infernalis; Wikipedia, Vespula squamosa; Wikipedia, Vespa dybowskii',
+  },
+  emergency: {
+    title: 'Emergency queens',
+    note: 'A honeybee colony that loses its queen raises a new one from a worker larva a few days old, fed royal jelly. Wasp workers cannot: a queenless wasp nest raises only males, and dies.',
+    source: 'University of Georgia Honey Bee Program, Honey Bee Biology; Wikipedia, Vespula',
+  },
 };
 export const PLACE_KINDS = Object.keys(FIELD_NOTES);

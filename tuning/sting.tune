@@ -580,6 +580,9 @@ proteinIn = 1
 out = 1
 guards = 2
 perennial = 0
+swarmFound = 0
+usurp = 1
+emergency = 0
 
 [species.hornet]
 size = 1.7
@@ -604,6 +607,9 @@ proteinIn = 1.4
 out = 0.5
 guards = 2
 perennial = 0
+swarmFound = 0
+usurp = 1
+emergency = 0
 
 [species.bee]
 size = 0.85
@@ -628,6 +634,26 @@ proteinIn = 1
 out = 1.2
 guards = 5
 perennial = 1
+swarmFound = 0
+usurp = 0
+emergency = 1
+
+# how a line spreads (GDD 6.10): a queen raised on order (swarmFound), a queen's takeover of a small nest (usurp), an
+# emergency queen (emergency); costs, days, and the taken nest's size
+[found]
+protein = 6
+sugar = 6
+adults = 25
+days = 1.5
+tutorial = 0.2
+escortR = 2.5
+reach = 2.5
+usurpFrac = 0.35
+heirDays = 0.5
+heirBrood = 3
+hostAdults = 6
+hostWorker = 2
+hostBrood = 8
 
 [xp]
 sting = 4

@@ -445,7 +445,8 @@ namespace Sting.Core
             prevAct = act;
             if (cmd.alloc > 0 && cmd.alloc <= T.alloc.Length && colony.alloc != cmd.alloc - 1) { colony.alloc = cmd.alloc - 1; Emit("alloc", ("preset", colony.alloc)); }
             int pick = cmd.pick;
-            if (pick <= -2000000) { KinMark(-pick - 2000000); pick = 0; } // mark a colony of the player's kin, or not (T3-4)
+            if (pick == -3000000) { RaiseQueen(); pick = 0; } // raise a queen to found a colony (GDD 6.10)
+            else if (pick <= -2000000) { KinMark(-pick - 2000000); pick = 0; } // mark a colony of the player's kin, or not (T3-4)
             else if (pick <= -1000) { SwitchColony(-pick - 1000); pick = 0; } // take another colony of the line in hand (GDD 6.8)
             else if (pick <= -500) { Grow(-pick - 500); pick = 0; } // a rank on the growth tree (T3-3)
             else if (pick < 0) { Learn(-pick - 1); pick = 0; } // a negative pick learns a skill (GDD 6.8)
@@ -529,7 +530,7 @@ namespace Sting.Core
             if (pick != 0)
             {
                 var w = WaspById(pick);
-                if (w == null || w.colony != "own" || w == d || w.caste == "gyne") return;
+                if (w == null || w.colony != "own" || w == d || (w.caste == "gyne" && !w.foundress)) return; // a young queen out to found may be flown (GDD 6.10)
                 best = w; bd = D2(w, d);
             }
             else foreach (var w in wasps)
@@ -547,7 +548,7 @@ namespace Sting.Core
 
         void Possess(Wasp d, Wasp best)
         {
-            d.ai = new Ai();
+            d.ai = new Ai { mode = d.foundress ? "found" : "pick" };
             if (d.state == "attached") Detach(d, null);
             drivenId = best.id;
             if (best.state == "attached") Detach(best, null);

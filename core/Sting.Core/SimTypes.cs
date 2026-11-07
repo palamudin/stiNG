@@ -23,8 +23,11 @@ namespace Sting.Core
         public Num stingHold, cargo; public string atFood;
         // senses (T1-16): the source being worked, the one remembered, and the spiral search (angle, radius, which way)
         public AiTarget from; public Known known; public Num head, leg; public int spin;
+        /// a young queen's founding spot (GDD 6.10): the tree, and the point by its trunk she nests at
+        public FoundSpot found;
         public Ai Clone() => (Ai)MemberwiseClone();
     }
+    public sealed class FoundSpot { public Num tx, tz, x, y, z; }
     public sealed class Attach { public string hex, posture; public V3 local, n; public int start; public bool deepened; public int zone; }
     public sealed class UnderMove { public int to, t; }
     public sealed class Under { public string hex, posture, key; public int node, sel, entered; public UnderMove move; public Num nextPress; public bool mxHeld, mzHeld; }
@@ -71,6 +74,8 @@ namespace Sting.Core
         public Pers pers;
         /// a young queen who has mated on her flight (T2-3)
         public bool mated;
+        /// a young queen raised to found a colony of the line (GDD 6.10)
+        public bool foundress;
         /// the wood being chewed (T1-12): a box in a chunk, or a tree (i = -1)
         public WoodSpot chewAt;
         public WebHold web; public Drown drown; public Fight fight; public Ai ai = new Ai(); public Contact contact; public Perch perch;
@@ -265,13 +270,15 @@ namespace Sting.Core
         public Dictionary<int, int> pulp;
         /// moths taken at the porch lights, back at this tick (T2-10)
         public Dictionary<int, long> caughtMoth;
+        /// the chunk's rival nest taken by a queen of the player's (GDD 6.10): it is the player's now
+        public int taken;
     }
 
     public sealed class BeePhys { public Num x, y, z, vx, vy, vz, stun; public string mode; }
     /// phys: JS object with integer keys, which iterate in ascending order
     public sealed class HiveAlarm { public string key; public int h, target; public Num until; public SortedDictionary<int, BeePhys> phys = new SortedDictionary<int, BeePhys>(); }
     public sealed class HunterState { public string mode; public Num x, y, z, vx, vy, vz, until; public int target; }
-    public sealed class Ext { public int visit; public string state = "none"; public Num arriveMinute; public Human hm; public Lead lead; }
+    public sealed class Ext { public int visit; public string state = "none"; public Num arriveMinute; public Human hm; public Lead lead; /** called by the tutorial: things calming down do not call him off (GDD 10.7) */ public bool forced; }
     /// Where the exterminator's last flight line took him, and for which nest (T1-7)
     public sealed class Lead { public Num x, z, nx, nz; }
     public sealed class Spray { public string hex; public Num start, end; }
@@ -304,7 +311,9 @@ namespace Sting.Core
     public sealed class Virgin { public long at; }
     /// a honeybee swarm on its way (T2-11): out of the hive, hanging on a branch, flying to its new home
     public sealed class SwarmOut { public Num n; public V3 from, biv, to; public long t0, @out, leave, arrive; public Nest nest; public ColonyState colony; public bool own; }
-    public sealed class LineColony { public int id, season; public Nest nest; public ColonyState colony; /** when the exterminator comes for it (0: not called) */ public long ext; /** colony ticks owed at the abstract tier (T3-5) */ public int owed; }
+    public sealed class LineColony { public int id, season; public Nest nest; public ColonyState colony; /** when the exterminator comes for it (0: not called) */ public long ext; /** colony ticks owed at the abstract tier (T3-5) */ public int owed; /** the exterminator called by the tutorial (GDD 10.7) */ public bool extForced; }
+    /// the tutorial world's script (GDD 10.7): the colony founded, the one taken, the exterminator called, the player moved, done
+    public sealed class Tut { public int founded, usurped; public bool ext, moved, done; }
     public sealed class HiberSite { public string kind; public Num x, y, z, q; public int n; public bool scouted; }
     public sealed class Winter { public string why; public List<HiberSite> sites = new List<HiberSite>(); public Num survivors, lineage; public int until; /** the year's turn (GDD 6.8): "hornet", "bee" or null */ public string offer; /** the line's hives, wintering as clusters */ public List<LineColony> keep; /** the player's own nest wintered in (GDD 6.8) */ public bool home; /** a honeybee hive's winter with a wasp offer (Q-19), and its length in days */ public bool bee; public Num days; }
     /// a line's XP, stabs, skills and role levels (GDD 6.8); a line is the player's colonies of one species

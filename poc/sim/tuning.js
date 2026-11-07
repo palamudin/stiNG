@@ -229,12 +229,19 @@ export const T = {
   // reproduce, and whose workers die when they sting a person.
   species: {
     wasp: { size: 1, swatR: 0, speed: 1, drain: 1, felt: 1, pain: 1, annoy: 1, night: 0, barbed: 0, hunts: 1, pollen: 0, wood: 1, fight: 0, raid: 0.04,
-      start: 1, lay: 1, store: 1, sugarIn: 1, proteinIn: 1, out: 1, guards: 2, perennial: 0 },
+      start: 1, lay: 1, store: 1, sugarIn: 1, proteinIn: 1, out: 1, guards: 2, perennial: 0, swarmFound: 0, usurp: 1, emergency: 0 },
     hornet: { size: 1.7, swatR: 0.006, speed: 1.15, drain: 1.3, felt: 0.65, pain: 1.8, annoy: 1.6, night: 1, barbed: 0, hunts: 1, pollen: 0, wood: 1, fight: 1.5, raid: 0.15,
-      start: 0.35, lay: 0.3, store: 1.5, sugarIn: 0.7, proteinIn: 1.4, out: 0.5, guards: 2, perennial: 0 },
+      start: 0.35, lay: 0.3, store: 1.5, sugarIn: 0.7, proteinIn: 1.4, out: 0.5, guards: 2, perennial: 0, swarmFound: 0, usurp: 1, emergency: 0 },
     bee: { size: 0.85, swatR: -0.001, speed: 0.9, drain: 0.8, felt: 1.15, pain: 0.9, annoy: 0.6, night: 0, barbed: 1, hunts: 0, pollen: 1, wood: 0, fight: 0, raid: 0,
-      start: 2.5, lay: 1.5, store: 10, sugarIn: 1.3, proteinIn: 1, out: 1.2, guards: 5, perennial: 1 },
+      start: 2.5, lay: 1.5, store: 10, sugarIn: 1.3, proteinIn: 1, out: 1.2, guards: 5, perennial: 1, swarmFound: 0, usurp: 0, emergency: 1 },
   },
+  // How a line spreads (GDD 6.10): each way a species trait (the species rows' swarmFound, usurp, emergency), true to the
+  // insects that do it, and all of them in the tutorial world. swarmFound: a queen raised on order (cost, days) leaves
+  // to found at a free tree, with the workers near her when she founds (Polybia, honeybees); usurp: a mated queen takes
+  // a small nest whose guards are down and kills its queen, its workers raising her brood (Vespula infernalis, V.
+  // squamosa, Vespa dybowskii), before usurpFrac of the season; emergency: a queenless colony with brood raises a new
+  // queen in heirDays (honeybees). tutorial: the tutorial world's queens are raised this much faster
+  found: { protein: 6, sugar: 6, adults: 25, days: 1.5, tutorial: 0.2, escortR: 2.5, reach: 2.5, usurpFrac: 0.35, heirDays: 0.5, heirBrood: 3, hostAdults: 6, hostWorker: 2, hostBrood: 8 },
   // Progression (GDD 6.8, T0 of the growth tree). Unit XP comes from what the insect you fly does (sting a person,
   // more for one nobody had stung; drive a sting home; catch prey; bring a load home; rob a hive; get out from under a
   // hand); hive XP from what the colony does (adults emerged, loads home, young queens raised). Stabs: stings that move
@@ -429,6 +436,9 @@ export const DEFAULT_SETTINGS = {
   // how many colonies a player may hold, the one in hand counted (T3-5, GDD 6.8): the line founds no more past it; 9
   // never binds (one in hand, the line's five, three more from the tree's Line: found)
   colonies: 9,
+  // the tutorial world (GDD 10.7): the line's every way of spreading open, queens raised faster, and the exterminator
+  // called to the home nest and a taken one once the player has founded and taken a nest
+  tutorial: false,
   // dev (GDD 18.109): the driven insect is a ghost: nothing notices or harms it, it acts on nothing, it flies at full
   // burst with the swoop ready; solo only, and a rule (a ghost world never matches a normal one). Not in the C# core
   ghost: false,
@@ -476,7 +486,7 @@ const RULE_KEYS = ['dayMinutes', 'humanDensity', 'beeAggression', 'seasonDays', 
 export function rulesHash(settings) {
   const s = { ...DEFAULT_SETTINGS, ...settings };
   let h = 0x811c9dc5;
-  const str = 'gen' + GEN_VERSION + '|' + RULE_KEYS.map((k) => k + '=' + s[k]).join('|') + (s.settled ? '|settled=' + s.settled : '') + (s.colonies !== DEFAULT_SETTINGS.colonies ? '|colonies=' + s.colonies : '') + (s.ghost ? '|ghost' : '') + '|tune=' + TUNE.hash; // peers must share the tuning file too (T1-22)
+  const str = 'gen' + GEN_VERSION + '|' + RULE_KEYS.map((k) => k + '=' + s[k]).join('|') + (s.settled ? '|settled=' + s.settled : '') + (s.colonies !== DEFAULT_SETTINGS.colonies ? '|colonies=' + s.colonies : '') + (s.ghost ? '|ghost' : '') + (s.tutorial ? '|tutorial' : '') + '|tune=' + TUNE.hash; // peers must share the tuning file too (T1-22)
   for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
   return (h >>> 0).toString(16).padStart(8, '0');
 }
@@ -503,6 +513,7 @@ export function worldTag(settings) {
   if (s.settled) t.push(`wild beyond ${s.settled} m`);
   if (s.colonies !== d.colonies) t.push(`${s.colonies} colonies a player`);
   if (s.ghost) t.push('dev ghost');
+  if (s.tutorial) t.push('tutorial');
   if (s.skills !== d.skills) t.push(s.skills === 'all' ? 'all skills' : s.skills);
   if (s.progression !== d.progression) t.push(s.progression === 'earned' ? 'species earned' : s.progression.startsWith('fixed:') ? s.progression.slice(6) + 's only' : s.progression);
   return t.join(' · ');

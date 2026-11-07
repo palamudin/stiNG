@@ -10,6 +10,8 @@ namespace Sting.Core
     {
         public Num size, swatR, speed, drain, felt, pain, annoy, fight, raid, start, lay, store, sugarIn, proteinIn, @out;
         public int night, barbed, hunts, pollen, wood, guards, perennial;
+        /// how the line spreads (GDD 6.10): a queen raised on order founds with a swarm, a queen takes a small nest, an emergency queen
+        public int swarmFound, usurp, emergency;
     }
 
     /// The skills (GDD 6.8), in the order the learn command numbers them; see tuning.js
@@ -257,12 +259,18 @@ namespace Sting.Core
         public static class species
         {
             public static SpeciesRow wasp = new SpeciesRow { size = 1, swatR = 0, speed = 1, drain = 1, felt = 1, pain = 1, annoy = 1, night = 0, barbed = 0, hunts = 1, pollen = 0, wood = 1, fight = 0, raid = 0.04,
-                start = 1, lay = 1, store = 1, sugarIn = 1, proteinIn = 1, @out = 1, guards = 2, perennial = 0 };
+                start = 1, lay = 1, store = 1, sugarIn = 1, proteinIn = 1, @out = 1, guards = 2, perennial = 0, swarmFound = 0, usurp = 1, emergency = 0 };
             public static SpeciesRow hornet = new SpeciesRow { size = 1.7, swatR = 0.006, speed = 1.15, drain = 1.3, felt = 0.65, pain = 1.8, annoy = 1.6, night = 1, barbed = 0, hunts = 1, pollen = 0, wood = 1, fight = 1.5, raid = 0.15,
-                start = 0.35, lay = 0.3, store = 1.5, sugarIn = 0.7, proteinIn = 1.4, @out = 0.5, guards = 2, perennial = 0 };
+                start = 0.35, lay = 0.3, store = 1.5, sugarIn = 0.7, proteinIn = 1.4, @out = 0.5, guards = 2, perennial = 0, swarmFound = 0, usurp = 1, emergency = 0 };
             public static SpeciesRow bee = new SpeciesRow { size = 0.85, swatR = -0.001, speed = 0.9, drain = 0.8, felt = 1.15, pain = 0.9, annoy = 0.6, night = 0, barbed = 1, hunts = 0, pollen = 1, wood = 0, fight = 0, raid = 0,
-                start = 2.5, lay = 1.5, store = 10, sugarIn = 1.3, proteinIn = 1, @out = 1.2, guards = 5, perennial = 1 };
+                start = 2.5, lay = 1.5, store = 10, sugarIn = 1.3, proteinIn = 1, @out = 1.2, guards = 5, perennial = 1, swarmFound = 0, usurp = 0, emergency = 1 };
             public static SpeciesRow Of(string sp) => sp switch { "hornet" => hornet, "bee" => bee, _ => wasp };
+        }
+        /// How a line spreads (GDD 6.10): queens raised on order, nests taken, emergency queens; see tuning.js
+        public static class found
+        {
+            public static Num protein = 6, sugar = 6, adults = 25, days = 1.5, tutorial = 0.2, escortR = 2.5, reach = 2.5, usurpFrac = 0.35, heirDays = 0.5;
+            public static Num heirBrood = 3, hostAdults = 6, hostWorker = 2, hostBrood = 8;
         }
         /// Progression (GDD 6.8): XP for deeds, the year's turn; see tuning.js
         public static class xp
@@ -380,6 +388,8 @@ namespace Sting.Core
         public string species = "wasp";
         /// how many colonies a player may hold, the one in hand counted (T3-5, GDD 6.8); 9 never binds
         public int colonies = 9;
+        /// the tutorial world (GDD 10.7): every way of spreading open, queens raised faster, the exterminator called once the player has founded and taken a nest
+        public bool tutorial;
         public static readonly string[] SPECIES = { "wasp", "hornet", "bee" };
         /// the species a world lets a new line start as
         public string[] SpeciesAllowed() => progression == "open" ? (string[])SPECIES.Clone() : progression.StartsWith("fixed:") ? new[] { progression.Substring(6) } : new[] { "wasp" };
@@ -400,7 +410,7 @@ namespace Sting.Core
                 + "|seasonDays=" + N(seasonDays) + "|reaction=" + N(reaction) + "|escalation=" + N(escalation)
                 + "|exterminator=" + B(exterminator) + "|birds=" + B(birds) + "|rivals=" + B(rivals)  + "|pestControl=" + B(pestControl)
                 + "|woods=" + woods + "|towns=" + towns + "|water=" + N(water) + "|hives=" + N(hives) + "|terrain=" + terrain + "|progression=" + progression + "|skills=" + skills
-                + (settled != 0 ? "|settled=" + settled : "") + (colonies != 9 ? "|colonies=" + colonies : "") + "|tune=" + Tune.Hash; // peers must share the tuning file too (T1-22)
+                + (settled != 0 ? "|settled=" + settled : "") + (colonies != 9 ? "|colonies=" + colonies : "") + (tutorial ? "|tutorial" : "") + "|tune=" + Tune.Hash; // peers must share the tuning file too (T1-22)
             return R.Fnv32(str).ToString("x8");
         }
 
@@ -426,6 +436,7 @@ namespace Sting.Core
             if (terrain != d.terrain) t.Add(terrain > 1 ? "hilly" : "rolling");
             if (settled != 0) t.Add("wild beyond " + settled + " m");
             if (colonies != d.colonies) t.Add(colonies + " colonies a player");
+            if (tutorial) t.Add("tutorial");
             if (skills != d.skills) t.Add(skills == "all" ? "all skills" : skills);
             if (progression != d.progression) t.Add(progression == "earned" ? "species earned" : progression.StartsWith("fixed:") ? progression.Substring(6) + "s only" : progression);
             return string.Join(" · ", t);
