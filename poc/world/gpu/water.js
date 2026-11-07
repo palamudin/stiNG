@@ -9,9 +9,10 @@
 // Still to come over from surface.js: the shore table's coastal swell and swash, the foam fields and lace, the
 // screen-space reflection and the mirror, glints, rain rings, caustics.
 import * as THREE from 'three/webgpu';
-import { Fn, If, float, int, vec2, vec3, vec4, uniform, uniformArray, texture, positionLocal, positionWorld, cameraPosition, screenUV, viewportSharedTexture, abs, max, min, mix, clamp, smoothstep, pow, exp, sqrt, log2, length, normalize, dot, reflect, select, varyingProperty, wgslFn, wgsl, Discard, Loop, Break, cross, dFdx, dFdy, cameraProjectionMatrix, cameraViewMatrix, cameraNear, cameraFar, viewportDepthTexture, perspectiveDepthToViewZ } from 'three/tsl';
+import { Fn, If, float, int, vec2, vec3, vec4, uniform, uniformArray, texture, positionLocal, positionWorld, cameraPosition, screenUV, viewportSharedTexture, abs, max, min, mix, clamp, smoothstep, pow, exp, sqrt, log2, floor, length, normalize, dot, reflect, select, varyingProperty, wgslFn, wgsl, Discard, Loop, Break, cross, dFdx, dFdy, cameraProjectionMatrix, cameraViewMatrix, cameraNear, cameraFar, viewportDepthTexture, perspectiveDepthToViewZ } from 'three/tsl';
 import { COAST_WGSL } from './coast.wgsl.js';
 import { bakeFoamTexture } from './foamtex.js';
+import { bakeBreaker } from './breaker.js';
 
 // the coast (water3/swash.js, converted): entries taking the shore table's answer at the point
 const coastCode = wgsl(COAST_WGSL);
@@ -128,7 +129,9 @@ export function gpuWater(clip, waves, opts = {}) {
   const vCoast = varyingProperty('vec4', 'vCoast'), vCoastF = varyingProperty('vec2', 'vCoastF'); // set in the vertex stage, read in the fragment
   const vH = varyingProperty('float', 'vH'); // the waves' lift here (the crests' glow)
   const vRest = varyingProperty('vec2', 'vRest'); // the water's own place before the waves moved it: patterns ride the surface, not the screen's
-  const vCurl = varyingProperty('float', 'vCurl'); const vBed = varyingProperty('float', 'vBed'); // the swell's velocity at the bed (the silt it stirs) // how much of a plunging lip this is (its normal and its white)
+  const vCurl = varyingProperty('float', 'vCurl');
+  const vBed = varyingProperty('float', 'vBed'); // the swell's velocity at the bed (the silt it stirs)
+  const tBrk = bakeBreaker(); // the breaker's event (gpu/breaker.js), computed once; vCurl: how much of a breaking lip this is (its normal and its white)
   const uLip = uniform(1); // the lip's strength (the panel)
   mat.positionNode = Fn(() => {
     const skirt = positionLocal.y.greaterThan(0.5);
@@ -140,6 +143,7 @@ export function gpuWater(clip, waves, opts = {}) {
     const cd = vec3(0).toVar(), near = float(0).toVar(), shift = float(1).toVar(), isCoast = float(0).toVar();
     vCoast.assign(vec4(0)); vCoastF.assign(vec2(0)); vH.assign(0); vCurl.assign(0); vBed.assign(0); vRest.assign(vec2(0));
     const lipPsi = float(0).toVar(), lipB = float(0).toVar(), lipA = float(0).toVar(), lipDir = vec2(0).toVar(), lipU = float(-1).toVar(); vRest.assign(xz);
+    const lipPh = float(0).toVar(), lipK = float(1).toVar(), l1Psi = float(0).toVar(), l1A = float(0).toVar(), l1Dir = vec2(1, 0).toVar(), l1U = float(-1).toVar(), l1Ph = float(0).toVar(), l1K = float(1).toVar();
     if (shV) If(skirt.not().and(depth.greaterThan(-3)).and(level.lessThanEqual(uSea.add(3.5))).and(dist.lessThan(600)), () => {
       const sh = shV(xz);
       const m = cVert({ xz, sh: sh.v, know: sh.know, depth, cell, fl: float(0), ...surfArgs }).toVar();
@@ -175,7 +179,11 @@ export function gpuWater(clip, waves, opts = {}) {
       // whitewater on the crest's front and the lace it leaves); its bed velocity stirs the silt
       const psi = t0.ph.add(Math.PI).mod(2 * Math.PI).sub(Math.PI).negate().toVar(); // < 0 ahead of the crest
       lipPsi.assign(psi); lipB.assign(smoothstep(0.7, 1.0, sw.B0.x).mul(wF)); lipA.assign(t0.a); lipDir.assign(t0.dirW);
-      lipU.assign(select(sw.B0.y.greaterThan(0.5), sw.B0.z.div(max(float(6.2832).div(max(t0.k, 1e-3)).mul(0.3), 2)), float(-1))); // the breaker's stage: 0 the break .. 1 the lip in the trough
+      lipU.assign(select(sw.B0.y.greaterThan(0.5), sw.B0.z.div(max(float(6.2832).div(max(t0.k, 1e-3)).mul(0.3), 2)), float(-1)));
+      lipPh.assign(t0.ph); lipK.assign(t0.k); lipA.assign(t0.a.mul(wF));
+      // the wind sea's crests break by the same event, smaller
+      l1Psi.assign(t1.ph.add(Math.PI).mod(2 * Math.PI).sub(Math.PI).negate()); l1A.assign(t1.a.mul(wF1)); l1Dir.assign(t1.dirW); l1Ph.assign(t1.ph); l1K.assign(t1.k);
+      l1U.assign(select(sw.B1.y.greaterThan(0.5), sw.B1.z.div(max(float(6.2832).div(max(t1.k, 1e-3)).mul(0.3), 1)), float(-1))); // the breaker's stage: 0 the break .. 1 the lip in the trough
       const brk = max(smoothstep(0.0, 0.04, sw.B0.w), sw.B0.y.mul(0.35)).mul(wF); // the white where the wave loses its energy (gpu/swellfield.js), a little over every bore
       vCoast.z.assign(brk.mul(smoothstep(-0.9, -0.1, psi)).mul(exp(psi.max(0).mul(-0.9))).mul(smoothstep(0.05, 0.3, t0.a)));
       vCoast.w.assign(brk.mul(0.35).mul(smoothstep(0.05, 0.3, t0.a)));
@@ -193,25 +201,24 @@ export function gpuWater(clip, waves, opts = {}) {
     const k = smoothstep(0, 4, depth.max(0)).mul(uChop);
     D.assign(D.mul(k).add(cd).add(fd)); vH.assign(D.y);
     D.x.mulAssign(shift); D.z.mulAssign(shift); // near the line the waves only lift and lower the water
-    // the plunging lip (after Malan's breaking waves, SIGGRAPH 2022, as a shape instead of a baked one): where the first
-    // train is breaking (the band of depth where its height reaches the breaking limit: its crests curl as they cross
-    // it), the water over the crest and just behind it is thrown forward over the face and falls, so the surface folds
-    // over into a tube; only where the grid is fine enough to carry it (near the eye)
-    if (shV || SWv) {
-      // its stage (field: how far it has run since it broke, in parts of the distance a lip takes to land): rising
-      // before the break, pitching forward over the first half, falling to the trough by 1 (a tube), gone into a bore by
-      // 1.6; without the field, the old band of breaking
-      const st = lipU, rise = select(st.lessThan(0), smoothstep(0.02, 0.6, lipB), float(1)), fall = smoothstep(0.35, 1.0, st), gone = smoothstep(1.1, 1.6, st);
-      const b = lipB, curl = select(st.lessThan(0), smoothstep(0.02, 0.4, b).mul(float(1).sub(smoothstep(0.72, 0.98, b))), rise.mul(float(1).sub(gone))).mul(uLip);
-      const hr = D.y.div(max(lipA.mul(1.22), 0.03)).clamp(0, 1.2), w = exp(lipPsi.sub(0.12).div(0.5).pow(2).negate());
-      const fine = smoothstep(lipA.mul(2.5), lipA.mul(0.8), cell).mul(smoothstep(0.08, 0.25, lipA));
-      const k2 = curl.mul(w).mul(fine).toVar();
-      // the cross-section: the crest's water thrown forward as the square of its height (the tip furthest), lifted a
-      // little as it pitches, then falling as the cube toward the trough in front: a half pipe whose tip lands as it ends
-      const thr = k2.mul(lipA).mul(fall.mul(1.4).add(1.5)).mul(hr.mul(hr));
-      const dy = k2.mul(lipA).mul(hr.mul(hr).mul(0.3).sub(hr.mul(hr).mul(hr).mul(fall.mul(1.8).add(1.0)).mul(smoothstep(-0.1, 0.6, lipPsi).max(fall.mul(0.8)))));
-      D.addAssign(vec3(lipDir.x.mul(thr), dy, lipDir.y.mul(thr)));
-      vCurl.assign(k2.mul(hr));
+    // the breaker, replayed (gpu/breaker.js): wherever a train has broken, its baked event at the wave's stage (how far
+    // it has run since it broke) and its place across the wave, scaled to its height; each crest, and each stretch of
+    // it, a little faster or slower and stronger or weaker (a seed from the crest's number and the place along it: the
+    // break peels along the crest instead of the whole line going at once); only where the grid carries it
+    if (SWv) {
+      const replay = (psi, a, dir, st, ph, kk, strength) => {
+        const L = float(6.2832).div(max(kk, 1e-3)), cyc = floor(ph.add(Math.PI).div(6.2832)), along = xz.dot(vec2(dir.y.negate(), dir.x)).div(L.mul(1.3));
+        const n1 = nz({ p: vec2(along, cyc.mul(7.31)), s: int(901) }), n2 = nz({ p: vec2(along.mul(0.7).add(3.1), cyc.mul(5.17)), s: int(902) });
+        const sv = st.mul(n1.mul(0.2).add(1)).add(n2.mul(0.12));
+        const T = texture(tBrk, vec2(psi.div(6.2832).add(0.5), sv.clamp(0, 1))).level(0);
+        const k3 = select(st.greaterThanEqual(0).and(sv.lessThan(1.05)), float(1), float(0)).mul(strength).mul(n1.mul(0.25).add(0.85))
+          .mul(smoothstep(a.mul(2.5), a.mul(0.8), cell)).mul(smoothstep(0.03, 0.15, a));
+        return { d: vec3(dir.x.mul(T.x), T.y, dir.y.mul(T.x)).mul(a).mul(k3), white: T.z.mul(k3), slide: dir.mul(T.w.mul(a).mul(k3)) };
+      };
+      const b0 = replay(lipPsi, lipA, lipDir, lipU, lipPh, lipK, uLip), b1 = replay(l1Psi, l1A, l1Dir, l1U, l1Ph, l1K, uLip.mul(0.8));
+      D.addAssign(b0.d.add(b1.d));
+      vCurl.assign(max(b0.white, b1.white));
+      vRest.assign(xz.add(b0.slide).add(b1.slide)); // (the patterns keep their size over the fold)
     }
     const y = level.add(D.y).max(min(bed.add(0.04), level)).toVar(); // the trough held over the floor
     // the shoreline: over the sand a sheet at the swash's height, thin at its tip; in the last half metre of water lifted
@@ -373,8 +380,9 @@ export function gpuWater(clip, waves, opts = {}) {
     } else fm.assign(max(cap, coastFoam));
     const foamCol = uSkyUp.mul(0.8).add(uSunColor.mul(cs).mul(max(uSunDir.y, 0.05)).mul(0.55)).mul(0.92);
     col.assign(mix(col, foamCol, fm.clamp(0, 1).mul(0.85)));
-    // the edge: the water fades to nothing as it thins, so the line is the sand seen through no water
-    const outc = mix(under, col, smoothstep(0, 0.05, depth)).toVar();
+    // the edge: only the last millimetres fade (a hairline, no seam); a thin sheet still mirrors the sky as any water
+    // does (the reflection does not thin with the depth: only the body's colour does, through its absorption)
+    const outc = mix(under, col, smoothstep(0, 0.006, depth)).toVar();
     // the map (map.js): flat blue by depth, the coast line drawn by the ground under it
     if (opts.map) outc.assign(mix(outc, mix(lin3(0.55, 0.78, 0.9), lin3(0.2, 0.45, 0.75), smoothstep(0, 14, still)).mul(opts.map.uMapK), opts.map.uMap));
     return RF.bind(vec4(outc, 1));
