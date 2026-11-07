@@ -6,6 +6,7 @@
 //     where the forest thins; boulders on a 6.5 m grid, most on steep ground and at the shore.
 //   game's world: the sim's own trees, one for one, at their own sizes.
 import { hash01, vnoise, smoothstep } from './noise.js';
+import { riverRock, RIVER_ROCK } from './sources/wild.js';
 
 export function placeTile(src, ti, tj, kinds, cfg, design) {
   const T = cfg.tile, items = kinds.map(() => Array.from({ length: cfg.variants }, () => []));
@@ -64,6 +65,14 @@ export function placeTile(src, ti, tj, kinds, cfg, design) {
     if (r > p) continue;
     const s = (0.5 + 1.6 * Math.pow(hash01(ix, iz, 44), 2)) * (1 + smoothstep(0.3, 0.8, slope));
     push(rk, x, z, hash01(ix, iz, 45) * 6.283, hash01(ix, iz, 46), s, s * (0.8 + 0.4 * hash01(ix, iz, 47)));
+  }
+  // rocks in the rivers' shallows (wild.js riverRock): the river's flow parts round the same rocks
+  if (rk >= 0 && src.kind === 'wild') {
+    const RG2 = RIVER_ROCK.grid, o6 = [0, 0, 0, 0, 0, 0];
+    for (let iz = Math.floor(z0 / RG2); iz * RG2 < z0 + T; iz++) for (let ix = Math.floor(x0 / RG2); ix * RG2 < x0 + T; ix++) {
+      const q = riverRock(src.params, ix, iz, o6);
+      if (q && q[0] >= x0 && q[0] < x0 + T && q[1] >= z0 && q[1] < z0 + T) push(rk, q[0], q[1], q[2], q[3], q[4], q[5]);
+    }
   }
   return items;
 }

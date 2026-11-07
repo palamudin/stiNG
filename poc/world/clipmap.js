@@ -67,7 +67,7 @@ void main() {
 void main() {
   ivec2 t = ivec2(gl_FragCoord.xy); ivec2 w = ivec2(uWin);
   ivec2 idx = w + ((t - w) & 127);
-  outColor = wildWaterFlow(vec2(idx) * uCell); // the level, the river's share, its velocity
+  outColor = wildWaterFlow(vec2(idx) * uCell, uCell); // the level, the river's share, its velocity (parted round its rocks)
 }`,
         depthTest: false, depthWrite: false,
       });

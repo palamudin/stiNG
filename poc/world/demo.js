@@ -30,7 +30,7 @@ const camera = new THREE.PerspectiveCamera(55, 1, 0.005, 60000);
 // the shore by table (the default) or by live calculation per pixel, for the comparison: ?shore=live, or a page that
 // sets window.__SHORE_MODE before this script
 const SHORE_MODE = ((m) => (m === 'live' || m === 'none' ? m : 'table'))(new URLSearchParams(location.search).get('shore') || window.__SHORE_MODE || 'table');
-const state = { source: 'wild', seed: 7, tod: 16.6, day: 100, weather: 'auto', zoom: 0.42, blocky: 0.6, fog: 1, wet: 0, wind: 5, fstop: 2.8, quality: 'high', ui: true };
+const state = { source: 'wild', seed: 7, tod: 16.6, day: 100, weather: 'auto', zoom: 0.42, blocky: 0.6, fog: 1, wet: 0, wind: 5, fstop: 2.8, quality: 'high', ui: true, treeDist: 1 };
 let world = null, src = null;
 
 // ------------------------------------------------------------ camera: orbit a focus point on the ground
@@ -92,8 +92,52 @@ addEventListener('resize', resize); resize();
 const focus = new THREE.Vector3();
 let last = performance.now(), frames = 0, fpsT = 0, fps = 0;
 const keys = new Set();
+// the player (P): a coloured cube flown with the keys, for checking the water's mirror (water3/surface.js MIRROR).
+// Third person by default (drag to orbit, wheel for the distance); the right button toggles first person, where the
+// cube leaves the view but stays on the mirror's layer, so it shows only in the water under it
+const player = { on: false, fp: false, d: 4, pos: new THREE.Vector3(), mesh: null };
+function playerMesh() {
+  const g = new THREE.BoxGeometry(0.5, 0.5, 0.5).toNonIndexed(), cols = [[0.9, 0.15, 0.1], [0.1, 0.7, 0.2], [0.95, 0.85, 0.1], [0.2, 0.3, 0.9], [0.9, 0.9, 0.9], [0.8, 0.2, 0.8]], c = [];
+  for (let f = 0; f < 6; f++) for (let v = 0; v < 6; v++) c.push(...cols[f]); // each face its own colour, so its turn reads in the water
+  g.setAttribute('color', new THREE.Float32BufferAttribute(c, 3));
+  const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6 }));
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.3, 12).rotateX(-Math.PI / 2).translate(0, 0, -0.38), new THREE.MeshStandardMaterial({ color: 0xff7700 }));
+  m.add(nose); m.castShadow = nose.castShadow = true; m.frustumCulled = nose.frustumCulled = false;
+  return m;
+}
+function setPlayer(on) {
+  player.on = on;
+  if (on && !player.mesh) { player.mesh = playerMesh(); scene.add(player.mesh); }
+  if (on) { player.pos.set(cam.fx, world.surfaceAt(cam.fx, cam.fz) + 1.2, cam.fz); player.fp = false; cam.look = -0.25; }
+  if (player.mesh) player.mesh.visible = on;
+  for (const l of [world.sun, world.hemi]) l.layers.enable(5); // lit in the mirror's pass too
+  if (world.surface) world.surface.mirrorAt = on ? player.pos : null;
+}
+function playerLayers() { const L = player.mesh.layers; if (player.fp) L.set(5); else { L.set(0); L.enable(5); } player.mesh.children.forEach((c) => c.layers.mask = L.mask); }
+function playerStep(dt) {
+  const P = player, sp = (keys.has('ShiftLeft') || keys.has('ShiftRight') ? 5 : 1) * 4;
+  const fwd = (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0) - (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0);
+  const side = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0);
+  const up = (keys.has('Space') || keys.has('KeyE') ? 1 : 0) - (keys.has('KeyC') || keys.has('KeyQ') || keys.has('ControlLeft') ? 1 : 0);
+  P.pos.x += (-Math.sin(cam.yaw) * fwd + Math.cos(cam.yaw) * side) * sp * dt;
+  P.pos.z += (-Math.cos(cam.yaw) * fwd - Math.sin(cam.yaw) * side) * sp * dt;
+  P.pos.y = Math.max(P.pos.y + up * sp * dt, world.surfaceAt(P.pos.x, P.pos.z) + 0.3);
+  P.mesh.position.copy(P.pos); P.mesh.rotation.set(0, cam.yaw, 0); playerLayers();
+  const pt = cam.look, dir = new THREE.Vector3(-Math.sin(cam.yaw) * Math.cos(pt), Math.sin(pt), -Math.cos(cam.yaw) * Math.cos(pt));
+  if (P.fp) { camera.position.copy(P.pos).y += 0.1; camera.lookAt(camera.position.clone().add(dir)); }
+  else {
+    camera.position.copy(P.pos).addScaledVector(dir, -P.d); camera.position.y += 0.4;
+    camera.position.y = Math.max(camera.position.y, world.surfaceAt(camera.position.x, camera.position.z) + 0.15);
+    camera.lookAt(P.pos.x, P.pos.y + 0.3, P.pos.z);
+  }
+  camera.fov = 55; camera.near = 0.02; camera.far = 60000; camera.updateProjectionMatrix();
+  cam.map = 0; cam.dist = P.fp ? 0.5 : P.d; focus.copy(P.pos);
+  if (world.surface) world.surface.mirrorAt = P.pos;
+  for (const l of [world.sun, world.hemi]) l.layers.enable(5); // a rebuilt world's lights too
+}
 function step(dt) {
   if (!world) return;
+  if (player.on) playerStep(dt); else {
   // move
   const sp = (keys.has('ShiftLeft') || keys.has('ShiftRight') ? 4 : 1) * Math.max(0.4, cam.dist * 0.6);
   const fwd = (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0) - (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0);
@@ -105,7 +149,7 @@ function step(dt) {
   const gy = cam.fy ?? world.surfaceAt(cam.fx, cam.fz); // cam.fy: a focus height of its own (tests)
   focus.set(cam.fx, gy, cam.fz);
   // into the map: the view tips toward straight down, narrows (backing off to keep the framing) and turns north-up
-  const m = cam.map = mapFor(cam.dist);
+  cam.map = mapFor(cam.dist); const m = cam.map;
   const pitch = cam.pitchOverride ?? THREE.MathUtils.lerp(pitchFor(cam.dist), MAP.pitch, m);
   const fov = THREE.MathUtils.lerp(55, MAP.fov, m), back = Math.tan(55 / 2 * Math.PI / 180) / Math.tan(fov / 2 * Math.PI / 180);
   if (m > 0.5 && !drag) cam.yaw += (0 - cam.yaw) * Math.min(1, dt * 1.5 * (m - 0.5) * 2); // north-up
@@ -120,6 +164,8 @@ function step(dt) {
   camera.near = THREE.MathUtils.clamp(cam.dist * 0.02, 0.003, 20);
   camera.far = 60000;
   camera.updateProjectionMatrix();
+  }
+  const m = cam.map;
   // the weather: the day's own, or a forced one from the buttons (then the haze and wind sliders apply)
   const forced = state.weather !== 'auto';
   const F = { clear: { cloud: 0.05, rain: 0, snow: 0, storm: 0 }, overcast: { cloud: 0.92, rain: 0, snow: 0, storm: 0 }, rain: { cloud: 0.95, rain: 0.8, snow: 0, storm: 0 }, storm: { cloud: 0.98, rain: 1, snow: 0, storm: 1 }, fog: { cloud: 0.6, rain: 0, snow: 0, storm: 0 }, snow: { cloud: 0.9, rain: 0.7, snow: 1, storm: 0 } }[state.weather] || {};
@@ -127,6 +173,7 @@ function step(dt) {
   world.set(forced
     ? { hour: state.tod, day: state.day, auto: false, haze: state.fog * (state.weather === 'fog' ? 3 : 1), mist: state.fog * (state.weather === 'fog' ? 6 : 1), wet: F.rain, cloud: F.cloud, cloudDens: 0.6 + 0.6 * F.cloud + F.storm * 0.8, wind10: w10, wind: [w10[0] * 0.35, w10[1] * 0.35], rain: F.rain, snow: F.snow, storm: F.storm, flash: F.storm && hash01(Math.floor(world.time * 2), 7, 99) < 0.08 ? 1 : Math.max(0, (world.env.flash || 0) - dt * 6), map: m }
     : { hour: state.tod, day: state.day, auto: true, map: m });
+  if (world.forest.rangeK !== state.treeDist) world.forest.setRange(state.treeDist);
   world.post.U.uFstop.value = state.fstop;
   world.update(dt, camera.position, cam.dist);
   updatePins(dt);
@@ -147,17 +194,19 @@ function showStats() {
   const g = world.timer.ms, gpu = world.timer.on ? (g.total ? `gpu ${g.total.toFixed(1)} ms: ` + ['scene', 'water', 'shore', 'clouds', 'composite', 'rays', 'dof', 'bloom', 'final', 'waves'].filter((k) => g[k] !== undefined).map((k) => `${k} ${g[k].toFixed(1)}`).join(' · ') : 'gpu timing…') : 'gpu timing: not given by this browser';
   const w = world.weather, wx = w ? `${w.kind}, ${w.temp.toFixed(0)} °C, wind ${Math.hypot(...w.wind).toFixed(0)} m/s` : state.weather;
   const sm = world.post.samplers, dbg = world.post.U.uDebug.value, smt = (sm ? ` · samplers ${sm.composite}/${sm.max}` : '') + ` · shore by ${world.shoreMode}` + (world.surface ? ` · water ${(world.surface.stats.verts / 1000).toFixed(0)}k verts` : '') + (dbg ? " · DEBUG water's kinds: blue large, green river, bands its flow" : '');
-  $('stats').textContent = `${fps.toFixed(0)} fps · ${i.calls} draws · ${(i.triangles / 1000).toFixed(0)}k tris · ${(world.forest.stats.far / 1000).toFixed(0)}k far cells${smt}\n${gpu}\nview ${ds} · ${seasonName(state.day)} day ${state.day} · ${wx} · ${world.forest.stats.trees} near trees`;
+  $('stats').textContent = `${fps.toFixed(0)} fps · ${i.calls} draws · ${(i.triangles / 1000).toFixed(0)}k tris · ${(world.forest.stats.far / 1000).toFixed(0)}k far cells${smt}\n${gpu}\nview ${ds} · ${seasonName(state.day)} day ${state.day} · ${wx} · ${world.forest.stats.trees} near trees` + (player.on ? `\nplayer (P off) · ${player.fp ? 'first person' : 'third person'} (right button) · WASD, Space/E up, C/Q down, Shift fast, wheel distance · mirror ${world.surface && world.surface.U.uMirrorOn.value ? 'on' : 'off (needs water under the cube, the eye within 40 m, 32 texture units)'}` : '');
 }
 
 // ------------------------------------------------------------ input
 let drag = null;
-canvas.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY, yaw: cam.yaw, look: cam.look, id: e.pointerId }; canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+canvas.addEventListener('pointerdown', (e) => { if (e.button === 2) { if (player.on) player.fp = !player.fp; return; } drag = { x: e.clientX, y: e.clientY, yaw: cam.yaw, look: cam.look, id: e.pointerId }; canvas.setPointerCapture(e.pointerId); });
 canvas.addEventListener('pointermove', (e) => { if (drag && drag.id === e.pointerId) { cam.yaw = drag.yaw - (e.clientX - drag.x) * 0.005; cam.look = THREE.MathUtils.clamp(drag.look + (e.clientY - drag.y) * 0.005 * (cam.invert ? 1 : -1), -1.45, 1.45); } }); // across: round the focus; up and down: the view tilts (a wasp looks anywhere)
 canvas.addEventListener('pointerup', () => { drag = null; });
-canvas.addEventListener('wheel', (e) => { e.preventDefault(); setZoom(state.zoom + e.deltaY * 0.0006); }, { passive: false });
+canvas.addEventListener('wheel', (e) => { e.preventDefault(); if (player.on) { player.d = THREE.MathUtils.clamp(player.d * (1 + e.deltaY * 0.001), 1.2, 40); return; } setZoom(state.zoom + e.deltaY * 0.0006); }, { passive: false });
 addEventListener('keydown', (e) => keys.add(e.code));
-addEventListener('keydown', (e) => { if (e.code === 'KeyK' && !e.repeat && world) world.waterLog(); }); // the water's log (world/index.js)
+addEventListener('keydown', (e) => { if (e.code === 'KeyK' && !e.repeat && world) world.waterLog(); });
+addEventListener('keydown', (e) => { if (e.code === 'KeyP' && !e.repeat && world) setPlayer(!player.on); }); // the player cube: P on and off, right button first person // the water's log (world/index.js)
 window.waterLog = (x, z) => (world ? world.waterLog(x, z) : 'no world');
 // L toggles the water's debug view: its kinds (blue large, green a river) and the river's flow
 addEventListener('keydown', (e) => { if (e.code === 'KeyL' && world) { const U = world.post.U.uDebug; U.value = U.value === 0 ? 8 : 0; } });
@@ -176,6 +225,7 @@ bindRange('tod', 'tod', 'oTod', fmtTod);
 bindRange('day', 'day', 'oDay', (v) => `${seasonName(v)} · ${v}`);
 bindRange('zoom', 'zoom', 'oZoom', (v) => fmtDist(zoomToDist(v)));
 bindRange('blocky', 'blocky', 'oBlocky', undefined, () => makeWorld());
+bindRange('treeDist', 'treeDist', 'oTreeDist', (v) => Math.round(v * 100) + '%'); // applied in step (a rebuilt forest takes it too)
 bindRange('fog', 'fog', 'oFog');
 bindRange('wind', 'wind', 'oWind', (v) => v.toFixed(1) + ' m/s');
 bindRange('fstop', 'fstop', 'oFstop', (v) => 'f/' + v.toFixed(1));

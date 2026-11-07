@@ -20,7 +20,7 @@ import { CLOUD_SHADOW_GLSL } from './clouds.js';
 const TMP_VR = new THREE.Matrix4();
 // Thinning by presence: past the near band a 64 m tile draws at most this many trees (by detail level: near, mid, far);
 // a dense wood (S7: up to 220 trees a chunk) is drawn whole round the eye and as a lighter stand further out
-export const THIN = { cap: [Infinity, 60, 24], steep: 14 }; // steep: the cap's growth with the sine of the look down on a tile
+export const THIN = { px: 10 }; // a 15 m tree under this many pixels tall: its tile is thinned (GDD 18.102, by the view)
 const thinHash = (a, b, c, d) => { let h = (Math.imul(a | 0, 0x27d4eb2d) ^ Math.imul(b | 0, 0x165667b1) ^ Math.imul(c | 0, 0x9e3779b1) ^ Math.imul(d | 0, 0x85ebca77)) >>> 0; h ^= h >>> 15; h = Math.imul(h, 0x2c1b3c6d) >>> 0; h ^= h >>> 12; return (h >>> 0) / 4294967296; };
 export const FOREST = { tile: 64, variants: 3, bands: [0, 45, 160, 420], fade: 12, grid: 5.2, meadow: 0.012, budgetMs: 4, far: [1200, 6000], impostor: 128, views: 8 };
 
@@ -80,7 +80,7 @@ export class Forest {
   constructor(world, opts = {}) {
     this.world = world; this.source = world.source;
     this.cfg = { ...FOREST, ...opts, far: Array.isArray(opts.far) ? opts.far : FOREST.far };
-    const scale = opts.range ?? 1;
+    const scale = opts.range ?? 1; this._range0 = scale; this.rangeK = 1;
     this.bands = this.cfg.bands.map((b) => b * scale);
     this.group = new THREE.Group(); this.group.name = 'world2-forest';
     this.tiles = new Map(); this.queue = [];
@@ -265,6 +265,15 @@ export class Forest {
     }
   }
 
+  // the woods' reach: the bands (and where the far cards take over) scaled by k from the quality's own (the panel's
+  // tree distance, 0.5 to 2); the tiles come and go with it and every level re-bins
+  setRange(k) {
+    this.rangeK = k; this.bands = this.cfg.bands.map((b) => b * this._range0 * k);
+    for (const pv of this.meshes) for (const pl of pv) pl.forEach((m, l) => m.userData.U.uBand.value.set(this.bands[l], this.bands[l + 1], this.cfg.fade * (1 + l)));
+    if (this.farMeshes && this.farMeshes[0]) { const ud = this.farMeshes[0].userData; ud.rin = this.bands[3] - this.cfg.fade * 2; ud.U.uRin.value = ud.rin; }
+    this._qc = null; this._dirty = true;
+  }
+
   // ---- placement (scatter.js, pure, tested)
   // a tile's trees, each list shuffled once by a hash of its place (so any leading share of it is an even thinning of the
   // tile, the same every time) and kept as floats; t.n: how many trees the tile has
@@ -289,15 +298,21 @@ export class Forest {
     this._frustum.setFromProjectionMatrix(TMPM); this._shadowR = shadowR;
     cam.getWorldDirection(TMPV3); const turned = TMPV3.dot(this._lastDir) < Math.cos(0.06); this._lastDir.copy(TMPV3);
     const ci = Math.floor(eye.x / T), cj = Math.floor(eye.z / T), rt = Math.ceil(R / T) + 1;
-    const t0 = performance.now();
+    const t0 = performance.now(); let turnedQ = false;
     if (!this._q || this._qc !== ci + ',' + cj) {
       this._qc = ci + ',' + cj; this._q = [];
       for (let j = cj - rt; j <= cj + rt; j++) for (let i = ci - rt; i <= ci + rt; i++) {
         const d = Math.hypot((i + 0.5) * T - eye.x, (j + 0.5) * T - eye.z);
         if (d < R + T && !this.tiles.has(i + ',' + j)) this._q.push([d, i, j]);
       }
-      this._q.sort((a, b) => a[0] - b[0]);
+      turnedQ = true;
       for (const [k, t] of this.tiles) if (Math.hypot((t.i + 0.5) * T - eye.x, (t.j + 0.5) * T - eye.z) > R + 3 * T) { this.tiles.delete(k); this._dirty = true; }
+    }
+    // what is in view is made first (nearest first), then the rest: the tiles ahead fill before those behind
+    if ((turnedQ || turned) && this._q.length) {
+      const gy = eye.y - Math.max(0, eye.y - this.source.height(eye.x, eye.z));
+      for (const q of this._q) { TMPB.min.set(q[1] * T, gy - 60, q[2] * T); TMPB.max.set((q[1] + 1) * T, gy + 120, (q[2] + 1) * T); q[3] = q[0] * (this._frustum.intersectsBox(TMPB) ? 1 : 4); }
+      this._q.sort((a, b) => a[3] - b[3]);
     }
     while (this._q.length && performance.now() - t0 < this.cfg.budgetMs) {
       const [, i, j] = this._q.shift();
@@ -327,6 +342,7 @@ export class Forest {
     this._dirty = false; this._lastBin.set(eye.x, eye.z); this._lastY = eye.y;
     const T = this.cfg.tile, half = T * 0.71, B = this.bands, F = this.cfg.fade * 3;
     const alt = Math.max(0, eye.y - this.source.height(eye.x, eye.z));
+    const cam = this.world.camera, focal = this.world.renderer.getDrawingBufferSize(TMP2B).y * 0.5 / Math.tan(cam.fov * Math.PI / 360); // pixels per metre at 1 m
     const counts = this.meshes.map((pv) => pv.map((pl) => pl.map(() => 0)));
     const lists = this.meshes.map((pv) => pv.map((pl) => pl.map(() => []))), shadowOnly = this.meshes.map((pv) => pv.map((pl) => pl.map(() => [])));
     const mains = this.meshes.map((pv) => pv.map((pl) => pl.map(() => 0)));
@@ -337,17 +353,14 @@ export class Forest {
       if (t.y0 === undefined) { let lo = 1e9, hi = -1e9; for (let q = 0; q < 9; q++) { const h = this.source.height((t.i + 0.5 * (q % 3)) * T, (t.j + 0.5 * Math.floor(q / 3)) * T); lo = Math.min(lo, h); hi = Math.max(hi, h); } t.y0 = lo - 12; t.y1 = hi + 30; } // the ground at nine points, with slack for what lies between and the trees' height
       TMPB.min.set(t.i * T, t.y0, t.j * T); TMPB.max.set((t.i + 1) * T, t.y1, (t.j + 1) * T);
       const seen = this._frustum.intersectsBox(TMPB);
-      const sinE = Math.max(0, eye.y - (t.y0 + t.y1) * 0.5 + 9) / Math.max(d, 1); // the eye's height over the tile's ground, by its distance
       if (!seen && Math.hypot((t.i + 0.5) * T - eye.x, (t.j + 0.5) * T - eye.z) > this._shadowR + half) { culled++; continue; }
       for (let l = 0; l < 3; l++) {
         if (!seen && l === 2) continue; // out of view, the far level casts no shadow
         if (d + half < B[l] - F || d - half > B[l + 1] + F) continue;
-        // by presence (GDD 18.101): every tree near the eye; further out a dense tile draws at most THIN.cap of its trees
-        // (an even share of each list, the same trees every time; the canopy painted into the ground fills in beyond)
-        // and by the view: the cap is for a tile seen edge on, where its trees stand behind one another; the
-        // steeper the eye looks down on it the less they overlap and the more are kept, until from above all are
-        const cap = THIN.cap[l] * Math.max(1, THIN.steep * sinE);
-        const share = this.thin && t.n > cap ? cap / t.n : 1;
+        // by presence, by the size on screen: every tree is drawn while a tree stands THIN.px pixels tall or more; only
+        // beyond that, where a crown is a few pixels, an even share of each list (the same trees every time), the fewer
+        // the smaller. A fixed cap per tile left bare floor between the trees wherever the ground faced the eye
+        const px = 15 * focal / Math.max(d - half, 1), share = this.thin && px < THIN.px ? Math.max(0.15, (px / THIN.px) ** 2) : 1;
         for (let k = 0; k < this.kinds.length; k++) for (let v = 0; v < this.cfg.variants; v++) { const a0 = t.items[k][v], a = share < 1 ? a0.subarray(0, Math.ceil(a0.length / 8 * share) * 8) : a0; if (a.length) { (seen ? lists : shadowOnly)[k][v][l].push(a); counts[k][v][l] += a.length / 8; if (seen) mains[k][v][l] += a.length / 8; if (l === 0) trees += a.length / 8; } }
       }
     }
@@ -375,7 +388,7 @@ export class Forest {
     this.stats.trees = trees; this.stats.tiles = this.tiles.size; this.stats.culled = culled;
   }
 }
-const TMP2 = new THREE.Vector2(), TMPM = new THREE.Matrix4(), TMPV3 = new THREE.Vector3(), TMPB = new THREE.Box3();
+const TMP2 = new THREE.Vector2(), TMP2B = new THREE.Vector2(), TMPM = new THREE.Matrix4(), TMPV3 = new THREE.Vector3(), TMPB = new THREE.Box3();
 
 // The far ring's vertex shader: scatter.js's wild placement again in GLSL (the same grid, hashes and rules), then the
 // impostor quad billboarded about its trunk, culled against the view, dithered in where the meshes end.

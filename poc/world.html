@@ -74,6 +74,8 @@
   <p class="note">Distance to the point you look at, 6 cm to 9 km. Ground detail is refined round the camera; new detail blurs in as it arrives. The lens is a real thin lens, so close views get a macro depth of field.</p>
   <div class="row"><label for="blocky">Blocky stone</label><input id="blocky" type="range" min="0" max="1" step="0.01" value="0.6"><output id="oBlocky"></output></div>
   <p class="note">Cuts mountains into ledges of 5 m: 0 is smooth slopes, 1 is sheer steps. Rebuilds the world. Hills and meadows are not stepped.</p>
+  <div class="row"><label for="treeDist">Tree distance</label><input id="treeDist" type="range" min="0.5" max="2" step="0.05" value="1"><output id="oTreeDist"></output></div>
+  <p class="note">How far the trees are drawn, from half to twice the quality's own reach; the far cards take over where they end. Only what is in view is drawn, and tiles in view are made first.</p>
   <div class="row"><label for="fog">Haze</label><input id="fog" type="range" min="0" max="2" step="0.01" value="1"><output id="oFog"></output></div>
   <p class="note">With a forced weather: aerosol in the air (Mie density) and a low mist that thins with height above the water. The day's weather sets its own.</p>
   <div class="row"><label for="wind">Wind</label><input id="wind" type="range" min="0" max="15" step="0.1" value="5"><output id="oWind"></output></div>

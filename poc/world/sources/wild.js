@@ -184,8 +184,24 @@ export function wildSample(P, x, z, out = [0, 0, 0, 0, 0]) {
   vnoised(x / 0.83, z / 0.83, ss(S, 9), N); micro += 0.035 * N[0];
   h += micro * (1 - trail) * smoothstep(wl + 0.3, wl + 2, h) - 0.07 * trail;
   if (lake && band > 0 && inLake < 1) h += (Math.max(h, lake.level + 1.2) - h) * band * (1 - inLake); // the rim, held last
-  out[0] = h; out[1] = moist; out[2] = forest; out[3] = trail; out[4] = wl;
+  out[0] = h; out[1] = moist; out[2] = forest; out[3] = trail; out[4] = wl; out[5] = river;
   return out;
+}
+
+// Rocks in the rivers' shallows (scatter.js plants them, the water's flow parts round them: wildWaterFlow with a cell):
+// on a grid of their own, kept by a hash, where the river has the water and it is between d0 and d1 deep, each big
+// enough to stand out of it. JS and GLSL read the same cells, hashes and ground.
+export const RIVER_ROCK = { grid: 3.5, p: 0.3, river: 0.3, d0: 0.15, d1: 1.6, maxA: 1.2 };
+// (ix, iz) a cell; o: a sample there is taken into it; returns null or [x, z, turn, variety, sxz, sy, a (the radius the water parts round)]
+export function riverRock(P, ix, iz, o = [0, 0, 0, 0, 0, 0]) {
+  const R = RIVER_ROCK;
+  if (hash01(ix, iz, 51) > R.p) return null;
+  const x = (ix + 0.15 + 0.7 * hash01(ix, iz, 52)) * R.grid, z = (iz + 0.15 + 0.7 * hash01(ix, iz, 57)) * R.grid;
+  wildSample(P, x, z, o);
+  const d = o[4] - o[0];
+  if (!(o[5] > R.river) || d < R.d0 || d > R.d1) return null;
+  const h1 = hash01(ix, iz, 53), s = 0.55 + 0.6 * h1 * h1, sy = Math.max(s, (d + 0.3) / 0.85), sxz = Math.max(s, sy * 0.8) * (0.9 + 0.2 * hash01(ix, iz, 54));
+  return [x, z, hash01(ix, iz, 55) * 6.283, hash01(ix, iz, 56), sxz, sy, Math.min(R.maxA, 0.75 * sxz)];
 }
 
 // GLSL twin: vec4 wildSample(vec2 xz), float wildWater(vec2 xz), with uniforms wSeed, wSea, wRelief, wBlocky, wRivers,
@@ -248,7 +264,7 @@ bool wLake(vec2 xz, out vec4 L, out float depth, out float d) {
 }
 // the water's kind and flow (W3, the clipmap's water layer): (the river's share of the water here, its velocity x, z),
 // worked out only when asked (wildWaterFlow), as it reads the broad shape twice more
-bool wWantFlow = false; vec3 wFlow = vec3(0.0);
+bool wWantFlow = false; vec3 wFlow = vec3(0.0); float wRiver = 0.0;
 void wildSampleW(vec2 xz, out vec4 S, out float wlOut) {
   float x = xz.x, z = xz.y;
   float cn; vec4 B = wBroad(xz, cn);
@@ -292,7 +308,7 @@ void wildSampleW(vec2 xz, out vec4 S, out float wlOut) {
   float rd = abs(rn.x) / max(length(rn.yz), 0.08) * ${f(W.riverCell)};
   float low = 1.0 - wsmooth(18.0, 55.0, h);
   float river = (1.0 - wsmooth(${f(W.riverW)}, ${f(W.riverW + W.riverBank)}, rd)) * low * wRivers * (1.0 - inLake) * (1.0 - band);
-  wFlow = vec3(0.0);
+  wFlow = vec3(0.0); wRiver = river;
   if (wWantFlow && river > 0.0) {
     // flowing water: the channel's share (fading where the land round it drops into the sea), its direction along the
     // channel (the noise's zero line), downhill on the broad land over 80 m, faster for a steeper fall, fastest
@@ -324,6 +340,39 @@ void wildSampleW(vec2 xz, out vec4 S, out float wlOut) {
 vec4 wildSample(vec2 xz) { vec4 S; float wl; wildSampleW(xz, S, wl); return S; }
 float wildWater(vec2 xz) { vec4 S; float wl; wildSampleW(xz, S, wl); return wl; }
 vec4 wildWaterFlow(vec2 xz) { wWantFlow = true; vec4 S; float wl; wildSampleW(xz, S, wl); wWantFlow = false; return vec4(wl, wFlow); }
+// the river's flow parted round its rocks (RIVER_ROCK, riverRock in JS): each rock a cylinder of radius a in the
+// stream, the flow past it as the ideal flow past a cylinder (v = U - (a/r)^2 (2 (U.r^) r^ - U): still at its nose,
+// twice as fast at its flanks), slowed in its wake for a few radii behind; rocks add up, each fading out by 3 a.
+// For levels with texels of a metre or less (cell), where a rock is a few texels across.
+bool wRiverRock(int ix, int iz, out vec2 c, out float a) {
+  if (w2hash01(ix, iz, 51) > ${f(RIVER_ROCK.p)}) return false;
+  c = (vec2(float(ix), float(iz)) + 0.15 + 0.7 * vec2(w2hash01(ix, iz, 52), w2hash01(ix, iz, 57))) * ${f(RIVER_ROCK.grid)};
+  vec4 S; float wl; wildSampleW(c, S, wl);
+  float d = wl - S.x;
+  if (!(wRiver > ${f(RIVER_ROCK.river)}) || d < ${f(RIVER_ROCK.d0)} || d > ${f(RIVER_ROCK.d1)}) return false;
+  float h1 = w2hash01(ix, iz, 53), s = 0.55 + 0.6 * h1 * h1, sy = max(s, (d + 0.3) / 0.85), sxz = max(s, sy * 0.8) * (0.9 + 0.2 * w2hash01(ix, iz, 54));
+  a = min(${f(RIVER_ROCK.maxA)}, 0.75 * sxz);
+  return true;
+}
+vec4 wildWaterFlow(vec2 xz, float cell) {
+  vec4 o = wildWaterFlow(xz);
+  if (cell > 1.01 || o.y <= 0.0) return o;
+  vec2 U = o.zw, v = U; float us = length(U);
+  if (us < 1e-4) return o;
+  vec2 Ud = U / us; float wake = 0.0, inside = 0.0;
+  int ci = int(floor(xz.x / ${f(RIVER_ROCK.grid)})), cj = int(floor(xz.y / ${f(RIVER_ROCK.grid)}));
+  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+    vec2 c; float a; if (!wRiverRock(ci + i, cj + j, c, a)) continue;
+    vec2 r = xz - c; float rl = length(r);
+    if (rl < a) { inside = 1.0; continue; }
+    vec2 rh = r / rl; float k = (a * a) / (rl * rl) * (1.0 - wsmooth(2.0 * a, 3.0 * a, rl));
+    v -= k * (2.0 * dot(U, rh) * rh - U);
+    float along = dot(r, Ud), across = dot(r, vec2(-Ud.y, Ud.x));
+    if (along > 0.0) wake = max(wake, exp(-across * across / (a * a) * 1.5) * exp(-along / (5.0 * a)));
+  }
+  v *= (1.0 - 0.75 * wake) * (1.0 - inside);
+  return vec4(o.xy, v);
+}
 `;
 }
 
