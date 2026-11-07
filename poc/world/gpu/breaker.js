@@ -18,8 +18,12 @@ export function breakerSection(u, s) {
   const near = Math.exp(-(((u - 0.03) / 0.13) ** 2)); // the crest and just behind it: the water the lip is made of
   const pitch = ss(0, 0.45, s), fall = ss(0.3, 0.75, s), gone = ss(0.75, 1, s);
   const live = 1 - gone;
-  const forward = (1.6 * pitch + 1.3 * fall) * h * h * near * live;
-  const up = (0.25 * pitch * h * h - 2.1 * fall * h * h * h) * near * live - 0.45 * gone * h; // the bore: lower, its front steep
+  const forward = (1.1 * pitch + 0.8 * fall) * h * h * near * live;
+  // the lip falls onto the face in front, never through it: the water does not part as it crashes (what lands surges on
+  // and closes any gap at once, the crash's energy goes into white, not into a hole), so the section is held over the
+  // front's own level; the bore keeps its height as it runs on, white
+  const base = Math.pow(Math.max(c, 0), 1.5);
+  const up = Math.max((0.25 * pitch * h * h - 1.6 * fall * h * h * h) * near * live, -0.15 - base);
   const front = ss(-0.3, -0.02, u) * (1 - ss(0.02, 0.25, u)); // the crest's front
   const white = Math.min(1, fall * h * h * near * 1.6 + pitch * h * h * h * near * 0.5 + gone * front * (1 - 0.6 * ss(0.9, 1, s)));
   return [forward, up, white];

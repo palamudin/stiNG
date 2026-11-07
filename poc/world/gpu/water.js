@@ -274,7 +274,7 @@ export function gpuWater(clip, waves, opts = {}) {
     // on a plunging lip the analytic slope does not know the fold: the surface's own facet (turned to the eye) instead
     // (derivatives outside any branch: WGSL wants them in uniform control flow)
     { const ng0 = normalize(cross(dFdx(positionWorld), dFdy(positionWorld))), ng = select(dot(ng0, Vv).greaterThan(0), ng0.negate(), ng0);
-      n.assign(normalize(mix(n, ng, smoothstep(0.02, 0.35, vCurl)))); }
+      n.assign(normalize(mix(n, ng, smoothstep(0.02, 0.35, vCurl).mul(float(1).sub(smoothstep(0.2, 0.7, ng.y))).mul(0.8)))); } // (the facet only where the lip truly overhangs: no faceted face)
     // under: the scene behind, along the bent ray, through depth / cos of the path, absorbed per channel
     const cosV = max(Vv.y.negate(), 0.08);
     const path = depth.div(cosV).min(80);
