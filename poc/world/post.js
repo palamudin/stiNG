@@ -49,7 +49,7 @@ export class Post {
       uBody: { value: Array.from({ length: WATER.bodies }, () => new THREE.Vector4()) }, uBodyB: { value: Array.from({ length: WATER.bodies }, () => new THREE.Vector4()) }, uBodyC: { value: Array.from({ length: WATER.bodies }, () => new THREE.Vector4()) }, uBodies: { value: 0 },
       tCaus: { value: null }, uCaus: { value: new THREE.Vector4(1, 0, 1, 0) },
       // the water's mirror (water3/surface.js MIRROR), shared with the surface: the game's things mirrored in the water
-      tMirror: { value: null }, tMirrorMask: { value: null }, uVPM: { value: new THREE.Matrix4() }, uMirrorOff: { value: new THREE.Vector4() }, uMirrorOn: { value: 0 },
+      tMirror: { value: null }, uVPM: { value: new THREE.Matrix4() }, uMirrorOff: { value: new THREE.Vector4() }, uMirrorOn: { value: 0 },
       tCloud: { value: null }, uCloudOn: { value: 0 }, uCloudBase: { value: 1000 }, uIce: { value: 0 }, uFlash: { value: 0 },
       uMap: { value: 0 }, uSnowLine: { value: 1e9 },
       ...sky.uniforms,
@@ -308,7 +308,9 @@ void main() {
     const dt = new THREE.DepthTexture(w, h, THREE.UnsignedIntType);
     this.rtScene = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, samples: this.msaa, depthTexture: dt, depthBuffer: true });
     this.rtCopy = this.msaa ? null : target(w, h);
-    this.rtA = target(w, h); this.rtB = target(w, h);
+    // the composite's target has a depth of its own: the scene's is copied into it, and the near things (opts.near) are
+    // drawn into it after the composite (sharing the scene's would loop: the composite reads that one)
+    this.rtA = target(w, h, { depthBuffer: true, depthTexture: new THREE.DepthTexture(w, h, THREE.UnsignedIntType) }); this.rtB = target(w, h);
     const hw = Math.max(1, w >> 1), hh = Math.max(1, h >> 1), qw = Math.max(1, w >> 2), qh = Math.max(1, h >> 2);
     this.rtHalf = target(hw, hh); this.rtHalf2 = target(hw, hh);
     this.rtQ = target(qw, qh); this.rtQ2 = target(qw, qh);
@@ -347,6 +349,13 @@ void main() {
     U.uRes.value.set(this.w, this.h);
     // the scene
     const prevTM = r.toneMapping; r.toneMapping = THREE.NoToneMapping;
+    // The near things (opts.near: the game's wasps, on their own layer, and their materials): kept out of the scene
+    // every reflection and refraction reads (the water's, the bodies', the screen-space marches'), and drawn after the
+    // composite over its result, against the scene's depth (GDD 18.106). In the scene pass they write neither colour nor
+    // depth, so they still cast their shadows (the shadow pass draws them with its own materials). Read from the scene,
+    // a wasp showed in the water as if under it, and its wings stretched down its reflections
+    const near = opts.near && opts.near.layer >= 0 ? opts.near : null;
+    if (near) for (const m of near.materials) { m.userData.nearCW = m.colorWrite; m.userData.nearDW = m.depthWrite; m.colorWrite = false; m.depthWrite = false; }
     T.begin('scene'); r.setRenderTarget(this.rtScene); r.clear(); r.render(scene, camera); T.end();
     // the water (water3/surface.js): drawn over the scene with its depth test, reading the scene's colour under it. With
     // MSAA the scene was resolved into its texture while the drawing goes on in the multisampled buffers, so the
@@ -363,7 +372,22 @@ void main() {
     // the clouds at quarter resolution, before the composite blends them in
     T.begin('clouds'); if (opts.clouds) { opts.clouds.render(this.rtQ, this.rtScene.depthTexture, camera, U.uLogF.value, this.rtQ.width, this.rtQ.height, camera.position, opts.skyUp); U.tCloud.value = this.rtQ.texture; U.uCloudOn.value = 1; } else U.uCloudOn.value = 0; T.end();
     // composite
-    T.begin('composite'); U.tColor.value = this.rtScene.texture; this._run(this.composite, this.rtA); T.end();
+    T.begin('composite'); U.tColor.value = this.rtScene.texture;
+    this._run(this.composite, this.rtA);
+    if (near) { // the near things over it, on their layer only, against the scene's depth (copied in), and into that
+      for (const m of near.materials) { m.colorWrite = m.userData.nearCW ?? true; m.depthWrite = m.userData.nearDW ?? true; }
+      if (!this.depthCopy) this.depthCopy = new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, uniforms: { tSrc: { value: null } }, vertexShader: VS,
+        fragmentShader: 'precision highp float; uniform highp sampler2D tSrc; in vec2 vUv; out vec4 oColor; void main() { gl_FragDepth = texture(tSrc, vUv).r; oColor = vec4(0.0); }',
+        depthTest: true, depthWrite: true, depthFunc: THREE.AlwaysDepth, colorWrite: false });
+      const mask = camera.layers.mask, ac = r.autoClear, sm = r.shadowMap.needsUpdate, bg = scene.background;
+      r.autoClear = false; r.shadowMap.needsUpdate = false;
+      this.depthCopy.uniforms.tSrc.value = this.rtScene.depthTexture; this.quad.material = this.depthCopy; r.setRenderTarget(this.rtA); r.render(this.scene, this.cam);
+      camera.layers.set(near.layer); scene.background = null;
+      r.render(scene, camera);
+      camera.layers.mask = mask; r.autoClear = ac; r.shadowMap.needsUpdate = sm; scene.background = bg;
+      U.tDepth.value = this.rtA.depthTexture; // the depth of field sees them
+    }
+    T.end();
     let cur = this.rtA;
     // god rays, when the sun is in front of the camera
     const s = new THREE.Vector4(U.uSun.value.x, U.uSun.value.y, U.uSun.value.z, 0).applyMatrix4(U.uViewProj.value);

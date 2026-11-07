@@ -80,7 +80,7 @@ const f = (v) => (Number.isInteger(v) ? v.toFixed(1) : String(v));
 const _vr = new THREE.Matrix4();
 // the mirror's layer (the game's things to reflect; -1: none), its target's size (of the drawing buffer), how high
 // above the water the eye may be for it
-// The mirror reads two more textures in the water's shaders, which already read many: a card that lets a shader read
+// The mirror reads one more texture in the water's shaders, which already read many: a card that lets a shader read
 // only 16 (common: Chrome on Direct3D) would fail to build them, and the whole frame with the post chain's. So it is
 // built in only where a shader may read MIRROR.units or more
 export const MIRROR = { layer: 5, scale: 0.5, above: 40, units: 32, on: (r) => !!r && r.capabilities.maxTextures >= MIRROR.units };
@@ -103,7 +103,7 @@ export class WaterSurface {
       uSurf: world.uSurf, uSurfX: world.uSurfX, uWTime: world.uWTime, uSwDir: world.uSwDir,
       uWave: world.uWave, // (the panel's wave scale, the sea's fetch m, -, -)
       tScene: { value: null }, tDepth: { value: null }, uVP: { value: new THREE.Matrix4() }, tFoam: { value: null },
-      tMirror: world.post.U.tMirror, tMirrorMask: world.post.U.tMirrorMask, uVPM: world.post.U.uVPM, uMirrorOff: world.post.U.uMirrorOff, uMirrorOn: world.post.U.uMirrorOn, // (shared with the post chain's water bodies)
+      tMirror: world.post.U.tMirror, uVPM: world.post.U.uVPM, uMirrorOff: world.post.U.uMirrorOff, uMirrorOn: world.post.U.uMirrorOn, // (shared with the post chain's water bodies)
       uLook: world.uLook, uLook2: world.uLook2, uLook3: world.uLook3, uLace: world.uLace, uAbs: world.uAbs, uSca: world.uSca, // the panel's 'Water'
       uLogF: world.post.U.uLogF, uDebug: world.post.U.uDebug, uRain: world.post.U.uRain, uIce: world.post.U.uIce, uGlint: world.post.U.uGlint, uWPeak: world.post.U.uWPeak,
       tCaus: { value: world.caustics ? world.caustics.rt.texture : null }, uCaus: world.post.U.uCaus,
@@ -258,7 +258,7 @@ float laceD(vec2 x, vec2 xl, float s, vec2 drift) {
   return t < 1.0 ? mix(lacePat(x, xl, 0.25 * s, drift), lacePat(x, xl, 0.8 * s, drift), t) : mix(lacePat(x, xl, 0.8 * s, drift), lacePat(x, xl, 2.5 * s, drift), t - 1.0);
 } uniform mat4 uVP; uniform float uWLost, uRain, uIce, uGlint, uWPeak;
 #ifdef W3_MIRROR
-uniform sampler2D tMirror, tMirrorMask; uniform mat4 uVPM; uniform vec4 uMirrorOff; uniform float uMirrorOn; // the mirror (MIRROR): xyz eye to mirrored eye, w its plane
+uniform sampler2D tMirror; uniform mat4 uVPM; uniform vec4 uMirrorOff; uniform float uMirrorOn; // the mirror (MIRROR): xyz eye to mirrored eye, w its plane
 #endif
 in vec3 vW, vRel; in vec2 vXZ, vLoc; in float vCell, vNear, vJ; in vec2 vCoastSlope; in vec3 vCoast, vFlow; in vec4 vRough; out vec4 oColor;
 uniform float uDebug;
@@ -332,9 +332,6 @@ vec4 wSSR(vec3 P, vec3 R) { // P: from the eye (vRel), as uVP takes it
         vec2 um = cm.xy / cm.w * 0.5 + 0.5; float dm = texture(tDepth, um).r, sm = dm >= 1.0 ? 1e9 : exp2(dm * uLogF) - 1.0;
         if (cm.w > sm) { b = m; hu = um; hw = cm.w; hs = sm; } else a = m;
       }
-#ifdef W3_MIRROR
-      if (uMirrorOn > 0.5 && texture(tMirrorMask, hu).a > 0.02) hs = -1e9; // the mirror draws the wasps
-#endif
       if (hw - hs < 0.01 + 0.02 * hs) {
         float e = min(min(hu.x, 1.0 - hu.x), min(hu.y, 1.0 - hu.y));
         return vec4(texture(tScene, hu).rgb, smoothstep(0.0, 0.08, e));
@@ -417,12 +414,8 @@ void main() {
   vec3 Pf = vRel + Tr * min(Lp, 8.0); // from the eye (uVP takes it so)
   vec4 cf = uVP * vec4(Pf, 1.0); vec2 ruv = cf.w > 0.0 ? clamp(cf.xy / cf.w * 0.5 + 0.5, vec2(0.001), vec2(0.999)) : suv;
   ruv = mix(suv, ruv, edge * uLook.z / 0.06); // the refraction's strength (0.06: as drawn)
-  // the scene under the water is read where the bent ray lands; where that pixel shows a thing above the water (the
-  // wasp, drawn into the scene in front of the water) it is not the floor: read straight down instead (the mirror's
-  // mask: the mirrored things as the eye sees them). Without this the wasp showed in the water as if under it
-#ifdef W3_MIRROR
-  if (uMirrorOn > 0.5 && texture(tMirrorMask, ruv).a > 0.02) ruv = suv;
-#endif
+  // (the near things, the wasps, are not in the scene read here: the post chain draws them after the water, post.js
+  // near; read here they showed in the water as if under it, and in its reflections stretched)
   vec3 floorCol = texture(tScene, ruv).rgb;
   // the floor's light: the sun's share lost to the surface and the water on its way down and focused by the
   // caustics, the sky's share lost to the water; then the path up to the eye (Beer-Lambert) and the water's own glow
@@ -575,10 +568,10 @@ void main() {
     // (the foam pieces are not drawn: they splat into the near foam field, which the surface draws)
     this._t = null;
   }
-  // The mirror (GDD 18.105): the things on MIRROR.layer (the game puts its wasps there, with its lights) drawn from the
-  // eye mirrored in the water's plane under MIRROR.at (the driven wasp), into a target the surface reads where it
-  // shows them; and the same things from the eye, a mask the refraction keeps off. Drawn only while there is water
-  // under that point and the eye is within MIRROR.above m of it; a few draws (the camera sees only that layer)
+  // The mirror (GDD 18.105-106): the things on MIRROR.layer (the game puts its wasps there, with its lights) drawn from
+  // the eye mirrored in the water's plane under MIRROR.at (the driven wasp), into a target the surface (and the post
+  // chain's water bodies) read where they show them. Drawn only while there is water under that point and the eye is
+  // within MIRROR.above m of it; a few draws (the camera sees only that layer)
   mirror(scene, camera) {
     const W = this.world, r = W.renderer, U = this.U, at = this.mirrorAt || camera.position, e = camera.position;
     // the plane: the open water's level under that point, or the level of the body it is over (a pond, a birdbath:
@@ -591,21 +584,18 @@ void main() {
     if (!on) return;
     const sz = r.getDrawingBufferSize(_mv2), w = Math.max(64, Math.round(sz.x * MIRROR.scale)), h = Math.max(64, Math.round(sz.y * MIRROR.scale));
     if (!this._mir || this._mir.w !== w || this._mir.h !== h) {
-      if (this._mir) { this._mir.rt.dispose(); this._mir.mask.dispose(); }
-      this._mir = { w, h, rt: new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType }), mask: new THREE.WebGLRenderTarget(w, h), cam: new THREE.PerspectiveCamera(), eye: new THREE.PerspectiveCamera() };
-      U.tMirror.value = this._mir.rt.texture; U.tMirrorMask.value = this._mir.mask.texture;
+      if (this._mir) this._mir.rt.dispose();
+      this._mir = { w, h, rt: new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType }), cam: new THREE.PerspectiveCamera() };
+      U.tMirror.value = this._mir.rt.texture;
     }
     const M = this._mir, vc = M.cam;
     vc.copy(camera, false); vc.layers.set(MIRROR.layer);
     camera.getWorldDirection(_md); _mu.set(0, 1, 0).applyQuaternion(camera.getWorldQuaternion(_mq));
     vc.position.set(e.x, 2 * L - e.y, e.z); vc.up.set(_mu.x, -_mu.y, _mu.z); vc.lookAt(vc.position.x + _md.x, vc.position.y - _md.y, vc.position.z + _md.z);
     vc.updateMatrixWorld(); vc.projectionMatrix.copy(camera.projectionMatrix); vc.projectionMatrixInverse.copy(camera.projectionMatrixInverse);
-    M.eye.copy(camera, false); M.eye.layers.set(MIRROR.layer); M.eye.position.copy(e); M.eye.quaternion.copy(camera.getWorldQuaternion(_mq)); M.eye.updateMatrixWorld();
-    M.eye.projectionMatrix.copy(camera.projectionMatrix); M.eye.projectionMatrixInverse.copy(camera.projectionMatrixInverse);
     const prev = r.getRenderTarget(), bg = scene.background, sm = r.shadowMap.needsUpdate, cc = r.getClearColor(_mc), ca = r.getClearAlpha();
     scene.background = null; r.shadowMap.needsUpdate = false; r.setClearColor(0x000000, 0);
     r.setRenderTarget(M.rt); r.clear(); r.render(scene, vc);
-    r.setRenderTarget(M.mask); r.clear(); r.render(scene, M.eye);
     r.setRenderTarget(prev); r.setClearColor(cc, ca); r.shadowMap.needsUpdate = sm; scene.background = bg;
     _mr.copy(vc.matrixWorldInverse).setPosition(0, 0, 0); U.uVPM.value.multiplyMatrices(vc.projectionMatrix, _mr);
     U.uMirrorOff.value.set(0, e.y - vc.position.y, 0, L); // the eye to the mirrored eye (the water's points are given from the eye); the plane

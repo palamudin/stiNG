@@ -185,6 +185,7 @@ Run the tests from this folder with `node test/sim.test.mjs`, `node test/net.tes
 | 155 | The grass's clump cache: a pass a frame per ring writes each clump's ground, growth, height, moisture and wind into a float texture; the blades read one texel instead of three clipmap reads and five noises per vertex (fallback without float targets) | 18.104 |
 | 156 | The water's mirror: the wasps drawn from the eye mirrored in the water (a true planar reflection, in place and at its size), and a mask that keeps the refraction from pulling the wasp into the water; birds and dragonflies drawn by presence; the overlay's CPU by part and World passes named; the mirror on ponds and birdbaths too (the post chain's water bodies), their screen-space reflection refined and leaving the wasps to the mirror | 18.105 |
 | 157 | The mirror built in only where a shader may read 32 textures: on a 16-texture card (Chrome on Direct3D) the post chain's composite, at exactly 16, failed to build with it and World v3 drew nothing | 18.105 |
+| 158 | Near things drawn after the reflections: World v3 keeps the wasps out of the scene every reflection and refraction reads (they still cast shadows) and draws them over the composite against a copy of its depth; the mirror's mask dropped (one texture); a pond's floor read where the screen's depth confirms it (no box under the eye) | 18.106 |
 
 ## Verified
 

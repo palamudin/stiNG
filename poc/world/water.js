@@ -81,7 +81,7 @@ uniform vec4 uBodyB[${B}]; // ground gradient x, z, floor depth (0: the floor is
 uniform vec4 uBodyC[${B}]; // a pond's lobes: phases a, b, and 1 when it has them (sources/sting.js pondEdge)
 uniform int uBodies;
 #ifdef W_MIRROR
-uniform sampler2D tMirror, tMirrorMask; uniform mat4 uVPM; uniform vec4 uMirrorOff; uniform float uMirrorOn; // the mirror (water3/surface.js MIRROR): xyz eye to mirrored eye, w its plane
+uniform sampler2D tMirror; uniform mat4 uVPM; uniform vec4 uMirrorOff; uniform float uMirrorOn; // the mirror (water3/surface.js MIRROR): xyz eye to mirrored eye, w its plane
 #endif
 // a body's edge at a point's bearing: lobed for a pond, its radius otherwise
 float wBodyR(vec4 b, vec4 l, vec2 d) { if (l.z < 0.5) return b.z; float a = atan(d.y, d.x); return b.z * (0.86 + 0.08 * sin(2.0 * a + l.x) + 0.06 * sin(3.0 * a + l.y)); }
@@ -187,8 +187,8 @@ vec4 wSSR(vec3 P, vec3 R, float yb) {
     vec3 S = uCamPos + viewRay(uv) * sd;
     // a crossing: the ray has gone from in front of the scene to behind it since the last step, on something above the
     // water. Found again by halving the step, and taken only within a thin shell behind what the pixel shows (a step-
-    // long allowance hung a streak under a thin thing, the wasp, longer the further the eye); what the mirror draws
-    // (the wasps) is left to it
+    // long allowance hung a streak under a thin thing, the wasp, longer the further the eye); the wasps are not in
+    // the scene read here (post.js near)
     if (qd > sd && front && S.y > yb + 0.002) {
       float a = tp, b = t; vec2 hu = uv; float hq = qd, hs = sd;
       for (int k = 0; k < 6; k++) {
@@ -196,9 +196,6 @@ vec4 wSSR(vec3 P, vec3 R, float yb) {
         vec2 um = cm.xy / cm.w * 0.5 + 0.5; float dm = texture(tDepth, um).r, sm = dm >= 1.0 ? 1e9 : rayDist(um, dm), qm2 = length(qm - uCamPos);
         if (qm2 > sm) { b = mm; hu = um; hq = qm2; hs = sm; } else a = mm;
       }
-#ifdef W_MIRROR
-      if (uMirrorOn > 0.5 && texture(tMirrorMask, hu).a > 0.02) hs = -1e9;
-#endif
       if (hq - hs < 0.01 + 0.02 * hs) {
         float edge = min(min(hu.x, 1.0 - hu.x), min(hu.y, 1.0 - hu.y));
         return vec4(texture(tColor, hu).rgb, smoothstep(0.0, 0.08, edge));
@@ -288,9 +285,17 @@ vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, floa
     }
     t = max(t, 0.0); Pb = P + T * t; D = max(P.y - Pb.y, 0.0); L = t;
     // the floor's colour and light: the basin's drawn top under that point
-    vec4 c = uViewProj * vec4(Pb.x, P.y - 0.006, Pb.z, 1.0); vec2 fuv = clamp(c.xy / c.w * 0.5 + 0.5, vec2(0.001), vec2(0.999));
-    floorCol = texture(tColor, fuv).rgb;
-    float fd = texture(tDepth, fuv).r; if (fd >= 1.0 || abs(rayDist(fuv, fd) - length(vec3(Pb.x, P.y - 0.006, Pb.z) - uCamPos)) > 0.03 + 0.01 * tw) floorCol = sceneCol;
+    // the floor's colour: what the screen shows where the bent ray's floor point projects, if the screen there shows
+    // the floor (its depth agrees with the drawn ground's at that place), else straight down. The drawn floor is the
+    // ground (a pond's bed) or the basin's top: projected at the water's level less 6 mm it read a pond's carved bed
+    // from the wrong place, and the line where the read gave up showed as a box under the eye, worse the nearer
+    vec2 fuv = uv; floorCol = sceneCol;
+    for (int k = 0; k < 2; k++) {
+      vec3 Q = k == 0 ? Pb : vec3(Pb.x, P.y - 0.006, Pb.z); vec4 c = uViewProj * vec4(Q, 1.0);
+      if (c.w <= 0.0) continue;
+      vec2 qu = clamp(c.xy / c.w * 0.5 + 0.5, vec2(0.001), vec2(0.999)); float fd = texture(tDepth, qu).r;
+      if (fd < 1.0 && abs(rayDist(qu, fd) - length(Q - uCamPos)) < 0.03 + 0.01 * tw) { fuv = qu; floorCol = texture(tColor, qu).rgb; break; }
+    }
   } else {
     vec2 ruv = clamp(uv + n.xz * 0.06 * clamp((dist - tw) * 0.25, 0.0, 1.0) * vec2(1.0, uRes.x / uRes.y) * 0.5, vec2(0.001), vec2(0.999));
     float rd = texture(tDepth, ruv).r; float rdist = rd >= 1.0 ? 1e9 : rayDist(ruv, rd);

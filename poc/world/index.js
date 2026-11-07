@@ -372,7 +372,7 @@ ${this.shore ? '  else if (q.y == 1) { vec4 sh = shoreAt(p); o = vec4(sh.x, sh.w
     // count the whole frame (shadows, scene, post), not just its last pass
     const info = this.renderer.info; info.autoReset = false; info.reset();
     if (this.surface && this.q.post) this.surface.mirror(this.scene, this.camera); // the game's things in the water (water3/surface.js MIRROR)
-    if (this.q.post) this.post.render(this.scene, this.camera, { dof: this.q.dof, rays: this.q.rays, clouds: this.q.clouds ? this.clouds : null, skyUp: this.sky.skyUp, timer: this.timer, water: this.surface });
+    if (this.q.post) this.post.render(this.scene, this.camera, { near: this.near, dof: this.q.dof, rays: this.q.rays, clouds: this.q.clouds ? this.clouds : null, skyUp: this.sky.skyUp, timer: this.timer, water: this.surface });
     else this.renderer.render(this.scene, this.camera);
     this.timer.frame();
     this.frameInfo = { calls: info.render.calls, tris: info.render.triangles };
