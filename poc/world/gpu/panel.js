@@ -48,6 +48,7 @@ export function buildPanel(hud, state, onChange = () => {}) {
   slider(W, state, 'day', 'Day of year', 0, 359, 1, (v) => `${v | 0} ${seasonName(v)}`);
   slider(W, state, 'wind', 'Wind', 0, 20, 0.1, (v) => v.toFixed(1) + ' m/s');
   slider(W, state, 'rain', 'Rain', 0, 1, 0.01);
+  slider(W, state, 'tideAmp', 'Tide (m)', 0, 3, 0.01, (v) => v.toFixed(2) + ' m'); slider(W, state, 'tideSpeed', 'Tide speed', 0, 600, 1, (v) => v ? `x${v} (${(12.42 * 60 / v).toFixed(1)} min)` : 'stopped');
   const kind = document.createElement('div'); kind.className = 'note'; kind.style.fontSize = '11px'; kind.style.opacity = '0.75'; W.appendChild(kind);
   outs.push(() => { kind.textContent = state.auto ? `today: ${state.kind || ''} · cover ${Math.round(state.cover * 100)}% · haze ${state.haze.toFixed(2)}` : 'the sliders hold the weather'; });
 
