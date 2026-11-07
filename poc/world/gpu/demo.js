@@ -11,6 +11,7 @@ import { gpuWater, surfUniforms } from './water.js';
 import { GpuShore } from './shore.js';
 import { GpuFoamField, GFOAM } from './foamfield.js';
 import { GpuGrass } from './grass.js';
+import { GpuSky } from './sky.js';
 import { WAVES, swellState } from '../waves.js';
 
 const $ = (id) => document.getElementById(id);
@@ -24,16 +25,19 @@ await renderer.init();
 const backend = renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL 2 (fallback)';
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0.55, 0.7, 0.9);
-scene.fog = new THREE.Fog(0xa9c3dc, 600, 4500);
+// the sky (gpu/sky.js): the background, the aerial perspective, the sun's and the sky's light
+const sky = new GpuSky(renderer);
+scene.backgroundNode = sky.background(); scene.fogNode = sky.fog();
 const camera = new THREE.PerspectiveCamera(55, 1, 0.05, 20000);
 const sun = new THREE.DirectionalLight(0xfff1dc, 3.2), hemi = new THREE.HemisphereLight(0xbcd4f0, 0x4a4630, 1.1);
 sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
 const SH = 70; Object.assign(sun.shadow.camera, { left: -SH, right: SH, top: SH, bottom: -SH, near: 1, far: 600 }); sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.05;
 scene.add(sun, sun.target, hemi);
 const sunDir = new THREE.Vector3(0.45, 0.62, 0.3).normalize();
+// the sun by the hour (a plain arc: up at 6, highest at 12 at 55 degrees, down at 18)
+function sunAt(hour) { const a = (hour - 6) / 12 * Math.PI, el = Math.sin(a) * 0.96 - 0.04, az = 1.9 + (hour - 12) / 12 * Math.PI; sunDir.set(Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az)).normalize(); }
 
-const state = { seed: 7, treeDist: 1, wind: 4 };
+const state = { seed: 7, treeDist: 1, wind: 4, hour: +(q.get('hour') || 11) };
 let src, clip, terrain, forest, waves, water, shore, fields, grass, wtime = 0;
 function build() {
   if (terrain) { scene.remove(terrain, forest.group, water.mesh); if (grass) scene.remove(grass.group); }
@@ -45,10 +49,10 @@ function build() {
   waves = new GpuWaves(renderer, { cascades: src.water.cascades, fetch: src.water.fetch, salt: src.cosmetic | 0 });
   shore = q.has('noshore') ? null : new GpuShore(renderer, src);
   fields = q.has('nofield') ? null : [GFOAM.far, GFOAM.near].map((level) => new GpuFoamField(renderer, { clip, waves, shore, surfU, level }));
-  water = gpuWater(clip, waves, { waterAt: (x, z) => src.waterAt(x, z), shore, sea: src.sea, renderer, surfU, fields, debug: +(q.get('wdebug') || 0) });
+  water = gpuWater(clip, waves, { sunColor: sky.uSunColor, skyUp: sky.uSkyUp, skyHz: sky.uSkyHz, waterAt: (x, z) => src.waterAt(x, z), shore, sea: src.sea, renderer, surfU, fields, debug: +(q.get('wdebug') || 0) });
   if (!q.has('nowater')) scene.add(water.mesh);
   if (!q.has('noterrain')) scene.add(terrain);
-  grass = q.has('nograss') ? null : new GpuGrass(renderer, { clip, source: src, sunDir: water.U.uSunDir }); if (grass) scene.add(grass.group);
+  grass = q.has('nograss') ? null : new GpuGrass(renderer, { clip, source: src, sunDir: water.U.uSunDir, sunColor: sky.uSunColor }); if (grass) scene.add(grass.group);
   if (!q.has('noforest')) scene.add(forest.group);
   clip.build(cam.fx, cam.fz);
 }
@@ -108,6 +112,12 @@ function step(dt) {
     camera.lookAt(cam.fx, gy, cam.fz); if (cam.look) camera.rotateX(cam.look);
   }
   camera.near = THREE.MathUtils.clamp(cam.dist * 0.01, 0.03, 5); camera.updateProjectionMatrix();
+  // the sun, the sky's tables and the light they give; the exposure follows the light (index.js: a grey card facing up
+  // maps to 0.18 when exposure = pi / E)
+  sunAt(state.hour);
+  sky.update(sunDir, Math.max(1, camera.position.y - (src.sea ?? 0)), 1); sky.uSea.value = src.sea ?? 0;
+  sun.color.copy(sky.sunColor); sun.intensity = 1; hemi.color.copy(sky.skyUp); hemi.groundColor.copy(sky.skyUp).multiplyScalar(0.25); hemi.intensity = 1;
+  { const g2 = Math.max(0, sunDir.y), c = sky.sunColor, u = sky.skyUp, lum = 0.2126 * (c.r * g2 + u.r) + 0.7152 * (c.g * g2 + u.g) + 0.0722 * (c.b * g2 + u.b); if (lum > 0) renderer.toneMappingExposure = THREE.MathUtils.clamp(Math.PI / Math.max(lum, 0.05), 0.02, 40); }
   // the sun's shadow box follows the eye
   const f = player.on ? player.pos : new THREE.Vector3(cam.fx, ground(cam.fx, cam.fz), cam.fz);
   sun.target.position.copy(f); sun.position.copy(f).addScaledVector(sunDir, 300);
@@ -132,6 +142,8 @@ function resize() { const w = innerWidth, h = innerHeight; renderer.setSize(w, h
 addEventListener('resize', resize); resize();
 $('treeDist').addEventListener('input', (e) => { state.treeDist = parseFloat(e.target.value); $('oTreeDist').textContent = Math.round(state.treeDist * 100) + '%'; });
 $('oTreeDist').textContent = '100%';
+$('hour').value = state.hour; const showHour = () => { const h = Math.floor(state.hour), m = Math.round((state.hour - h) * 60); $('oHour').textContent = `${h}:${String(m).padStart(2, '0')}`; }; showHour();
+$('hour').addEventListener('input', (e) => { state.hour = parseFloat(e.target.value); showHour(); });
 build();
 
 let last = performance.now(), fps = 0, frames = 0, ft = 0, gpuMs = 0, counts = null, countT = 0, manual = false;
@@ -161,4 +173,4 @@ async function snap() {
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = (y * w + x) * 4, o = i; /* WebGPU reads back top row first */ for (let c = 0; c < 3; c++) im.data[o + c] = 255 * srgb(aces(toF(px[i + c]) * 0.6 * renderer.toneMappingExposure)); im.data[o + 3] = 255; }
   c2.putImageData(im, 0, 0); return cv2.toDataURL('image/png');
 }
-window.__gpu = { snap, draw, renderer, scene, camera, cam, state, player, get forest() { return forest; }, get grass() { return grass; }, get clip() { return clip; }, manual(on) { manual = on; if (!on) { last = performance.now(); requestAnimationFrame(frame); } }, step, async counts() { return forest.counts(); }, render() { draw(); } };
+window.__gpu = { snap, draw, renderer, scene, camera, cam, state, player, get forest() { return forest; }, get grass() { return grass; }, sky, get clip() { return clip; }, manual(on) { manual = on; if (!on) { last = performance.now(); requestAnimationFrame(frame); } }, step, async counts() { return forest.counts(); }, render() { draw(); } };
