@@ -21,6 +21,7 @@ const fGround = wgslFn('fn sGround(r: f32, mu: f32) -> f32 { return aGround(r, m
 const fPR = wgslFn('fn sPR(c: f32) -> f32 { return aPhaseR(c); }', [code]);
 const fPM = wgslFn('fn sPM(c: f32) -> f32 { return aPhaseM(c); }', [code]);
 const fUV = wgslFn('fn sUV(v: vec3<f32>, s: vec3<f32>) -> vec2<f32> { return skyUV(v, s); }', [code]);
+const fNight = wgslFn('fn sNight(v: vec3<f32>, blur: f32, sun: vec3<f32>, moonDir: vec3<f32>, moonColor: vec3<f32>) -> vec3<f32> { return nightAt(v, blur, sun, moonDir, moonColor); }', [code]);
 const fDir = wgslFn('fn sDir(uv: vec2<f32>, s: vec3<f32>) -> vec3<f32> { return skyDir(uv, s); }', [code]);
 const A = ATMO;
 
@@ -31,6 +32,7 @@ export class GpuSky {
     this.msRT = rt(32, 32); this.rt = rt(192, 108); this.rt.texture.wrapS = THREE.RepeatWrapping;
     this.uSun = uniform(new THREE.Vector3(0.4, 0.6, 0.3).normalize()); this.uHaze = uniform(1); this.uCamH = uniform(2);
     this.uSunColor = uniform(new THREE.Color()); this.uSkyUp = uniform(new THREE.Color()); this.uSkyHz = uniform(new THREE.Color());
+    this.uMoonDir = uniform(new THREE.Vector3(0, 1, 0)); this.uMoonColor = uniform(new THREE.Color(0, 0, 0)); // the moon (update): its direction and its light at the ground
     this.uMist = uniform(0); this.uMistH = uniform(40); this.uSea = uniform(0);
     const msMat = new THREE.MeshBasicNodeMaterial(); msMat.outputNode = fMS({ uv: screenUV, haze: this.uHaze });
     this.msQuad = new THREE.QuadMesh(msMat);
@@ -58,13 +60,16 @@ export class GpuSky {
     this._key = ''; this._msHaze = -1; this._day = new Map();
     this.sunColor = new THREE.Color(); this.skyUp = new THREE.Color(); this.skyHorizon = new THREE.Color();
   }
+  // the night sky (sky.js NIGHT_GLSL, converted): the stars as the sky darkens, the moon's disc and glow; blur > 0 for
+  // the water's reflection of it
+  night(v, blur) { return fNight({ v, blur: float(blur), sun: this.uSun, moonDir: this.uMoonDir, moonColor: this.uMoonColor }); }
   // the background: the table by direction and the sun's disc (post.js sunDisc)
   background() {
     return Fn(() => {
       const v = positionWorldDirection, cs = dot(v, this.uSun), r = 0.5 * A.sunAngle, a = acos(clamp(cs, -1, 1));
       const mu2 = sqrt(max(float(1).sub(a.div(r).mul(a.div(r))), 0)), limb = float(1).sub(float(1).sub(pow(mu2, 0.5)).mul(0.6));
       const disc = this.uSunColor.mul(limb).mul(smoothstep(r * 1.05, r * 0.95, a)).div(Math.PI * r * r).mul(0.6);
-      return this.skyAt(v).add(disc);
+      return this.skyAt(v).add(disc).add(this.night(v, 0));
     })();
   }
   // the aerial perspective (post.js airT): the analytic optical depth of exponential air and the mist along the segment
@@ -88,7 +93,12 @@ export class GpuSky {
   // the tables, rebuilt when the sun's height, the haze or the eye's altitude has moved enough; the light eases from
   // step to step
   update(sunDir, camH, haze) {
-    this.uSun.value.copy(sunDir); this.uHaze.value = haze; this.uCamH.value = Math.max(1, camH);
+    this.uSun.value.copy(sunDir);
+    // the moon (index.js): about opposite the sun, a little off its track, up while the sun is down; its light at the
+    // ground about a thirtieth of the sun's, cool
+    { const m = this.uMoonDir.value.set(-sunDir.x + 0.18, -sunDir.y + 0.32, -sunDir.z - 0.12).normalize();
+      const up = THREE.MathUtils.smoothstep(m.y, -0.02, 0.15) * (1 - THREE.MathUtils.smoothstep(sunDir.y, -0.1, 0.05));
+      this.uMoonColor.value.setRGB(0.55, 0.62, 0.8).multiplyScalar(0.11 * up); } this.uHaze.value = haze; this.uCamH.value = Math.max(1, camH);
     const key = `${sunDir.y.toFixed(3)},${haze.toFixed(2)},${Math.round(Math.log2(Math.max(1, camH)) * 4)}`, r = this.renderer;
     if (key !== this._key) {
       this._key = key;

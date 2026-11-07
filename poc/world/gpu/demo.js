@@ -35,6 +35,7 @@ const SH = 70; Object.assign(sun.shadow.camera, { left: -SH, right: SH, top: SH,
 scene.add(sun, sun.target, hemi);
 const sunDir = new THREE.Vector3(0.45, 0.62, 0.3).normalize();
 // the sun by the hour (a plain arc: up at 6, highest at 12 at 55 degrees, down at 18)
+const keyDir = new THREE.Vector3();
 function sunAt(hour) { const a = (hour - 6) / 12 * Math.PI, el = Math.sin(a) * 0.96 - 0.04, az = 1.9 + (hour - 12) / 12 * Math.PI; sunDir.set(Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az)).normalize(); }
 
 const state = { seed: 7, treeDist: 1, wind: 4, hour: +(q.get('hour') || 11) };
@@ -116,11 +117,15 @@ function step(dt) {
   // maps to 0.18 when exposure = pi / E)
   sunAt(state.hour);
   sky.update(sunDir, Math.max(1, camera.position.y - (src.sea ?? 0)), 1); sky.uSea.value = src.sea ?? 0;
-  sun.color.copy(sky.sunColor); sun.intensity = 1; hemi.color.copy(sky.skyUp); hemi.groundColor.copy(sky.skyUp).multiplyScalar(0.25); hemi.intensity = 1;
-  { const g2 = Math.max(0, sunDir.y), c = sky.sunColor, u = sky.skyUp, lum = 0.2126 * (c.r * g2 + u.r) + 0.7152 * (c.g * g2 + u.g) + 0.0722 * (c.b * g2 + u.b); if (lum > 0) renderer.toneMappingExposure = THREE.MathUtils.clamp(Math.PI / Math.max(lum, 0.05), 0.02, 40); }
+  // the key light: the sun by day, the moon by night (its light and its shadows), crossing at dusk
+  const mc = sky.uMoonColor.value, night = 1 - THREE.MathUtils.smoothstep(sunDir.y, -0.1, 0.05), md = sky.uMoonDir.value;
+  keyDir.copy(sunDir).lerp(md, night).normalize();
+  sun.color.copy(sky.sunColor).add(mc); sun.intensity = 1; hemi.color.setRGB(sky.skyUp.r + 0.25 * mc.r, sky.skyUp.g + 0.25 * mc.g, sky.skyUp.b + 0.25 * mc.b); hemi.groundColor.copy(hemi.color).multiplyScalar(0.25); hemi.intensity = 1;
+  { const g2 = Math.max(0, sunDir.y), c = sky.sunColor, u = sky.skyUp, lum = 0.2126 * (c.r * g2 + u.r) + 0.7152 * (c.g * g2 + u.g) + 0.0722 * (c.b * g2 + u.b), lumM = (0.2126 * mc.r + 0.7152 * mc.g + 0.0722 * mc.b) * Math.max(0, md.y);
+    renderer.toneMappingExposure = THREE.MathUtils.clamp(Math.PI / Math.max(lum + lumM, 0.05), 0.02, 40); }
   // the sun's shadow box follows the eye
   const f = player.on ? player.pos : new THREE.Vector3(cam.fx, ground(cam.fx, cam.fz), cam.fz);
-  sun.target.position.copy(f); sun.position.copy(f).addScaledVector(sunDir, 300);
+  sun.target.position.copy(f); sun.position.copy(f).addScaledVector(keyDir, 300);
   clip.update(camera.position.x, camera.position.z, dt);
   if (forest.rangeK !== state.treeDist) forest.setRange(state.treeDist);
   if (!q.has('noforest')) forest.update(camera, dt, [state.wind * 0.94, state.wind * 0.35]);

@@ -10,6 +10,9 @@ const A_MIEX: f32 = 0.0000044f;
 const A_MIEH: f32 = 1200f;
 
 var<private> uHaze: f32 = 1f;
+var<private> uMoonDir: vec3<f32> = vec3<f32>(0f, 1f, 0f);
+var<private> uMoonColor: vec3<f32> = vec3(0f);
+var<private> uSun: vec3<f32> = vec3<f32>(0f, 1f, 0f);
 
 fn aExt(h: f32, scR: ptr<function, vec3<f32>>, scM: ptr<function, f32>) -> vec3<f32> {
     var h_1: f32;
@@ -444,5 +447,149 @@ fn skyTrans(r_7: f32, mu_6: f32, haze_4: f32) -> vec3<f32> {
     let _e17 = mu_7;
     let _e18 = aTransmittance(_e16, _e17);
     return _e18;
+}
+
+fn nightDark() -> f32 {
+    let _e16 = uSun;
+    return (1f - smoothstep(-0.14f, 0.02f, _e16.y));
+}
+
+fn nightHash(c_4: vec2<f32>) -> f32 {
+    var c_5: vec2<f32>;
+
+    c_5 = c_4;
+    let _e14 = c_5;
+    return fract((sin(dot(_e14, vec2<f32>(127.1f, 311.7f))) * 43758.547f));
+}
+
+fn nightStars(v_3: vec3<f32>, blur: f32) -> vec3<f32> {
+    var v_4: vec3<f32>;
+    var blur_1: f32;
+    var uv_2: vec2<f32>;
+    var c_6: vec2<f32>;
+    var f: vec2<f32>;
+    var h_4: f32;
+    var h2_: f32;
+    var on: f32;
+    var b_1: f32;
+    var o: vec2<f32>;
+    var s_5: f32;
+    var pt: f32;
+    var tint: vec3<f32>;
+
+    v_4 = v_3;
+    blur_1 = blur;
+    let _e16 = v_4;
+    if (_e16.y <= 0f) {
+        return vec3(0f);
+    }
+    let _e22 = v_4;
+    let _e24 = v_4;
+    let _e27 = v_4;
+    uv_2 = ((vec2<f32>(atan2(_e22.z, _e24.x), asin(clamp(_e27.y, -1f, 1f))) * 57.29578f) * 2.2f);
+    let _e40 = uv_2;
+    c_6 = floor(_e40);
+    let _e43 = uv_2;
+    f = (fract(_e43) - vec2(0.5f));
+    let _e49 = c_6;
+    let _e50 = nightHash(_e49);
+    h_4 = _e50;
+    let _e52 = c_6;
+    let _e56 = nightHash((_e52 + vec2(17.3f)));
+    h2_ = _e56;
+    let _e59 = h_4;
+    on = step(0.9f, _e59);
+    let _e64 = h2_;
+    let _e68 = on;
+    b_1 = (mix(0.25f, 1f, pow(_e64, 6f)) * _e68);
+    let _e71 = h_4;
+    let _e75 = h_4;
+    o = ((vec2<f32>(fract((_e71 * 13.1f)), fract((_e75 * 31.7f))) - vec2(0.5f)) * 0.6f);
+    let _e87 = blur_1;
+    s_5 = (0.06f + _e87);
+    let _e90 = f;
+    let _e91 = o;
+    let _e93 = f;
+    let _e94 = o;
+    let _e99 = s_5;
+    let _e101 = s_5;
+    let _e106 = s_5;
+    let _e110 = s_5;
+    pt = ((exp((-(dot((_e90 - _e91), (_e93 - _e94))) / ((2f * _e99) * _e101))) * (0.06f / _e106)) * (0.06f / _e110));
+    let _e122 = h2_;
+    tint = mix(vec3<f32>(0.8f, 0.88f, 1.15f), vec3<f32>(1.15f, 0.95f, 0.75f), vec3(fract((_e122 * 7.7f))));
+    let _e129 = tint;
+    let _e130 = b_1;
+    let _e132 = pt;
+    let _e134 = nightDark();
+    let _e138 = v_4;
+    return (((((_e129 * _e130) * _e132) * _e134) * smoothstep(0f, 0.12f, _e138.y)) * 0.12f);
+}
+
+fn nightMoon(v_5: vec3<f32>, blur_2: f32) -> vec3<f32> {
+    var v_6: vec3<f32>;
+    var blur_3: f32;
+    var c_7: f32;
+    var r_9: f32;
+    var a_1: f32;
+
+    v_6 = v_5;
+    blur_3 = blur_2;
+    let _e16 = v_6;
+    let _e17 = uMoonDir;
+    c_7 = max(dot(_e16, _e17), 0f);
+    let _e23 = blur_3;
+    r_9 = (0.0075f + _e23);
+    let _e26 = c_7;
+    a_1 = acos(clamp(_e26, -1f, 1f));
+    let _e33 = uMoonColor;
+    let _e34 = r_9;
+    let _e37 = r_9;
+    let _e40 = a_1;
+    let _e45 = r_9;
+    let _e49 = r_9;
+    let _e52 = c_7;
+    let _e58 = c_7;
+    let _e68 = uMoonDir;
+    return ((_e33 * (((((smoothstep((_e34 * 1.08f), (_e37 * 0.92f), _e40) * 30f) * (0.0075f / _e45)) * (0.0075f / _e49)) + (pow(_e52, 900f) * 1.5f)) + (pow(_e58, 40f) * 0.12f))) * smoothstep(-0.02f, 0.05f, _e68.y));
+}
+
+fn nightSky(v_7: vec3<f32>, blur_4: f32) -> vec3<f32> {
+    var v_8: vec3<f32>;
+    var blur_5: f32;
+
+    v_8 = v_7;
+    blur_5 = blur_4;
+    let _e16 = v_8;
+    let _e17 = blur_5;
+    let _e18 = nightStars(_e16, _e17);
+    let _e19 = v_8;
+    let _e20 = blur_5;
+    let _e21 = nightMoon(_e19, _e20);
+    return (_e18 + _e21);
+}
+
+fn nightAt(v_9: vec3<f32>, blur_6: f32, sun: vec3<f32>, moonDir: vec3<f32>, moonColor: vec3<f32>) -> vec3<f32> {
+    var v_10: vec3<f32>;
+    var blur_7: f32;
+    var sun_1: vec3<f32>;
+    var moonDir_1: vec3<f32>;
+    var moonColor_1: vec3<f32>;
+
+    v_10 = v_9;
+    blur_7 = blur_6;
+    sun_1 = sun;
+    moonDir_1 = moonDir;
+    moonColor_1 = moonColor;
+    let _e22 = sun_1;
+    uSun = _e22;
+    let _e23 = moonDir_1;
+    uMoonDir = _e23;
+    let _e24 = moonColor_1;
+    uMoonColor = _e24;
+    let _e25 = v_10;
+    let _e26 = blur_7;
+    let _e27 = nightSky(_e25, _e26);
+    return _e27;
 }
 `;
