@@ -411,7 +411,7 @@ let running = false, paused = false;
 const input = { pick: 0, keys: new Set(), lmb: false, yaw: 0, pitch: 0, alloc: 1, autopilot: null, free: { yaw: 0, pitch: 0, held: false },
   lock: null, pilot: null, autoTurn: false, turning: false, gazeOff: 0, gDown: 0, gLong: false }; // lock-on, assisted flight, eye turn (GDD 7.9)
 // Player options from the Esc menu, kept per browser
-const opts = { volume: 0.7, sens: 1, invert: false, reflex: true, autoGrab: null, autoRes: true, perf: false, grassMatte: true }; // autoGrab null: on for touch, off otherwise
+const opts = { volume: 0.7, sens: 1, invert: false, reflex: true, autoGrab: null, autoRes: true, perf: false, grassMatte: true, vip: true }; // autoGrab null: on for touch, off otherwise
 try { Object.assign(opts, JSON.parse(localStorage.getItem('sting.options') || '{}')); } catch { /* optional */ }
 const saveOpts = () => { try { localStorage.setItem('sting.options', JSON.stringify(opts)); } catch { /* optional */ } };
 const ySign = () => (opts.invert ? -1 : 1);
@@ -2190,7 +2190,8 @@ function readPad() {
   if (atlas.open) { pad.prev = gp.buttons.map((x) => !!(x && (x.pressed || x.value > 0.5))); return null; } // the pad works the atlas (padUI)
   if (wmap.open) { // the worker map: the right stick moves the pointer, A flies the one under it, B or Y closes
     wmap.cx += dz(gp.axes[2] || 0) * 6; wmap.cy += dz(gp.axes[3] || 0) * 6;
-    if (edge(0)) wmapPick(); else if (edge(1) || edge(3)) closeWorkerMap();
+    if (wmap.choice) { if (edge(12)) wmap.opt = Math.max(0, wmap.opt - 1); if (edge(13)) wmap.opt = Math.min(2, wmap.opt + 1); }
+    if (edge(0)) wmapPick(); else if (edge(1) || (edge(3) && !wmap.choice)) closeWorkerMap();
     pad.prev = gp.buttons.map((x) => !!(x && (x.pressed || x.value > 0.5))); return null;
   }
   if (ui.nest) { // the colony view has the buttons (padUI); the sticks still fly
@@ -2364,7 +2365,7 @@ function buildCmd() {
     yawQ: Math.round(input.yaw * 1e4), pitchQ: Math.round(input.pitch * 1e4),
     act: (k.has('KeyE') || (gp && gp.b(0)) ? Act.Interact : 0) | (input.qTap ? (input.qTap = 0, Act.Switch) : 0) | (k.has('KeyR') || (gp && gp.b(2)) ? Act.Rest : 0) | (input.swoopOnce ? (input.swoopOnce = false, Act.Swoop) : 0),
     alloc: input.alloc,
-    pick: input.raise ? (input.raise = 0, -3000000) : input.kin ? (input.kin = 0, -(2000000 + kinOnce)) : input.switchTo ? (input.switchTo = 0, -(1000 + switchOnce)) : input.grow ? (input.grow = 0, -(500 + growOnce)) : input.learn ? (input.learn = 0, -(learnOnce + 1)) : input.pick ? (input.pick = 0, pickOnce) : 0, // negative picks: take a colony in hand, learn a skill (GDD 6.8)
+    pick: input.raise ? (input.raise = 0, -3000000) : input.queenGo ? (input.queenGo === 1 ? -3000001 : -3000002) + (input.queenGo = 0) : input.kin ? (input.kin = 0, -(2000000 + kinOnce)) : input.switchTo ? (input.switchTo = 0, -(1000 + switchOnce)) : input.grow ? (input.grow = 0, -(500 + growOnce)) : input.learn ? (input.learn = 0, -(learnOnce + 1)) : input.pick ? (input.pick = 0, pickOnce) : 0, // negative picks: take a colony in hand, learn a skill (GDD 6.8)
   };
   if (input.eatBurst) { if (cmd.burst) cmd.burst = 0; else input.eatBurst = false; }
   // Auto grab (on by default with touch): prey within reach and nothing in the jaws, and nothing else E would do here (a
@@ -2556,23 +2557,29 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyG' && !e.repeat && running && !paused) { eyeTurnDown(); return; }
   if (e.code === 'KeyE' && !e.repeat && running && !paused && startPilot()) return;
   if (e.code === 'KeyH' && !e.repeat && running && !paused) { toggleHover(); return; }
+  if (e.code === 'KeyB' && !e.repeat && running && !paused) { opts.vip = opts.vip === false; saveOpts(); showOpts(); toast(opts.vip ? 'Markers on: queens, guards, escorts' : 'Markers off', 'var(--muted)', 1.2); return; }
   if (e.code === 'KeyM' && !e.repeat && sim && running) { toggleAtlas(); return; } // the atlas (sound is the pause menu's volume)
   if (atlas.open && e.code === 'Escape') { e.preventDefault(); closeAtlas(); return; }
   if ((e.code === 'Minus' || e.code === 'Equal') && !e.repeat) { mapStep('size', e.code === 'Equal' ? 1 : -1); return; }
   if ((e.code === 'BracketLeft' || e.code === 'BracketRight') && !e.repeat) { mapStep('zoom', e.code === 'BracketRight' ? 1 : -1); return; }
   if (wmap.open) { // the worker map: 1 to 9 fly that one, E flies the one under the pointer, Esc closes
     const n = e.code.startsWith('Digit') ? +e.code.slice(5) : 0;
+    if (wmap.choice && n >= 1 && n <= 3) { queenChoose(QCHOICE[n - 1][0]); return; }
     if (n >= 1 && n <= 9) { const o = wmap.list[n - 1]; if (o) wmapFly(o.w.id); return; }
     if (e.code === 'KeyE' && !e.repeat) { wmapPick(); return; }
     if (e.code === 'Escape') { e.preventDefault(); closeWorkerMap(); return; }
   }
-  if (e.code === 'KeyQ' && !e.repeat && running && !paused && !atlas.open && !ov.on) { if (wmap.open) closeWorkerMap(); else input.qDown = performance.now(); return; }
+  if (e.code === 'KeyQ' && !e.repeat && running && !paused && !atlas.open && !ov.on) { if (wmap.open && !wmap.choice) closeWorkerMap(); else input.qDown = performance.now(); return; }
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
   input.keys.add(e.code);
 });
 addEventListener('keyup', (e) => {
   input.keys.delete(e.code); if (e.code === 'KeyG') eyeTurnUp();
-  if (e.code === 'KeyQ' && input.qDown) { const held = performance.now() - input.qDown; input.qDown = 0; if (held < Q_HOLD && !wmap.open) qShort(); }
+  if (e.code === 'KeyQ' && input.qDown) { // (a hold no frame saw is still a hold)
+    const held = performance.now() - input.qDown; input.qDown = 0;
+    if (held < Q_HOLD) { if (wmap.open) closeWorkerMap(); else qShort(); }
+    else if (wmap.open && wmap.choice) queenChoose('alone'); else if (!wmap.open && running && !paused) openWorkerMap();
+  }
 });
 addEventListener('blur', () => { input.keys.clear(); input.lmb = false; input.free.held = false; });
 let lockFailed = false, pointerLockWorked = false;
@@ -2620,6 +2627,7 @@ function showOpts() {
   $('optInvert').checked = opts.invert;
   $('optReflex').checked = opts.reflex;
   $('optGrab').checked = opts.autoGrab ?? touch.on;
+  $('optVip').checked = opts.vip !== false;
   $('optRes').checked = opts.autoRes;
   $('optPerf').checked = !!opts.perf; $('optGrass').checked = opts.grassMatte !== false;
   $('perfOpt').value = opts.perf ? '1' : '0'; $('grassLook').value = opts.grassMatte !== false ? 'matte' : 'gloss';
@@ -2636,6 +2644,7 @@ $('optSens').addEventListener('input', (e) => { opts.sens = +e.target.value / 10
 $('optInvert').addEventListener('change', (e) => { opts.invert = e.target.checked; saveOpts(); });
 $('optReflex').addEventListener('change', (e) => { opts.reflex = e.target.checked; saveOpts(); });
 $('optGrab').addEventListener('change', (e) => { opts.autoGrab = e.target.checked; saveOpts(); });
+$('optVip').addEventListener('change', (e) => { opts.vip = e.target.checked; saveOpts(); });
 $('optPerf').addEventListener('change', (e) => setPerf(e.target.checked));
 $('optGrass').addEventListener('change', (e) => setGrass(e.target.checked));
 $('perfOpt').addEventListener('change', (e) => setPerf(e.target.value === '1'));
@@ -2835,7 +2844,16 @@ $('nLine').addEventListener('click', (e) => {
 // A tap of Q takes a worker of the hand within reach, at random (the nearest one, by relay, when none is); a hold opens
 // the worker map: every insect of the hand round the one flown, top-down with the view's forward up, to pick one.
 const Q_HOLD = 350;
-const wmap = { open: false, cx: 0, cy: 0, list: [], hover: null, R: 40 };
+const wmap = { open: false, cx: 0, cy: 0, list: [], hover: null, R: 40, choice: null, opt: 0, ride: false };
+// a young queen raised waits at the door till the player chooses (GDD 6.10): fly her, escort her, or let her go alone
+const waitingQueen = () => sim && sim.wasps.find((w) => w.foundress && w.ai.mode === 'wait' && w.id !== sim.drivenId);
+const QCHOICE = [['fly', 'Fly the queen', 'you take her; E by a free trunk founds, E at a rival door takes it'], ['escort', 'Escort her', 'workers of the nest go with her and join her colony; you fly one of them'], ['alone', 'Let her go alone', 'she flies to the nearest free tree and founds there']];
+function queenChoose(k) {
+  const q = waitingQueen(); wmap.choice = null; closeWorkerMap();
+  if (!q) return;
+  if (k === 'fly') { pickOnce = q.id; input.pick = 1; }
+  else { input.queenGo = k === 'escort' ? 1 : 2; wmap.ride = k === 'escort'; }
+}
 function qShort() {
   const d = sim && sim._driven(); if (!d) { input.qTap = 1; return; }
   const R2 = T.possess.freeRange * T.possess.freeRange;
@@ -2844,22 +2862,23 @@ function qShort() {
 }
 function qTick() {
   const now = performance.now(), live = running && !paused && !ui.nest && !atlas.open && !ov.on;
-  if (input.qDown && now - input.qDown >= Q_HOLD) { input.qDown = 0; if (live) openWorkerMap(); }
+  if (input.qDown && now - input.qDown >= Q_HOLD) { input.qDown = 0; if (wmap.open && wmap.choice) queenChoose('alone'); else if (live) openWorkerMap(); } // a second hold on the queen's choice lets her go alone
   const gp = navigator.getGamepads ? [...navigator.getGamepads()].find((g) => g && g.connected) : null;
   const y = !!(gp && gp.buttons[3] && (gp.buttons[3].pressed || gp.buttons[3].value > 0.5));
-  if (y && !input.padQ) input.padQ = wmap.open || !live ? -1 : now;
+  if (y && !input.padQ) input.padQ = (wmap.open && !wmap.choice) || !live ? -1 : now;
+  else if (y && input.padQ > 0 && wmap.open && wmap.choice && now - input.padQ >= Q_HOLD) { input.padQ = -1; queenChoose('alone'); }
   else if (!y && input.padQ) { const t0 = input.padQ; input.padQ = 0; if (t0 > 0 && now - t0 < Q_HOLD) qShort(); }
   else if (y && input.padQ > 0 && now - input.padQ >= Q_HOLD) { input.padQ = -1; openWorkerMap(); }
 }
 function wmapList() {
   const d = sim._driven(); if (!d) return [];
   return sim.wasps.filter((w) => w !== d && w.colony === 'own' && w.state !== 'dead' && (w.caste === 'worker' || w.foundress))
-    .map((w) => ({ w, d: Math.hypot(w.x - d.x, w.z - d.z) })).filter((o) => o.d <= wmap.R).sort((a, b) => a.d - b.d).slice(0, 60);
+    .map((w) => ({ w, d: Math.hypot(w.x - d.x, w.z - d.z) })).filter((o) => o.d <= wmap.R || o.w.foundress).sort((a, b) => a.d - b.d).slice(0, 60); // a young queen shows at any distance, on the rim
 }
-function openWorkerMap() { if (!sim || !sim._driven()) return; wmap.open = true; wmap.cx = wmap.cy = 0; input.lmb = false; input.keys.clear(); $('wmap').hidden = false; drawWorkerMap(); }
-function closeWorkerMap() { wmap.open = false; $('wmap').hidden = true; }
+function openWorkerMap() { if (!sim || !sim._driven()) return; wmap.choice = waitingQueen() ? 'queen' : null; wmap.opt = 0; wmap.open = true; wmap.cx = wmap.cy = 0; input.lmb = false; input.keys.clear(); $('wmap').hidden = false; drawWorkerMap(); }
+function closeWorkerMap() { wmap.open = false; wmap.choice = null; $('wmap').hidden = true; }
 function wmapFly(id) { pickOnce = id; input.pick = 1; closeWorkerMap(); }
-function wmapPick() { if (wmap.hover) wmapFly(wmap.hover.w.id); }
+function wmapPick() { if (wmap.choice) queenChoose(QCHOICE[wmap.opt][0]); else if (wmap.hover) wmapFly(wmap.hover.w.id); }
 const ROLE_ICON = { sugar: '✿', protein: '✧', pulp: '▤', water: '≈', guard: '⛨' };
 function drawWorkerMap() {
   const cv = $('wmapC'), S = cv.width, ctx = cv.getContext('2d'), d = sim._driven();
@@ -2876,7 +2895,11 @@ function drawWorkerMap() {
   if (sim.colony.nestAlive && sim.colony.sited) { const [x, y] = toS(sim.nest.x, sim.nest.z); ctx.fillStyle = '#ece8dc'; ctx.font = '16px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('⌂', x, y); }
   const px = half + wmap.cx, py = half + wmap.cy;
   let best = null, bd = 28 * 28;
-  for (const o of wmap.list) { const [x, y] = toS(o.w.x, o.w.z), q = (x - px) ** 2 + (y - py) ** 2; o.s = [x, y]; if (q < bd) { bd = q; best = o; } }
+  for (const o of wmap.list) {
+    let [x, y] = toS(o.w.x, o.w.z); const rr = Math.hypot(x - half, y - half), lim = half - 14;
+    if (rr > lim) { x = half + (x - half) * lim / rr; y = half + (y - half) * lim / rr; o.far = true; } else o.far = false; // past the rim: pinned on it
+    const q = (x - px) ** 2 + (y - py) ** 2; o.s = [x, y]; if (q < bd) { bd = q; best = o; }
+  }
   if (!best && wmap.list.length && !wmap.cx && !wmap.cy) best = wmap.list[0];
   wmap.hover = best;
   ctx.font = '13px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -2885,13 +2908,57 @@ function drawWorkerMap() {
     ctx.fillStyle = o === best ? '#f5c518' : q ? '#ff9e3d' : w.carry ? '#e8d48a' : '#cfc8b4';
     ctx.font = q ? '18px system-ui' : '13px system-ui';
     ctx.fillText(q ? '♛' : ROLE_ICON[w.role] || '•', x, y);
-    if (i < 9) { ctx.font = '10px system-ui'; ctx.fillStyle = 'rgba(236,232,220,.7)'; ctx.fillText(String(i + 1), x + 9, y - 8); }
+    if (i < 9 && !wmap.choice) { ctx.font = '10px system-ui'; ctx.fillStyle = 'rgba(236,232,220,.7)'; ctx.fillText(String(i + 1), x + 9, y - 8); }
+    if (o.far) { ctx.font = '10px system-ui'; ctx.fillStyle = '#ff9e3d'; ctx.fillText(Math.round(o.d) + ' m', x, y + 13); }
   });
   ctx.fillStyle = '#e5412d'; ctx.beginPath(); ctx.moveTo(half, half - 7); ctx.lineTo(half - 5, half + 5); ctx.lineTo(half + 5, half + 5); ctx.closePath(); ctx.fill();
   ctx.strokeStyle = '#f5c518'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(px, py, 7, 0, Math.PI * 2); ctx.stroke();
+  if (wmap.choice) { // the waiting queen's choice: the pointer up and down picks a line
+    const q = waitingQueen(); if (!q) { closeWorkerMap(); return; }
+    wmap.opt = Math.max(0, Math.min(2, wmap.opt + Math.round(wmap.cy / 40))); if (Math.abs(wmap.cy) >= 40) wmap.cy = 0;
+    const n = Math.min(T.found.escort, Math.max(0, Math.floor(sim.colony.adults - sim._own().filter((w) => w.caste === 'worker').length - 2)));
+    $('wmapT').innerHTML = `<b>♛ A young queen waits at the door</b>` + QCHOICE.map(([k, t, d], i) => `<div class="qopt${i === wmap.opt ? ' on' : ''}">${kbd(String(i + 1))} <b>${t}</b>${k === 'escort' ? ` (${n} worker${n === 1 ? '' : 's'})` : ''} · ${d}</div>`).join('')
+      + `<div>${kbd('LMB')} or ${kbd('E')} choose · hold ${kbd('Q')} again: let her go alone · ${kbd('Esc')} not yet</div>`;
+    return;
+  }
   const h = best && best.w;
   $('wmapT').innerHTML = h ? `<b>${h.foundress ? 'Young queen' : noun() + ' ' + h.id}</b> · ${h.foundress ? 'out to found' : h.role}${h.carry ? ' · carrying ' + h.carry.what : ''} · ${Math.round(best.d)} m${best.d > T.possess.freeRange ? ' (by relay)' : ''}<br>${kbd('LMB')} or ${kbd('E')} fly it · ${kbd('1')}–${kbd('9')} · ${kbd('Q')} or ${kbd('Esc')} close`
     : `No ${noun().toLowerCase()} of yours within ${wmap.R} m · ${kbd('Q')} or ${kbd('Esc')} close`;
+}
+
+// ------------------------------------------------------------------ markers over the insects that matter
+// ♛ the hand's queens (a young queen out to found shows at any distance, on the screen's edge when out of view), ⛨ its
+// guards, ◦ a queen's escort: placed over the insect as drawn, so the player finds them without the map. B toggles them
+const vip = { els: [], v: new THREE.Vector3() };
+function vipTick() {
+  const layer = $('vip');
+  if (opts.vip === false || !sim || !running || ui.nest || paused) { layer.hidden = true; return; }
+  layer.hidden = false;
+  const d = sim._driven(), W = innerWidth, H = innerHeight, M = 48;
+  let n = 0;
+  for (const w of sim.wasps) {
+    if (w === d || w.state === 'dead' || w.colony !== 'own') continue;
+    const q = w.foundress || w.caste === 'queen', g = !q && w.role === 'guard', es = !q && w.ai && w.ai.mode === 'escort';
+    if (!q && !g && !es) continue;
+    const dist = d ? Math.hypot(w.x - d.x, w.y - d.y, w.z - d.z) : 0;
+    if (!q && dist > 60) continue;
+    const gv = waspViews.get(w.id), p = gv ? gv.position : w, v = vip.v.set(p.x, p.y + 0.05, p.z).project(camera);
+    const behind = v.z > 1, on = !behind && Math.abs(v.x) <= 1 && Math.abs(v.y) <= 1;
+    if (!on && !q) continue;
+    let sx, sy, edge = false;
+    if (on) { sx = (v.x + 1) / 2 * W; sy = (1 - v.y) / 2 * H - 14; }
+    else { // on the edge, the way to turn
+      let ex = behind ? -v.x : v.x, ey = behind ? -v.y : v.y; const k = 1 / Math.max(Math.abs(ex), Math.abs(ey), 1e-6); ex *= k; ey *= k;
+      sx = (ex + 1) / 2 * (W - 2 * M) + M; sy = (1 - ey) / 2 * (H - 2 * M) + M; edge = true;
+    }
+    const el = vip.els[n] || (vip.els[n] = layer.appendChild(document.createElement('div')));
+    el.className = 'vip ' + (q ? 'q' : g ? 'g' : 'e') + (edge ? ' edge' : '');
+    const txt = q ? `♛ ${Math.round(dist)} m` : g ? '⛨' : '◦';
+    if (el.textContent !== txt) el.textContent = txt;
+    el.style.transform = `translate(${sx.toFixed(1)}px, ${sy.toFixed(1)}px) translate(-50%, -50%)`;
+    el.hidden = false; n++;
+  }
+  for (let i = n; i < vip.els.length; i++) vip.els[i].hidden = true;
 }
 
 // ------------------------------------------------------------------ the tutorial (GDD 10.7)
@@ -2909,8 +2976,8 @@ const TUT = [
   { say: () => `Tap ${kbd('Q')}: fly another worker`, sub: 'A wasp is spent; the colony is you', done: () => tutor.f.possess },
   { say: () => `${kbd('N')} colony view · Raise a queen`, sub: () => tutor.f.qWhy ? `Not yet: ${QWHY[tutor.f.qWhy] || tutor.f.qWhy}` : `${T.found.protein} protein, ${T.found.sugar} sugar, ${T.found.adults} adults`, done: () => sim.colony.queenOrder || sim._foundresses() > 0 || sim.tut.founded },
   { say: () => 'A queen is being raised · keep foraging', sub: () => sim.colony.queenOrder ? `She comes out in about ${Math.max(1, Math.ceil((sim.colony.queenOrder.at - sim.tick) / 60))} s` : '', done: () => sim._foundresses() > 0 || sim.tut.founded },
-  { say: () => `Hold ${kbd('Q')}: pick the queen ♛`, sub: 'Or let her go: she founds by herself', done: (w) => w.foundress || sim.tut.founded },
-  { say: () => `Fly her to a free tree · ${kbd('E')}`, sub: 'Workers near her when she founds go with her', done: () => sim.tut.founded },
+  { say: () => `Hold ${kbd('Q')}: choose for the queen ♛`, sub: 'Fly her, escort her with workers, or let her go alone; she waits till you choose', done: () => sim.tut.founded || (sim._foundresses() > 0 && !waitingQueen()) },
+  { say: () => sim._driven() && sim._driven().foundress ? `Fly her to a free tree · ${kbd('E')}` : 'Follow her to her tree', sub: () => sim._driven() && sim._driven().foundress ? 'A trunk with no nest of yours within 8 m' : 'The ♛ marker shows where she is (B toggles markers)', done: () => sim.tut.founded },
   { say: () => `Raid the rival nest · ${kbd('E')} at its door`, sub: 'As a worker: steal a larva; its workers will hunt you, sting to fight', aim: () => rivalNear(), aimName: 'rival nest', done: () => tutor.f.raid || sim.tut.usurped },
   { say: () => 'Raise a queen · take that nest', sub: () => tutor.f.guards ? `${tutor.f.guards} guard${tutor.f.guards === 1 ? '' : 's'} at the door: down them first` : `Fly the queen (hold ${kbd('Q')}) to its door · ${kbd('E')} to take it`, aim: () => rivalNear(), aimName: 'rival nest', done: () => sim.tut.usurped },
   { say: () => 'The exterminator is coming', sub: 'For your first nest and the one you took. The colony you founded will carry on', done: () => tutor.f.home || sim.tut.done },
@@ -2957,9 +3024,15 @@ function tutorTick() {
 function spreadEvent(e) {
   const F = T.found;
   switch (e.type) {
+    case 'queenGo': {
+      if (wmap.ride && e.escort) { const w = sim.wasps.find((x) => x.ai && x.ai.mode === 'escort' && x.ai.huntId === e.id); if (w) { pickOnce = w.id; input.pick = 1; } }
+      wmap.ride = false;
+      toast(e.escort ? `The queen goes, with ${e.escort} workers · you fly with them` : 'The queen goes alone, to the nearest free tree', 'var(--yellow)', 3); lineSig = ''; break;
+    }
+    case 'queenGoDenied': toast('No queen is waiting at the door', 'var(--muted)', 1.6); break;
     case 'queenDenied': toast(`No queen raised: ${QWHY[e.why] || e.why}`, 'var(--muted)', 2.6); break;
     case 'queenOrdered': toast(`A queen is being raised · out in about ${Math.max(1, Math.round((e.at - sim.tick) / 60))} s`, 'var(--yellow)', 2.6); lineSig = ''; break;
-    case 'queenRaised': toast(`A young queen is out to found · hold Q to fly her, or let her go`, 'var(--yellow)', 3.4); logEvent(`young queen ${e.id} raised to found a colony`); lineSig = ''; break;
+    case 'queenRaised': toast(`A young queen waits at the door · hold Q to choose`, 'var(--yellow)', 3.4); logEvent(`young queen ${e.id} raised to found a colony`); lineSig = ''; break;
     case 'founded': toast(`A new colony of the line, ${Math.round(Math.hypot(e.x - sim.nest.x, e.z - sim.nest.z))} m off${e.escort ? `, with ${e.escort} workers` : ''}`, 'var(--yellow)', 3.4); logEvent(`a young queen founded colony ${e.id}`); syncNests(); lineSig = ''; break;
     case 'foundDenied': toast(e.why === 'cap' ? 'The line holds all the colonies it can' : `No free tree here · a trunk with no nest of yours within ${T.line.minGap} m`, 'var(--muted)', 2.6); break;
     case 'usurped': toast(e.own ? 'This nest is yours now · its workers raise your brood' : `Nest taken · a colony of the line with ${e.workers} workers`, 'var(--yellow)', 3.4); logEvent(`a queen took the rival nest ${e.key}`); syncNests(); lineSig = ''; mapTiles.clear(); break;
@@ -3124,6 +3197,7 @@ function updateHud() {
   const w = sim.wasp, c = sim.colony;
   if (wmap.open) drawWorkerMap();
   tutorTick();
+  vipTick();
   $('stungN').textContent = fmt(sim.stung.size);
   $('adults').textContent = fmt(c.adults);
   $('brood').textContent = fmt(broodTotal(c));

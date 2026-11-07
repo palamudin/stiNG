@@ -127,7 +127,7 @@ namespace Sting.Core
         }
         void TakeColony(LineColony sc)
         {
-            foreach (var w in new List<Wasp>(wasps)) if (w.colony == "own" || w.colony == "line:" + sc.id) Despawn(w);
+            foreach (var w in new List<Wasp>(wasps)) if ((w.colony == "own" && !w.foundress) || w.colony == "line:" + sc.id) Despawn(w); // a young queen out to found flies on
             line.Remove(sc);
             line.Add(new LineColony { id = ++lineSeq, nest = nest, colony = colony, season = season.n });
             nest = sc.nest; colony = sc.colony;

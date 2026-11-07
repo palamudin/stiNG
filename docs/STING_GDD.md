@@ -524,7 +524,7 @@ For testing, the PoC and the core run `open`: all three species can be picked on
 
 | Way | What happens in the game | Who does it in nature | Species with it at the start |
 |---|---|---|---|
-| **Founding with a swarm** (`swarmFound`) | The colony view's "Raise a queen" spends protein and sugar (6 and 6, with 25 adults home). Some days later (1.5) a young queen comes out, mated, and flies to the nearest free tree (no nest of the player's within 8 m). There she founds a colony of the line, and the workers near her (2.5 m) go with her. The player can hold Q, pick her on the worker map and fly her: E by a free trunk founds there. | Honeybees, and the tropical Polybia paper wasps. A yellowjacket queen founds alone, in spring. | none (a mutation to come) |
+| **Founding with a swarm** (`swarmFound`) | The colony view's "Raise a queen" spends protein and sugar (6 and 6, with 25 adults home). Some days later (1.5) a young queen comes out, mated, and waits at the door till the player chooses (hold Q): **fly her** (E by a free trunk founds there), **escort her** (up to 6 workers come out, follow her and join her colony, and the player flies one of them), or **let her go alone** (a second hold of Q). Sent, she flies to the nearest free tree (no nest of the player's within 8 m) and founds a colony of the line there, with the workers near her (2.5 m) and her escort. | Honeybees, and the tropical Polybia paper wasps. A yellowjacket queen founds alone, in spring. | none (a mutation to come) |
 | **Taking a nest** (`usurp`) | A mated queen at a rival nest's door presses E. If any of its wasps are at the door she is refused, and they hunt her. Once the guards are down she takes the nest: its queen is killed, its workers (6, plus 2 for each of the rival's) raise her brood, and the rival nest is gone from the map. A queen not yet nested makes it her own nest. A young queen of the line makes it a colony of the line. Spring only: before 35% of the season. | Vespula infernalis waits for a host nest's first workers and stings the host queen. The southern yellowjacket (V. squamosa) takes other yellowjackets' nests; Vespa dybowskii takes other hornets'. | yellowjackets and hornets |
 | **Emergency queens** (`emergency`) | A queenless colony with brood (3 at least) and some food raises a new queen in half a day, before the collapse. | Honeybees: a worker larva a few days old, fed royal jelly. Wasp workers cannot: a queenless wasp nest raises only males, and dies. | honeybees |
 
@@ -879,8 +879,8 @@ The front of the game is a game menu, not a manual. Whoever wants to read clicks
 | 4 | **Switching** | Tap Q: fly another worker ("a wasp is spent; the colony is you") | a switch |
 | 5 | **The colony** | N colony view · Raise a queen (the cost, or why not yet) | a queen ordered |
 | 6 | Waiting | A queen is being raised · keep foraging (seconds left) | she is out |
-| 7 | **The worker map** | Hold Q: pick the queen ♛ ("or let her go: she founds by herself") | flying her, or founded |
-| 8 | **Founding** | Fly her to a free tree · E ("workers near her go with her") | a colony founded |
+| 7 | **The queen's choice** | Hold Q: choose for the queen ♛ (fly her, escort her, or let her go; she waits till you choose) | she is sent, or flown |
+| 8 | **Founding** | Fly her to a free tree · E, or follow her ("the ♛ marker shows where she is") | a colony founded |
 | 9 | **The first raid** (pointer: the rival nest) | Raid the rival nest · E at its door ("its workers will hunt you, sting to fight") | a larva stolen, or the nest taken |
 | 10 | **Taking a nest** (pointer: the rival nest) | Raise a queen · take that nest (the guards at the door, or how) | the nest taken |
 | 11 | **The exterminator** | The exterminator is coming ("the colony you founded will carry on") | the home nest gone |
@@ -2601,6 +2601,26 @@ On a jump the CPU path no longer blurs a level out to its parent: the window it 
 **Caustics over a wider floor.** World v3 sized its square of caustics by the focus distance, 2.2 times it with 6 m at least. The game's camera is a few centimetres behind the wasp, so the square was 6 m across round the wasp: sharp light patterns under the wasp, and past them a flat, murky floor. It was also coarse for its size (a 256 texture and a 192 grid, the medium tier), which showed as blocky cells.
 
 The game now asks for a square at least 16 m across (`causticsMin`), pushed 30% of its size ahead along the view (`causticsAhead`), on a 512 texture with a 384 grid. That is about the old detail (3 cm texels, 7 cm cells, against 2.3 and 5 cm) over 2.7 times the width. Water seen at a slant still clouds with distance: that is the water, not the caustics.
+
+### 18.111 The queen waits, her escort, and markers over the insects that matter
+
+**What went wrong.** In play the young queen left for her tree as soon as she came out, before the player could pick her. The worker map only shows 40 m round the player, so she was gone from it, and nothing in the world showed where she was.
+
+**The queen waits** (6.10; sim.js `_queenGo`, `_thinkEscort`, and the C# twins). A queen raised on order now hovers at the door (`ai.mode` "wait") till the player chooses. Holding Q while she waits opens her choice on the worker map:
+- **1 Fly the queen:** the player takes her.
+- **2 Escort her** (pick `-3,000,001`): up to `escort` (6) workers come out of the nest and follow her (`ai.mode` "escort"), and the player is put in one of them. When she founds, they join her colony, at any distance.
+- **3 Let her go alone** (pick `-3,000,002`), or **a second hold of Q.** Esc closes it with no choice made, and she keeps waiting.
+
+A queen out to found, and her escort, are no longer cleared when the player flies far from the home nest, or when the player takes another colony in hand. On the worker map a young queen shows at any distance, pinned to the rim with her distance.
+
+**Markers** (B, and a Settings checkbox, on by default). A glyph over each insect of the hand that matters, placed over it as drawn:
+- ♛ queens, with the distance. A young queen out of view sits on the screen's edge, on the side to turn to.
+- ⛨ guards within 60 m.
+- ◦ a queen's escort.
+
+**Q held without a frame.** A hold released before a frame saw it (a slow frame) now still opens the map.
+
+**Tests.** Block 76 (both twins): the raised queen waits at the door for 1,200 ticks with no founding; sent with an escort, 6 workers follow her and all join the colony she founds. Checked headless: the choice, the escort with the player in one of its workers, and the markers.
 
 ### 18.110 Spreading the line, the worker map, and the tutorial
 

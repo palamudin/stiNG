@@ -93,6 +93,15 @@
   #wmapT { font-size: 12.5px; text-align: center; color: var(--fg); }
   #wmapT kbd { font: 600 11px var(--mono); border: 1px solid rgba(243,238,226,.4); padding: 0 4px; margin: 0 2px; }
   body.touch #tut .tut-say { font-size: 14px; }
+  #wmapT .qopt { margin-top: 4px; padding: 2px 8px; border: 1px solid transparent; }
+  #wmapT .qopt.on { border-color: var(--yellow); background: rgba(245,197,24,.12); }
+  /* markers over the hand's queens, guards and escorts (B) */
+  #vip { position: fixed; inset: 0; pointer-events: none; z-index: 4; overflow: hidden; }
+  #vip .vip { position: absolute; left: 0; top: 0; font: 700 13px var(--mono); color: #cfc8b4; text-shadow: 0 0 3px #000, 0 0 2px #000; white-space: nowrap; }
+  #vip .vip.q { color: #ff9e3d; font-size: 15px; }
+  #vip .vip.g { color: #ece8dc; }
+  #vip .vip.e { color: #e8d48a; font-size: 16px; }
+  #vip .vip.edge { background: rgba(14,12,9,.7); padding: 1px 6px; border: 1px solid #ff9e3d; }
   #lockMark span { position: absolute; left: 40px; top: 6px; white-space: nowrap; font: 700 12px var(--mono, ui-monospace, monospace); color: var(--fg); text-shadow: 0 1px 2px #000; text-transform: uppercase; letter-spacing: .06em; }
   #toast { top: 24%; left: 50%; transform: translateX(-50%); text-align: center; font-family: var(--display); font-weight: 800; font-size: 22px; letter-spacing: .05em; text-transform: uppercase; opacity: 0; transition: opacity .3s; max-width: 90vw; }
 
@@ -365,6 +374,7 @@
 <div class="hud shadow" id="toast"></div>
 <div id="lockMark" hidden><span></span></div>
 <div class="hud shadow" id="tut" hidden></div>
+<div id="vip" hidden></div>
 <div id="wmap" hidden><canvas id="wmapC" width="360" height="360"></canvas><div id="wmapT" class="shadow"></div></div>
 
 <div class="hud shadow" id="vitals">
@@ -527,7 +537,8 @@
       <div><kbd>V</kbd>/<kbd>MMB</kbd> lock on: the spot you aim at on a person, else the nearest prey or danger · <kbd>E</kbd> fly there and land · <kbd>H</kbd> hover round it (wheel: how far off · Shift+wheel: how fast round)</div>
       <div><kbd>X</kbd>swoop: a short dash that slams onto whatever it reaches (grabs prey, lands, lands on people) · locked on, it homes in</div>
       <div><kbd>G</kbd>turn to where you look · hold 1 s: auto turn</div>
-      <div><kbd>Q</kbd>tap: take over a worker near you · hold: the worker map, to pick one</div>
+      <div><kbd>Q</kbd>tap: take over a worker near you · hold: the worker map, to pick one (or a waiting queen's choice)</div>
+      <div><kbd>B</kbd>markers over your queens, guards and escorts</div>
       <div><kbd>R</kbd>rest in the nest at night</div>
       <div><kbd>N</kbd>nest panel</div>
       <div><kbd>Tab</kbd>lab overlay</div>
@@ -557,6 +568,7 @@
       <label for="optSens"><span class="label">Mouse sensitivity</span><output id="optSensOut" for="optSens">1.00×</output></label>
       <input type="range" id="optSens" min="25" max="300" step="5" value="100">
       <label class="check" for="optInvert"><input type="checkbox" id="optInvert"><span class="label">Invert look up / down</span></label>
+      <label class="check" for="optVip"><input type="checkbox" id="optVip"><span class="label">Markers over your queens, guards and a queen's escort (B); a young queen out of view shows at the screen's edge</span></label>
       <label class="check" for="optGrab"><input type="checkbox" id="optGrab"><span class="label">Auto grab: catch prey in reach without pressing (on by default on touch screens)</span></label>
       <label class="check" for="optRes"><input type="checkbox" id="optRes" checked><span class="label">Auto resolution: lower the render resolution to hold the frame rate</span></label>
       <label class="check" for="optPerf"><input type="checkbox" id="optPerf"><span class="label">Performance overlay: FPS, CPU and GPU load (F3)</span></label>

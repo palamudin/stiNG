@@ -2489,10 +2489,14 @@ function seated(sim, pred) {
   const raised = ev.some((e) => e.type === 'queenRaised') && !!q && q.mated;
   const r0 = restore(snapshot(t)), savedQ = r0.wasps.some((w) => w.foundress && w.id === q.id);
   const n0 = t.line.length; let founded = null;
+  ev = run(t, 1200, hold); const e0 = t.nest.entrance;
+  const waits = !ev.some((e) => e.type === 'founded') && q.ai.mode === 'wait' && Math.hypot(q.x - e0.x, q.z - e0.z) < 1;
+  ev = run(t, 1, () => idle({ pick: -3000001 })); const go = ev.find((e) => e.type === 'queenGo');
+  const escorts = t.wasps.filter((w) => w.ai.mode === 'escort' && w.ai.huntId === q.id).length;
   for (let i = 0; i < 40 && !founded; i++) founded = run(t, 120, hold).find((e) => e.type === 'founded');
   const sc = founded && t.line.find((x) => x.id === founded.id);
-  ok(poor && ord && raised && savedQ && !!founded && t.line.length === n0 + 1 && sc.colony.queenAlive && sc.colony.sited && !t.wasps.includes(q) && t.guide.swarmfound !== undefined,
-    `a queen is raised on order for protein and sugar (refused when short), comes out mated, survives a save, and founds at a free tree on her own (${founded ? `colony ${founded.id}, escort ${founded.escort}` : 'none'}); its field note opens`);
+  ok(poor && ord && raised && savedQ && waits && !!go && go.escort === T.found.escort && escorts === go.escort && !!founded && founded.escort >= go.escort && t.line.length === n0 + 1 && sc.colony.queenAlive && sc.colony.sited && !t.wasps.includes(q) && t.guide.swarmfound !== undefined,
+    `a queen is raised on order for protein and sugar (refused when short), comes out mated, survives a save, waits at the door till sent, and founds at a free tree with her escort (${founded ? `colony ${founded.id}, escort ${founded.escort} of ${go ? go.escort : 0} sent` : 'none'}); its field note opens`);
   // the takeover: the player flies a second queen to the rival nest
   c.protein = c.sugar = 20; run(t, 1, () => idle({ pick: -3000000 })); run(t, c.queenOrder.at - t.tick + 61, hold);
   const q2 = t.wasps.find((w) => w.foundress), rv = t.places().find((p) => p.kind === 'rival');

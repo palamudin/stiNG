@@ -240,8 +240,9 @@ export const T = {
   // to found at a free tree, with the workers near her when she founds (Polybia, honeybees); usurp: a mated queen takes
   // a small nest whose guards are down and kills its queen, its workers raising her brood (Vespula infernalis, V.
   // squamosa, Vespa dybowskii), before usurpFrac of the season; emergency: a queenless colony with brood raises a new
-  // queen in heirDays (honeybees). tutorial: the tutorial world's queens are raised this much faster
-  found: { protein: 6, sugar: 6, adults: 25, days: 1.5, tutorial: 0.2, escortR: 2.5, reach: 2.5, usurpFrac: 0.35, heirDays: 0.5, heirBrood: 3, hostAdults: 6, hostWorker: 2, hostBrood: 8 },
+  // queen in heirDays (honeybees). A queen raised waits at the door till the player sends her: alone, or with an escort of
+  // up to `escort` workers who follow her and join her colony. tutorial: the tutorial world's queens are raised this much faster
+  found: { protein: 6, sugar: 6, adults: 25, days: 1.5, tutorial: 0.2, escortR: 2.5, reach: 2.5, usurpFrac: 0.35, heirDays: 0.5, escort: 6, heirBrood: 3, hostAdults: 6, hostWorker: 2, hostBrood: 8 },
   // Progression (GDD 6.8, T0 of the growth tree). Unit XP comes from what the insect you fly does (sting a person,
   // more for one nobody had stung; drive a sting home; catch prey; bring a load home; rob a hive; get out from under a
   // hand); hive XP from what the colony does (adults emerged, loads home, young queens raised). Stabs: stings that move

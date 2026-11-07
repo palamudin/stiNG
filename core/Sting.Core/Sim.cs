@@ -446,6 +446,7 @@ namespace Sting.Core
             if (cmd.alloc > 0 && cmd.alloc <= T.alloc.Length && colony.alloc != cmd.alloc - 1) { colony.alloc = cmd.alloc - 1; Emit("alloc", ("preset", colony.alloc)); }
             int pick = cmd.pick;
             if (pick == -3000000) { RaiseQueen(); pick = 0; } // raise a queen to found a colony (GDD 6.10)
+            else if (pick == -3000001 || pick == -3000002) { QueenGo(pick == -3000001); pick = 0; } // send the waiting queen: with an escort, or alone
             else if (pick <= -2000000) { KinMark(-pick - 2000000); pick = 0; } // mark a colony of the player's kin, or not (T3-4)
             else if (pick <= -1000) { SwitchColony(-pick - 1000); pick = 0; } // take another colony of the line in hand (GDD 6.8)
             else if (pick <= -500) { Grow(-pick - 500); pick = 0; } // a rank on the growth tree (T3-3)

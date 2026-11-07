@@ -1878,10 +1878,14 @@ namespace Sting.Core.Tests
                 bool raised = ev.Any(e => e.type == "queenRaised") && q != null && q.mated;
                 var r0 = Persist.Restore(Persist.Snapshot(t)); bool savedQ = r0.wasps.Any(w => w.foundress && w.id == q.id);
                 int n0 = t.line.Count; SimEvent founded = null;
+                ev = RunS(t, 1200, Hold); var e0 = t.nest.entrance;
+                bool waits = !ev.Any(e => e.type == "founded") && q.ai.mode == "wait" && System.Math.Sqrt(D(Sq(q.x - e0.x) + Sq(q.z - e0.z))) < 1;
+                ev = RunS(t, 1, (sim, i) => Idle(k => k.pick = -3000001)); var go = ev.FirstOrDefault(e => e.type == "queenGo");
+                int escorts = t.wasps.Count(w => w.ai.mode == "escort" && w.ai.huntId == q.id);
                 for (int i = 0; i < 40 && founded == null; i++) founded = RunS(t, 120, Hold).FirstOrDefault(e => e.type == "founded");
                 var sc = founded != null ? t.line.FirstOrDefault(x => x.id == (int)founded["id"]) : null;
-                Ok(poor && ord && raised && savedQ && founded != null && t.line.Count == n0 + 1 && sc.colony.queenAlive && sc.colony.sited && !t.wasps.Contains(q) && t.guide.ContainsKey("swarmfound"),
-                    $"a queen is raised on order for protein and sugar (refused when short), comes out mated, survives a save, and founds at a free tree on her own ({(founded != null ? $"colony {founded["id"]}, escort {founded["escort"]}" : "none")}); its field note opens");
+                Ok(poor && ord && raised && savedQ && waits && go != null && (int)go["escort"] == T.found.escort && escorts == (int)go["escort"] && founded != null && (int)founded["escort"] >= (int)go["escort"] && t.line.Count == n0 + 1 && sc.colony.queenAlive && sc.colony.sited && !t.wasps.Contains(q) && t.guide.ContainsKey("swarmfound"),
+                    $"a queen is raised on order for protein and sugar (refused when short), comes out mated, survives a save, waits at the door till sent, and founds at a free tree with her escort ({(founded != null ? $"colony {founded["id"]}, escort {founded["escort"]} of {(go != null ? go["escort"] : 0)} sent" : "none")}); its field note opens");
                 // the takeover: the player flies a second queen to the rival nest
                 c.protein = c.sugar = 20; RunS(t, 1, (sim, i) => Idle(k => k.pick = -3000000)); RunS(t, c.queenOrder.Value - t.tick + 61, Hold);
                 var q2 = t.wasps.First(w => w.foundress); var rv = t.Places().First(p => p.kind == "rival");

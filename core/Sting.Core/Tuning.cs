@@ -271,6 +271,8 @@ namespace Sting.Core
         {
             public static Num protein = 6, sugar = 6, adults = 25, days = 1.5, tutorial = 0.2, escortR = 2.5, reach = 2.5, usurpFrac = 0.35, heirDays = 0.5;
             public static Num heirBrood = 3, hostAdults = 6, hostWorker = 2, hostBrood = 8;
+            /// a queen raised waits at the door till sent: alone, or with up to this many workers who join her colony
+            public static int escort = 6;
         }
         /// Progression (GDD 6.8): XP for deeds, the year's turn; see tuning.js
         public static class xp

@@ -52,6 +52,7 @@ namespace Sting.Core
             if (w.colony != "own") return IsRival(w) ? ThinkRival(w, cmd) : ThinkSister(w, cmd);
             if (w.caste == "male") return ThinkMale(w, cmd); // T2-3
             if (w.foundress) return ThinkFoundress(w, cmd);
+            if (ai.mode == "escort") { var ec = ThinkEscort(w, cmd); if (ec != null) return ec; }
             if (w.caste == "gyne") return ThinkGyne(w, cmd);
             // alarm pheromone pulls nearby workers into an attack
             if (ai.mode != "attack" && ai.mode != "evade")

@@ -43,7 +43,7 @@ namespace Sting.Core
                 if (c.nestAlive)
                 {
                     var q = SpawnWasp(false, "gyne"); q.role = "gyne"; q.foundress = true; q.mated = true; q.venom = 1;
-                    q.ai.mode = "found"; q.ai.found = null; q.x = n.entrance.x; q.y = n.entrance.y - 0.03; q.z = n.entrance.z;
+                    q.ai.mode = "wait"; q.ai.found = null; q.x = n.entrance.x; q.y = n.entrance.y - 0.03; q.z = n.entrance.z;
                     Emit("queenRaised", ("id", q.id));
                 }
             }
@@ -78,6 +78,7 @@ namespace Sting.Core
         Cmd ThinkFoundress(Wasp w, Cmd cmd)
         {
             var ai = w.ai;
+            if (ai.mode == "wait") { var e = nest.entrance; Steer(w, new V3(e.x + 0.25, e.y + 0.3, e.z), cmd); return cmd; } // at the door till the player sends her
             if (ai.found == null)
             {
                 var t = FreeTree(w);
@@ -87,6 +88,29 @@ namespace Sting.Core
             var f = ai.found; var fp = new V3(f.x, f.y, f.z);
             Steer(w, fp, cmd);
             if (D2(w, fp) < 0.3 * 0.3) Found(w, f);
+            return cmd;
+        }
+        /// the waiting queen goes: alone, or with an escort of workers out of the nest who follow her and join her colony
+        void QueenGo(bool escort)
+        {
+            Wasp q = null; foreach (var w in wasps) if (w.foundress && w.ai.mode == "wait" && w.id != drivenId) { q = w; break; }
+            if (q == null) { Emit("queenGoDenied"); return; }
+            q.ai.mode = "found";
+            int n = 0;
+            if (escort)
+            {
+                int @out = 0; foreach (var w in Own()) if (w.caste == "worker") @out++;
+                int k = System.Math.Min(T.found.escort, System.Math.Max(0, (int)Floor(colony.adults - @out - 2)));
+                for (int i = 0; i < k; i++) { var w = SpawnWasp(false); w.ai.mode = "escort"; w.ai.huntId = q.id; n++; }
+            }
+            Emit("queenGo", ("id", q.id), ("escort", n));
+        }
+        /// an escort keeps about its queen till she founds (and joins her colony), or goes back to work if she is gone
+        Cmd ThinkEscort(Wasp w, Cmd cmd)
+        {
+            var q = WaspById(w.ai.huntId);
+            if (q == null || !q.foundress) { w.ai.mode = "pick"; w.ai.huntId = 0; return null; }
+            Steer(w, new V3(q.x + (H32(w.id, 41) - 0.5) * 0.9, q.y + 0.08 + H32(w.id, 43) * 0.25, q.z + (H32(w.id, 42) - 0.5) * 0.9), cmd);
             return cmd;
         }
         void FoundHere(Wasp w)
@@ -104,7 +128,7 @@ namespace Sting.Core
             int escort = 0; Num R2 = T.found.escortR * T.found.escortR;
             foreach (var w in new List<Wasp>(wasps))
             {
-                if (w == q || w.id == drivenId || w.colony != "own" || w.caste != "worker" || D2(w, q) > R2 || (w.state != "fly" && w.state != "landed")) continue;
+                if (w == q || w.id == drivenId || w.colony != "own" || w.caste != "worker" || (D2(w, q) > R2 && !(w.ai.mode == "escort" && w.ai.huntId == q.id)) || (w.state != "fly" && w.state != "landed")) continue;
                 wasps.Remove(w); colony.adults = Max(0, colony.adults - 1); c.adults += 1; escort++;
             }
             var sc = new LineColony { id = ++lineSeq, nest = n, colony = c, season = season.n };

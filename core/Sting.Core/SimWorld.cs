@@ -1670,7 +1670,7 @@ namespace Sting.Core
             if (colony.sited) foreach (var r in activeChunks) if (r.key == nest.key) { nearNest = true; break; }
             if (!nearNest)
             {
-                foreach (var w in Own()) if (w.id != drivenId) Despawn(w);
+                foreach (var w in Own()) if (w.id != drivenId && !w.foundress && w.ai.mode != "escort") Despawn(w); // a young queen out to found, and her escort, fly on
                 return;
             }
             int own = OwnWorkers(); // males and gynes out are not workers (T2-3)

@@ -397,6 +397,7 @@ export class Sim {
     if (cmd.alloc > 0 && cmd.alloc <= T.alloc.length && this.colony.alloc !== cmd.alloc - 1) { this.colony.alloc = cmd.alloc - 1; this.emit('alloc', { preset: this.colony.alloc }); }
     let pick = cmd.pick | 0;
     if (pick === -3000000) { this._raiseQueen(); pick = 0; } // raise a queen to found a colony (GDD 6.10)
+    else if (pick === -3000001 || pick === -3000002) { this._queenGo(pick === -3000001); pick = 0; } // send the waiting queen: with an escort, or alone
     else if (pick <= -2000000) { this._kinMark(-pick - 2000000); pick = 0; } // mark a colony of the player's kin, or not (T3-4)
     else if (pick <= -1000) { this._switchColony(-pick - 1000); pick = 0; } // take another colony of the line in hand (GDD 6.8)
     else if (pick <= -500) { this._grow(-pick - 500); pick = 0; } // a rank on the growth tree (T3-3)
@@ -2784,7 +2785,7 @@ export class Sim {
     this.emit('switchPending', { seconds: P.relayTicks / 60, toNest: false, colony: id, species: sc.colony.species || 'wasp' });
   }
   _takeColony(sc) {
-    for (const w of this.wasps.slice()) if (w.colony === 'own' || w.colony === 'line:' + sc.id) this._despawn(w);
+    for (const w of this.wasps.slice()) if ((w.colony === 'own' && !w.foundress) || w.colony === 'line:' + sc.id) this._despawn(w); // a young queen out to found flies on
     this.line = this.line.filter((x) => x !== sc);
     this.line.push({ id: ++this.lineSeq, nest: this.nest, colony: this.colony, season: this.season.n, ext: 0 });
     this.nest = sc.nest; this.colony = sc.colony;
@@ -4669,7 +4670,7 @@ export class Sim {
     this._lineTraffic(daylight);
     const nearNest = this.colony.sited && this.activeChunks.some((r) => chunkKey(r.cx, r.cz) === this.nest.key);
     if (!nearNest) {
-      for (const w of this._own()) if (w.id !== this.drivenId) this._despawn(w);
+      for (const w of this._own()) if (w.id !== this.drivenId && !w.foundress && w.ai.mode !== 'escort') this._despawn(w); // a young queen out to found, and her escort, fly on
       return;
     }
     const own = this._own().filter((w) => w.caste === 'worker').length; // males and gynes out are not workers (T2-3)
@@ -4830,7 +4831,7 @@ export class Sim {
       c.queenOrder = null;
       if (c.nestAlive) {
         const q = this._spawnWasp(false, 'gyne'); q.role = 'gyne'; q.foundress = true; q.mated = true; q.venom = 1;
-        q.ai.mode = 'found'; q.ai.found = null; q.x = nest.entrance.x; q.y = nest.entrance.y - 0.03; q.z = nest.entrance.z;
+        q.ai.mode = 'wait'; q.ai.found = null; q.x = nest.entrance.x; q.y = nest.entrance.y - 0.03; q.z = nest.entrance.z;
         this.emit('queenRaised', { id: q.id });
       }
     }
@@ -4860,10 +4861,30 @@ export class Sim {
   // pressed by a free trunk, or takes a small rival nest at its entrance
   _thinkFoundress(w, cmd) {
     const ai = w.ai;
+    if (ai.mode === 'wait') { const e = this.nest.entrance; this._steer(w, { x: e.x + 0.25, y: e.y + 0.3, z: e.z }, cmd); return cmd; } // at the door till the player sends her
     if (!ai.found) { const t = this._freeTree(w); if (!t) { this._steer(w, { x: this.nest.entrance.x + 0.6, y: this.nest.entrance.y + 0.4, z: this.nest.entrance.z }, cmd); return cmd; } ai.found = this._treeNest(t, w); }
     const f = ai.found;
     this._steer(w, f, cmd);
     if (dist2(w, f) < 0.3 * 0.3) this._found(w, f);
+    return cmd;
+  }
+  // the waiting queen goes: alone, or with an escort of workers out of the nest who follow her and join her colony
+  _queenGo(escort) {
+    const q = this.wasps.find((w) => w.foundress && w.ai.mode === 'wait' && w.id !== this.drivenId);
+    if (!q) { this.emit('queenGoDenied', {}); return; }
+    q.ai.mode = 'found';
+    let n = 0;
+    if (escort) {
+      const out = this._own().filter((w) => w.caste === 'worker').length, k = Math.min(T.found.escort, Math.max(0, Math.floor(this.colony.adults - out - 2)));
+      for (let i = 0; i < k; i++) { const w = this._spawnWasp(false); w.ai.mode = 'escort'; w.ai.huntId = q.id; n++; }
+    }
+    this.emit('queenGo', { id: q.id, escort: n });
+  }
+  // an escort keeps about its queen till she founds (and joins her colony), or goes back to work if she is gone
+  _thinkEscort(w, cmd) {
+    const q = this.waspById(w.ai.huntId);
+    if (!q || !q.foundress) { w.ai.mode = 'pick'; w.ai.huntId = 0; return null; }
+    this._steer(w, { x: q.x + (h32(w.id, 41) - 0.5) * 0.9, y: q.y + 0.08 + h32(w.id, 43) * 0.25, z: q.z + (h32(w.id, 42) - 0.5) * 0.9 }, cmd);
     return cmd;
   }
   _foundHere(w) {
@@ -4879,7 +4900,7 @@ export class Sim {
     let escort = 0;
     const R2 = T.found.escortR * T.found.escortR;
     for (const w of this.wasps.slice()) {
-      if (w === q || w.id === this.drivenId || w.colony !== 'own' || w.caste !== 'worker' || dist2(w, q) > R2 || (w.state !== 'fly' && w.state !== 'landed')) continue;
+      if (w === q || w.id === this.drivenId || w.colony !== 'own' || w.caste !== 'worker' || (dist2(w, q) > R2 && !(w.ai.mode === 'escort' && w.ai.huntId === q.id)) || (w.state !== 'fly' && w.state !== 'landed')) continue;
       this.wasps = this.wasps.filter((x) => x !== w); this.colony.adults = Math.max(0, this.colony.adults - 1); colony.adults += 1; escort++;
     }
     const sc = { id: ++this.lineSeq, nest, colony, season: this.season.n, ext: 0 };
@@ -5057,6 +5078,7 @@ export class Sim {
     if (w.colony !== 'own') return this.isRival(w) ? this._thinkRival(w, cmd) : this._thinkSister(w, cmd);
     if (w.caste === 'male') return this._thinkMale(w, cmd); // T2-3
     if (w.foundress) return this._thinkFoundress(w, cmd);
+    if (ai.mode === 'escort') { const c = this._thinkEscort(w, cmd); if (c) return c; }
     if (w.caste === 'gyne') return this._thinkGyne(w, cmd);
     // alarm pheromone pulls nearby workers into an attack
     if (ai.mode !== 'attack' && ai.mode !== 'evade') {
