@@ -2473,6 +2473,39 @@ function seated(sim, pred) {
   ok(porchLevel === houses && doors === houses, `every front door has a level stoop and a step before it, the door at the stoop's height (${porchLevel} of ${houses})`);
 }
 
+// 73. The player's own colonies across species (T3-4, GDD 6.8): the player's hornets hunt the player's yellowjackets and
+// the bees ball them, as another colony's; a colony of the same species never fights; a colony marked kin is at peace
+// with the player's other species (both ways); the mark is colony state, toggled by a pick, and saved
+{
+  const mk = () => { const s = new Sim({ seed: 1234, birds: false }, { noAI: true }); run(s, 1); return s; };
+  const addLine = (s, sp, dx) => {
+    const c = newColony(false, sp); c.sited = true; c.maxCells = s._maxCells('trunk', sp);
+    const nest = makeNest(s.nest.treeX + dx, s.nest.treeZ, s.nest.x + dx, s.nest.y, s.nest.z, 0.14, 'trunk');
+    const sc = { id: ++s.lineSeq, nest, colony: c, season: s.season.n, ext: 0 }; s.line.push(sc); return sc;
+  };
+  // one of a line colony's insects beside the player's wasp, in the open
+  const meet = (sp, kinOwn, kinLine) => {
+    const s = mk(), sc = addLine(s, sp, 8), w = s.wasp;
+    place(w, { x: s.nest.x + 3, y: 1.5, z: s.nest.z + 3 }); w.state = 'fly'; w.land = null; w.energy = 1;
+    const x = s._spawnWasp(false); x.colony = 'line:' + sc.id; x.sp = sp; x.role = 'protein'; place(x, { x: w.x + 0.01, y: w.y, z: w.z }); x.state = 'fly';
+    let ev = [];
+    if (kinOwn) ev = ev.concat(run(s, 1, () => idle({ pick: -2000000 })));
+    if (kinLine) ev = ev.concat(run(s, 1, () => idle({ pick: -(2000000 + sc.id) })));
+    place(x, { x: w.x + 0.01, y: w.y, z: w.z }); x.state = 'fly';
+    const prey = s._preyNear(x, 0.5);
+    ev = ev.concat(run(s, 2));
+    return { s, sc, w, x, prey, fight: ev.some((e) => e.type === 'fight'), balled: ev.some((e) => e.type === 'balled' && e.id === w.id), kin: ev.filter((e) => e.type === 'kin') };
+  };
+  const h = meet('hornet'), hk = meet('hornet', true), hl = meet('hornet', false, true), b = meet('bee'), bk = meet('bee', false, true), y = meet('wasp');
+  ok(h.fight && h.prey && h.prey.kind === 'wasp' && h.prey.id === h.w.id && b.balled && !y.fight && !(y.prey && y.prey.kind === 'wasp'),
+    `unmarked, the player's hornet wrestles the player's yellowjacket and takes it as prey, the player's bees ball it; a yellowjacket colony of the line never fights it`);
+  ok(!hk.fight && !(hk.prey && hk.prey.kind === 'wasp') && !hl.fight && !bk.balled && hk.kin.length === 1 && hk.kin[0].kin === true && hk.s.colony.kin === true && hl.sc.colony.kin === true,
+    `marked kin (the colony in hand, or the hornets' own), the hornet leaves the wasp alone and the bees do not ball it; the mark is an event and colony state`);
+  const r = restore(snapshot(hl.s)), back = run(hl.s, 1, () => idle({ pick: -(2000000 + hl.sc.id) }));
+  ok(r.line.find((q) => q.id === hl.sc.id).colony.kin === true && hl.sc.colony.kin === false && back.some((e) => e.type === 'kin' && e.kin === false) && run(hl.s, 1, () => idle({ pick: -(2000000 + 99) })).some((e) => e.type === 'kinDenied'),
+    'the mark survives a save, a second pick takes it off, and a colony the player does not hold cannot be marked');
+}
+
 // 72. The growth tree (T3-3, GDD 6.8, 7.8): three branches; a point for each 150 XP the line earns, a rank a point, a node
 // open once the one before it has a rank; the ranks act in the sim (comb, brood, insulation, guards, the swoop's
 // recovery, lock-on, young queens, wintering, founding); peers audit a grow against the tree's ranges; the tree is saved

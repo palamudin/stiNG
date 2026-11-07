@@ -606,12 +606,12 @@ namespace Sting.Core
         }
 
         internal PreyHit PreyNear(Wasp w) => PreyNear(w, T.prey.catchDist * Mul(w, "grabR")); // the grab reach skill (GDD 6.8)
-        PreyHit PreyNear(Wasp w, Num reach)
+        internal PreyHit PreyNear(Wasp w, Num reach)
         {
             Num r2 = reach * reach; var SP = Spw(w);
             if (SP.hunts == 0) return null; // bees take no prey (T2-11)
             // a hornet takes another colony's wasp on the wing (T2-10)
-            if (SP.fight > 0) foreach (var x in wasps) if (IsRival(x) && Spw(x).fight < SP.fight && (x.state == "fly" || x.state == "landed") && D2(w, x.P) <= r2) return new PreyHit { kind = "wasp", id = x.id, protein = T.moths.waspProtein };
+            if (SP.fight > 0) foreach (var x in wasps) if ((IsRival(x) || FoeOwn(w, x)) && Spw(x).fight < SP.fight && (x.state == "fly" || x.state == "landed") && D2(w, x.P) <= r2) return new PreyHit { kind = "wasp", id = x.id, protein = T.moths.waspProtein };
             foreach (var rec in activeChunks)
             {
                 if (!Near(rec, w.x, w.z)) { CS(rec.key); continue; } // the JS creates chunk state here, and the state hash sees it

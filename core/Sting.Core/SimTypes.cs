@@ -143,8 +143,8 @@ namespace Sting.Core
         public int auth = -1, claimPeer = -1, claimWasp; public int? ctick;
         /// a late-event correction (GDD 11.6): the chunk's humans and its shared state, as the chunk authority had them
         public List<(string hex, byte[] s)> fixHumans; public byte[] fixChunk;
-        /// a player's nest is alive (the `nest` event)
-        public bool alive;
+        /// a player's nest is alive (the `nest` event), and its colony is marked kin to the player's other species (T3-4)
+        public bool alive, kin;
         /// a rank on a peer's growth tree (the `grow` event, T3-3): the node and its new rank
         public int node, rank;
         /// the species (GDD 6.8): a fighter's weight, a sting's pain (null on events that carry none), a nest's species
@@ -297,7 +297,7 @@ namespace Sting.Core
     /// a firefly's spot: where it drifts, how, and its flash phase
     public sealed class Firefly { public int i, ph; public Num x, y, z, w, p; }
     /// another player's nest, as it last said (colony against colony)
-    public sealed class PeerNest { public Num x, y, z; public string key; public bool alive; public string species = "wasp"; }
+    public sealed class PeerNest { public Num x, y, z; public string key; public bool alive; public string species = "wasp"; public bool kin; }
     /// A hibernation site and the queens waking there (T1-15)
     /// a colony of the line run by the AI (T2-4)
     /// a young honeybee queen's mating flight to come (T2-11)

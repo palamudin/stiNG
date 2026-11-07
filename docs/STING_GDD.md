@@ -2483,6 +2483,30 @@ On a jump the CPU path no longer blurs a level out to its parent: the window it 
 
 The game now asks for a square at least 16 m across (`causticsMin`), pushed 30% of its size ahead along the view (`causticsAhead`), on a 512 texture with a 384 grid. That is about the old detail (3 cm texels, 7 cm cells, against 2.3 and 5 cm) over 2.7 times the width. Water seen at a slant still clouds with distance: that is the water, not the caustics.
 
+### 18.107 The player's own colonies across species (T3-4)
+
+**The rule** (6.8, "They can meet"). The player's colonies of different species are not friends by default. The player's hornets hunt the player's yellowjackets, and the player's honeybees ball them, as they would another colony's. Colonies of the same species never fight, as the line's colonies never have. A colony the player marks **kin** is at peace with the player's colonies of other species, both ways: its hornets leave them alone, and its bees do not ball them. The mark is one per colony (kin to the player's other species), not one per pair: one mark covers the case that comes up, a bee colony beside the wasp line it came from.
+
+**In the sim** (sim.js `_foeOwn`, `_colOf`, `_kinMark`; C# `FoeOwn`, `ColOf`, `KinMark`):
+- Two of the player's insects are foes when they are of different colonies and different species, and neither colony is marked kin.
+- A foe is fought where another colony's insect would be:
+  - the wrestle when two meet in flight (the bees' ball instead, where one is a bee);
+  - a hornet's prey on the wing (`_preyNear`).
+- A yellowjacket killed by the player's own hornet dies "taken by a hornet".
+- The mark is `colony.kin`, colony state:
+  - in the save (C# save version 38);
+  - told to the peers with the nest (`nest` carries `kin`, kept in `peerNests`).
+- A pick toggles it (`-(2,000,000 + id)`; 0 is the colony in hand), with a `kin` event, or `kinDenied` for a colony the player does not hold.
+- Not yet: a hornet does not seek the player's yellowjackets by scent. It takes them where it meets them (`_sources` still lists only other colonies' wasps).
+
+**In the colony view.** Where the player holds more than one species, "Colonies of the line" shows each colony's mark beside its "take in hand" button: for the one in hand, and for each colony of another species. A toast says what the mark does.
+
+**Tests.** Block 73 in sim.test.mjs, and its C# twin in Behaviour.cs:
+- Unmarked, the player's hornet wrestles the player's yellowjacket and takes it as prey, and the player's bees ball it.
+- A yellowjacket colony of the line never fights it.
+- Marked kin (the colony in hand, or the hornets' own), there is no wrestle, no prey and no ball.
+- The mark survives a save, a second pick takes it off, and a colony the player does not hold cannot be marked.
+
 ### 18.106 Near things drawn after the reflections
 
 **What was still wrong.** The wasp is drawn into the scene, and every reflection and refraction of the water reads that scene from the screen:
@@ -3003,7 +3027,7 @@ Set 2026-11-03, after T2-14: graphics now belong to the world-building thread (2
 | T3-1 | **Built (18.72).** **Leftovers from the flight and network work.** <br>• Other players' AI wasps reported inside walls are not drawn there (as players' wasps already are, 18.36). <br>• Assisted flight plans a way round long walls and hedges, not only single obstacles. <br>• A lock on a walking person lands on the exact spot locked. <br>• H's hover distance and orbit can be set. <br>• `CHASE.close` goes. | 11.8, 7.9 | M | each has a check in JS and C# where it touches the sim |
 | T3-2 | **Built (18.98).** **Places of interest and field notes** (the sim half of 20.3 G6). <br>• A place list kept by the sim (C# twin): the nest, colonies of the line, rival nests, hives, swarms, water, town squares and beer gardens, porch lights, the exterminator, nest sites found. <br>• Every kind carries a true field note from Appendix C. <br>• Notes unlock into a field guide the first time the place is reached, kept in the save. <br>• The map and area cards show them. The drawn map tiles are the world thread's. | 10, App. C | M | the list matches in JS and C#; the guide unlocks, saves and restores |
 | T3-3 | **Built (18.100).** **The growth tree's branches** (T2-13 in full, with T2-7). <br>• Nest (cell building, brood speed, insulation, guard strength), Flight (the Reflex cue, swoop recovery, lock-on range, assisted reach) and Line (gyne output, winter survival by site, how many lineage colonies found). <br>• Points come from experience, a few a season. <br>• Every node that changes an outcome is a colony parameter in ranges the plausibility checks know (11.8). | 6.8, 7.8 | L | nodes act in the sim, ranges are audited across peers, the colony view spends points |
-| T3-4 | **The player's own colonies meeting across species.** <br>• A player's hornets hunt the same player's yellowjackets and bees ball them, unless the player marks the colonies kin. <br>• Kin is colony state every peer reads. | 6.8 | S | a kin mark stops the hunting and balling; unmarked, they fight |
+| T3-4 | **Built (18.107).** **The player's own colonies meeting across species.** <br>• A player's hornets hunt the same player's yellowjackets and bees ball them, unless the player marks the colonies kin. <br>• Kin is colony state every peer reads. | 6.8 | S | a kin mark stops the hunting and balling; unmarked, they fight |
 | T3-5 | **How many colonies a player holds,** as a world setting, with colonies far from the player run at the abstract tier. | 6.8, 11.12 | M | the setting caps the held colonies; a far colony steps abstractly and comes back in step |
 
 **Waiting on decisions.** The genus progression beyond hornets and bees (6.9, T4: ants, termites, cockroaches) waits on Q-22 (what a removed tree means in a persistent world) and Q-23 (how alliances are formed and audited). Offshoot modes need their own design passes.

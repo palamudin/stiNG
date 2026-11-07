@@ -400,11 +400,11 @@ namespace Sting.Core
         /// every peer says where its nest is when it moves or dies, and every ten seconds so a peer that joins hears it
         void ShareNest()
         {
-            var e = nest.entrance; bool alive = colony.sited && colony.nestAlive;
-            string sig = e.x + "," + e.y + "," + e.z + "," + alive;
+            var e = nest.entrance; bool alive = colony.sited && colony.nestAlive, kin = colony.kin;
+            string sig = e.x + "," + e.y + "," + e.z + "," + alive + "," + kin;
             if (sig == nestSig && tick - nestSentTick < 600) return;
             nestSig = sig; nestSentTick = tick;
-            Publish(new NetEv { type = "nest", x = e.x, y = e.y, z = e.z, key = nest.key, alive = alive, species = species });
+            Publish(new NetEv { type = "nest", x = e.x, y = e.y, z = e.z, key = nest.key, alive = alive, species = species, kin = kin }); // (kin: T3-4)
         }
         /// another player's live nest at the wasp, not where its own is (players can share the home tree)
         internal (int peer, PeerNest n)? PeerNestNear(Wasp w)
@@ -472,7 +472,7 @@ namespace Sting.Core
             {
                 case "fixReq": if (ChunkAuthority(ev.key) == peer) OwesFix(ev.key); break;
                 case "grow": if (!mine) { if (!plaus.trees.TryGetValue(ev.peer, out var tr)) plaus.trees[ev.peer] = tr = new int[Growth.NODES.Length]; tr[ev.node] = ev.rank; } break; // a peer's tree, as audited (T3-3)
-                case "nest": if (!mine) peerNests[ev.peer] = new PeerNest { x = ev.x, y = ev.y, z = ev.z, key = ev.key, alive = ev.alive, species = ev.species ?? "wasp" }; break;
+                case "nest": if (!mine) peerNests[ev.peer] = new PeerNest { x = ev.x, y = ev.y, z = ev.z, key = ev.key, alive = ev.alive, species = ev.species ?? "wasp", kin = ev.kin }; break;
                 case "praid": // another player's wasp took a larva from my nest: one fewer, and my guards go after it
                     if (mine || ev.toPeer != peer || !colony.nestAlive) break;
                     colony.larvae = Max(0, colony.larvae - 1);

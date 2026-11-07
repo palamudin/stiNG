@@ -223,6 +223,23 @@ export class Sim {
   _own() { return this.wasps.filter((w) => w.colony === 'own'); }
   // Another colony's wasp that fights the line: a rival, not one of the line's sister colonies (T2-4)
   isRival(w) { return w.colony !== 'own' && !(typeof w.colony === 'string' && w.colony.startsWith('line:')); }
+  // the colony of the player's an insect belongs to (its own, or one of the line's), or null for a rival's
+  _colOf(w) { if (w.colony === 'own') return this.colony; const sc = typeof w.colony === 'string' && w.colony.startsWith('line:') ? this.line.find((x) => 'line:' + x.id === w.colony) : null; return sc ? sc.colony : null; }
+  // Two of the player's own colonies at war (T3-4, GDD 6.8): their insects are of different species and neither colony
+  // is marked kin. The player's hornets hunt the player's yellowjackets and the bees ball them; the same species never
+  // fight, as the line's colonies never have. The mark is colony state (saved, and told to the peers with the nest)
+  _foeOwn(a, b) {
+    if (a.colony === b.colony || this.isRival(a) || this.isRival(b) || (a.sp || 'wasp') === (b.sp || 'wasp')) return false;
+    const ca = this._colOf(a), cb = this._colOf(b);
+    return !(ca && ca.kin) && !(cb && cb.kin);
+  }
+  // mark a colony of the player's kin, or not (0: the one in hand; else a colony of the line by its id)
+  _kinMark(id) {
+    const c = id === 0 ? this.colony : (this.line.find((x) => x.id === id) || {}).colony;
+    if (!c) { this.emit('kinDenied', { id }); return; }
+    c.kin = !c.kin;
+    this.emit('kin', { id, kin: c.kin, species: c.species || 'wasp' });
+  }
   get seasonFrac() { return (this.minute - this.season.startMinute) / (this.settings.seasonDays * 1440); }
   canFly() { return this.temperature >= T.weather.flyMinTemp; }
   // A site's room for comb, for the line's species: a bee colony builds a bigger nest (T2-11)
@@ -373,7 +390,8 @@ export class Sim {
     this.prevAct = act;
     if (cmd.alloc > 0 && cmd.alloc <= T.alloc.length && this.colony.alloc !== cmd.alloc - 1) { this.colony.alloc = cmd.alloc - 1; this.emit('alloc', { preset: this.colony.alloc }); }
     let pick = cmd.pick | 0;
-    if (pick <= -1000) { this._switchColony(-pick - 1000); pick = 0; } // take another colony of the line in hand (GDD 6.8)
+    if (pick <= -2000000) { this._kinMark(-pick - 2000000); pick = 0; } // mark a colony of the player's kin, or not (T3-4)
+    else if (pick <= -1000) { this._switchColony(-pick - 1000); pick = 0; } // take another colony of the line in hand (GDD 6.8)
     else if (pick <= -500) { this._grow(-pick - 500); pick = 0; } // a rank on the growth tree (T3-3)
     else if (pick < 0) { this._learn(-pick - 1); pick = 0; } // a negative pick learns a skill (GDD 6.8)
     if (this.winter) { this._winterStep(pick); pick = 0; } // in winter a pick chooses the queen (T1-15)
@@ -684,7 +702,7 @@ export class Sim {
     switch (ev.type) {
       case 'fixReq': if (this.chunkAuthority(ev.key) === this.peer) this._owesFix(ev.key); break;
       case 'grow': if (!mine) { const T2 = this.plaus.trees || (this.plaus.trees = {}), tr = T2[ev.peer] || (T2[ev.peer] = TREE_NODES.map(() => 0)); tr[ev.node] = ev.rank; } break; // a peer's tree, as audited (T3-3)
-      case 'nest': if (!mine) this.peerNests.set(ev.peer, { x: ev.x, y: ev.y, z: ev.z, key: ev.key, alive: ev.alive, species: ev.species || 'wasp' }); break;
+      case 'nest': if (!mine) this.peerNests.set(ev.peer, { x: ev.x, y: ev.y, z: ev.z, key: ev.key, alive: ev.alive, species: ev.species || 'wasp', kin: !!ev.kin }); break;
       case 'praid': // another player's wasp took a larva from my nest: one fewer, and my guards go after it
         if (mine || ev.toPeer !== this.peer || !this.colony.nestAlive) break;
         this.colony.larvae = Math.max(0, this.colony.larvae - 1);
@@ -1721,7 +1739,7 @@ export class Sim {
     const r2 = reach * reach, SP = spw(w);
     if (!SP.hunts) return null; // bees take no prey (T2-11)
     // a hornet takes another colony's wasp on the wing (T2-10)
-    if (SP.fight > 0) for (const x of this.wasps) if (this.isRival(x) && spw(x).fight < SP.fight && (x.state === 'fly' || x.state === 'landed') && dist2(w, x) <= r2) return { kind: 'wasp', id: x.id, protein: T.moths.waspProtein };
+    if (SP.fight > 0) for (const x of this.wasps) if ((this.isRival(x) || this._foeOwn(w, x)) && spw(x).fight < SP.fight && (x.state === 'fly' || x.state === 'landed') && dist2(w, x) <= r2) return { kind: 'wasp', id: x.id, protein: T.moths.waspProtein };
     for (const rec of this.activeChunks) {
       const mk = chunkKey(rec.cx, rec.cz);
       for (const mo of this.mothsIn(rec)) if (dist2(w, mo) <= r2) return { kind: 'moth', key: mk, i: mo.i, protein: T.moths.protein };
@@ -4361,10 +4379,10 @@ export class Sim {
 
   // Every peer says where its nest is when it moves or dies, and every ten seconds so a peer that joins hears it
   _shareNest() {
-    const e = this.nest.entrance, alive = !!(this.colony.sited && this.colony.nestAlive), sig = `${e.x},${e.y},${e.z},${alive}`, S = this.nestShared;
+    const e = this.nest.entrance, alive = !!(this.colony.sited && this.colony.nestAlive), kin = !!this.colony.kin, sig = `${e.x},${e.y},${e.z},${alive},${kin}`, S = this.nestShared;
     if (sig === S.sig && this.tick - S.tick < 600) return;
     S.sig = sig; S.tick = this.tick;
-    this._publish({ type: 'nest', x: e.x, y: e.y, z: e.z, key: this.nest.key, alive, species: this.species });
+    this._publish({ type: 'nest', x: e.x, y: e.y, z: e.z, key: this.nest.key, alive, species: this.species, kin }); // (kin: T3-4)
   }
   // Another player's live nest at the wasp, not where its own is (players can share the home tree)
   _peerNestNear(w) {
@@ -4517,14 +4535,14 @@ export class Sim {
       const score = (x) => x.venom + (x.caste === 'queen' ? 1 : 0) + x.fight.mash + h32(x.id, this.tick, 61) * 1.2 + spw(x).fight;
       const [win, lose] = score(w) >= score(o) ? [w, o] : [o, w];
       win.state = 'stunned'; win.stateTicks = 20; win.fight = null;
-      this._die(lose, !this.isRival(lose) ? 'killed by a rival wasp' : spw(win).fight ? 'taken by a hornet' : 'killed by your worker', null);
+      this._die(lose, !this.isRival(lose) ? (!this.isRival(win) && spw(win).fight ? 'taken by a hornet' : 'killed by a rival wasp') : spw(win).fight ? 'taken by a hornet' : 'killed by your worker', null); // (a hornet of the player's own, T3-4)
       this._spoils(win);
       this.emit('fightOver', { winner: win.id, loser: lose.id });
     }
     const free = this.wasps.filter((w) => w.state === 'fly' || w.state === 'landed' || w.state === 'chewing');
     for (let i = 0; i < free.length; i++) for (let j = i + 1; j < free.length; j++) {
       const a = free[i], b = free[j];
-      if (a.colony === b.colony || (!this.isRival(a) && !this.isRival(b)) || a.state === 'fighting' || b.state === 'fighting') continue; // the line's colonies are sisters
+      if (a.colony === b.colony || (!this.isRival(a) && !this.isRival(b) && !this._foeOwn(a, b)) || a.state === 'fighting' || b.state === 'fighting') continue; // the line's colonies are sisters, and the player's other species too once marked kin (T3-4)
       if (dist2(a, b) > R.fightRange * R.fightRange) continue;
       // a bee of the line does not wrestle: it balls the intruder (T2-11)
       if (spw(a).perennial !== spw(b).perennial && (spw(a).perennial ? !this.isRival(a) : !this.isRival(b))) { const t = spw(a).perennial ? b : a; if (t.state !== 'balled') this._ownBall(t); continue; }

@@ -1543,7 +1543,7 @@ namespace Sting.Core
                 Num Score(Wasp x) => x.venom + (x.caste == "queen" ? 1 : 0) + x.fight.mash + H32(x.id, tick, 61) * 1.2 + Spw(x).fight;
                 var (win, lose) = Score(w) >= Score(o) ? (w, o) : (o, w);
                 win.state = "stunned"; win.stateTicks = 20; win.fight = null;
-                Die(lose, !IsRival(lose) ? "killed by a rival wasp" : Spw(win).fight != 0 ? "taken by a hornet" : "killed by your worker", null);
+                Die(lose, !IsRival(lose) ? (!IsRival(win) && Spw(win).fight != 0 ? "taken by a hornet" : "killed by a rival wasp") : Spw(win).fight != 0 ? "taken by a hornet" : "killed by your worker", null); // (a hornet of the player's own, T3-4)
                 Spoils(win);
                 Emit("fightOver", ("winner", win.id), ("loser", lose.id));
             }
@@ -1551,7 +1551,7 @@ namespace Sting.Core
             for (int i = 0; i < free.Count; i++) for (int j = i + 1; j < free.Count; j++)
                 {
                     var a = free[i]; var b = free[j];
-                    if (a.colony == b.colony || (!IsRival(a) && !IsRival(b)) || a.state == "fighting" || b.state == "fighting") continue; // the line's colonies are sisters
+                    if (a.colony == b.colony || (!IsRival(a) && !IsRival(b) && !FoeOwn(a, b)) || a.state == "fighting" || b.state == "fighting") continue; // the line's colonies are sisters, and the player's other species too once marked kin (T3-4)
                     if (D2(a, b) > T.rival.fightRange * T.rival.fightRange) continue;
                     // a bee of the line does not wrestle: it balls the intruder (T2-11)
                     if (Spw(a).perennial != Spw(b).perennial && (Spw(a).perennial != 0 ? !IsRival(a) : !IsRival(b))) { var tb = Spw(a).perennial != 0 ? b : a; if (tb.state != "balled") OwnBall(tb); continue; }

@@ -2357,7 +2357,7 @@ function buildCmd() {
     yawQ: Math.round(input.yaw * 1e4), pitchQ: Math.round(input.pitch * 1e4),
     act: (k.has('KeyE') || (gp && gp.b(0)) ? Act.Interact : 0) | (k.has('KeyQ') || (gp && gp.b(3)) ? Act.Switch : 0) | (k.has('KeyR') || (gp && gp.b(2)) ? Act.Rest : 0) | (input.swoopOnce ? (input.swoopOnce = false, Act.Swoop) : 0),
     alloc: input.alloc,
-    pick: input.switchTo ? (input.switchTo = 0, -(1000 + switchOnce)) : input.grow ? (input.grow = 0, -(500 + growOnce)) : input.learn ? (input.learn = 0, -(learnOnce + 1)) : input.pick ? (input.pick = 0, pickOnce) : 0, // negative picks: take a colony in hand, learn a skill (GDD 6.8)
+    pick: input.kin ? (input.kin = 0, -(2000000 + kinOnce)) : input.switchTo ? (input.switchTo = 0, -(1000 + switchOnce)) : input.grow ? (input.grow = 0, -(500 + growOnce)) : input.learn ? (input.learn = 0, -(learnOnce + 1)) : input.pick ? (input.pick = 0, pickOnce) : 0, // negative picks: take a colony in hand, learn a skill (GDD 6.8)
   };
   if (input.eatBurst) { if (cmd.burst) cmd.burst = 0; else input.eatBurst = false; }
   // Auto grab (on by default with touch): prey within reach and nothing in the jaws, and nothing else E would do here (a
@@ -2714,7 +2714,7 @@ const SKILL_INFO = {
   forage: ['Foraging yield', 'more from every load'], brood: ['Brood growth', 'brood develops faster'], lay: ['Population', 'the queen lays more'], build: ['Comb building', 'more cells from each load'],
 };
 const ROLE_INFO = { sugar: ['Sugar foragers', 'feeding reach, speed'], protein: ['Hunters', 'grab reach, speed'], pulp: ['Pulp collectors', 'chew faster, speed'], water: ['Water carriers', 'fill faster, feeding reach, speed'], guard: ['Guards', 'weight in a fight, landing reach, speed'] };
-let learnOnce = 0, skillSig = '', switchOnce = 0, lineSig = '', growOnce = 0, treeSig = '';
+let learnOnce = 0, skillSig = '', switchOnce = 0, lineSig = '', growOnce = 0, treeSig = '', kinOnce = 0;
 // The growth tree (T3-3): three branches; points from the line's experience, a rank a point, a node open once the one
 // before it has a rank
 const TREE_INFO = {
@@ -2745,15 +2745,22 @@ function updateLine() {
     ['In hand', `${SPECIES_NAME[sim.species]} · ${fmt(sim.colony.adults)} adults`],
     ['Your gauge', measured ? `${Math.round(g * 100)}% · ${P.gaugeRate.toFixed(0)} XP a day in hand (full at ${T.gauge.ref})` : `not measured yet (${P.gaugeDays.toFixed(1)} of ${T.gauge.minDays} days played); the AI works at ${Math.round(g * 100)}%`],
   ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
-  const sig = sim.line.map((x) => `${x.id}:${Math.round(x.colony.adults)}:${x.colony.nestAlive}`).join(',') + '|' + sim.colony.sited;
+  const sig = sim.line.map((x) => `${x.id}:${Math.round(x.colony.adults)}:${x.colony.nestAlive}:${!!x.colony.kin}`).join(',') + '|' + sim.colony.sited + '|' + !!sim.colony.kin;
   if (sig === lineSig) return;
   lineSig = sig;
-  $('nLine').innerHTML = sim.line.length ? sim.line.map((x) => {
-    const d = Math.round(Math.hypot(x.nest.x - sim.nest.x, x.nest.z - sim.nest.z)), ok = x.colony.nestAlive && sim.colony.sited;
-    return `<button class="ghost" data-sw="${x.id}"${ok ? '' : ' disabled'}><b>Take in hand: ${SPECIES_NAME[x.colony.species || 'wasp']}</b><span>${fmt(x.colony.adults)} adults, ${fmt(broodTotal(x.colony))} brood, ${d} m off${x.colony.nestAlive ? '' : ' · destroyed'}</span></button>`;
-  }).join('') : '<span class="label">No other colony of the line yet. Queens that winter well found them in spring; honeybees swarm.</span>';
+  // kin (T3-4): the player's colonies of other species fight yours (hornets hunt yellowjackets, bees ball them) unless
+  // one of the two is marked kin; offered only where the player holds more than one species
+  const sp0 = sim.species || 'wasp', mixed = sim.line.some((x) => (x.colony.species || 'wasp') !== sp0);
+  const kinBtn = (id, c, label) => `<button class="ghost" data-kin="${id}"><b>${c.kin ? 'Kin ✓' : 'Not kin'}: ${label}</b><span>${c.kin ? 'at peace with your other species' : 'your other species fight it, and it fights them'}</span></button>`;
+  $('nLine').innerHTML = (mixed ? kinBtn(0, sim.colony, `your ${SPECIES_NAME[sp0]} in hand`) : '') + (sim.line.length ? sim.line.map((x) => {
+    const d = Math.round(Math.hypot(x.nest.x - sim.nest.x, x.nest.z - sim.nest.z)), ok = x.colony.nestAlive && sim.colony.sited, sp = x.colony.species || 'wasp';
+    return (sp !== sp0 ? kinBtn(x.id, x.colony, `the ${SPECIES_NAME[sp]} ${d} m off`) : '') + `<button class="ghost" data-sw="${x.id}"${ok ? '' : ' disabled'}><b>Take in hand: ${SPECIES_NAME[sp]}</b><span>${fmt(x.colony.adults)} adults, ${fmt(broodTotal(x.colony))} brood, ${d} m off${x.colony.nestAlive ? '' : ' · destroyed'}</span></button>`;
+  }).join('') : '<span class="label">No other colony of the line yet. Queens that winter well found them in spring; honeybees swarm.</span>');
 }
-$('nLine').addEventListener('click', (e) => { const b = e.target.closest('button[data-sw]'); if (b && !b.disabled) { switchOnce = +b.dataset.sw; input.switchTo = 1; } });
+$('nLine').addEventListener('click', (e) => {
+  const k = e.target.closest('button[data-kin]'); if (k) { kinOnce = +k.dataset.kin; input.kin = 1; return; }
+  const b = e.target.closest('button[data-sw]'); if (b && !b.disabled) { switchOnce = +b.dataset.sw; input.switchTo = 1; }
+});
 function updateSkills() {
   const P = sim.prog, X = T.xp, all = sim.settings.skills === 'all', xp = P.unitTotal + P.hiveTotal, w = sim._driven();
   const p = w && w.colony === 'own' ? (w.pers || { xp: 0, by: ROLES.map(() => 0), ranks: SKILLS.map(() => 0), mastered: false }) : null;
@@ -3596,6 +3603,7 @@ function handleEvents(events) {
       case 'learnDenied': toast('Not enough XP', 'var(--muted)', 1); break;
       case 'grew': toast(`Growth: ${TREE_INFO[e.id][0]} (rank ${e.rank}) · ${e.points} point${e.points === 1 ? '' : 's'} left`, 'var(--yellow)', 2.5); logEvent(`Growth tree: ${TREE_INFO[e.id][0]} ${e.rank}`); break;
       case 'growDenied': toast('No point to spend, or that node is not open yet', 'var(--muted)', 1.4); break;
+      case 'kin': toast(e.kin ? `Marked kin: these ${SPECIES_NAME[e.species]} and your other species leave each other alone.` : `No longer kin: your ${SPECIES_NAME[e.species]} and your other species will fight.`, 'var(--yellow)', 3); lineSig = ''; break; // T3-4
       case 'colonySwitch': toast(`You take the ${SPECIES_NAME[e.species]} in hand. The colony you left goes on under the AI.`, 'var(--yellow)', 3); lineSig = ''; skillSig = ''; syncNests(); waspSwitched(sim.drivenId, 0.98); syncChunks(); break; // GDD 6.8
       case 'switchDenied': toast('That colony cannot be taken in hand now', 'var(--muted)', 1.4); break;
       case 'spat': if (e.what === 'firefly') { toast('Spat it out. Fireflies taste foul: their blood carries lucibufagins, a poison most hunters learn to leave alone.', 'var(--muted)', 4); logEvent('a firefly, spat out'); } break;

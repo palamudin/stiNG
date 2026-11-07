@@ -25,6 +25,8 @@ namespace Sting.Core
         public Num maxCells = Num.MaxValue;
         /// the colony's species (GDD 6.8), and the season a honeybee colony last swarmed in (T2-11)
         public string species = "wasp"; public int swarmed;
+        /// marked kin: at peace with the player's colonies of other species (T3-4)
+        public bool kin;
         /// the hive XP already counted from this colony's work (GDD 6.8)
         public Num xpSeen;
         /// nested somewhere warm (a house, a giant tree's hollow), inside a house, and found by the household there (GDD 6.8)

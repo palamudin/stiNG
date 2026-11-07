@@ -1863,6 +1863,38 @@ namespace Sting.Core.Tests
                 Ok(D(I.site.h) >= 10 && D(I.site.h) <= 90 && inside && beyond && step < 3 && wild > 400 && settledChunks > 30 && built == 0 && trees > 300 && wet == 0 && s.wasp.y >= 0 && st.RulesHash() != t1.RulesHash() && st.WorldTag().Contains("wild beyond 400 m"),
                     $"the settled area sits on the wild land {D(I.site.h):0.0} m above the sea at ({D(I.site.x):0}, {D(I.site.z):0}); {settledChunks} settled chunks, {wild} wild ones with nothing built and {trees} trees, none in the water; no step over 3 m across the band ({step:0.00} per 2 m); a sim runs over it");
             }
+            // 73. the player's own colonies across species (T3-4; sim.test.mjs): the hornets hunt and the bees ball the player's
+            // yellowjackets unless a colony is marked kin; the same species never fight; the mark is a pick, an event, colony state and saved
+            {
+                LineColony AddLine(Sim s, string sp, Num dx)
+                {
+                    var c = Colony.New(false, sp); c.sited = true; c.maxCells = s.MaxCells("trunk", sp);
+                    var nn = World.MakeNest(s.nest.treeX + dx, s.nest.treeZ, s.nest.x + dx, s.nest.y, s.nest.z, 0.14, "trunk");
+                    var sc = new LineColony { id = ++s.lineSeq, nest = nn, colony = c, season = s.season.n }; s.line.Add(sc); return sc;
+                }
+                (Sim s, LineColony sc, Wasp w, PreyHit prey, bool fight, bool balled, List<SimEvent> kin) Meet(string sp, bool kinOwn = false, bool kinLine = false)
+                {
+                    var s = new Sim(new Settings { seed = 1234, birds = false }, new SimOpts { noAI = true }); RunS(s, 1);
+                    var sc = AddLine(s, sp, 8); var w = s.wasp;
+                    Place(w, P(s.nest.x + 3, 1.5, s.nest.z + 3)); w.state = "fly"; w.land = null; w.energy = 1;
+                    var x = s.SpawnWasp(false); x.colony = "line:" + sc.id; x.sp = sp; x.role = "protein"; Place(x, P(w.x + 0.01, w.y, w.z)); x.state = "fly";
+                    var ev = new List<SimEvent>();
+                    if (kinOwn) ev.AddRange(RunS(s, 1, (sim, i) => Idle(c => c.pick = -2000000)));
+                    if (kinLine) ev.AddRange(RunS(s, 1, (sim, i) => Idle(c => c.pick = -(2000000 + sc.id))));
+                    Place(x, P(w.x + 0.01, w.y, w.z)); x.state = "fly";
+                    var prey = s.PreyNear(x, 0.5);
+                    ev.AddRange(RunS(s, 2));
+                    return (s, sc, w, prey, ev.Any(e => e.type == "fight"), ev.Any(e => e.type == "balled" && (int)e["id"] == w.id), ev.Where(e => e.type == "kin").ToList());
+                }
+                var h = Meet("hornet"); var hk = Meet("hornet", true); var hl = Meet("hornet", false, true); var b = Meet("bee"); var bk = Meet("bee", false, true); var y = Meet("wasp");
+                Ok(h.fight && h.prey != null && h.prey.kind == "wasp" && h.prey.id == h.w.id && b.balled && !y.fight && !(y.prey != null && y.prey.kind == "wasp")
+                    && !hk.fight && !(hk.prey != null && hk.prey.kind == "wasp") && !hl.fight && !bk.balled && hk.kin.Count == 1 && (bool)hk.kin[0]["kin"] && hk.s.colony.kin && hl.sc.colony.kin,
+                    "unmarked, the player's hornet wrestles and takes the player's yellowjacket and the bees ball it; the same species never fight; marked kin, no hunting and no balling");
+                var r = Persist.Restore(Persist.Snapshot(hl.s)); var back = RunS(hl.s, 1, (sim, i) => Idle(c => c.pick = -(2000000 + hl.sc.id)));
+                bool denied = RunS(hl.s, 1, (sim, i) => Idle(c => c.pick = -(2000000 + 99))).Any(e => e.type == "kinDenied");
+                Ok(r.line.First(q => q.id == hl.sc.id).colony.kin && !hl.sc.colony.kin && back.Any(e => e.type == "kin" && !(bool)e["kin"]) && denied,
+                    "the mark survives a save, a second pick takes it off, and a colony the player does not hold cannot be marked");
+            }
             // 72. the growth tree (T3-3; sim.test.mjs): points from XP, nodes open in order, ranks acting in the sim, the audit, the save
             {
                 var s = new Sim(new Settings { seed = 1234, birds = false }, new SimOpts { noAI = true }); RunS(s, 1);

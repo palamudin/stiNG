@@ -240,6 +240,29 @@ namespace Sting.Core
         internal List<Wasp> Own() { var l = new List<Wasp>(); foreach (var w in wasps) if (w.colony == "own") l.Add(w); return l; }
         /// another colony's wasp that fights the line: a rival, not one of the line's sister colonies (T2-4)
         public static bool IsRival(Wasp w) => w.colony != "own" && !(w.colony != null && w.colony.StartsWith("line:", System.StringComparison.Ordinal));
+        /// the colony of the player's an insect belongs to (its own, or one of the line's), or null for a rival's (sim.js _colOf)
+        internal ColonyState ColOf(Wasp w)
+        {
+            if (w.colony == "own") return colony;
+            if (w.colony != null && w.colony.StartsWith("line:", System.StringComparison.Ordinal)) foreach (var x in line) if ("line:" + x.id == w.colony) return x.colony;
+            return null;
+        }
+        /// two of the player's own colonies at war (T3-4, GDD 6.8): of different species, and neither marked kin (sim.js _foeOwn)
+        internal bool FoeOwn(Wasp a, Wasp b)
+        {
+            if (a.colony == b.colony || IsRival(a) || IsRival(b) || (a.sp ?? "wasp") == (b.sp ?? "wasp")) return false;
+            var ca = ColOf(a); var cb = ColOf(b);
+            return !(ca != null && ca.kin) && !(cb != null && cb.kin);
+        }
+        /// mark a colony of the player's kin, or not (0: the one in hand; else a colony of the line by its id)
+        void KinMark(int id)
+        {
+            ColonyState c = id == 0 ? colony : null;
+            if (id != 0) foreach (var x in line) if (x.id == id) { c = x.colony; break; }
+            if (c == null) { Emit("kinDenied", ("id", id)); return; }
+            c.kin = !c.kin;
+            Emit("kin", ("id", id), ("kin", c.kin), ("species", c.species ?? "wasp"));
+        }
         int OwnWorkers() { int n = 0; foreach (var w in wasps) if (w.colony == "own" && w.caste == "worker") n++; return n; } // males and gynes out are not workers (T2-3)
         public Num SeasonFrac => (minute - season.startMinute) / (settings.seasonDays * 1440);
         public bool CanFly() => Temperature >= T.weather.flyMinTemp;
@@ -422,7 +445,8 @@ namespace Sting.Core
             prevAct = act;
             if (cmd.alloc > 0 && cmd.alloc <= T.alloc.Length && colony.alloc != cmd.alloc - 1) { colony.alloc = cmd.alloc - 1; Emit("alloc", ("preset", colony.alloc)); }
             int pick = cmd.pick;
-            if (pick <= -1000) { SwitchColony(-pick - 1000); pick = 0; } // take another colony of the line in hand (GDD 6.8)
+            if (pick <= -2000000) { KinMark(-pick - 2000000); pick = 0; } // mark a colony of the player's kin, or not (T3-4)
+            else if (pick <= -1000) { SwitchColony(-pick - 1000); pick = 0; } // take another colony of the line in hand (GDD 6.8)
             else if (pick <= -500) { Grow(-pick - 500); pick = 0; } // a rank on the growth tree (T3-3)
             else if (pick < 0) { Learn(-pick - 1); pick = 0; } // a negative pick learns a skill (GDD 6.8)
             if (winter != null) { WinterStep(pick); pick = 0; } // in winter a pick chooses the queen (T1-15)
