@@ -2483,6 +2483,31 @@ On a jump the CPU path no longer blurs a level out to its parent: the window it 
 
 The game now asks for a square at least 16 m across (`causticsMin`), pushed 30% of its size ahead along the view (`causticsAhead`), on a 512 texture with a 384 grid. That is about the old detail (3 cm texels, 7 cm cells, against 2.3 and 5 cm) over 2.7 times the width. Water seen at a slant still clouds with distance: that is the water, not the caustics.
 
+### 18.103 Presence for the game's own things, and the draw calls by part
+
+**The draw calls.** By day a scene drew thousands of calls, at night a few hundred. The difference was the shadow pass, which draws every caster again:
+- **Wasps.** A wasp was 19 meshes: head, eyes, thorax, waist, six abdomen segments, sting, two wings, what it carries and six legs. All 19 cast shadows. The colony round the nest made 19 shadow draws per wasp, plus 19 main draws for each wasp in view.
+- **People on hills.** People are lifted onto the ground in their vertex shader, so they are never culled by their bounds. Every person in the active chunks was drawn part by part, in both passes.
+
+**Wasps by presence** (`WASP_LOD`; game.js `presence()`, run once the camera is placed):
+- A wasp is drawn whole only within 4 m of the camera, where its 1.5 cm is about 3 pixels.
+- It casts a shadow only within 3 m, and only from its body and wings: legs, eyes, sting, waist and what it carries never cast (`rigidWasp`, `casters`).
+- From 4 m out to 90 m, every wasp in view is a dot in one instanced draw (`waspDots`, coloured by species), grown with distance so it stays a pixel or two. Beyond 90 m wasps are not drawn.
+- The driven wasp is always drawn whole.
+
+**People by presence** (`HUMAN_LOD`). A person is posed and drawn only in these cases:
+- in view, tested on last frame's camera against a 2.2 m sphere at the person's lifted height;
+- within 30 m, close enough to cast a shadow into the view.
+No one is drawn past 220 m. Out of view, a person is not posed either, which saves CPU.
+
+**Shadow-only trees.** A tree tile out of view but inside the shadow box was drawn in the main pass as well as the shadow pass. Each tree mesh now lists the trees in view first and the shadow-only trees after them. The main pass draws the first `ud.main` instances (set in `onBeforeRender`); the shadow pass draws them all. The far level casts no shadow, so its out-of-view tiles are dropped.
+
+**Grass slices by their wedge.** A slice was tested by its bounding box. A box round a wedge that reaches the eye holds the eye, so every view met it: looking at the ground, 41 of 80 slices were drawn. A slice is now out of view when all its corners, at the bottom and the top, are behind one of the view's planes. Its height is its own ground's range, not a hill allowance. The range is sampled at the wedge's corners and middle, and sampled again only when the eye has moved 5% of the slice's reach. A level view keeps about 40 slices, looking down about 20.
+
+**The overlay's draw calls.** Every draw three.js makes is counted (a wrapper on `renderBufferDirect`), by part and with the shadow pass apart: `draws: main N (chunks, wasps, people, trees, grass, ...)` and `shadow N (...)`.
+
+**The water's reflection.** The screen-space march took a hit at the end of a step with a step-long allowance. The steps grow with the distance, so a thin thing (a wasp) reflected as a streak hanging under it, longer the further the eye. A crossing is now found again by halving the step six times, and taken only if the ray is within a thin shell behind what the pixel shows (1 cm plus 2% of the depth).
+
 ### 18.102 Drawn by presence: grass slices, thinned far woods, the triangle breakdown, and spiders on hills
 
 **The principle.** What the player cannot see is not drawn, and what is far is drawn thinly. In a dense wood (S7) with World v3 the frame carried several million triangles: the grass rings over the whole disc round the camera (blades behind the camera were dropped only after their vertex shader ran), and every tree out to 420 m in the view cone, the near two detail levels again in the shadow pass. The water is small beside them (about 77k triangles in its grid plus the breakers' curl).

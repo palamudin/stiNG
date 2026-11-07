@@ -355,11 +355,30 @@ float w2ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.
       let lo = 0, hi = u.radii.length; // the first cell (they run outermost first) closer than inner
       while (lo < hi) { const mid = (lo + hi) >> 1; if (u.radii[mid] >= inner) lo = mid + 1; else hi = mid; }
       m.geometry.instanceCount = lo;
-      const r0 = Math.max(0, inner - u.sp), r1 = (u.rout + 1) / Math.cos(Math.PI / GRASS.sectors), am = (u.a0 + u.a1) / 2, dy = 0.25 * r1;
-      let x0 = Infinity, x1 = -Infinity, z0b = Infinity, z1 = -Infinity;
-      for (const [r, a] of [[r0, u.a0], [r0, u.a1], [r1, u.a0], [r1, u.a1], [r1, am]]) { const x = eye.x + r * Math.cos(a), z = eye.z + r * Math.sin(a); x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0b = Math.min(z0b, z); z1 = Math.max(z1, z); }
-      B.min.set(x0, ground - 2 - dy, z0b); B.max.set(x1, ground + 1.5 + dy, z1);
-      m.visible = lo > 0 && F.intersectsBox(B);
+      // the wedge itself, not its box (a box round a wedge reaching the eye holds the eye, and every view meets it: looking
+      // at the ground, half the slices of every ring were drawn): its corners, at the bottom and the top, each a little
+      // wider for the blades' lean; out of view when all of them are behind one of the view's planes
+      const r0 = Math.max(0, inner - u.sp), r1 = (u.rout + 1) / Math.cos(Math.PI / GRASS.sectors), am = (u.a0 + u.a1) / 2, dy = 0.25 * r1, w0 = 1 + 2 * u.sp;
+      const P = this._pts || (this._pts = Array.from({ length: 12 }, () => new THREE.Vector3())); let q = 0;
+      const C = [[r0, u.a0 - w0 / Math.max(r0, 1)], [r0, u.a1 + w0 / Math.max(r0, 1)], [r1, u.a0], [r1, u.a1], [r1, am], [r0 > 0 ? r1 : -w0, am]];
+      // the ground's range over the wedge, sampled at its corners and middle (a table per slice, sampled again only once
+      // the eye has gone 5% of the slice's reach): the wedge is only as tall as its own ground, not the hills' worst
+      let lo = ground - dy, hi = ground + dy;
+      if (u.rout > 8 && this.world.heightAt) {
+        const hc = u.hc || (u.hc = { x: Infinity, z: 0, lo: 0, hi: 0 });
+        if (Math.hypot(eye.x - hc.x, eye.z - hc.z) > 0.05 * r1 || hc.r0 !== r0) {
+          hc.x = eye.x; hc.z = eye.z; hc.r0 = r0; hc.lo = Infinity; hc.hi = -Infinity;
+          for (const [r, a] of [...C, [(r0 + r1) / 2, am], [(r0 + r1) / 2, u.a0], [(r0 + r1) / 2, u.a1]]) { const h = this.world.heightAt(eye.x + r * Math.cos(a), eye.z + r * Math.sin(a)); hc.lo = Math.min(hc.lo, h); hc.hi = Math.max(hc.hi, h); }
+        }
+        const pad = 0.06 * r1; lo = Math.min(hc.lo, ground) - pad; hi = Math.max(hc.hi, ground) + pad;
+      }
+      for (const [r, a] of C) {
+        const x = eye.x + r * Math.cos(a), z = eye.z + r * Math.sin(a);
+        P[q++].set(x, lo - 2, z); P[q++].set(x, hi + 1.5, z);
+      }
+      let out = false;
+      for (const pl of F.planes) { let all = true; for (let i = 0; i < 12 && all; i++) if (pl.distanceToPoint(P[i]) >= 0) all = false; if (all) { out = true; break; } }
+      m.visible = lo > 0 && !out;
       if (m.visible) drawn += lo;
     }
     this.stats = { clumps: drawn, slices: this.meshes.filter((m) => m.visible).length, of: this.meshes.length };

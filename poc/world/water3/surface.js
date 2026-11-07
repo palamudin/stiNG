@@ -307,10 +307,22 @@ vec4 wSSR(vec3 P, vec3 R) { // P: from the eye (vRel), as uVP takes it
     float d = texture(tDepth, uv).r; if (d >= 1.0) { front = true; tp = t; t *= 1.35; continue; }
     float sw = exp2(d * uLogF) - 1.0;                              // the scene's view depth at that pixel
     vec3 S = q * (sw / c.w);    // the scene's point on the same pixel ray (from the eye)
-    // a hit: the ray went from in front of the scene to behind it within this step, on something above the water
-    if (c.w > sw && front && c.w - sw < (t - tp) * 1.5 + 0.02 && S.y > P.y + 0.002) {
-      float e = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
-      return vec4(texture(tScene, uv).rgb, smoothstep(0.0, 0.08, e));
+    // a crossing: the ray went from in front of the scene to behind it within this step, on something above the water.
+    // The step grows with distance, so the crossing is found again by halving it, and taken only if the ray is then
+    // within a thin shell behind what the pixel shows: a ray passing far behind a thin thing (a wasp, a stem) is not
+    // a hit. Taken at the step's end with a step-long allowance, a wasp's reflection was a streak hanging under it,
+    // the longer the further the eye (the steps grow with the distance)
+    if (c.w > sw && front && S.y > P.y + 0.002) {
+      float a = tp, b = t; vec2 hu = uv; float hw = c.w, hs = sw;
+      for (int k = 0; k < 6; k++) {
+        float m = 0.5 * (a + b); vec4 cm = uVP * vec4(P + R * m, 1.0);
+        vec2 um = cm.xy / cm.w * 0.5 + 0.5; float dm = texture(tDepth, um).r, sm = dm >= 1.0 ? 1e9 : exp2(dm * uLogF) - 1.0;
+        if (cm.w > sm) { b = m; hu = um; hw = cm.w; hs = sm; } else a = m;
+      }
+      if (hw - hs < 0.01 + 0.02 * hs) {
+        float e = min(min(hu.x, 1.0 - hu.x), min(hu.y, 1.0 - hu.y));
+        return vec4(texture(tScene, hu).rgb, smoothstep(0.0, 0.08, e));
+      }
     }
     front = c.w <= sw; tp = t; t *= 1.35;
   }

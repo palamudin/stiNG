@@ -314,20 +314,23 @@ export class Forest {
     const T = this.cfg.tile, half = T * 0.71, B = this.bands, F = this.cfg.fade * 3;
     const alt = Math.max(0, eye.y - this.source.height(eye.x, eye.z));
     const counts = this.meshes.map((pv) => pv.map((pl) => pl.map(() => 0)));
-    const lists = this.meshes.map((pv) => pv.map((pl) => pl.map(() => [])));
+    const lists = this.meshes.map((pv) => pv.map((pl) => pl.map(() => []))), shadowOnly = this.meshes.map((pv) => pv.map((pl) => pl.map(() => [])));
+    const mains = this.meshes.map((pv) => pv.map((pl) => pl.map(() => 0)));
     let trees = 0, culled = 0;
     for (const t of this.tiles.values()) {
       const d = Math.hypot((t.i + 0.5) * T - eye.x, (t.j + 0.5) * T - eye.z, alt);
       // out of the view and out of the shadow box: not drawn (the tile's box: its ground's range plus the trees' height)
       if (t.y0 === undefined) { let lo = 1e9, hi = -1e9; for (let q = 0; q < 9; q++) { const h = this.source.height((t.i + 0.5 * (q % 3)) * T, (t.j + 0.5 * Math.floor(q / 3)) * T); lo = Math.min(lo, h); hi = Math.max(hi, h); } t.y0 = lo - 12; t.y1 = hi + 30; } // the ground at nine points, with slack for what lies between and the trees' height
       TMPB.min.set(t.i * T, t.y0, t.j * T); TMPB.max.set((t.i + 1) * T, t.y1, (t.j + 1) * T);
-      if (!this._frustum.intersectsBox(TMPB) && Math.hypot((t.i + 0.5) * T - eye.x, (t.j + 0.5) * T - eye.z) > this._shadowR + half) { culled++; continue; }
+      const seen = this._frustum.intersectsBox(TMPB);
+      if (!seen && Math.hypot((t.i + 0.5) * T - eye.x, (t.j + 0.5) * T - eye.z) > this._shadowR + half) { culled++; continue; }
       for (let l = 0; l < 3; l++) {
+        if (!seen && l === 2) continue; // out of view, the far level casts no shadow
         if (d + half < B[l] - F || d - half > B[l + 1] + F) continue;
         // by presence (GDD 18.101): every tree near the eye; further out a dense tile draws at most THIN.cap of its trees
         // (an even share of each list, the same trees every time; the canopy painted into the ground fills in beyond)
         const share = this.thin && t.n > THIN.cap[l] ? THIN.cap[l] / t.n : 1;
-        for (let k = 0; k < this.kinds.length; k++) for (let v = 0; v < this.cfg.variants; v++) { const a0 = t.items[k][v], a = share < 1 ? a0.subarray(0, Math.ceil(a0.length / 8 * share) * 8) : a0; if (a.length) { lists[k][v][l].push(a); counts[k][v][l] += a.length / 8; if (l === 0) trees += a.length / 8; } }
+        for (let k = 0; k < this.kinds.length; k++) for (let v = 0; v < this.cfg.variants; v++) { const a0 = t.items[k][v], a = share < 1 ? a0.subarray(0, Math.ceil(a0.length / 8 * share) * 8) : a0; if (a.length) { (seen ? lists : shadowOnly)[k][v][l].push(a); counts[k][v][l] += a.length / 8; if (seen) mains[k][v][l] += a.length / 8; if (l === 0) trees += a.length / 8; } }
       }
     }
     for (let k = 0; k < this.kinds.length; k++) for (let v = 0; v < this.cfg.variants; v++) for (let l = 0; l < 3; l++) {
@@ -340,7 +343,13 @@ export class Forest {
         ud.buf = buf; ud.cap = cap;
       }
       const arr = ud.buf.array; let o = 0;
+      // the trees in view first, then those out of view that only cast a shadow into it: the main pass draws the first
+      // ud.main (onBeforeRender), the shadow pass all of them (drawn in the main pass too, the trees behind the eye
+      // within the shadow box were a third of the forest's triangles)
       for (const a of lists[k][v][l]) { arr.set(a, o); o += a.length; }
+      for (const a of shadowOnly[k][v][l]) { arr.set(a, o); o += a.length; }
+      ud.main = mains[k][v][l];
+      if (!ud.mainHook) { ud.mainHook = true; mesh.onBeforeRender = () => { mesh.geometry.instanceCount = ud.main; }; mesh.onAfterRender = () => { mesh.geometry.instanceCount = ud.count; }; }
       ud.buf.needsUpdate = true;
       mesh.geometry.instanceCount = n; ud.count = n;
       mesh.visible = n > 0;

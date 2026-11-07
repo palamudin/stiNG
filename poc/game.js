@@ -920,7 +920,7 @@ function syncChunks() {
   for (const [k, g] of chunkViews) if (!want.has(k)) { scene.remove(g); chunkViews.delete(k); g.traverse((o) => { if (o.userData.own) o.geometry.dispose(); }); }
   for (const r of sim.activeChunks) {
     const k = chunkKey(r.cx, r.cz);
-    if (!chunkViews.has(k)) { const g = buildChunk(r); g.userData.key = k; g.visible = !ov.hidden; chunkViews.set(k, g); scene.add(g); }
+    if (!chunkViews.has(k)) { const g = buildChunk(r); g.userData.key = k; g.userData.perf = 'chunks'; g.visible = !ov.hidden; chunkViews.set(k, g); scene.add(g); }
   }
   const want2 = new Set(sim.active.map((h) => h.hex));
   for (const [k, v] of humanViews) if (!want2.has(k)) { scene.remove(v.group); humanViews.delete(k); }
@@ -1296,6 +1296,7 @@ function renderCritters(t) {
 // then), and it is never culled by its bounds, which sit at its unlifted height: a spider 1 m up a web on ground 30 m
 // high was culled as soon as the camera looked at it (it was 'invisible')
 function liftNew(g) {
+  g.userData.perf = 'critters';
   if (!TERR.on) return g;
   terrApply(g); g.traverse((o) => { o.frustumCulled = false; });
   return g;
@@ -1423,7 +1424,7 @@ function humanColors(hm) {
 }
 
 function buildHuman(hm) {
-  const group = new THREE.Group();
+  const group = new THREE.Group(); group.userData.perf = 'people';
   const view = { hm, group, meshes: {}, posture: null, sig: '', x: hm.x, z: hm.z, ang: Math.atan2(hm.fx, hm.fz), flinch: 0, lean: new THREE.Vector3(), walk: 0, zonesOn: false };
   scene.add(group);
   rebuildHuman(view);
@@ -1684,8 +1685,9 @@ function buildWasp(remote = false, rival = false, caste = 'worker', species = 'w
     ring.rotation.x = Math.PI / 2; ring.position.y = 0.007;
     g.add(ring);
   }
-  if (species === 'bee') return buildBee(g, caste);
+  if (species === 'bee') { g.userData.dot = '#a7742a'; return buildBee(g, caste); }
   const L = SPECIES_LOOK[species] || SPECIES_LOOK.wasp;
+  g.userData.dot = rival ? '#e0901a' : L.band;
   const black = mat(L.dark), yellow = mat(rival ? '#e0901a' : L.band);
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.0021, 12, 10), L.head ? mat(L.head) : yellow); head.position.z = 0.0058; head.scale.set(1.15, 1, 0.9);
   const eyes = new THREE.Mesh(new THREE.SphereGeometry(0.0013, 8, 6), mat('#15120c')); eyes.scale.set(2.0, 1.1, 0.8); eyes.position.set(0, 0.0004, 0.0062);
@@ -1800,7 +1802,56 @@ function rigidMat(m) {
 }
 function rigidWasp(g) {
   g.traverse((o) => { o.userData.ring = true; o.frustumCulled = true; if (o.material) o.material = Array.isArray(o.material) ? o.material.map(rigidMat) : rigidMat(o.material); });
+  // the parts that cast a shadow: the body and the wings, never the legs, eyes, sting, waist or what it carries (a
+  // shadow pass draws every caster again: 19 parts a wasp made 19 shadow draws, for marks a few pixels across)
+  const skip = new Set(); for (const h of g.userData.legs || []) h.traverse((o) => skip.add(o));
+  g.traverse((o) => { if (o === g.userData.carry || o === g.userData.eyes) o.traverse((q) => skip.add(q)); });
+  const casters = [];
+  g.traverse((o) => {
+    if (!o.isMesh) return;
+    if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+    const big = o.geometry.boundingSphere.radius * Math.max(o.scale.x, o.scale.y, o.scale.z) >= 0.0012;
+    if (o.castShadow && big && !skip.has(o)) casters.push(o); else o.castShadow = false;
+  });
+  g.userData.casters = casters; g.userData.casting = true; g.userData.perf = 'wasps';
   return g;
+}
+// By presence (GDD 18.102): a wasp is drawn whole only within WASP_LOD.near m of the camera (1.5 cm is 3 pixels at
+// 4 m), and casts its shadow only within WASP_LOD.shadow m; further out, to WASP_LOD.far m, every wasp in view is a dot
+// in one instanced draw (grown with distance so it stays a pixel or two), beyond that not drawn. The driven wasp is
+// always whole. A wasp was 19 draws, and 19 more in the shadow pass: a hundred round the nest made thousands by day
+const WASP_LOD = { near: 4, shadow: 3, far: 90, grow: 8 };
+const waspDots = new THREE.InstancedMesh(new THREE.SphereGeometry(0.004, 6, 4).scale(0.8, 0.7, 1.6), rigidMat(mat('#ffffff')), 2048);
+waspDots.count = 0; waspDots.frustumCulled = false; waspDots.castShadow = false; waspDots.userData.ring = true; waspDots.userData.perf = 'wasps (dots)';
+waspDots.setColorAt(0, new THREE.Color()); scene.add(waspDots);
+const PRES = { F: new THREE.Frustum(), M: new THREE.Matrix4(), S: new THREE.Sphere(), ready: false, dotCol: new Map(), m: new THREE.Matrix4(), q: new THREE.Quaternion(), e: new THREE.Euler(0, 0, 0, 'YXZ'), sc: new THREE.Vector3() };
+function inView(x, y, z, r) { if (!PRES.ready) return true; PRES.S.center.set(x - RO.x, y, z - RO.z); PRES.S.radius = r; return PRES.F.intersectsSphere(PRES.S); }
+function presence() {
+  camera.updateMatrixWorld(); PRES.M.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse); PRES.F.setFromProjectionMatrix(PRES.M); PRES.ready = true;
+  const c = camera.position; let n = 0;
+  for (const [id, g] of waspViews) {
+    if (!g.visible) continue;
+    const d = Math.hypot(g.position.x - c.x, g.position.y - c.y, g.position.z - c.z), driven = sim && id === sim.drivenId;
+    const cast = driven || d < WASP_LOD.shadow;
+    if (cast !== g.userData.casting) { g.userData.casting = cast; for (const o of g.userData.casters) o.castShadow = cast; }
+    if (driven || d <= WASP_LOD.near) continue;
+    g.visible = false;
+    if (d > WASP_LOD.far || n >= waspDots.instanceMatrix.count || !inView(g.position.x, g.position.y, g.position.z, 0.05 * Math.max(1, d / WASP_LOD.grow))) continue;
+    PRES.e.set(g.rotation.x, g.rotation.y, 0); PRES.q.setFromEuler(PRES.e); PRES.sc.setScalar(g.scale.x * Math.max(1, d / WASP_LOD.grow));
+    waspDots.setMatrixAt(n, PRES.m.compose(g.position, PRES.q, PRES.sc));
+    let col = PRES.dotCol.get(g.userData.dot); if (!col) PRES.dotCol.set(g.userData.dot, col = new THREE.Color(g.userData.dot || '#d8b020'));
+    waspDots.setColorAt(n++, col);
+  }
+  waspDots.count = n; waspDots.instanceMatrix.needsUpdate = true; if (waspDots.instanceColor) waspDots.instanceColor.needsUpdate = true;
+}
+// a person is posed and drawn only in view (from last frame's camera, with room), or near enough to cast a shadow
+// into it, and never past HUMAN_LOD.far m; on hills people are never culled by their bounds (they are lifted in the
+// shader), so before this every person in the active chunks was drawn, part by part, twice (the shadow pass) by day
+const HUMAN_LOD = { far: 220, shadow: 30, r: 2.2 };
+function humanPresent(v) {
+  const g = v.group, c = camera.position, x = g.position.x, z = g.position.z, d = Math.hypot(x - c.x, z - c.z);
+  if (d > HUMAN_LOD.far) return false;
+  return d < HUMAN_LOD.shadow || inView(x, terrAt(x, z) + 1, z, HUMAN_LOD.r);
 }
 function renderWasps(alpha, t, dt) {
   const seen = new Set();
@@ -3862,6 +3913,35 @@ const PERF = { gpu: new GpuTimer(renderer), acc: { n: 0, frame: 0, sim: 0, cpu: 
 // instances, summed by the part it belongs to (the nearest named group: grass, forest, terrain, water, ...; the game's
 // own chunks, people and insects as 'game'), the five largest. The main pass only: shadows draw their casters again
 const TRI_NAME = { 'world2-grass': 'grass', 'world2-forest': 'trees', 'world2-terrain': 'ground', world2: 'world', water: 'water' };
+// where the draw calls come from: every draw three.js makes (renderBufferDirect, the main passes and the shadow
+// pass alike) counted by the part it draws, and in the shadow pass apart, averaged a frame (installed when the
+// overlay is first on; off, it costs one test a draw)
+const DRAWS = { by: new Map(), frames: 0, part: new WeakMap(), hooked: false };
+function drawPart(o) {
+  let k = DRAWS.part.get(o); if (k) return k;
+  let p = o, top = o;
+  while (p && !k) { k = TRI_NAME[p.name] || p.userData.perf || null; top = p; p = p.parent; }
+  if (!k) k = top === scene ? 'game other' : world2 && world2.surface && top === world2.surface.scene ? 'water' : top.isScene ? (top.name || 'other scene') : 'post';
+  DRAWS.part.set(o, k);
+  return k;
+}
+function hookDraws() {
+  if (DRAWS.hooked) return; DRAWS.hooked = true;
+  const orig = renderer.renderBufferDirect, info = renderer.info.render;
+  renderer.renderBufferDirect = function (camera, scn, geometry, material, object, group) {
+    if (!opts.perf) return orig.call(this, camera, scn, geometry, material, object, group);
+    const c0 = info.calls; orig.call(this, camera, scn, geometry, material, object, group);
+    const d = info.calls - c0; if (!d) return;
+    const k = (scn ? '' : '⛆') + drawPart(object); DRAWS.by.set(k, (DRAWS.by.get(k) || 0) + d);
+  };
+}
+function perfDraws() {
+  const f = Math.max(1, DRAWS.frames), main = new Map(), sh = new Map();
+  for (const [k, v] of DRAWS.by) { if (k[0] === '⛆') sh.set(k.slice(1), v / f); else main.set(k, v / f); }
+  const tot = (M) => [...M.values()].reduce((a, v) => a + v, 0), top = (M) => [...M].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => `${k} ${Math.round(v)}`).join(' · ');
+  DRAWS.by.clear(); DRAWS.frames = 0;
+  return `draws: main ${Math.round(tot(main))} (${top(main)})<br>shadow ${Math.round(tot(sh))}${sh.size ? ` (${top(sh)})` : ''}`;
+}
 function perfTris() {
   const by = new Map(), add = (root, def) => root.traverseVisible((o) => {
     if (!(o.isMesh || o.isLine || o.isPoints) || !o.geometry) return;
@@ -3878,6 +3958,7 @@ function perfTris() {
 }
 function perfFrame(raw, sim, cpu, submit) {
   if (!opts.perf) { if (PERF.el && !PERF.el.hidden) PERF.el.hidden = true; return; }
+  hookDraws(); DRAWS.frames++;
   const A = PERF.acc; A.n++; A.frame += raw * 1000; A.sim += sim; A.cpu += cpu; A.submit += submit;
   const now = performance.now(); if (now - PERF.t0 < 500) return;
   PERF.t0 = now;
@@ -3889,7 +3970,7 @@ function perfFrame(raw, sim, cpu, submit) {
     + `CPU ${(cp + sb).toFixed(1)} ms (${pct(cp + sb)}): sim ${sm.toFixed(1)} · frame ${(cp - sm).toFixed(1)} · submit ${sb.toFixed(1)}<br>`
     + (g === null ? 'GPU: no timer queries in this browser' : `GPU ${g.toFixed(1)} ms (${pct(g)})${passes ? `<br><span>${passes}</span>` : ''}`)
     + `<br>${info.calls} calls · ${(info.triangles / 1e6).toFixed(2)} M triangles (all passes, shadows too) · ${world2 ? 'World v3' : 'classic'}${world2 && world2.grass ? ` · grass ${world2.grass.matte ? 'matte' : 'glossy'}` : ''}`
-    + `<br><span>${perfTris()}</span>`;
+    + `<br><span>${perfTris()}</span><br><span>${perfDraws()}</span>`;
   el.hidden = false;
   A.n = A.frame = A.sim = A.cpu = A.submit = 0;
 }
@@ -3927,12 +4008,13 @@ function frame(now) {
     const alpha = running && !paused ? acc / DT : 1;
     const t = sim.tick + alpha;
     for (let i = anims.length - 1; i >= 0; i--) if (envelope(anims[i], t) < 0) anims.splice(i, 1);
-    for (const v of humanViews.values()) poseHuman(v, t, dt);
+    for (const v of humanViews.values()) { if (!ov.hidden && !humanPresent(v)) { v.group.visible = false; continue; } poseHuman(v, t, dt); }
     if (tm) { tm('humans', t0); t0 = performance.now(); }
     const p = renderWasps(alpha, t, dt);
     originFrame(); // the render origin follows the camera (planet scale)
     if (sim) terrFrame(ov.on ? new THREE.Vector3(ov.fx, 0, ov.fz) : p || V(sim.nest.spawn));
     const focus = updateCamera(p, dt);
+    if (!ov.hidden) presence(); else waspDots.count = 0; // what is drawn, by the player's presence (GDD 18.102)
     drawLock();
     drawPins();
     updateStare(dt);
