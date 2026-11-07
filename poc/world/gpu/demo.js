@@ -47,6 +47,8 @@ function build() {
 
 // the camera: an orbit round a focus on the ground, as the template's
 const cam = { fx: 0, fz: 0, yaw: 0.8, look: 0, dist: 60 };
+// ?at=x,z[,yaw]: start there (?at=coast: a beach of seed 7, facing the sea)
+{ const a = q.get('at'); if (a === 'coast') Object.assign(cam, { fx: -1438, fz: 1317, yaw: 2.31, dist: 40, look: 0.1 }); else if (a) { const [x, z, y] = a.split(',').map(Number); cam.fx = x || 0; cam.fz = z || 0; if (Number.isFinite(y)) cam.yaw = y; } }
 const keys = new Set();
 addEventListener('keydown', (e) => keys.add(e.code)); addEventListener('keyup', (e) => keys.delete(e.code));
 let drag = null;
