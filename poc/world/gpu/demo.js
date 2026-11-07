@@ -16,6 +16,7 @@ import { buildPanel } from './panel.js';
 import { readCompare, compareURL, poseOf, applyPose } from '../compare.js';
 import { GpuWaterQuery } from './waterquery.js';
 import { GpuSpray } from './spray.js';
+import { GpuSwellField } from './swellfield.js';
 import { Floaters } from './floaters/floaters.js';
 import { GWATER_PRESETS } from './water.js';
 import { weatherAt, seasonAt } from '../seasons.js';
@@ -64,7 +65,7 @@ const mapFor = (d) => THREE.MathUtils.smoothstep(Math.log(d), Math.log(MAP.from)
 const pitchFor = (d) => 0.12 + 0.95 * THREE.MathUtils.smoothstep(Math.log10(d), -1.2, 3.7);
 const state = { seed: 7, treeDist: 1, wind: 4, hour: +(q.get('hour') || 11), cover: +(q.get('cover') ?? 0.35), cshadow: !q.has('nocshadow'), caustics: !q.has('nocaustics'),
   spray: q.has('spray'), auto: q.has('auto'), day: +(q.get('day') ?? 100), rain: 0, haze: 1, dens: 1, kind: '', windDir: [0.94, 0.35], waterAuto: true, runoff: 0 };
-let caustics, query, floaters, spray, src, clip, terrain, forest, waves, water, shore, fields, grass, wtime = 0;
+let swellF = null, caustics, query, floaters, spray, src, clip, terrain, forest, waves, water, shore, fields, grass, wtime = 0;
 function build() {
   if (terrain) { scene.remove(terrain, forest.group, water.mesh); if (grass) scene.remove(grass.group); }
   src = wildSource({ seed: state.seed });
@@ -74,8 +75,9 @@ function build() {
   terrain = gpuTerrain(clip, { sea: src.sea, bands: forest.uBands, surf: q.has('noshore') ? null : surfU, map: mapU });
   waves = new GpuWaves(renderer, { cascades: src.water.cascades, fetch: src.water.fetch, salt: src.cosmetic | 0 });
   shore = q.has('noshore') ? null : new GpuShore(renderer, src);
-  fields = q.has('nofield') ? null : [GFOAM.far, GFOAM.near].map((level) => new GpuFoamField(renderer, { clip, waves, shore, surfU, level }));
-  water = gpuWater(clip, waves, { sky, clouds, ssr: !q.has('nossr'), sunColor: sky.uSunColor, skyUp: sky.uSkyUp, skyHz: sky.uSkyHz, waterAt: (x, z) => src.waterAt(x, z), shore, sea: src.sea, renderer, surfU, fields, map: mapU, debug: +(q.get('wdebug') || 0) });
+  swellF = q.has('noswell') ? null : new GpuSwellField(renderer, src);
+  fields = q.has('nofield') ? null : [GFOAM.far, GFOAM.near].map((level) => new GpuFoamField(renderer, { clip, waves, shore, surfU, level, swell: swellF }));
+  water = gpuWater(clip, waves, { swell: swellF, sky, clouds, ssr: !q.has('nossr'), sunColor: sky.uSunColor, skyUp: sky.uSkyUp, skyHz: sky.uSkyHz, waterAt: (x, z) => src.waterAt(x, z), shore, sea: src.sea, renderer, surfU, fields, map: mapU, debug: +(q.get('wdebug') || 0) });
   if (!q.has('nowater')) scene.add(water.mesh);
   if (!q.has('noterrain')) scene.add(terrain);
   grass = q.has('nograss') ? null : new GpuGrass(renderer, { clip, source: src, sunDir: water.U.uSunDir, sunColor: sky.uSunColor, clouds }); if (grass) scene.add(grass.group);
@@ -241,6 +243,8 @@ function step(dt) {
   const swell = { Hs: Math.max(WAVES.swellHmin, sw.Hs), T: Math.min(10.5, Math.max(WAVES.swellT - 1, WAVES.swellT - 1 + 2.5 * sw.Hs)) };
   waves.update(wtime, w10, Math.PI * 60, swell);
   water.U.uSurf.value.set(Math.min(1.5, Math.max(0.2, 0.35 + 0.55 * swell.Hs)), Math.min(60, Math.max(12, 0.45 * 9.81 * swell.T * swell.T / (2 * Math.PI))), 1, 1);
+  if (swellF) { const U = Math.hypot(w10[0], w10[1]); swellF.update(camera.position, waves.U.swDir.value, swell.T, new THREE.Vector2(w10[0], w10[1]).normalize(), water.U.uSurf.value.x, Math.max(2, 0.785 * U), 0.35 * 0.21 * U * U / 9.81); } // (the wind sea's peak: Pierson-Moskowitz)
+  water.look.uWind.value = Math.hypot(w10[0], w10[1]);
   water.U.uWTime.value = wtime; water.U.uTime.value = wtime; water.U.uSwDir.value.copy(waves.U.swDir.value);
   if (shore) shore.update(camera.position, !shore._built); if (shore) shore._built = true;
   // the water's look: the panel's settings, moved by the weather and the season
@@ -338,4 +342,4 @@ async function snap() {
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = (y * w + x) * 4, o = i; /* WebGPU reads back top row first */ for (let c = 0; c < 3; c++) im.data[o + c] = 255 * srgb(aces(toF(px[i + c]) * 0.6 * renderer.toneMappingExposure)); im.data[o + 3] = 255; }
   c2.putImageData(im, 0, 0); return cv2.toDataURL('image/png');
 }
-window.__gpu = { snap, draw, renderer, scene, camera, cam, state, player, get caustics() { return caustics; }, clouds, drop: () => dropFloaters(), get floaters() { return floaters; }, get query() { return query; }, get spray() { return spray; }, setPlayer, get forest() { return forest; }, get grass() { return grass; }, sky, get clip() { return clip; }, manual(on) { manual = on; if (!on) { last = performance.now(); requestAnimationFrame(frame); } }, step, async counts() { return forest.counts(); }, render() { draw(); } };
+window.__gpu = { snap, draw, renderer, scene, camera, cam, state, player, get caustics() { return caustics; }, clouds, drop: () => dropFloaters(), get floaters() { return floaters; }, get query() { return query; }, get spray() { return spray; }, get swellF() { return swellF; }, setPlayer, get forest() { return forest; }, get grass() { return grass; }, sky, get clip() { return clip; }, manual(on) { manual = on; if (!on) { last = performance.now(); requestAnimationFrame(frame); } }, step, async counts() { return forest.counts(); }, render() { draw(); } };

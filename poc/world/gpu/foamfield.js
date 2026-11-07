@@ -26,6 +26,7 @@ export class GpuFoamField {
     const A = storage(this.aAttr, 'float', n * n), B = storage(this.bAttr, 'float', n * n);
     this.uOrigin = uniform(new THREE.Vector2()); this.uPrev = uniform(new THREE.Vector2()); this.uDt = uniform(0); this.uLinger = uniform(4); this.uDrift = uniform(new THREE.Vector2());
     this.uBias = uniform(0.05); this.uScale = uniform(1.3);
+    const SWr = opts.swell ? opts.swell.reader() : null; this.uWindU = uniform(5);
     const RC = opts.clip.reads(TX < 1 ? 'FFN' : 'FFF'), shR = opts.shore ? opts.shore.reader() : null, S = opts.surfU, waves = opts.waves;
     const surf = { surf: S.uSurf, surfX: S.uSurfX, t: S.uWTime, swDir: S.uSwDir };
     const L1 = waves.cascades[1], L2 = waves.cascades[2], N = waves.N;
@@ -44,18 +45,31 @@ export class GpuFoamField {
       const v = vec2(this.uDrift).toVar(), make = float(0).toVar(), wet = depth.greaterThan(0).toVar(), wave = float(0).toVar();
       // whitecaps: the open water folding (the 85 m and 12 m cascades' Jacobian), at the folds the texel can hold
       const J = float(1).add(texture(waves.disp[1], p.div(L1)).level(lod1).w.sub(1).mul(smoothstep(0.6, 5, depth))).add(texture(waves.disp[2], p.div(L2)).level(lod2).w.sub(1).mul(smoothstep(0.2, 2, depth)));
-      make.assign(float(0.6).add(this.uBias).sub(J).mul(this.uScale).clamp(0, 1).mul(0.5));
+      // (on a lake or a pond, as much as its fetch lets the wind build the folding waves: gpu/swellfield.js)
+      const wc = float(1).toVar();
+      if (SWr) { const F = SWr.fetch(p), U = max(this.uWindU, 1), wp = float(22).mul(float(96.24).div(U.mul(max(F, 1))).pow(1 / 3)); wc.assign(F.div(U.mul(U).mul(2243)).clamp(0, 1).sqrt().mul(smoothstep(0.1, 0.5, float(61.6).div(wp.mul(wp)).div(L2)))); }
+      make.assign(float(0.6).add(this.uBias).sub(J).mul(this.uScale).clamp(0, 1).mul(0.5).mul(wc));
       if (shR) {
         const sea = level.lessThanEqual(S.uSea.add(0.5));
         // the surf: its crest's whitewater, made in proportion to the wave that broke; the foam behind carried shoreward
         If(depth.greaterThan(0).and(sea), () => {
-          const sh = shR(p), m = cField({ p, sh: sh.v, know: sh.know, depth, cell: float(TX), ...surf }).toVar();
-          If(m.element(0).w.greaterThan(0.5), () => {
-            const big = smoothstep(0.1, 0.9, S.uSurf.x.mul(m.element(0).y).mul(m.element(0).z));
-            wave.assign(m.element(0).x);
-            make.assign(max(make, m.element(0).x.mul(mix(0.55, 1, big))));
-            v.addAssign(m.element(1).xy.mul(m.element(0).y).mul(0.25));
-          });
+          if (SWr) { // the swell field's breakers (gpu/swellfield.js): broken waves' crests make white, carried along their rays
+            const sw = SWr.swell(p), ph = sw.A0.x.sub(SWr.omega.x.mul(S.uWTime)), psi = ph.add(Math.PI).mod(2 * Math.PI).sub(Math.PI).negate();
+            const a = sw.A0.y.mul(S.uSurf.x), inF = sw.inside.mul(float(1).sub(smoothstep(0.7, 2.2, sw.A0.w.mul(depth))));
+            const ww = sw.B0.y.mul(inF).mul(smoothstep(-0.9, -0.1, psi)).mul(exp(psi.max(0).mul(-0.9))).mul(smoothstep(0.05, 0.3, a));
+            wave.assign(ww); make.assign(max(make, ww.mul(0.8)));
+            const th = sw.A0.z, d0 = SWr.dir, dirW = d0.mul(th.cos()).add(vec2(d0.y.negate(), d0.x).mul(th.sin()));
+            v.addAssign(dirW.mul(depth.max(0.1).mul(9.81).sqrt()).mul(0.25).mul(inF));
+          }
+          if (!SWr) {
+            const sh = shR(p), m = cField({ p, sh: sh.v, know: sh.know, depth, cell: float(TX), ...surf }).toVar();
+            If(m.element(0).w.greaterThan(0.5), () => {
+              const big = smoothstep(0.1, 0.9, S.uSurf.x.mul(m.element(0).y).mul(m.element(0).z));
+              wave.assign(m.element(0).x);
+              make.assign(max(make, m.element(0).x.mul(mix(0.55, 1, big))));
+              v.addAssign(m.element(1).xy.mul(m.element(0).y).mul(0.25));
+            });
+          }
         });
         // the shoreline's own foam over the water by the line and the sand the swash covers
         If(depth.lessThan(0.8).and(sea).and(S.uSurf.x.greaterThan(0)), () => {
@@ -93,7 +107,7 @@ export class GpuFoamField {
     this.uPrev.value.copy(this.uOrigin.value);
     this.uOrigin.value.set(Math.floor((camera.position.x - half) / L.texel) * L.texel, Math.floor((camera.position.z - half) / L.texel) * L.texel);
     if (!this._init) { this.uPrev.value.copy(this.uOrigin.value); this._init = true; }
-    this.uDt.value = Math.min(Math.max(dt, 0), 0.1); this.uLinger.value = linger; this.uDrift.value.set(wind[0] * 0.03, wind[1] * 0.03);
+    this.uDt.value = Math.min(Math.max(dt, 0), 0.1); this.uLinger.value = linger; this.uDrift.value.set(wind[0] * 0.03, wind[1] * 0.03); this.uWindU.value = Math.hypot(wind[0], wind[1]);
     this.renderer.compute(this.kStep); this.renderer.compute(this.kCopy);
   }
 }
