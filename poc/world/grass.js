@@ -229,6 +229,62 @@ const GRASS_BUILD = /* glsl */ `
   }
 `;
 
+// The clump cache (GDD 18.104): what a clump is (its ground, how tall it grows or that nothing grows, how wet, and the
+// wind's gusts and eddies on it) is the same for every vertex of its blades, and every vertex worked it out again: three
+// clipmap reads, the ground's normal, five noises, every frame, some 40 times a clump. Now one pass a frame writes it per
+// clump into a float texture (a texel a grid cell of the ring, at its cell index), and the blades read one texel. The
+// pass is a full-screen triangle over the ring's grid: about 60,000 texels a ring, against 2 million vertices
+const GRASS_CELL = /* glsl */ `
+uniform int uK, uCacheN; uniform float uS0, uSea, uDensity, uFlower, uShore, uSnowLine, uWoodH, uBloom, uSnowCover, uWildFrom, uGustPh;
+uniform vec2 uWildH, uGrassH, uWind, uEddy; uniform vec3 uCamG; out vec4 outCell;
+void main() {
+  vec2 aCell = vec2(ivec2(gl_FragCoord.xy) - ivec2(uCacheN));
+  float sp = uS0 * exp2(float(uK));
+  vec2 org = floor(uCamG.xz / sp) * sp, cw = org + aCell * sp;
+  ivec2 ci = ivec2(floor(cw / uS0 + 0.5));
+  int bits = ci.x | ci.y, lvl = 7;
+  for (int b = 0; b < 7; b++) if (((bits >> b) & 1) != 0) { lvl = b; break; }
+  vec2 base = vec2(ci) * uS0 + (vec2(w2hash01(ci.x, ci.y, 201), w2hash01(ci.x, ci.y, 202)) - 0.5) * uS0 * exp2(float(min(lvl, ${GRASS.jitterLv})));
+  vec2 bL = base - floor(uCamG.xz / 4096.0) * 4096.0;
+  vec4 gd = clipAt(base); vec3 gn = clipNormal(base);
+  float hgt = gd.x - clipWater(base), slope = 1.0 - gn.y;
+  float dens = (1.0 - smoothstep(0.32, 0.45, slope)) * mix(1.0, smoothstep(1.3, 2.2, hgt), uShore) * (1.0 - smoothstep(0.3, 0.45, gd.w)) * mix(1.0, 0.35, smoothstep(0.4, 0.8, gd.z));
+  dens *= uDensity * (1.0 - smoothstep(uSnowLine - 10.0, uSnowLine + 10.0, gd.x - uSea));
+  dens *= 1.0 - smoothstep(0.97, 1.03, gd.y);
+  float wr = w2wear(gd.w);
+  dens *= 1.0 - w2bare(base, wr);
+  if (uFlower > 0.5) dens *= smoothstep(0.1, 0.6, w2noise(base / 9.0, 211) + 0.35 * (gd.y - 0.5)) * (1.0 - smoothstep(0.3, 0.6, gd.z)) * uBloom;
+  dens *= 1.0 - 0.92 * uSnowCover;
+  bool kill = w2hash01(ci.x, ci.y, 203) > dens;
+  float rnd = w2hash01(ci.x, ci.y, 204);
+  vec2 GH = uWildFrom > 0.0 ? mix(uGrassH, uWildH, smoothstep(uWildFrom * 0.85, uWildFrom * 1.05, length(base))) : uGrassH;
+  float Hc = mix(GH.x, GH.y, gd.y) * (0.75 + 0.5 * rnd) * (uFlower > 0.5 ? 1.3 : 1.0) * mix(1.0, uWoodH, smoothstep(0.85, 1.0, gd.z)) * mix(1.0, 0.45, wr);
+  float U10 = length(uWind); vec2 wd = U10 > 0.01 ? uWind / U10 : vec2(0.83, 0.55);
+  float gust = 0.6 + 0.4 * sin(1.571 * dot(bL, wd) - uGustPh + 3.0 * w2noise(bL / 7.0, 205));
+  float eddy = 0.5 + 0.5 * w2noise((bL - uEddy) / 1.6, 206);
+  outCell = vec4(gd.x, kill ? -1.0 : max(Hc, 1e-4), gd.y, floor(clamp(gust, 0.0, 1.0) * 4095.0) * 4096.0 + floor(clamp(eddy, 0.0, 1.0) * 4095.0));
+}`;
+// the blades' part, reading the cache (GRASS_BUILD without it is the fallback where float targets are missing)
+const GRASS_BUILD_CACHED = GRASS_BUILD
+  .replace(/  vec4 gd = clipAt\(base\);[\s\S]*?float rnd = w2hash01\(ci\.x, ci\.y, 204\);\n/, `  vec4 gc = texelFetch(tCache, ivec2(aCell) + ivec2(uCacheN), 0); // the clump: ground, height (nothing grows: < 0), moisture, wind
+  vec4 gd = vec4(gc.x, gc.z, 0.0, 0.0);
+  vec4 cc = projectionMatrix * modelViewMatrix * vec4(base.x, gd.x, base.y, 1.0);
+  float mx = 1.05 * cc.w + 1.6 * projectionMatrix[0][0], my = 1.05 * cc.w + 1.6 * projectionMatrix[1][1];
+  if (gc.y > 0.0 && abs(cc.x) <= mx && abs(cc.y) <= my && cc.w > -2.0) {
+  vKill = 0.0;
+  float fade = persist ? 1.0 : 1.0 - smoothstep(uRout * ${GRASS_BAND}, uRout, de);
+  fade *= 1.0 - smoothstep(8.0, 30.0, uAlt);
+  float th = w2hash01(ci.x, ci.y, 213);
+  vFade = clamp((fade - th * 0.85) / 0.15, 0.0, 1.0);
+  vDith = w2hash01(ci.x, ci.y, 214);
+  if (vFade <= 0.0) vKill = 1.0;
+  float rnd = w2hash01(ci.x, ci.y, 204);
+`)
+  .replace(/  vec2 GH = uWildFrom[^\n]*\n  float H = [^\n]*\n  H \*= mix\(1\.0, uWoodH[^\n]*\n  H \*= mix\(1\.0, 0\.45, wr\);[^\n]*\n/, '  float H = gc.y * (0.55 + 0.9 * aB.w);\n')
+  .replace(/  float gust = 0\.6 \+ 0\.4 \* sin[^\n]*\n  float eddy = [^\n]*\n/, '  float gust = floor(gc.w / 4096.0) / 4095.0, eddy = mod(gc.w, 4096.0) / 4095.0; // from the clump pass\n')
+  .replace(/\n  }\n  }\n`;?$/, '\n  }\n  }\n');
+if (!GRASS_BUILD_CACHED.includes('texelFetch(tCache') || !GRASS_BUILD_CACHED.includes('from the clump pass') || !GRASS_BUILD_CACHED.includes('gc.y * (0.55')) throw new Error('grass: the cached build did not take');
+
 export class Grass {
   constructor(world, opts = {}) {
     this.world = world;
@@ -236,6 +292,10 @@ export class Grass {
     this.group = new THREE.Group(); this.group.name = 'world2-grass';
     const clip = world.clip.glsl();
     this.meshes = [];
+    // the clump cache needs float targets (as the clipmap's GPU fill); without them the blades work it out themselves
+    const r = world.renderer;
+    this.cached = opts.cache !== false && !!r && r.capabilities.isWebGL2 && !!r.extensions.get('EXT_color_buffer_float');
+    this.caches = [];
     const d = Math.sqrt(this.density), s0 = GRASS.s0 / d;
     const mk = (k, S0, rin, rout, flower, blades, segs, nextBlades) => {
       const geo = clumpGeometry(blades, segs);
@@ -259,11 +319,21 @@ export class Grass {
         tSway: shared.tSway, uPh: shared.uPh, uGustPh: shared.uGustPh, uSwayRow: shared.uSwayRow, uEddy: shared.uEddy, uGrassMatte: shared.uGrassMatte,
         uGrassH: { value: new THREE.Vector2(...(world.source.grassHeight || [0.1, 0.42])) }, // metres, dry to wet ground
       };
+      let cache = null;
+      if (this.cached) { // a texel a cell of this ring's grid, (i, j) at (i + n, j + n)
+        const N = 2 * n + 1, rt = new THREE.WebGLRenderTarget(N, N, { type: THREE.FloatType, format: THREE.RGBAFormat, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: false, generateMipmaps: false });
+        U.tCache = { value: rt.texture }; U.uCacheN = { value: n };
+        const cmat = new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, uniforms: U, depthTest: false, depthWrite: false,
+          vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }',
+          fragmentShader: `precision highp float; precision highp int;\n${clip}\n${NOISE_GLSL}\n${WEAR_GLSL}\n${GRASS_CELL}` });
+        cache = { rt, mat: cmat, meshes: [], N };
+        this.caches.push(cache);
+      }
       const mat = new THREE.MeshStandardMaterial({ roughness: 0.75, metalness: 0, side: THREE.DoubleSide });
       mat.onBeforeCompile = (sh) => {
         Object.assign(sh.uniforms, U);
-        sh.vertexShader = `${clip}\n${NOISE_GLSL}\n${WEAR_GLSL}\n${GRASS_VERT_HEAD}\n` + sh.vertexShader
-          .replace('#include <beginnormal_vertex>', GRASS_BUILD + '\n  vec3 objectNormal = gNor;')
+        sh.vertexShader = `${clip}\n${NOISE_GLSL}\n${WEAR_GLSL}\n${GRASS_VERT_HEAD}\n${cache ? 'uniform highp sampler2D tCache; uniform int uCacheN;\n' : ''}` + sh.vertexShader
+          .replace('#include <beginnormal_vertex>', (cache ? GRASS_BUILD_CACHED : GRASS_BUILD) + '\n  vec3 objectNormal = gNor;')
           .replace('#include <begin_vertex>', 'vec3 transformed = gPos;')
           // projected from the eye (GDD 18.95): viewMatrix * an absolute position cancels two large 32-bit numbers
           .replace('#include <project_vertex>', 'vec4 mvPosition = vec4(mat3(viewMatrix) * gRel, 1.0); gl_Position = projectionMatrix * mvPosition;\n  if (vKill > 0.5) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);');
@@ -291,7 +361,7 @@ float w2ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.
     reflectedLight.directDiffuse *= mix(1.0, 0.7 + 0.3 * vT, vRootK);
   }`);
       };
-      mat.customProgramCacheKey = () => 'w2grass' + (flower ? 'f' : '') + world.clip.cfg.levels; // the clipmap's level count is in the code
+      mat.customProgramCacheKey = () => 'w2grass' + (flower ? 'f' : '') + (cache ? 'c' : '') + world.clip.cfg.levels; // the clipmap's level count is in the code
       const SEC = GRASS.sectors, bySec = Array.from({ length: SEC }, () => []);
       for (const c of list) bySec[Math.floor((Math.atan2(c[2], c[1]) + Math.PI) / (2 * Math.PI) * SEC) % SEC].push(c); // still outermost first
       for (let q = 0; q < SEC; q++) {
@@ -306,6 +376,7 @@ float w2ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.
         const a0 = -Math.PI + q * 2 * Math.PI / SEC;
         mesh.userData = { U, instances: L.length, radii: L.map((c) => c[0]), rin, slack, rout: rout + slack, a0, a1: a0 + 2 * Math.PI / SEC, sp };
         this.group.add(mesh); this.meshes.push(mesh);
+        if (cache) cache.meshes.push(mesh);
       }
     };
     const shared = { uWind: { value: new THREE.Vector2(0.8, 0.3) }, uCamG: { value: new THREE.Vector3() }, uAlt: { value: 0 },
@@ -363,25 +434,35 @@ float w2ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.
       const C = [[r0, u.a0 - w0 / Math.max(r0, 1)], [r0, u.a1 + w0 / Math.max(r0, 1)], [r1, u.a0], [r1, u.a1], [r1, am], [r0 > 0 ? r1 : -w0, am]];
       // the ground's range over the wedge, sampled at its corners and middle (a table per slice, sampled again only once
       // the eye has gone 5% of the slice's reach): the wedge is only as tall as its own ground, not the hills' worst
-      let lo = ground - dy, hi = ground + dy;
+      let gLo = ground - dy, gHi = ground + dy;
       if (u.rout > 8 && this.world.heightAt) {
         const hc = u.hc || (u.hc = { x: Infinity, z: 0, lo: 0, hi: 0 });
         if (Math.hypot(eye.x - hc.x, eye.z - hc.z) > 0.05 * r1 || hc.r0 !== r0) {
           hc.x = eye.x; hc.z = eye.z; hc.r0 = r0; hc.lo = Infinity; hc.hi = -Infinity;
           for (const [r, a] of [...C, [(r0 + r1) / 2, am], [(r0 + r1) / 2, u.a0], [(r0 + r1) / 2, u.a1]]) { const h = this.world.heightAt(eye.x + r * Math.cos(a), eye.z + r * Math.sin(a)); hc.lo = Math.min(hc.lo, h); hc.hi = Math.max(hc.hi, h); }
         }
-        const pad = 0.06 * r1; lo = Math.min(hc.lo, ground) - pad; hi = Math.max(hc.hi, ground) + pad;
+        const pad = 0.06 * r1; gLo = Math.min(hc.lo, ground) - pad; gHi = Math.max(hc.hi, ground) + pad;
       }
       for (const [r, a] of C) {
         const x = eye.x + r * Math.cos(a), z = eye.z + r * Math.sin(a);
-        P[q++].set(x, lo - 2, z); P[q++].set(x, hi + 1.5, z);
+        P[q++].set(x, gLo - 2, z); P[q++].set(x, gHi + 1.5, z);
       }
       let out = false;
       for (const pl of F.planes) { let all = true; for (let i = 0; i < 12 && all; i++) if (pl.distanceToPoint(P[i]) >= 0) all = false; if (all) { out = true; break; } }
       m.visible = lo > 0 && !out;
       if (m.visible) drawn += lo;
     }
-    this.stats = { clumps: drawn, slices: this.meshes.filter((m) => m.visible).length, of: this.meshes.length };
+    this.stats = { clumps: drawn, slices: this.meshes.filter((m) => m.visible).length, of: this.meshes.length, cached: this.cached };
+    // the clump cache, a pass a ring with a slice in view (after the uniforms above: the same grid the blades will read)
+    if (this.cached && this.group.visible) {
+      const r = this.world.renderer, prev = r.getRenderTarget();
+      if (!this._cq) { this._cq = new THREE.Mesh(new THREE.PlaneGeometry(2, 2)); this._cq.frustumCulled = false; this._cs = new THREE.Scene(); this._cs.add(this._cq); this._cc = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1); }
+      for (const c of this.caches) {
+        if (!c.meshes.some((m) => m.visible)) continue;
+        this._cq.material = c.mat; r.setRenderTarget(c.rt); r.render(this._cs, this._cc);
+      }
+      r.setRenderTarget(prev);
+    }
     // how far the blades reach on the ground (0 when hidden): the ground lays thatch under them; smooth in the height
     const h = GRASS.altK * alt, far = this.far;
     this.reach = this.group.visible ? Math.sqrt(Math.max(0, far * far - h * h)) * (1 - Math.min(1, Math.max(0, (alt - 8) / 22))) : 0;

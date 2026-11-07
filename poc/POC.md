@@ -182,6 +182,7 @@ Run the tests from this folder with `node test/sim.test.mjs`, `node test/net.tes
 | 152 | Grass sway tabulated (a table of wind states, phases integrated and bounded on the CPU, the wind eased): no more wild or jittering grass as the game runs on; matte, translucent grass with a switch; an in-game performance overlay (FPS, CPU and GPU load, passes, draw calls; F3) | 18.101 | 25 |
 | 153 | Drawn by presence: grass in 16 slices, only those in view drawn; far woods thinned (60 and 24 trees a tile at the middle and far levels); the overlay lists triangles by part; spiders, birds and dragonflies lifted and never culled on hills (spiders were invisible) | 18.102 |
 | 154 | Presence for wasps (whole within 4 m, shadows within 3 m from the body only, dots to 90 m in one draw) and people (posed and drawn in view or within 30 m); shadow-only trees kept out of the main pass; grass slices culled by their wedge on their own ground; the overlay counts draws by part and pass; the water's reflection refined (no streak under the wasp) | 18.103 |
+| 155 | The grass's clump cache: a pass a frame per ring writes each clump's ground, growth, height, moisture and wind into a float texture; the blades read one texel instead of three clipmap reads and five noises per vertex (fallback without float targets) | 18.104 |
 
 ## Verified
 

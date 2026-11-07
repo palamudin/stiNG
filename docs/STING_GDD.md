@@ -2483,6 +2483,28 @@ On a jump the CPU path no longer blurs a level out to its parent: the window it 
 
 The game now asks for a square at least 16 m across (`causticsMin`), pushed 30% of its size ahead along the view (`causticsAhead`), on a 512 texture with a 384 grid. That is about the old detail (3 cm texels, 7 cm cells, against 2.3 and 5 cm) over 2.7 times the width. Water seen at a slant still clouds with distance: that is the water, not the caustics.
 
+### 18.104 The grass's clump cache
+
+Every grass clump in a ring is the same tuft of blades, but each clump's place decides the rest:
+- its ground height;
+- whether anything grows there (slope, shore, paving, wear, snow, the flowers' season);
+- how tall it grows and how wet the ground is;
+- the wind's gusts and eddies on it.
+
+Every vertex of every blade used to work all of this out again: three clipmap reads, the ground's normal and five noises, every frame, about 40 times a clump.
+
+Now one pass a frame per ring writes it into a float texture (world/grass.js `GRASS_CELL`), one texel per cell of the ring's grid at `(i + n, j + n)`. Each texel holds:
+- the ground height;
+- the clump's height, or below 0 where nothing grows;
+- the moisture;
+- the gust and eddy, packed 12 bits each.
+
+The blades read one texel (`GRASS_BUILD_CACHED`). A clump where nothing grows skips its vertex work after that read. The pass covers about 60,000 texels a ring and runs only for rings with a slice in view, against about 2 million vertices before.
+
+**Fallback.** It needs float targets, as the clipmap's GPU fill does. Without them, or with `new Grass(world, { cache: false })`, the blades work it out themselves as before.
+
+**Checked.** Rendered headless with the cache and without it, on a stub ground: the same grass, 5 pixels of 64,000 differing by more than 30 (the gusts' 12-bit steps).
+
 ### 18.103 Presence for the game's own things, and the draw calls by part
 
 **The draw calls.** By day a scene drew thousands of calls, at night a few hundred. The difference was the shadow pass, which draws every caster again:
