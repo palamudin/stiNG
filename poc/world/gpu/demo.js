@@ -13,7 +13,6 @@ import { GpuFoamField, GFOAM } from './foamfield.js';
 import { GpuGrass } from './grass.js';
 import { GpuCaustics } from './caustics.js';
 import { buildPanel } from './panel.js';
-import { readCompare, compareURL, poseOf, applyPose } from '../compare.js';
 import { GpuWaterQuery } from './waterquery.js';
 import { GpuSpray } from './spray.js';
 import { GpuSwellField } from './swellfield.js';
@@ -101,9 +100,8 @@ function build() {
 const cam = { fx: 0, fz: 0, yaw: 0.8, look: 0, dist: 60 };
 // ?at=x,z[,yaw]: start there (?at=coast: a beach of seed 7, facing the sea)
 { const a = q.get('at'); if (a === 'coast') Object.assign(cam, { fx: -1438, fz: 1317, yaw: 2.31, dist: 40, look: 0.1 }); else if (a) { const [x, z, y] = a.split(',').map(Number); cam.fx = x || 0; cam.fz = z || 0; if (Number.isFinite(y)) cam.yaw = y; } }
-// no place asked for: the old water's start (demo.js findStart), a meadow by the sea looking along the shore, so both
-// pages open on the same spot
-if (!q.get('at') && !q.has('cmp')) {
+// no place asked for: a meadow by the sea looking along the shore (as the template's findStart)
+if (!q.get('at')) {
   const s = wildSource({ seed: state.seed });
   let best = null;
   for (let r = 0; r < 12000 && !best; r += 60) for (let a = 0; a < 6.283; a += 0.3) {
@@ -111,14 +109,6 @@ if (!q.get('at') && !q.has('cmp')) {
     if (o[0] > 2 && o[0] < 7 && o[2] < 0.3 && o[4] <= s.sea) { let ok = true; for (let k = 1; k <= 5 && ok; k++) { const w = s.sample(x + 60 * k * Math.cos(a), z + 60 * k * Math.sin(a)); ok = w[0] < s.sea - 1; } if (ok) { best = { x, z }; break; } }
   }
   if (best) { cam.fx = best.x; cam.fz = best.z; }
-}
-// the V switch (compare.js): arriving from the old water, the same place, time, weather and pose
-const cmp = readCompare();
-if (cmp) {
-  Object.assign(cam, { fx: cmp.fx, fz: cmp.fz, yaw: cmp.yaw }); if (cmp.dist) cam.dist = cmp.dist; if (cmp.look !== undefined) cam.look = cmp.look;
-  if (cmp.hour !== undefined) state.hour = cmp.hour; if (cmp.day !== undefined) state.day = cmp.day; if (cmp.wind !== undefined) state.wind = cmp.wind;
-  if (cmp.cover !== undefined) { if (cmp.cover < 0) state.auto = true; else { state.auto = false; state.cover = cmp.cover; } }
-  if (cmp.wt !== undefined) wtime = cmp.wt; if (cmp.ct !== undefined) clouds.time = cmp.ct;
 }
 const keys = new Set();
 addEventListener('keydown', (e) => keys.add(e.code)); addEventListener('keyup', (e) => keys.delete(e.code));
@@ -129,8 +119,7 @@ cv.addEventListener('pointerdown', (e) => { if (e.button === 2) { if (player.on)
 cv.addEventListener('pointermove', (e) => { if (drag && drag.id === e.pointerId) { cam.yaw = drag.yaw - (e.clientX - drag.x) * 0.005; cam.look = THREE.MathUtils.clamp(drag.look - (e.clientY - drag.y) * 0.005, -1.45, 1.45); } });
 cv.addEventListener('pointerup', () => { drag = null; });
 cv.addEventListener('wheel', (e) => { e.preventDefault(); if (player.on) player.d = THREE.MathUtils.clamp(player.d * (1 + e.deltaY * 0.001), 1.2, 40); else cam.dist = THREE.MathUtils.clamp(cam.dist * (1 + e.deltaY * 0.0012), 0.5, 6000); }, { passive: false });
-addEventListener('keydown', (e) => { if (e.code === 'KeyV' && !e.repeat) location.href = compareURL('world.html', { fx: cam.fx, fz: cam.fz, yaw: cam.yaw, dist: cam.dist, look: cam.look, hour: state.hour, day: state.day, wind: state.wind, cover: state.auto ? -1 : state.cover, wt: wtime, ct: clouds.time, pose: poseOf(camera) });
-  if (e.code === 'KeyP' && !e.repeat) setPlayer(!player.on); if (e.code === 'KeyB' && !e.repeat) dropFloaters(); });
+addEventListener('keydown', (e) => { if (e.code === 'KeyP' && !e.repeat) setPlayer(!player.on); if (e.code === 'KeyB' && !e.repeat) dropFloaters(); });
 // the flotsam: a boat, a buoy, crates and barrels in the water ahead of the eye (or of the player)
 function dropFloaters() {
   const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd); fwd.y = 0; if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, -1); fwd.normalize();
@@ -185,7 +174,6 @@ function step(dt) {
     camera.lookAt(cam.fx, gy, cam.fz); if (cam.look) camera.rotateX(cam.look);
   }
   camera.near = THREE.MathUtils.clamp(cam.dist * 0.01, 0.03, 5); camera.updateProjectionMatrix();
-  if (cmp && cmp.frozen && cmp.pose) applyPose(camera, cmp.pose); // (held until the user moves)
   // the sun, the sky's tables and the light they give; the exposure follows the light (index.js: a grey card facing up
   // maps to 0.18 when exposure = pi / E)
   // the weather and the season (seasons.js): by the clock, or the sliders'
