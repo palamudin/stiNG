@@ -41,7 +41,7 @@ function build() {
   terrain = gpuTerrain(clip, { sea: src.sea, bands: forest.uBands });
   waves = new GpuWaves(renderer, { cascades: src.water.cascades, fetch: src.water.fetch, salt: src.cosmetic | 0 });
   shore = q.has('noshore') ? null : new GpuShore(renderer, src);
-  water = gpuWater(clip, waves, { waterAt: (x, z) => src.waterAt(x, z), shore, sea: src.sea });
+  water = gpuWater(clip, waves, { waterAt: (x, z) => src.waterAt(x, z), shore, sea: src.sea, renderer, debug: +(q.get('wdebug') || 0) });
   if (!q.has('nowater')) scene.add(water.mesh);
   if (!q.has('noterrain')) scene.add(terrain);
   if (!q.has('noforest')) scene.add(forest.group);
@@ -116,7 +116,7 @@ function step(dt) {
   const swell = { Hs: Math.max(WAVES.swellHmin, sw.Hs), T: Math.min(10.5, Math.max(WAVES.swellT - 1, WAVES.swellT - 1 + 2.5 * sw.Hs)) };
   waves.update(wtime, w10, Math.PI * 60, swell);
   water.U.uSurf.value.set(Math.min(1.5, Math.max(0.2, 0.35 + 0.55 * swell.Hs)), Math.min(60, Math.max(12, 0.45 * 9.81 * swell.T * swell.T / (2 * Math.PI))), 1, 1);
-  water.U.uWTime.value = wtime; water.U.uSwDir.value.copy(waves.U.swDir.value);
+  water.U.uWTime.value = wtime; water.U.uTime.value = wtime; water.U.uSwDir.value.copy(waves.U.swDir.value);
   if (shore) shore.update(camera.position, !shore._built); if (shore) shore._built = true;
   water.U.uSunDir.value.copy(sunDir);
 }

@@ -70,6 +70,13 @@ export class GpuClip {
     });
     const level = tri(G).setLayout({ name: 'clipLevel' + tag, type: 'vec4', inputs: [{ name: 'l', type: 'int' }, { name: 'p', type: 'vec2' }] });
     const levelW = tri(Wt).setLayout({ name: 'clipLevelW' + tag, type: 'vec4', inputs: [{ name: 'l', type: 'int' }, { name: 'p', type: 'vec2' }] });
+    // bilinear instead of the mesh's split triangles: for tests along a contour (the swash's line), where the triangles'
+    // flat facets draw a contour as a sawtooth
+    const bil = Fn(([l, p]) => {
+      const s = Lv.element(l).z, g = p.div(s), g0 = floor(g), f = g.sub(g0), i = int(g0.x), j = int(g0.y);
+      const a = G.element(slot(l, i, j)), b = G.element(slot(l, i.add(1), j)), c = G.element(slot(l, i, j.add(1))), d = G.element(slot(l, i.add(1), j.add(1)));
+      return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+    }).setLayout({ name: 'clipLevelB' + tag, type: 'vec4', inputs: [{ name: 'l', type: 'int' }, { name: 'p', type: 'vec2' }] });
     const morph = Fn(([l, p]) => {
       const q = abs(p.sub(Lv.element(l).xy)), m = max(q.x, q.y), s = Lv.element(l).z;
       const e = clamp(m.sub(Lv.element(l).w.sub(s.mul(C.band0))).div(s.mul(C.band0 - C.band1)), 0, 1);
@@ -104,6 +111,12 @@ export class GpuClip {
     // a value with a zero-weighted read of this set's uniforms and buffers added: a node read only inside shared
     // functions may not be declared in a stage's module (three.js 0.186), so a material's stage body passes its
     // result through this once
+    o.clipAtSmooth = Fn(([p]) => {
+      const l = finest(p), v = bil(l, p).toVar();
+      If(l.lessThan(last), () => { const k = morph(l, p); If(k.greaterThan(0), () => { v.assign(mix(v, bil(l.add(1), p), k)); }); });
+      return v;
+    }).setLayout({ name: 'clipAtSmooth' + tag, type: 'vec4', inputs: [{ name: 'p', type: 'vec2' }] });
+    o.cellAt = (p) => Lv.element(finest(p)).z; // the finest level's texel at p (its triangles are flat: a slope over less is a step)
     o.bind = (v) => v.add(Lv.element(0).x.add(Fd.element(0)).add(G.element(0).x).add(Wt.element(0).x).mul(0));
     return o;
   }

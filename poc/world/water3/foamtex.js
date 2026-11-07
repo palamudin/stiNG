@@ -4,7 +4,7 @@
 // by the surface's foam and by the billows and streaks over it (surffoam.js) instead of noise summed per pixel.
 import * as THREE from 'three';
 
-const FOAM = /* glsl */ `precision highp float;
+export const FOAM = /* glsl */ `precision highp float;
 out vec4 oColor;
 uniform float uSize;
 vec2 hash22(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973)); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.xx + p3.yz) * p3.zy); }
