@@ -69,11 +69,11 @@ const UW = { on: uniform(0), level: uniform(0), sig: uniform(new THREE.Vector3(0
 scene.fogNode = Fn(() => {
   const air = sky.fog();
   const d = length(positionWorld.sub(cameraPosition)), v = normalize(positionWorld.sub(cameraPosition));
-  const dw = select(positionWorld.y.lessThan(UW.level.add(0.05)), d, UW.level.sub(cameraPosition.y).div(max(v.y, 0.02)).min(d));
+  const dw = select(positionWorld.y.lessThan(UW.level.add(0.05)), d, UW.level.sub(cameraPosition.y).div(max(v.y, 0.02)).min(d)).max(0); // (never negative: an eye above the water would make it grow without bound)
   const T = exp(UW.sig.mul(dw).negate());
   const light = sky.uSkyUp.mul(0.5).add(sky.uSunColor.mul(max(sky.uSun.y, 0)).mul(0.35)).mul(exp(UW.sig.mul(max(UW.level.sub(cameraPosition.y), 0)).negate()));
   const glow = UW.alb.mul(light).div(Math.PI);
-  return mix(air, vec4(output.rgb.mul(T).add(glow.mul(float(1).sub(T))), output.a), UW.on);
+  return select(UW.on.greaterThan(0.5), vec4(output.rgb.mul(T).add(glow.mul(float(1).sub(T))), output.a), air); // (a select, not a mix: the unused side may not be finite)
 })();
 const camera = new THREE.PerspectiveCamera(55, 1, 0.05, 20000);
 const sun = new THREE.DirectionalLight(0xfff1dc, 3.2), hemi = new THREE.HemisphereLight(0xbcd4f0, 0x4a4630, 1.1);

@@ -357,7 +357,10 @@ export function gpuWater(clip, waves, opts = {}) {
     // the sun's highlight: tight on a still surface, broader and dimmer with the roughness
     // the sun's highlight: a Beckmann lobe on the footprint's slope variance (plus the panel's roughness): a sharp glint
     // near, a broad sheen far, its energy kept
-    const s2 = sv.x.add(sv.y).mul(0.5).mul(calm).add(uLook.z.mul(uLook.z)).add(0.00025).toVar();
+    // (and the normal's own change across the pixel (specular anti-aliasing, after Kaplanyan 2016): ripples finer than
+    // a pixel spread the highlight instead of sparkling as single white pixels; a floor that keeps a glint soft)
+    const dn = dFdx(n).dot(dFdx(n)).add(dFdy(n).dot(dFdy(n)));
+    const s2 = sv.x.add(sv.y).mul(0.5).mul(calm).add(uLook.z.mul(uLook.z)).add(dn.mul(0.5).min(0.08)).add(0.0012).toVar();
     const Hh = normalize(uSunDir.sub(Vv)), nh = max(dot(n, Hh), 0.05), t2 = float(1).sub(nh.mul(nh)).div(nh.mul(nh));
     const Dm = exp(t2.div(s2.mul(2)).negate()).div(s2.mul(6.2832).mul(nh.mul(nh).mul(nh).mul(nh)));
     const Fh = float(0.02).add(float(0.98).mul(pow(float(1).sub(max(dot(Vv.negate(), Hh), 0)), 5)));
@@ -414,7 +417,7 @@ export function gpuWater(clip, waves, opts = {}) {
     // (48.6 degrees from straight up) the sky and the clouds bent through the surface (the whole hemisphere squeezed
     // into the cone, the sun in it), outside it the surface a mirror (total internal reflection) of the water's own
     // dim body; between them Fresnel. The water between the eye and the surface is the fog's (demo.js)
-    If(uUnder.greaterThan(0.5).and(Vv.y.greaterThan(0)), () => {
+    If(cameraPosition.y.lessThan(positionWorld.y.sub(0.01)).and(Vv.y.greaterThan(0)), () => { // (per pixel: the eye under this piece of surface, as a beaver's at the line)
       const nb = n.negate(), ci = max(dot(Vv.negate(), nb), 0); // the normal turned to the eye below
       const st2 = float(1.333 * 1.333).mul(float(1).sub(ci.mul(ci))); // sin^2 of the bent ray in the air
       const tir = st2.greaterThanEqual(1);
