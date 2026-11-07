@@ -13,6 +13,7 @@ import { GpuFoamField, GFOAM } from './foamfield.js';
 import { GpuGrass } from './grass.js';
 import { GpuCaustics } from './caustics.js';
 import { buildPanel } from './panel.js';
+import { readCompare, compareURL, poseOf, applyPose } from '../compare.js';
 import { GpuWaterQuery } from './waterquery.js';
 import { GpuSpray } from './spray.js';
 import { Floaters } from './floaters/floaters.js';
@@ -62,7 +63,7 @@ const mapU = { uMap: uniform(0), uMapK: uniform(1) };
 const mapFor = (d) => THREE.MathUtils.smoothstep(Math.log(d), Math.log(MAP.from), Math.log(MAP.to));
 const pitchFor = (d) => 0.12 + 0.95 * THREE.MathUtils.smoothstep(Math.log10(d), -1.2, 3.7);
 const state = { seed: 7, treeDist: 1, wind: 4, hour: +(q.get('hour') || 11), cover: +(q.get('cover') ?? 0.35), cshadow: !q.has('nocshadow'), caustics: !q.has('nocaustics'),
-  spray: true, auto: q.has('auto'), day: +(q.get('day') ?? 100), rain: 0, haze: 1, dens: 1, kind: '', windDir: [0.94, 0.35], waterAuto: true, runoff: 0 };
+  spray: q.has('spray'), auto: q.has('auto'), day: +(q.get('day') ?? 100), rain: 0, haze: 1, dens: 1, kind: '', windDir: [0.94, 0.35], waterAuto: true, runoff: 0 };
 let caustics, query, floaters, spray, src, clip, terrain, forest, waves, water, shore, fields, grass, wtime = 0;
 function build() {
   if (terrain) { scene.remove(terrain, forest.group, water.mesh); if (grass) scene.remove(grass.group); }
@@ -81,7 +82,7 @@ function build() {
   if (!q.has('noforest')) scene.add(forest.group);
   // the clouds' shadow on every lit thing's sun (the water and the grass's translucency take it themselves)
   // and on the ground under water, the waves' caustics
-  caustics = new GpuCaustics(clip, waves, water.U.uSunDir); caustics.uOn.value = state.caustics ? 1 : 0;
+  caustics = new GpuCaustics(clip, waves, water.U.uSunDir, renderer); caustics.uOn.value = state.caustics ? 1 : 0;
   clouds.receive(terrain.material, q.has('nocaustics') ? null : caustics.at());
   for (const o of [forest.group, grass && grass.group, player.mesh]) if (o) o.traverse((m) => { if (m.material) clouds.receive(m.material); });
   // the breakers' spray
@@ -98,6 +99,14 @@ function build() {
 const cam = { fx: 0, fz: 0, yaw: 0.8, look: 0, dist: 60 };
 // ?at=x,z[,yaw]: start there (?at=coast: a beach of seed 7, facing the sea)
 { const a = q.get('at'); if (a === 'coast') Object.assign(cam, { fx: -1438, fz: 1317, yaw: 2.31, dist: 40, look: 0.1 }); else if (a) { const [x, z, y] = a.split(',').map(Number); cam.fx = x || 0; cam.fz = z || 0; if (Number.isFinite(y)) cam.yaw = y; } }
+// the V switch (compare.js): arriving from the old water, the same place, time, weather and pose
+const cmp = readCompare();
+if (cmp) {
+  Object.assign(cam, { fx: cmp.fx, fz: cmp.fz, yaw: cmp.yaw }); if (cmp.dist) cam.dist = cmp.dist; if (cmp.look !== undefined) cam.look = cmp.look;
+  if (cmp.hour !== undefined) state.hour = cmp.hour; if (cmp.day !== undefined) state.day = cmp.day; if (cmp.wind !== undefined) state.wind = cmp.wind;
+  if (cmp.cover !== undefined) { if (cmp.cover < 0) state.auto = true; else { state.auto = false; state.cover = cmp.cover; } }
+  if (cmp.wt !== undefined) wtime = cmp.wt; if (cmp.ct !== undefined) clouds.time = cmp.ct;
+}
 const keys = new Set();
 addEventListener('keydown', (e) => keys.add(e.code)); addEventListener('keyup', (e) => keys.delete(e.code));
 let drag = null;
@@ -107,7 +116,8 @@ cv.addEventListener('pointerdown', (e) => { if (e.button === 2) { if (player.on)
 cv.addEventListener('pointermove', (e) => { if (drag && drag.id === e.pointerId) { cam.yaw = drag.yaw - (e.clientX - drag.x) * 0.005; cam.look = THREE.MathUtils.clamp(drag.look - (e.clientY - drag.y) * 0.005, -1.45, 1.45); } });
 cv.addEventListener('pointerup', () => { drag = null; });
 cv.addEventListener('wheel', (e) => { e.preventDefault(); if (player.on) player.d = THREE.MathUtils.clamp(player.d * (1 + e.deltaY * 0.001), 1.2, 40); else cam.dist = THREE.MathUtils.clamp(cam.dist * (1 + e.deltaY * 0.0012), 0.5, 6000); }, { passive: false });
-addEventListener('keydown', (e) => { if (e.code === 'KeyP' && !e.repeat) setPlayer(!player.on); if (e.code === 'KeyB' && !e.repeat) dropFloaters(); });
+addEventListener('keydown', (e) => { if (e.code === 'KeyV' && !e.repeat) location.href = compareURL('world.html', { fx: cam.fx, fz: cam.fz, yaw: cam.yaw, dist: cam.dist, look: cam.look, hour: state.hour, day: state.day, wind: state.wind, cover: state.auto ? -1 : state.cover, wt: wtime, ct: clouds.time, pose: poseOf(camera) });
+  if (e.code === 'KeyP' && !e.repeat) setPlayer(!player.on); if (e.code === 'KeyB' && !e.repeat) dropFloaters(); });
 // the flotsam: a boat, a buoy, crates and barrels in the water ahead of the eye (or of the player)
 function dropFloaters() {
   const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd); fwd.y = 0; if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, -1); fwd.normalize();
@@ -162,6 +172,7 @@ function step(dt) {
     camera.lookAt(cam.fx, gy, cam.fz); if (cam.look) camera.rotateX(cam.look);
   }
   camera.near = THREE.MathUtils.clamp(cam.dist * 0.01, 0.03, 5); camera.updateProjectionMatrix();
+  if (cmp && cmp.frozen && cmp.pose) applyPose(camera, cmp.pose); // (held until the user moves)
   // the sun, the sky's tables and the light they give; the exposure follows the light (index.js: a grey card facing up
   // maps to 0.18 when exposure = pi / E)
   // the weather and the season (seasons.js): by the clock, or the sliders'
@@ -171,7 +182,7 @@ function step(dt) {
     Object.assign(state, { cover: E.cover, wind: wl, rain: E.rain, haze: Math.round(Math.min(E.haze, 3) * 20) / 20, dens: E.cloudDens, kind: E.kind });
     if (wl > 1e-3) state.windDir = [E.wind[0] / wl, E.wind[1] / wl];
     sunAtSeason(state.hour, S.dec);
-  } else { state.haze = 1; state.dens = 1; sunAt(state.hour); }
+  } else { state.haze = 1; state.dens = 1; sunAtSeason(state.hour, S.dec); } // the season's track always (as the old water's)
   // the season on the leaves and the grass (seasons.js seasonAt, as index.js)
   if (forest) { forest.uLeafTint.value.set(...S.leafTint); forest.uAutumn.value = S.autumn; forest.uLeafGone.value = S.leafGone; forest.uSnowOn.value = S.snow; }
   if (grass) { grass.uTint.value.set(...S.grassTint); grass.uBloom.value = S.bloom; grass.uSnowCover.value = S.snow; }
@@ -213,7 +224,7 @@ function step(dt) {
   // the swell (index.js): from a long fetch at the wind (never under the sea's minimum), and the surf it drives
   wtime += dt;
   const w10 = [Math.max(state.wind, 1.5) * state.windDir[0], Math.max(state.wind, 1.5) * state.windDir[1]];
-  clouds.set(state.cover, state.dens, dt, w10);
+  clouds.set(state.cover, state.dens, dt, [w10[0] * 0.35, w10[1] * 0.35]); // (drifting as the old water's: index.js E.wind)
   const sw = swellState(Math.max(Math.hypot(w10[0], w10[1]), WAVES.swellMin), src.water.swellFetch || src.water.fetch);
   const swell = { Hs: Math.max(WAVES.swellHmin, sw.Hs), T: Math.min(10.5, Math.max(WAVES.swellT - 1, WAVES.swellT - 1 + 2.5 * sw.Hs)) };
   waves.update(wtime, w10, Math.PI * 60, swell);
@@ -235,6 +246,7 @@ function step(dt) {
     if (fields) for (const f of fields) { f.uBias.value = L.foamBias + wk; f.uScale.value = L.foamScale; f.update(dt, camera, w10, L.linger); } }
   if (grass) grass.update(camera, ground(camera.position.x, camera.position.z), w10, dt);
   water.U.uSunDir.value.copy(sunDir);
+  if (caustics) caustics.update(sunDir, state.caustics && !q.has('nocaustics'));
   if (spray) spray.update(camera, dt, w10, state.spray);
   // the floaters: their cells' points to the GPU, last frames' heights back, the bodies stepped
   if (floaters && floaters.bodies.length) { const pts = floaters.collectPoints([]); query.submit(pts, floaters.count, floaters.layout, wtime); floaters.ingest(query, 0); floaters.step(dt); }

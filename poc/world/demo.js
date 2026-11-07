@@ -8,6 +8,7 @@ import { compositeSource } from './sources/composite.js';
 import { MAP, Places, placeCard } from './map.js';
 import { seasonName, seasonAt } from './seasons.js';
 import { hash01 } from './noise.js';
+import { readCompare, compareURL, poseOf, applyPose } from './compare.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('view');
@@ -41,6 +42,13 @@ const cam = { fx: 0, fz: 0, yaw: 0.8, pitch: 0.5, dist: 120, target: null, tour:
 const mapFor = (d) => THREE.MathUtils.smoothstep(Math.log(d), Math.log(MAP.from), Math.log(MAP.to));
 const zoomToDist = (z) => 0.06 * Math.pow(9000 / 0.06, z);
 const distToZoom = (d) => Math.log(d / 0.06) / Math.log(9000 / 0.06);
+// the V switch (compare.js): arriving from the new water, the same place, time, weather and pose
+const cmp = readCompare();
+if (cmp) {
+  Object.assign(cam, { fx: cmp.fx, fz: cmp.fz, yaw: cmp.yaw }); if (cmp.dist) { cam.dist = cmp.dist; state.zoom = distToZoom(cmp.dist); } if (cmp.look !== undefined) cam.look = cmp.look;
+  if (cmp.hour !== undefined) state.tod = cmp.hour; if (cmp.day !== undefined) state.day = cmp.day; if (cmp.wind !== undefined) state.wind = cmp.wind;
+  if (cmp.cover !== undefined && cmp.cover >= 0) { state.weather = 'custom'; state.cover = cmp.cover; }
+}
 function pitchFor(d) { return 0.12 + 0.95 * THREE.MathUtils.smoothstep(Math.log10(d), -1.2, 3.7); }
 
 let stingMod = null, simMod = null;
@@ -165,10 +173,12 @@ function step(dt) {
   camera.far = 60000;
   camera.updateProjectionMatrix();
   }
+  if (cmp && cmp.frozen && cmp.pose) applyPose(camera, cmp.pose); // (held until the user moves)
+  if (cmp && !cmp.timeSet && world) { cmp.timeSet = true; if (cmp.wt !== undefined) world.waterTime = cmp.wt; if (cmp.ct !== undefined) world.time = cmp.ct; }
   const m = cam.map;
   // the weather: the day's own, or a forced one from the buttons (then the haze and wind sliders apply)
   const forced = state.weather !== 'auto';
-  const F = { clear: { cloud: 0.05, rain: 0, snow: 0, storm: 0 }, overcast: { cloud: 0.92, rain: 0, snow: 0, storm: 0 }, rain: { cloud: 0.95, rain: 0.8, snow: 0, storm: 0 }, storm: { cloud: 0.98, rain: 1, snow: 0, storm: 1 }, fog: { cloud: 0.6, rain: 0, snow: 0, storm: 0 }, snow: { cloud: 0.9, rain: 0.7, snow: 1, storm: 0 } }[state.weather] || {};
+  const F = { clear: { cloud: 0.05, rain: 0, snow: 0, storm: 0 }, overcast: { cloud: 0.92, rain: 0, snow: 0, storm: 0 }, rain: { cloud: 0.95, rain: 0.8, snow: 0, storm: 0 }, storm: { cloud: 0.98, rain: 1, snow: 0, storm: 1 }, fog: { cloud: 0.6, rain: 0, snow: 0, storm: 0 }, snow: { cloud: 0.9, rain: 0.7, snow: 1, storm: 0 } }[state.weather] || (state.weather === 'custom' ? { cloud: state.cover, rain: 0, snow: 0, storm: 0 } : {});
   const w10 = [state.wind * 0.94, state.wind * 0.35];
   world.set(forced
     ? { hour: state.tod, day: state.day, auto: false, haze: state.fog * (state.weather === 'fog' ? 3 : 1), mist: state.fog * (state.weather === 'fog' ? 6 : 1), wet: F.rain, cloud: F.cloud, cloudDens: 0.6 + 0.6 * F.cloud + F.storm * 0.8, wind10: w10, wind: [w10[0] * 0.35, w10[1] * 0.35], rain: F.rain, snow: F.snow, storm: F.storm, flash: F.storm && hash01(Math.floor(world.time * 2), 7, 99) < 0.08 ? 1 : Math.max(0, (world.env.flash || 0) - dt * 6), map: m }
@@ -206,6 +216,7 @@ canvas.addEventListener('pointerup', () => { drag = null; });
 canvas.addEventListener('wheel', (e) => { e.preventDefault(); if (player.on) { player.d = THREE.MathUtils.clamp(player.d * (1 + e.deltaY * 0.001), 1.2, 40); return; } setZoom(state.zoom + e.deltaY * 0.0006); }, { passive: false });
 addEventListener('keydown', (e) => keys.add(e.code));
 addEventListener('keydown', (e) => { if (e.code === 'KeyK' && !e.repeat && world) world.waterLog(); });
+addEventListener('keydown', (e) => { if (e.code === 'KeyV' && !e.repeat && world) location.href = compareURL('world-gpu.html', { fx: cam.fx, fz: cam.fz, yaw: cam.yaw, dist: cam.dist, look: cam.look, hour: state.tod, day: state.day, wind: state.wind, cover: state.weather === 'auto' ? -1 : state.weather === 'custom' ? state.cover : ({ clear: 0.05, overcast: 0.92, rain: 0.95, storm: 0.98, fog: 0.6, snow: 0.9 })[state.weather] ?? -1, wt: world.waterTime, ct: world.time, pose: poseOf(camera) }); }); // the V switch (compare.js)
 addEventListener('keydown', (e) => { if (e.code === 'KeyP' && !e.repeat && world) setPlayer(!player.on); }); // the player cube: P on and off, right button first person // the water's log (world/index.js)
 window.waterLog = (x, z) => (world ? world.waterLog(x, z) : 'no world');
 // L toggles the water's debug view: its kinds (blue large, green a river) and the river's flow

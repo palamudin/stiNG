@@ -172,10 +172,13 @@ export function gpuWater(clip, waves, opts = {}) {
     const P = positionWorld.xz, Vv = normalize(positionWorld.sub(cameraPosition)).toVar(), dist = length(positionWorld.sub(cameraPosition));
     const cs = opts.clouds && opts.clouds.shadowAt ? opts.clouds.shadowAt(positionWorld).toVar() : float(1); // the clouds' shadow on the sun
     // the slopes and the fold, summed over the cascades the distance still shows
-    const sl = vec2(0).toVar(), J = float(1).toVar();
+    // the slope over the pixel's footprint (LEAN, as surface.js): each cascade's mipmapped mean and its variance (the
+    // table holds the slope and its square), so far off the ripples become a broader, dimmer sheen instead of aliasing
+    // into swirls; the fold (whitecaps) from the cascades the distance still shows
+    const sl = vec2(0).toVar(), sv = vec2(0).toVar(), J = float(1).toVar();
     for (let c = 0; c < C; c++) {
       const s = texture(waves.slope[c], P.div(Ls[c])), d = texture(waves.disp[c], P.div(Ls[c])), w = share(c, dist.mul(0.5));
-      sl.addAssign(s.xy.mul(w)); if (c >= 1) J.addAssign(d.w.sub(1).mul(w));
+      sl.addAssign(s.xy); sv.addAssign(max(s.zw.sub(s.xy.mul(s.xy)), vec2(0))); if (c >= 1) J.addAssign(d.w.sub(1).mul(w));
     }
     const level = RF.clipWater(P), ground = RF.clipAtSmooth(P).x, still = level.sub(ground).toVar(); // bilinear: the line along a contour, not a sawtooth
     // the shoreline here (water3/swash.js): its foam, and the water over the floor with it (th); over the sand a pixel
@@ -249,10 +252,17 @@ export function gpuWater(clip, waves, opts = {}) {
         tPrev.assign(t); t.mulAssign(1.32);
       });
     }
-    const sky = mix(skyC, hitC, hitK);
+
     // the sun's highlight: tight on a still surface, broader and dimmer with the roughness
-    const sp = mix(float(700), float(30), sqrt(uLook.z.div(0.2).clamp(0, 1)));
-    const spec = pow(max(dot(R, uSunDir), 0), sp).mul(uSunColor).mul(sp.div(700).pow(0.6).mul(6)).add(pow(max(dot(R, uSunDir), 0), float(60)).mul(uSunColor).mul(0.15)).mul(cs);
+    // the sun's highlight: a Beckmann lobe on the footprint's slope variance (plus the panel's roughness): a sharp glint
+    // near, a broad sheen far, its energy kept
+    const s2 = sv.x.add(sv.y).mul(0.5).mul(calm).add(uLook.z.mul(uLook.z)).add(0.00025).toVar();
+    const Hh = normalize(uSunDir.sub(Vv)), nh = max(dot(n, Hh), 0.05), t2 = float(1).sub(nh.mul(nh)).div(nh.mul(nh));
+    const Dm = exp(t2.div(s2.mul(2)).negate()).div(s2.mul(6.2832).mul(nh.mul(nh).mul(nh).mul(nh)));
+    const Fh = float(0.02).add(float(0.98).mul(pow(float(1).sub(max(dot(Vv.negate(), Hh), 0)), 5)));
+    const spec = uSunColor.mul(cs).mul(Dm.mul(Fh).mul(0.25).div(max(cosI, 0.15))).mul(smoothstep(-0.02, 0.05, uSunDir.y));
+    hitK.mulAssign(smoothstep(0.03, 0.006, s2)); // a rough far surface reflects the sky's average, not a sharp scene
+    const sky = mix(skyC, hitC, hitK);
     const col = mix(body, sky, F).add(spec.mul(smoothstep(0, 0.3, depth)).mul(float(1).sub(hitK))).toVar();
     // the crests' glow (surface.js): the sun through a thin steep crest, toward a view into the light; a little always
     { const crest = vH.div(max(uHs.mul(0.5), 0.05)).clamp(0, 1), steep = length(sl).mul(3).clamp(0, 1);

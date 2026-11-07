@@ -27,7 +27,7 @@ export class GpuWaves {
     const mk = () => new THREE.StorageBufferAttribute(new Float32Array(W * H * 4), 4);
     this.bufA = mk(); this.bufB = mk();
     const A = storage(this.bufA, 'vec4', W * H), B = storage(this.bufB, 'vec4', W * H);
-    const tex = () => { const t = new THREE.StorageTexture(N, N); t.type = THREE.HalfFloatType; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.minFilter = THREE.LinearFilter; t.magFilter = THREE.LinearFilter; t.generateMipmaps = false; return t; };
+    const tex = () => { const t = new THREE.StorageTexture(N, N); t.type = THREE.HalfFloatType; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter; t.generateMipmaps = true; t.anisotropy = 4; return t; }; // mipmapped (rebuilt after each store): a pixel far off reads its footprint's mean slope and its variance (LEAN), not an aliased point
     this.disp = this.cascades.map(tex); this.slope = this.cascades.map(tex);
     const u = (v, t) => uniform(v, t);
     this.U = {
