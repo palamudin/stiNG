@@ -23,6 +23,28 @@ const vnoise = wgslFn(`fn tNoise(p: vec2<f32>) -> f32 {
   return mix(mix(a, b, u.x), mix(c, d, u.x), u.y) * 2.0 - 1.0;
 }`, [hash2]);
 
+// The ground's substrate at the water and its fine relief (centimetres, near the eye): what the shore is made of,
+// from the place itself: rock where the ground is steep, earth and mud where it is wet and wooded, shingle and pebbles
+// in patches and on steeper beaches, sand on the open gentle ones (mixed at their edges); and each one's own small
+// relief (wind and swash ripples in sand, rounded stones, lumpy earth, broken rock), lighting it through its normal and
+// deciding where the water lingers: the troughs stay wet and shine after the swash has left the crests dry.
+// subst: (sand, pebbles, earth, rock) weights; micro: the relief's height (m)
+const subst = (P, slope, TD) => {
+  const n1 = vnoise({ p: P.div(37) }), n2 = vnoise({ p: P.div(11).add(5.3) });
+  const rock = smoothstep(0.16, 0.32, slope.add(n1.mul(0.06)));
+  const earth = smoothstep(0.45, 0.8, TD.y.add(TD.z.mul(0.6)).add(n2.mul(0.25))).mul(float(1).sub(rock));
+  const peb = smoothstep(0.55, 0.8, n1.mul(0.5).add(0.5).add(slope.mul(2.5))).mul(float(1).sub(rock)).mul(float(1).sub(earth));
+  return vec4(max(float(1).sub(rock).sub(earth).sub(peb), 0), peb, earth, rock);
+};
+const micro = (P, w) => {
+  const d = vec2(0.8, 0.6), ph = P.dot(d).div(0.11).mul(6.2832).add(vnoise({ p: P.div(0.9) }).mul(2.5));
+  const hs = ph.sin().mul(0.5).add(0.5).pow(1.6).mul(0.007).add(vnoise({ p: P.div(0.5) }).mul(0.002));
+  const hp = smoothstep(0.15, 0.85, vnoise({ p: P.div(0.07) }).mul(0.5).add(0.5)).mul(0.022);
+  const he = vnoise({ p: P.div(0.35) }).mul(0.008).add(vnoise({ p: P.div(0.11) }).mul(0.005));
+  const hr = vnoise({ p: P.div(0.6) }).mul(0.05).add(vnoise({ p: P.div(0.17) }).mul(0.02));
+  return w.x.mul(hs).add(w.y.mul(hp)).add(w.z.mul(he)).add(w.w.mul(hr));
+};
+
 export function gpuTerrain(clip, opts = {}) {
   const C = clip.cfg, g = clipGrid(C.cells);
   const geo = new THREE.InstancedBufferGeometry();
@@ -49,7 +71,19 @@ export function gpuTerrain(clip, opts = {}) {
   // the fragment: the clipmap's own data at this point, so a coarse far level shades like the fine one it stands for
   const P = positionWorld.xz;
   const TD = RF.clipAt(P), TN = RF.clipNormal(P);
-  mat.normalNode = cameraViewMatrix.mul(vec4(TN, 0)).xyz.normalize(); // the clipmap's normal (world), in view space as the node material wants it
+  // the normal: the clipmap's, tilted by the substrate's relief near the eye (in view space, as the material wants it)
+  const shoreW = (hg) => float(1).sub(smoothstep(0.6, 2.4, hg)); // the shore's band (and everything under water)
+  mat.normalNode = Fn(() => {
+    const n = TN.toVar(), dist = length(cameraPosition.sub(positionWorld));
+    If(dist.lessThan(45), () => {
+      const hg = TD.x.sub(RF.clipWater(P)), w = subst(P, float(1).sub(TN.y), TD).mul(shoreW(hg)), e = 0.025;
+      const inl = vec4(0, 0, 0.6, 0).mul(float(1).sub(shoreW(hg))); // inland: a little earthy relief
+      const ww = w.add(inl);
+      const gx = micro(P.add(vec2(e, 0)), ww).sub(micro(P.sub(vec2(e, 0)), ww)), gz = micro(P.add(vec2(0, e)), ww).sub(micro(P.sub(vec2(0, e)), ww));
+      n.assign(normalize(n.sub(vec3(gx, 0, gz).div(2 * e).mul(smoothstep(45, 15, dist)))));
+    });
+    return cameraViewMatrix.mul(vec4(n, 0)).xyz.normalize();
+  })();
   // the sand the swash has wetted (water3/swash.js sw3Wet): darker while the water fills its pores, a shine just after
   // the water leaves it, drying from the top down; on a sea beach only. (darkness, gloss, covered)
   const wetN = opts.surf ? Fn(() => {
@@ -72,10 +106,15 @@ export function gpuTerrain(clip, opts = {}) {
     col.assign(mix(col, lin(0.30, 0.33, 0.17), smoothstep(0.35, 0.75, TD.z)));            // forest floor
     col.assign(mix(col, lin(0.55, 0.42, 0.28), smoothstep(0.2, 0.6, TD.w)));              // trails
     const sand = float(1).sub(smoothstep(0.6, 1.8, hgt.add(pa.mul(0.4))));
-    col.assign(mix(col, lin(0.86, 0.78, 0.56), sand));                                       // sand at the water
+    // the shore's substrate (subst): sand, shingle, earth and mud, rock, mixed by the place
+    const sw = subst(P, slope, TD).toVar();
+    const pebC = lin(0.55, 0.52, 0.47).mul(float(0.75).add(vnoise({ p: P.div(0.07) }).mul(0.25)).add(vnoise({ p: P.div(0.23) }).mul(0.1)));
+    const shoreC = lin(0.86, 0.78, 0.56).mul(sw.x).add(pebC.mul(sw.y)).add(lin(0.42, 0.34, 0.24).mul(sw.z)).add(lin(0.5, 0.48, 0.45).mul(sw.w));
+    col.assign(mix(col, shoreC, sand));                                                      // the shore at the water
+    const mh = micro(P, sw).toVar(), trough = smoothstep(0.004, -0.003, mh.sub(micro(P.add(vec2(0.04, 0.03)), sw).add(micro(P.sub(vec2(0.04, 0.03)), sw)).mul(0.5))).mul(smoothstep(40, 10, dist));
     // wet: the sand the swash has wetted, and all the ground under the water (its pores full: darker and a little
     // deeper in colour, the same wet sand as the swash's, the water's refraction and absorption on top of it)
-    const wet = max(wetN.x, smoothstep(0.03, -0.04, hgt));
+    const wet = max(wetN.x.mul(trough.mul(0.5).add(0.75)).clamp(0, 1), smoothstep(0.03, -0.04, hgt)); // (the troughs hold the water longer)
     col.assign(mix(col, col.mul(col).mul(1.15).add(col.mul(0.25)), wet.mul(0.6)).mul(mix(float(1), float(0.62), wet)));
     col.assign(mix(col, lin(0.36, 0.33, 0.25), float(1).sub(smoothstep(-3.5, -1.5, hgt)).mul(0.6)));   // deeper: finer, darker silt over the sand
     const rock = smoothstep(0.28, 0.45, slope.add(pa.mul(0.05)));
@@ -92,7 +131,7 @@ export function gpuTerrain(clip, opts = {}) {
     col.assign(mix(col, lin(0.95, 0.96, 0.98), snow));
     return vec4(col, 1);
   })();
-  if (opts.surf) mat.roughnessNode = mix(float(0.92), float(0.3), wetN.y); // the shine of sand the water has just left
+  if (opts.surf) mat.roughnessNode = Fn(() => { const hg = TD.x.sub(RF.clipWater(P)); const sw = subst(P, float(1).sub(TN.y), TD); const mh = micro(P, sw); const tr = smoothstep(0.004, -0.003, mh.sub(micro(P.add(vec2(0.04, 0.03)), sw).add(micro(P.sub(vec2(0.04, 0.03)), sw)).mul(0.5))); return mix(float(0.92), mix(float(0.3), float(0.06), tr), wetN.y.max(smoothstep(0.03, -0.04, hg).mul(0.3))); })(); // the shine of ground the water has just left, the troughs' films brightest
   // the map (map.js MAP_GLSL): zooming out, the ground turns into one, from the same clipmap: a hypsometric palette,
   // hillshade from the north-west, dotted forests, dashed trails, contours every 20 m, water flat blue by depth and a
   // dark coast line. Unlit (emissive, scaled by uMapK to show at its own colours whatever the exposure), the lit
