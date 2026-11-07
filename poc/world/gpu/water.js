@@ -9,7 +9,7 @@
 // Still to come over from surface.js: the shore table's coastal swell and swash, the foam fields and lace, the
 // screen-space reflection and the mirror, glints, rain rings, caustics.
 import * as THREE from 'three/webgpu';
-import { Fn, If, float, int, vec2, vec3, vec4, uniform, uniformArray, texture, positionLocal, positionWorld, cameraPosition, screenUV, viewportSharedTexture, abs, max, min, mix, clamp, smoothstep, pow, exp, length, normalize, dot, reflect, select, varyingProperty, wgslFn, wgsl, Discard, Loop, Break, cameraProjectionMatrix, cameraViewMatrix, cameraNear, cameraFar, viewportDepthTexture, perspectiveDepthToViewZ } from 'three/tsl';
+import { Fn, If, float, int, vec2, vec3, vec4, uniform, uniformArray, texture, positionLocal, positionWorld, cameraPosition, screenUV, viewportSharedTexture, abs, max, min, mix, clamp, smoothstep, pow, exp, sqrt, length, normalize, dot, reflect, select, varyingProperty, wgslFn, wgsl, Discard, Loop, Break, cameraProjectionMatrix, cameraViewMatrix, cameraNear, cameraFar, viewportDepthTexture, perspectiveDepthToViewZ } from 'three/tsl';
 import { COAST_WGSL } from './coast.wgsl.js';
 import { bakeFoamTexture } from './foamtex.js';
 
@@ -21,6 +21,26 @@ const nz = wgslFn('fn wNoise(p: vec2<f32>, s: i32) -> f32 { return w2noise(p, s)
 const cFoam = wgslFn('fn wCoastFoam(xz: vec2<f32>, depth: f32, grad: vec2<f32>, wave: f32, fl: f32, surf: vec4<f32>, surfX: vec4<f32>, t: f32, swDir: vec2<f32>) -> vec4<f32> { return coastShoreFoam(xz, depth, grad, wave, fl, surf, surfX, t, swDir); }', [coastCode]);
 
 const lin3 = (r, g, b) => vec3(r ** 2.2, g ** 2.2, b ** 2.2);
+
+// the water's colour presets (water.js WATER_PRESETS, the panel's 'Water'): absorption per metre (the channel absorbed
+// least is the colour seen through shallow water) and scattering per metre (the deep water's glow); 'ours' is the
+// world's lake water, the rest the reference pack's, and a milky glacial one
+export const GWATER_PRESETS = {
+  ours: { absorb: [0.45, 0.075, 0.035], scatter: [0.025, 0.04, 0.045] },
+  clear: { absorb: [0.40, 0.062, 0.032], scatter: [0.0, 0.05, 0.08] },
+  tropical: { absorb: [0.36, 0.045, 0.06], scatter: [0.0, 0.085, 0.085] },
+  glacial: { absorb: [0.42, 0.07, 0.06], scatter: [0.06, 0.12, 0.12] },
+  'algae green': { absorb: [0.45, 0.1, 0.5], scatter: [0.03, 0.08, 0.02] },
+  'toxic green': { absorb: [0.45, 0.1, 1.1], scatter: [0.05, 0.1, 0.004] },
+  purple: { absorb: [0.22, 0.85, 0.1], scatter: [0.05, 0.0, 0.09] },
+  'rust orange': { absorb: [0.1, 0.34, 1.2], scatter: [0.11, 0.035, 0.004] },
+  'murky brown': { absorb: [0.55, 0.62, 0.9], scatter: [0.045, 0.045, 0.022] },
+};
+// the silt a stirred bed or a flood puts in the water: absorption and scattering per metre at full load (a yellow-brown,
+// scattering a lot: milky where it is thick)
+export const SILT = { absorb: [0.22, 0.32, 0.55], scatter: [0.55, 0.48, 0.32] };
+// the look's controls and their defaults (the panel's 'Water', index.js waterCtl): see water look in gpuWater
+export const GLOOK = { preset: 'ours', clarity: 1, murk: 1, roughness: 0, refraction: 0.06, sssPeak: 1.6, sssView: 0.06, foamBias: 0.05, foamScale: 1.3, linger: 4, sediment: 0.05, stir: 0.6, riverSilt: 0.5, caustics: 1 };
 export const GSURF = { segments: 256, inner: 0.0625, innerGrow: 1.12, reach: 4000, skirt: 60000 };
 
 function polarGrid() {
@@ -58,6 +78,11 @@ export function gpuWater(clip, waves, opts = {}) {
   const uScale = uniform(1), uSunDir = opts.sunDir || uniform(new THREE.Vector3(0.45, 0.62, 0.3).normalize()), uSunColor = opts.sunColor || uniform(new THREE.Color(1, 0.95, 0.86).multiplyScalar(3));
   const uSkyUp = opts.skyUp || uniform(new THREE.Color(0.24, 0.42, 0.75)), uSkyHz = opts.skyHz || uniform(new THREE.Color(0.62, 0.74, 0.88));
   const uChop = uniform(1);
+  // the look (the panel's 'Water'): uAbs, uSca the preset's absorption and scattering; uLook (clarity: absorption over
+  // it, murk: scattering times it, roughness, refraction); uLook2 (crest glow, glow toward the view, whitecap bias,
+  // whitecap scale); uSed (silt everywhere, stirred by the surf, carried by rivers, 0); uHs the waves' height
+  const uAbs = uniform(new THREE.Vector3(...GWATER_PRESETS.ours.absorb)), uSca = uniform(new THREE.Vector3(...GWATER_PRESETS.ours.scatter));
+  const uLook = uniform(new THREE.Vector4(1, 1, 0, 0.06)), uLook2 = uniform(new THREE.Vector4(1.6, 0.06, 0.05, 1.3)), uSed = uniform(new THREE.Vector4(0.05, 0.6, 0.5, 0)), uHs = uniform(0.5);
   // the surf (water3/swash.js): uSurf (amplitude, wavelength, speed, steepness), uSurfX (foam charge, the shoreline's
   // lead), the water's clock, the swell's direction, the sea's level (a lake has no surf)
   const SU = opts.surfU || surfUniforms(opts.sea ?? 0), { uSurf, uSurfX, uWTime, uSwDir, uSea } = SU;
@@ -87,6 +112,7 @@ export function gpuWater(clip, waves, opts = {}) {
   // each cascade's share where the grid can carry it: its tile over the grid's spacing at this distance
   const share = (c, dist) => smoothstep(Ls[c] / N * 2.5, Ls[c] / N * 1.2, dist.mul(cellStep).add(0.001));
   const vCoast = varyingProperty('vec4', 'vCoast'), vCoastF = varyingProperty('vec2', 'vCoastF'); // set in the vertex stage, read in the fragment
+  const vH = varyingProperty('float', 'vH'); // the waves' lift here (the crests' glow)
   mat.positionNode = Fn(() => {
     const skirt = positionLocal.y.greaterThan(0.5);
     const xz = select(skirt, positionLocal.xz.mul(GSURF.skirt), positionLocal.xz.mul(uScale)).add(cameraPosition.xz).toVar();
@@ -95,7 +121,7 @@ export function gpuWater(clip, waves, opts = {}) {
     // the coast's trains near a sea shore (none on a lake): their displacement, slope and foam; the open sea's long
     // swell (the first cascade) fades out where they carry it
     const cd = vec3(0).toVar(), near = float(0).toVar(), shift = float(1).toVar(), isCoast = float(0).toVar();
-    vCoast.assign(vec4(0)); vCoastF.assign(vec2(0));
+    vCoast.assign(vec4(0)); vCoastF.assign(vec2(0)); vH.assign(0);
     if (shV) If(skirt.not().and(depth.greaterThan(-3)).and(level.lessThanEqual(uSea.add(0.5))).and(dist.lessThan(600)), () => {
       const sh = shV(xz);
       const m = cVert({ xz, sh: sh.v, know: sh.know, depth, cell, fl: float(0), ...surfArgs }).toVar();
@@ -108,7 +134,7 @@ export function gpuWater(clip, waves, opts = {}) {
       D.addAssign(vec3(d.x, d.y, d.z).mul(share(c, dist)).mul(c === 0 ? float(1).sub(near) : 1));
     }
     const k = smoothstep(0, 4, depth.max(0)).mul(uChop);
-    D.assign(D.mul(k).add(cd));
+    D.assign(D.mul(k).add(cd)); vH.assign(D.y);
     D.x.mulAssign(shift); D.z.mulAssign(shift); // near the line the waves only lift and lower the water
     const y = level.add(D.y).max(min(bed.add(0.04), level)).toVar(); // the trough held over the floor
     // the shoreline: over the sand a sheet at the swash's height, thin at its tip; in the last half metre of water lifted
@@ -126,6 +152,7 @@ export function gpuWater(clip, waves, opts = {}) {
   })();
   mat.colorNode = Fn(() => {
     const P = positionWorld.xz, Vv = normalize(positionWorld.sub(cameraPosition)).toVar(), dist = length(positionWorld.sub(cameraPosition));
+    const cs = opts.clouds && opts.clouds.shadowAt ? opts.clouds.shadowAt(positionWorld).toVar() : float(1); // the clouds' shadow on the sun
     // the slopes and the fold, summed over the cascades the distance still shows
     const sl = vec2(0).toVar(), J = float(1).toVar();
     for (let c = 0; c < C; c++) {
@@ -150,11 +177,20 @@ export function gpuWater(clip, waves, opts = {}) {
     // under: the scene behind, along the bent ray, through depth / cos of the path, absorbed per channel
     const cosV = max(Vv.y.negate(), 0.08);
     const path = depth.div(cosV).min(80);
-    const uvR = screenUV.add(n.xz.mul(0.04).mul(smoothstep(0, 1.5, depth)));
+    const uvR = screenUV.add(n.xz.mul(uLook.w.mul(0.67)).mul(smoothstep(0, 1.5, depth)));
     const under = viewportSharedTexture(uvR).rgb;
-    const ext = exp(vec3(0.45, 0.09, 0.055).mul(path).negate());
-    const scat = vec3(0.012, 0.05, 0.06).mul(uSkyUp.mul(0.6).add(uSunColor.mul(max(uSunDir.y, 0)).mul(0.25)));
-    const body = under.mul(ext).add(scat.mul(float(1).sub(ext.g)));
+    // the water's body: the preset's absorption over the clarity, its scattering times the murk, and the silt: some
+    // everywhere (the weather's and the season's), more where the surf stirs the bed and where a river carries it
+    const wa = RF.clipWaterAll(P), river = wa.y.clamp(0, 1);
+    const sedK = uSed.x.add(uSed.y.mul(max(vCoastF.x.clamp(0, 1), vCoast.z.clamp(0, 1).mul(0.7))).mul(smoothstep(4, 0.5, depth))).add(uSed.z.mul(river)).clamp(0, 1.5).toVar();
+    const sa = uAbs.div(max(uLook.x, 0.05)).add(vec3(...SILT.absorb).mul(sedK)), sb = uSca.mul(uLook.y).add(vec3(...SILT.scatter).mul(sedK));
+    const sig = sa.add(sb), alb = sb.div(max(sig, vec3(1e-4)));
+    const ext = exp(sig.mul(path).negate());
+    // its light: the sky's from above and the sun's through the surface, scattered back up (single scattering over a deep
+    // column: the albedo's share), the sun's more toward the view looking into it (a forward lobe)
+    const fwd = pow(max(dot(Vv, uSunDir), 0), float(4)).mul(1.6).add(0.4);
+    const scat = alb.mul(uSkyUp.mul(0.5).add(uSunColor.mul(cs).mul(max(uSunDir.y, 0)).mul(fwd).mul(0.25))).div(Math.PI);
+    const body = under.mul(ext).add(scat.mul(float(1).sub(ext)));
     // above: the sky by Fresnel (Schlick, water n = 1.33) and the sun's highlight
     const R = reflect(Vv, n), cosI = max(dot(Vv.negate(), n), 0);
     const F = float(0.02).add(float(0.98).mul(pow(float(1).sub(cosI), 5)));
@@ -192,8 +228,15 @@ export function gpuWater(clip, waves, opts = {}) {
       });
     }
     const sky = mix(skyC, hitC, hitK);
-    const spec = pow(max(dot(R, uSunDir), 0), float(700)).mul(uSunColor).mul(6).add(pow(max(dot(R, uSunDir), 0), float(60)).mul(uSunColor).mul(0.15));
+    // the sun's highlight: tight on a still surface, broader and dimmer with the roughness
+    const sp = mix(float(700), float(30), sqrt(uLook.z.div(0.2).clamp(0, 1)));
+    const spec = pow(max(dot(R, uSunDir), 0), sp).mul(uSunColor).mul(sp.div(700).pow(0.6).mul(6)).add(pow(max(dot(R, uSunDir), 0), float(60)).mul(uSunColor).mul(0.15)).mul(cs);
     const col = mix(body, sky, F).add(spec.mul(smoothstep(0, 0.3, depth)).mul(float(1).sub(hitK))).toVar();
+    // the crests' glow (surface.js): the sun through a thin steep crest, toward a view into the light; a little always
+    { const crest = vH.div(max(uHs.mul(0.5), 0.05)).clamp(0, 1), steep = length(sl).mul(3).clamp(0, 1);
+      const hv = normalize(vec2(Vv.x, Vv.z).add(1e-5)), hs = normalize(vec2(uSunDir.x, uSunDir.z).add(1e-5)), back = pow(max(dot(hv, hs), 0), float(3));
+      const tint = mix(vec3(0.04, 0.42, 0.3), vec3(0.28, 0.3, 0.12), sedK.clamp(0, 1));
+      col.addAssign(tint.mul(uSunColor.mul(cs).mul(max(uSunDir.y, 0)).mul(0.5).add(uSkyUp.mul(0.35))).mul(crest).mul(crest.mul(steep).mul(back).mul(uLook2.x).div(1.6).add(uLook2.y.div(0.06).mul(0.08))).mul(calm).mul(float(1).sub(F))); }
     const cap = smoothstep(0.55, 0.15, J).mul(calm);
     // ---- foam (surface.js): whitecaps where the surface folds, the open water's sloshing lace now and then, the
     // breakers' white and lace, the surf zone's bed of bubbles, the swash's lace; one baked pattern covered to a share
@@ -207,13 +250,13 @@ export function gpuWater(clip, waves, opts = {}) {
     if (opts.fields) for (const fr of opts.fields.map((f) => f.read())) { const q = fr(P); ff.assign(mix(ff, q.v, q.k)); inField.assign(max(inField, q.k)); }
     ff.assign(ff.clamp(0, 1).mul(fpatch));
     if (tFoam) {
-      fm.assign(J.mul(-1).add(0.65).mul(1.3).clamp(0, 1).mul(smoothstep(0.25, 0.6, laceD(P, lt, 1.4 * ls, vec2(0)).add(0.2))).mul(fpatch).mul(calm).mul(float(1).sub(inField)));
+      fm.assign(float(0.6).add(uLook2.z).sub(J).mul(uLook2.w).clamp(0, 1).mul(smoothstep(0.25, 0.6, laceD(P, lt, 1.4 * ls, vec2(0)).add(0.2))).mul(fpatch).mul(calm).mul(float(1).sub(inField)));
       const pn = smoothstep(0.6, 0.85, nz({ p: P.div(23).add(vec2(uTime.mul(0.07), uTime.mul(-0.05))), s: int(851) }).mul(0.5).add(0.5)).mul(smoothstep(0.5, 0.8, nz({ p: P.div(61).sub(vec2(uTime.mul(0.03), uTime.mul(0.04))), s: int(852) }).mul(0.5).add(0.5)));
       const slosh = pn.mul(smoothstep(1.03, 0.88, J)).mul(smoothstep(0.8, 2.5, depth));
       fm.assign(max(fm, slosh.mul(smoothstep(0.3, 0.65, laceD(P, lt, 1.6 * ls, vec2(uTime.mul(0.02), uTime.mul(0.013))).add(0.15))).mul(0.6).mul(fpatch)));
       const pat = laceD(P, lt, 3.1 * ls, vec2(uTime.mul(0.011), uTime.mul(-0.007))).mul(0.62).add(laceD(P, lt, 1.17 * ls, vec2(uTime.mul(-0.017), uTime.mul(-0.005))).mul(0.38)).add(0.12).toVar();
       const wf = vCoast.z.clamp(0, 1), lc = vCoast.w.clamp(0, 1).mul(float(1).sub(inField.mul(0.6)));
-      fm.assign(max(fm, smoothstep(float(1).sub(ff.mul(0.6)), float(1.1).sub(ff.mul(0.6)), pat).mul(ff.mul(0.55).add(0.3)).mul(smoothstep(0, 0.02, ff)))); // the field's foam: thick where fresh, eroding into lace as it fades
+      fm.assign(max(fm, smoothstep(float(1).sub(ff.mul(0.75)), float(1.08).sub(ff.mul(0.75)), pat).mul(ff.mul(0.6).add(0.35)).mul(smoothstep(0, 0.02, ff)))); // the field's foam: thick where fresh, eroding into lace as it fades
       fm.assign(max(fm, smoothstep(float(1).sub(wf.mul(0.6)), float(1.12).sub(wf.mul(0.6)), pat).mul(wf.mul(0.4).add(0.6))));
       fm.assign(max(fm, smoothstep(float(1).sub(lc.mul(0.5)), float(1.1).sub(lc.mul(0.5)), pat).mul(0.45)));
       const spf = laceD(P, lt, 5.3 * ls, vec2(uTime.mul(0.006), uTime.mul(-0.004))).mul(0.55).add(laceD(P, lt, 1.9 * ls, vec2(uTime.mul(-0.012), 0)).mul(0.45)).add(0.15);
@@ -221,7 +264,7 @@ export function gpuWater(clip, waves, opts = {}) {
       fm.assign(max(fm, smoothstep(float(0.98).sub(sfz.mul(0.3)), float(1.08).sub(sfz.mul(0.3)), spf).mul(smoothstep(-0.35, 0.45, nz({ p: P.div(0.22).add(uTime.mul(0.05)), s: int(629) }))).mul(sfz.mul(0.25).add(0.15))));
       fm.assign(max(fm, smoothstep(float(1).sub(coastFoam.mul(0.7)), float(1.12).sub(coastFoam.mul(0.7)), pat).mul(0.85).mul(coastFoam)));
     } else fm.assign(max(cap, coastFoam));
-    const foamCol = uSkyUp.mul(0.8).add(uSunColor.mul(max(uSunDir.y, 0.05)).mul(0.55)).mul(0.92);
+    const foamCol = uSkyUp.mul(0.8).add(uSunColor.mul(cs).mul(max(uSunDir.y, 0.05)).mul(0.55)).mul(0.92);
     col.assign(mix(col, foamCol, fm.clamp(0, 1).mul(0.85)));
     // the edge: the water fades to nothing as it thins, so the line is the sand seen through no water
     const outc = mix(under, col, smoothstep(0, 0.05, depth)).toVar();
@@ -236,5 +279,5 @@ export function gpuWater(clip, waves, opts = {}) {
     uScale.value = Math.max(1, above / 2);
   };
   mesh.onAfterRender = () => {};
-  return { mesh, U: { uLace, uTime, uScale, uSunDir, uSunColor, uSkyUp, uSkyHz, uChop, uSurf, uSurfX, uWTime, uSwDir, uSea } };
+  return { mesh, look: { uAbs, uSca, uLook, uLook2, uSed, uHs }, U: { uLace, uTime, uScale, uSunDir, uSunColor, uSkyUp, uSkyHz, uChop, uSurf, uSurfX, uWTime, uSwDir, uSea } };
 }

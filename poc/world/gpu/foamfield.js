@@ -67,8 +67,10 @@ export class GpuFoamField {
       }
       If(wet.not(), () => { B.element(t).assign(0); Return(); });
       const prev = prevAt(p.sub(v.mul(this.uDt)));
-      // foam builds up where breaking goes on, fading over the linger time where it stops
-      B.element(t).assign(RC.bind(vec4(min(prev.mul(exp(this.uDt.negate().div(max(this.uLinger, 0.05)))).add(make.mul(this.uDt).mul(2)), 1))).x);
+      // fresh foam is as thick as the breaking that makes it (not piled up past it: a band of solid white), a little more
+      // where breaking goes on, and fades over the linger time where it stops, eroding into lace as it thins
+      const kept = prev.mul(exp(this.uDt.negate().div(max(this.uLinger, 0.05))));
+      B.element(t).assign(RC.bind(vec4(min(max(kept, make).add(make.mul(this.uDt).mul(0.3)), 1))).x);
     })().compute(n * n, [64]);
     this.kCopy = Fn(() => { const t = int(instanceIndex); A.element(t).assign(B.element(t)); })().compute(n * n, [64]);
     this._init = false;

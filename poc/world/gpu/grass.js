@@ -28,6 +28,7 @@ export class GpuGrass {
     this.uWind = uniform(new THREE.Vector2(0.8, 0.3)); this.uCam = uniform(new THREE.Vector3()); this.uAlt = uniform(0);
     this.uPh = uniformArray(Array.from({ length: 8 }, () => new THREE.Vector2()), 'vec2'); this.uGustPh = uniform(0); this.uSwayRow = uniform(0.5 / SWAY.levels); this.uEddy = uniform(new THREE.Vector2());
     this.uVP = uniform(new THREE.Matrix4()); this.uPS = uniform(new THREE.Vector2(1, 1)); /* the view-projection; the projection's x and y scales */ this.uBloom = uniform(1); this.uSnowCover = uniform(0); this.uTint = uniform(new THREE.Vector3(1, 1, 1));
+    this.clouds = opts.clouds || null; // gpu/clouds.js: their shadow on the light through the blades
     this.uSunDir = opts.sunDir || uniform(new THREE.Vector3(0.45, 0.62, 0.3).normalize()); this.uSunColor = opts.sunColor || uniform(new THREE.Color(1, 0.95, 0.86).multiplyScalar(3));
     this.tSway = swayTable();
     this.uZ0 = 0.1 * (GH[0] + GH[1]) / 2;
@@ -182,7 +183,7 @@ export class GpuGrass {
     mat.emissiveNode = Fn(() => {
       const V = normalize(positionWorld.sub(cameraPosition)), back = pow(clamp(dot(V, this.uSunDir), 0, 1), 3);
       const through = clamp(dot(vNor, this.uSunDir).negate(), 0, 1).mul(0.6).add(back);
-      return this.uSunColor.mul(vTint).mul(vec3(0.85, 1.15, 0.5)).mul(through).mul(0.55 / Math.PI).mul(vT.mul(0.6).add(0.4)).mul(0.35);
+      return this.uSunColor.mul(vTint).mul(vec3(0.85, 1.15, 0.5)).mul(through).mul(this.clouds ? this.clouds.shadowAt() : 1).mul(0.55 / Math.PI).mul(vT.mul(0.6).add(0.4)).mul(0.35);
     })();
     mat.roughnessNode = float(0.95); mat.metalnessNode = float(0);
     return mat;

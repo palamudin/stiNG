@@ -59,6 +59,9 @@ export class GpuForest {
     this.uEye = uniform(new THREE.Vector3()); this.uOrg = uniform(new THREE.Vector2()); this.uN = uniform(1, 'int');
     this.uBands = uniform(new THREE.Vector4()); this.uNActive = uniform(0, 'int'); this.uFade = uniform(this.cfg.fade); this.uShadowR = uniform(opts.shadowR ?? 60);
     this.uTime = uniform(0); this.uWind = uniform(new THREE.Vector2(3, 1));
+    // the season's leaves (seasons.js, as trees.js): uLeafTint on the leaves' colour (spring light, summer deep),
+    // uAutumn turning each tree yellow, orange or red by its variety, uLeafGone the share fallen, uSnowOn on the tops
+    this.uLeafTint = uniform(new THREE.Vector3(1, 1, 1)); this.uAutumn = uniform(0); this.uLeafGone = uniform(0); this.uSnowOn = uniform(0);
     // the placed trees: per pool tile 169 slots of two vec4: (x, z, kind * variants + variant or -1, turn), (horizontal
     // scale, vertical scale, variety, 0); the resident tiles' pool indices; the placement jobs (tile i, j, pool)
     this.cacheAttr = new THREE.StorageBufferAttribute(new Float32Array(POOL * SLOTS * 8), 4);
@@ -132,12 +135,12 @@ export class GpuForest {
     const azV = az.toVarying('vCardAz'), fade = d1.w.toVarying('vCardFade'), vr = d1.z.toVarying('vCardVar');
     const auv = vec2(slice.add(uv().x).div(V), float(uRow).add(float(1).sub(uv().y)).div(rows));
     const A = texture(imp.A.texture, auv), Nn = texture(imp.N.texture, auv).xyz.mul(2).sub(1);
-    mat.maskNode = Fn(() => A.a.greaterThanEqual(0.5).and(float(1).sub(ign({ p: screenCoordinate.xy })).lessThanEqual(fade)))();
+    mat.maskNode = Fn(() => A.a.greaterThanEqual(0.5).and(float(1).sub(ign({ p: screenCoordinate.xy })).lessThanEqual(fade)).and(A.a.lessThanEqual(0.75).or(ign({ p: screenCoordinate.xy.add(7) }).greaterThanEqual(this.uLeafGone))))();
     const NW = vec3(cos(azV).mul(Nn.x).add(sin(azV).mul(Nn.z)), Nn.y, sin(azV).negate().mul(Nn.x).add(cos(azV).mul(Nn.z)));
     mat.normalNode = cameraViewMatrix.mul(vec4(NW.normalize(), 0)).xyz.normalize();
     mat.colorNode = Fn(() => {
       const c = A.rgb.toVar();
-      If(A.a.greaterThan(0.75), () => { c.mulAssign(mix(vec3(1.07, 1.0, 0.82), vec3(0.86, 1.0, 1.1), vr)); });
+      If(A.a.greaterThan(0.75), () => { c.assign(this._season(c.mul(mix(vec3(1.07, 1.0, 0.82), vec3(0.86, 1.0, 1.1), vr)), vr, NW.y)); });
       return vec4(c.mul(float(0.55).add(uv().y.mul(0.45))), 1); // darker toward the ground
     })();
     this.cardMeshes = [];
@@ -152,6 +155,13 @@ export class GpuForest {
     this.args.needsUpdate = true;
   }
 
+  // a leaf's colour in the season (trees.js seasonLeaf), and its snow by the normal's rise
+  _season(c, v, ny) {
+    const g = (a) => vec3(...a.map((x) => x ** 2.2));
+    const aut = select(v.lessThan(0.33), g([0.78, 0.55, 0.08]), select(v.lessThan(0.66), g([0.75, 0.32, 0.06]), g([0.6, 0.12, 0.05])));
+    const lum = min(float(1), c.dot(vec3(0.3, 0.6, 0.1)).mul(3));
+    return mix(mix(c.mul(this.uLeafTint), aut.mul(lum), this.uAutumn), vec3(0.85, 0.88, 0.95), this.uSnowOn.mul(smoothstep(0.2, 0.8, ny)).mul(0.8));
+  }
   _material(lod) {
     const mat = new THREE.MeshStandardNodeMaterial({ roughness: 0.85, metalness: 0, side: THREE.DoubleSide });
     const uBase = uniform(0, 'int').onObjectUpdate(({ object }) => object.userData.base);
@@ -185,12 +195,12 @@ export class GpuForest {
       // the leaves' cut by their alpha, lowered with the distance: the atlas's mips average the pixel leaves toward
       // half cover, so a fixed cut at 0.5 thinned the far crowns to specks over the forest floor
       const thr = mix(float(0.5), float(0.12), smoothstep(25, 220, length(positionWorld.sub(cameraPosition))));
-      If(leaf.greaterThan(0.5).and(lf.a.lessThan(thr)), () => { keep.assign(false); });
+      If(leaf.greaterThan(0.5).and(lf.a.lessThan(thr).or(ign({ p: screenCoordinate.xy.add(7) }).lessThan(this.uLeafGone))), () => { keep.assign(false); }); // winter: the leaves go, leaf by leaf
       return keep;
     })();
     mat.colorNode = Fn(() => {
       const c = attribute('color', 'vec3').toVar();
-      If(leaf.greaterThan(0.5), () => { c.mulAssign(lf.r.mul(lf.g).mul(mix(vec3(1.07, 1.0, 0.82), vec3(0.86, 1.0, 1.1), vr))); });
+      If(leaf.greaterThan(0.5), () => { c.assign(this._season(c.mul(lf.r.mul(lf.g).mul(mix(vec3(1.07, 1.0, 0.82), vec3(0.86, 1.0, 1.1), vr))), vr, nW.y)); });
       return vec4(c, 1);
     })();
     return mat;
