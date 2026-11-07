@@ -1291,6 +1291,15 @@ function renderCritters(t) {
 
 // ------------------------------------------------------------------ birds and spiders
 
+// a moving thing made after the chunks are built (birds, dragonflies, spiders): on hills its materials are lifted onto
+// the ground in their vertex shader at once (not at the next sweep, half a second on, drawn under the ground till
+// then), and it is never culled by its bounds, which sit at its unlifted height: a spider 1 m up a web on ground 30 m
+// high was culled as soon as the camera looked at it (it was 'invisible')
+function liftNew(g) {
+  if (!TERR.on) return g;
+  terrApply(g); g.traverse((o) => { o.frustumCulled = false; });
+  return g;
+}
 function buildDragonfly() {
   const g = new THREE.Group();
   const body = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.002, 0.07, 6), mat('#1f5f6b')); body.rotation.x = Math.PI / 2; body.position.z = -0.02;
@@ -1302,7 +1311,7 @@ function buildDragonfly() {
   const w1 = mk(0.018, 1), w2 = mk(0.018, -1), w3 = mk(0.008, 1), w4 = mk(0.008, -1);
   g.add(body, thorax, eyes, w1, w2, w3, w4);
   g.userData = { w1, w2, w3, w4 };
-  scene.add(g);
+  scene.add(liftNew(g));
   return g;
 }
 
@@ -1318,7 +1327,7 @@ function buildBird() {
   g.add(body, head, beak, wl, wr, tail);
   g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
   g.userData = { wl, wr, prev: new THREE.Vector3() };
-  scene.add(g);
+  scene.add(liftNew(g));
   return g;
 }
 const birdViews = new Map();
@@ -1374,11 +1383,12 @@ function renderBirdsAndSpiders(t, dt) {
       const abd = new THREE.Mesh(new THREE.SphereGeometry(0.009, 8, 6), mat('#2b2018')); abd.position.y = 0.011;
       sp.add(body, abd);
       for (let l = 0; l < 8; l++) { const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.0007, 0.0007, 0.02, 3), mat('#1a1410')); leg.rotation.z = (l < 4 ? 1 : -1) * (0.9 + (l % 4) * 0.2); leg.position.x = (l < 4 ? 1 : -1) * 0.008; leg.position.y = -0.002 + (l % 4) * 0.003; sp.add(leg); }
-      scene.add(sp); spiderPool.push(sp);
+      scene.add(liftNew(sp)); spiderPool.push(sp);
     }
     const sp = spiderPool[n++];
     const u = Math.min(1, Math.max(0, (t - w.web.start) / Math.max(1, w.web.spiderAt - w.web.start)));
     sp.visible = true;
+    if (TERR.on && sp.children[0].frustumCulled) liftNew(sp); // made on flat ground, now on hills
     sp.position.set(wb.x + (w.x - wb.x) * u, wb.y + (w.y - wb.y) * u, wb.z + (w.z - wb.z) * u);
     sp.rotation.y = Math.atan2(wb.nx, wb.nz);
   }
@@ -3848,6 +3858,24 @@ let last = performance.now(), acc = 0, panelTimer = 0;
 // milliseconds a frame where the browser gives timer queries (EXT_disjoint_timer_query_webgl2: desktop Chrome and Edge),
 // per pass in World v3; each as a share of the frame (load); the draw calls and triangles. Averaged over half a second.
 const PERF = { gpu: new GpuTimer(renderer), acc: { n: 0, frame: 0, sim: 0, cpu: 0, submit: 0 }, t0: 0, el: null };
+// where the triangles come from: every visible mesh of the scene (and World v3's water scene), its triangles times its
+// instances, summed by the part it belongs to (the nearest named group: grass, forest, terrain, water, ...; the game's
+// own chunks, people and insects as 'game'), the five largest. The main pass only: shadows draw their casters again
+const TRI_NAME = { 'world2-grass': 'grass', 'world2-forest': 'trees', 'world2-terrain': 'ground', world2: 'world', water: 'water' };
+function perfTris() {
+  const by = new Map(), add = (root, def) => root.traverseVisible((o) => {
+    if (!(o.isMesh || o.isLine || o.isPoints) || !o.geometry) return;
+    const g = o.geometry, n = (g.index ? g.index.count : g.attributes.position ? g.attributes.position.count : 0) / (o.isMesh ? 3 : 1);
+    const inst = o.isInstancedMesh ? o.count : g.isInstancedBufferGeometry ? (g.instanceCount === Infinity ? 1 : g.instanceCount) : 1;
+    let p = o, name = null; while (p && !name) { name = TRI_NAME[p.name] || null; p = p.parent; }
+    const k = name || def; by.set(k, (by.get(k) || 0) + n * inst);
+  });
+  add(scene, 'game');
+  if (world2 && world2.surface && world2.surface.scene) add(world2.surface.scene, 'water');
+  const fmtT = (v) => v >= 1e6 ? `${(v / 1e6).toFixed(2)} M` : `${Math.round(v / 1e3)} k`;
+  const gs = world2 && world2.grass && world2.grass.stats ? ` (${world2.grass.stats.slices} of ${world2.grass.stats.of} grass slices)` : '';
+  return [...by].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => `${k} ${fmtT(v)}`).join(' · ') + gs;
+}
 function perfFrame(raw, sim, cpu, submit) {
   if (!opts.perf) { if (PERF.el && !PERF.el.hidden) PERF.el.hidden = true; return; }
   const A = PERF.acc; A.n++; A.frame += raw * 1000; A.sim += sim; A.cpu += cpu; A.submit += submit;
@@ -3860,7 +3888,8 @@ function perfFrame(raw, sim, cpu, submit) {
   el.innerHTML = `<b>${Math.round(1000 / Math.max(fr, 0.01))} fps</b> · ${fr.toFixed(1)} ms a frame<br>`
     + `CPU ${(cp + sb).toFixed(1)} ms (${pct(cp + sb)}): sim ${sm.toFixed(1)} · frame ${(cp - sm).toFixed(1)} · submit ${sb.toFixed(1)}<br>`
     + (g === null ? 'GPU: no timer queries in this browser' : `GPU ${g.toFixed(1)} ms (${pct(g)})${passes ? `<br><span>${passes}</span>` : ''}`)
-    + `<br>${info.calls} calls · ${(info.triangles / 1e6).toFixed(2)} M triangles · ${world2 ? 'World v3' : 'classic'}${world2 && world2.grass ? ` · grass ${world2.grass.matte ? 'matte' : 'glossy'}` : ''}`;
+    + `<br>${info.calls} calls · ${(info.triangles / 1e6).toFixed(2)} M triangles (all passes, shadows too) · ${world2 ? 'World v3' : 'classic'}${world2 && world2.grass ? ` · grass ${world2.grass.matte ? 'matte' : 'glossy'}` : ''}`
+    + `<br><span>${perfTris()}</span>`;
   el.hidden = false;
   A.n = A.frame = A.sim = A.cpu = A.submit = 0;
 }

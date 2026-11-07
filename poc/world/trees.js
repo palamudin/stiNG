@@ -18,6 +18,10 @@ import { NOISE_GLSL } from './noise.js';
 import { CLOUD_SHADOW_GLSL } from './clouds.js';
 
 const TMP_VR = new THREE.Matrix4();
+// Thinning by presence: past the near band a 64 m tile draws at most this many trees (by detail level: near, mid, far);
+// a dense wood (S7: up to 220 trees a chunk) is drawn whole round the eye and as a lighter stand further out
+export const THIN = { cap: [Infinity, 60, 24] };
+const thinHash = (a, b, c, d) => { let h = (Math.imul(a | 0, 0x27d4eb2d) ^ Math.imul(b | 0, 0x165667b1) ^ Math.imul(c | 0, 0x9e3779b1) ^ Math.imul(d | 0, 0x85ebca77)) >>> 0; h ^= h >>> 15; h = Math.imul(h, 0x2c1b3c6d) >>> 0; h ^= h >>> 12; return (h >>> 0) / 4294967296; };
 export const FOREST = { tile: 64, variants: 3, bands: [0, 45, 160, 420], fade: 12, grid: 5.2, meadow: 0.012, budgetMs: 4, far: [1200, 6000], impostor: 128, views: 8 };
 
 const TREE_VERT_HEAD = /* glsl */ `
@@ -79,6 +83,7 @@ export class Forest {
     this.group = new THREE.Group(); this.group.name = 'world2-forest';
     this.tiles = new Map(); this.queue = [];
     this._frustum = new THREE.Frustum(); this._lastDir = new THREE.Vector3(); this._shadowR = 1e9;
+    this.thin = opts.thin !== false; // thinning by presence (THIN); the switch re-bins
     const atlas = leafAtlas();
     this.atlas = new THREE.DataTexture(atlas.data, atlas.size, atlas.size, THREE.RGBAFormat, THREE.UnsignedByteType);
     this.atlas.minFilter = THREE.LinearMipmapLinearFilter; this.atlas.magFilter = THREE.NearestFilter; this.atlas.generateMipmaps = true; this.atlas.needsUpdate = true;
@@ -254,7 +259,18 @@ export class Forest {
   }
 
   // ---- placement (scatter.js, pure, tested)
-  _genTile(ti, tj) { return placeTile(this.source, ti, tj, this.kinds, this.cfg, this.design); }
+  // a tile's trees, each list shuffled once by a hash of its place (so any leading share of it is an even thinning of the
+  // tile, the same every time) and kept as floats; t.n: how many trees the tile has
+  _genTile(ti, tj) {
+    const items = placeTile(this.source, ti, tj, this.kinds, this.cfg, this.design);
+    for (let k = 0; k < items.length; k++) for (let v = 0; v < items[k].length; v++) {
+      const a = items[k][v], n = a.length / 8, out = new Float32Array(a.length), order = Array.from({ length: n }, (_, q) => q);
+      for (let q = n - 1; q > 0; q--) { const r = Math.floor(thinHash(ti, tj, k * 16 + v, q) * (q + 1)); const t = order[q]; order[q] = order[r]; order[r] = t; }
+      order.forEach((q, o) => out.set(a.slice(q * 8, q * 8 + 8), o * 8));
+      items[k][v] = out;
+    }
+    return items;
+  }
 
   // shadowR: the sun's shadow box round the focus (index.js); a tile outside the view is still binned when it lies
   // within that box, so its trees keep casting into the frame
@@ -279,7 +295,8 @@ export class Forest {
     while (this._q.length && performance.now() - t0 < this.cfg.budgetMs) {
       const [, i, j] = this._q.shift();
       if (this.tiles.has(i + ',' + j)) continue;
-      this.tiles.set(i + ',' + j, { i, j, items: this._genTile(i, j) });
+      const items = this._genTile(i, j); let n = 0; for (const kk of items) for (const a of kk) n += a.length / 8;
+      this.tiles.set(i + ',' + j, { i, j, items, n });
       this._dirty = true;
     }
     if (this._dirty || turned || this._lastBin.distanceTo(TMP2.set(eye.x, eye.z)) > 8 || Math.abs(eye.y - (this._lastY ?? 0)) > Math.max(4, Math.abs(eye.y) * 0.1)) this._bin(eye);
@@ -307,7 +324,10 @@ export class Forest {
       if (!this._frustum.intersectsBox(TMPB) && Math.hypot((t.i + 0.5) * T - eye.x, (t.j + 0.5) * T - eye.z) > this._shadowR + half) { culled++; continue; }
       for (let l = 0; l < 3; l++) {
         if (d + half < B[l] - F || d - half > B[l + 1] + F) continue;
-        for (let k = 0; k < this.kinds.length; k++) for (let v = 0; v < this.cfg.variants; v++) { const a = t.items[k][v]; if (a.length) { lists[k][v][l].push(a); counts[k][v][l] += a.length / 8; if (l === 0) trees += a.length / 8; } }
+        // by presence (GDD 18.101): every tree near the eye; further out a dense tile draws at most THIN.cap of its trees
+        // (an even share of each list, the same trees every time; the canopy painted into the ground fills in beyond)
+        const share = this.thin && t.n > THIN.cap[l] ? THIN.cap[l] / t.n : 1;
+        for (let k = 0; k < this.kinds.length; k++) for (let v = 0; v < this.cfg.variants; v++) { const a0 = t.items[k][v], a = share < 1 ? a0.subarray(0, Math.ceil(a0.length / 8 * share) * 8) : a0; if (a.length) { lists[k][v][l].push(a); counts[k][v][l] += a.length / 8; if (l === 0) trees += a.length / 8; } }
       }
     }
     for (let k = 0; k < this.kinds.length; k++) for (let v = 0; v < this.cfg.variants; v++) for (let l = 0; l < 3; l++) {

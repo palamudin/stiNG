@@ -46,6 +46,7 @@ export const GRASS = {
   altK: 1.5,         // the camera's height counts this much toward a clump's distance (a pixel covers more ground from above)
   bladeW: { root: 0.0065, from: 1.5, power: 0.9 }, // a blade's width: root * max(1, distance / from) ^ power, so far blades cover as near ones do
   flowers: { spacing: 0.55, radius: 18 },
+  sectors: 16,       // each ring is drawn in this many slices round the camera; a slice out of view is not drawn
 };
 // The sway table (computed once): a blade's sway over one cycle of its motion (256 steps), across the wind (red) and
 // along it (green), for 8 wind levels from a breath of air to a gale (rows). In a breeze a blade swings smoothly side
@@ -247,9 +248,8 @@ export class Grass {
       for (let j = -n; j <= n; j++) for (let i = -n; i <= n; i++) { const r = Math.hypot(i, j) * sp; if (r <= rout + slack) list.push([r, i, j]); }
       list.sort((a, b) => b[0] - a[0]);
       for (const [, i, j] of list) cells.push(i, j);
-      const radii = list.map((c) => c[0]);
-      geo.setAttribute('aCell', new THREE.InstancedBufferAttribute(new Float32Array(cells), 2));
-      geo.instanceCount = cells.length / 2;
+      // (the ring is drawn in GRASS.sectors slices round the camera, each its own mesh, so the ones out of view are not
+      // drawn at all: by presence, GDD 18.101)
       const U = {
         ...world.clip.uniforms, tCloudShadow: world.uniforms.tCloudShadow, uCloudRect: world.uniforms.uCloudRect, uTime: world.uniforms.uTime, uBloom: { value: 1 }, uSnowCover: { value: 0 }, uGrassTint: { value: new THREE.Vector3(1, 1, 1) }, uWildFrom: { value: world.source.wildFrom || 0 }, uWildH: { value: new THREE.Vector2(...(world.source.wildGrass || world.source.grassHeight || [0.1, 0.42])) }, uSea: { value: world.source.sea }, uShore: world.uniforms.uShore, uSnowLine: world.uniforms.uSnowLine, uSunDir: world.uniforms.uSunDir, uSunColor: world.sky.uniforms.uSunColor,
         uK: { value: k }, uS0: { value: S0 }, uRin: { value: rin }, uRout: { value: rout }, uNextBlades: { value: nextBlades }, uDensity: { value: this.density }, uFlower: { value: flower ? 1 : 0 },
@@ -292,10 +292,21 @@ float w2ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.
   }`);
       };
       mat.customProgramCacheKey = () => 'w2grass' + (flower ? 'f' : '') + world.clip.cfg.levels; // the clipmap's level count is in the code
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.frustumCulled = false; mesh.receiveShadow = true; mesh.castShadow = false;
-      mesh.userData.U = U; mesh.userData.instances = cells.length / 2; mesh.userData.radii = radii; mesh.userData.rin = rin; mesh.userData.slack = slack;
-      this.group.add(mesh); this.meshes.push(mesh);
+      const SEC = GRASS.sectors, bySec = Array.from({ length: SEC }, () => []);
+      for (const c of list) bySec[Math.floor((Math.atan2(c[2], c[1]) + Math.PI) / (2 * Math.PI) * SEC) % SEC].push(c); // still outermost first
+      for (let q = 0; q < SEC; q++) {
+        const L = bySec[q]; if (!L.length) continue;
+        const g = new THREE.InstancedBufferGeometry();
+        for (const name of Object.keys(geo.attributes)) g.setAttribute(name, geo.attributes[name]); // the clump's blades, shared
+        g.setIndex(geo.index);
+        const cs = new Float32Array(L.length * 2); L.forEach((c, o) => { cs[o * 2] = c[1]; cs[o * 2 + 1] = c[2]; });
+        g.setAttribute('aCell', new THREE.InstancedBufferAttribute(cs, 2)); g.instanceCount = L.length; g.boundingSphere = geo.boundingSphere;
+        const mesh = new THREE.Mesh(g, mat);
+        mesh.frustumCulled = false; mesh.receiveShadow = true; mesh.castShadow = false;
+        const a0 = -Math.PI + q * 2 * Math.PI / SEC;
+        mesh.userData = { U, instances: L.length, radii: L.map((c) => c[0]), rin, slack, rout: rout + slack, a0, a1: a0 + 2 * Math.PI / SEC, sp };
+        this.group.add(mesh); this.meshes.push(mesh);
+      }
     };
     const shared = { uWind: { value: new THREE.Vector2(0.8, 0.3) }, uCamG: { value: new THREE.Vector3() }, uAlt: { value: 0 },
       tSway: { value: swayTable() }, uPh: { value: Array.from({ length: 8 }, () => new THREE.Vector2()) }, uGustPh: { value: 0 }, uSwayRow: { value: 0.5 / SWAY.levels }, uEddy: { value: new THREE.Vector2() },
@@ -333,14 +344,25 @@ float w2ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.
     const de = dt * (0.3 + 0.9 * Uh); W.eddy[0] = (W.eddy[0] + wd[0] * de) % 4096; W.eddy[1] = (W.eddy[1] + wd[1] * de) % 4096; S.uEddy.value.set(W.eddy[0], W.eddy[1]);
     S.uSwayRow.value = (wk * (SWAY.levels - 1) + 0.5) / SWAY.levels;
     this.group.visible = alt < 30;
-    // each ring draws its cells down to where a clump can still be past the last ring's reach, seen from this height
-    const hk = GRASS.altK * alt;
+    // each ring draws its cells down to where a clump can still be past the last ring's reach, seen from this height; a
+    // slice is drawn only if its wedge (out to the ring's reach, a little wider for the blades' lean, from below the
+    // ground to above the tallest blade, and allowing for the hills) meets the view
+    const hk = GRASS.altK * alt, cam = this.world.camera, F = this._frustum || (this._frustum = new THREE.Frustum()), B = this._box || (this._box = new THREE.Box3());
+    cam.updateMatrixWorld(); this._pm = (this._pm || new THREE.Matrix4()).multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse); F.setFromProjectionMatrix(this._pm);
+    let drawn = 0;
     for (const m of this.meshes) {
       const u = m.userData, inner = Math.sqrt(Math.max(0, u.rin * u.rin - hk * hk)) - u.slack;
       let lo = 0, hi = u.radii.length; // the first cell (they run outermost first) closer than inner
       while (lo < hi) { const mid = (lo + hi) >> 1; if (u.radii[mid] >= inner) lo = mid + 1; else hi = mid; }
       m.geometry.instanceCount = lo;
+      const r0 = Math.max(0, inner - u.sp), r1 = (u.rout + 1) / Math.cos(Math.PI / GRASS.sectors), am = (u.a0 + u.a1) / 2, dy = 0.25 * r1;
+      let x0 = Infinity, x1 = -Infinity, z0b = Infinity, z1 = -Infinity;
+      for (const [r, a] of [[r0, u.a0], [r0, u.a1], [r1, u.a0], [r1, u.a1], [r1, am]]) { const x = eye.x + r * Math.cos(a), z = eye.z + r * Math.sin(a); x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0b = Math.min(z0b, z); z1 = Math.max(z1, z); }
+      B.min.set(x0, ground - 2 - dy, z0b); B.max.set(x1, ground + 1.5 + dy, z1);
+      m.visible = lo > 0 && F.intersectsBox(B);
+      if (m.visible) drawn += lo;
     }
+    this.stats = { clumps: drawn, slices: this.meshes.filter((m) => m.visible).length, of: this.meshes.length };
     // how far the blades reach on the ground (0 when hidden): the ground lays thatch under them; smooth in the height
     const h = GRASS.altK * alt, far = this.far;
     this.reach = this.group.visible ? Math.sqrt(Math.max(0, far * far - h * h)) * (1 - Math.min(1, Math.max(0, (alt - 8) / 22))) : 0;

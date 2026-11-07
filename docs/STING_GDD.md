@@ -2483,6 +2483,18 @@ On a jump the CPU path no longer blurs a level out to its parent: the window it 
 
 The game now asks for a square at least 16 m across (`causticsMin`), pushed 30% of its size ahead along the view (`causticsAhead`), on a 512 texture with a 384 grid. That is about the old detail (3 cm texels, 7 cm cells, against 2.3 and 5 cm) over 2.7 times the width. Water seen at a slant still clouds with distance: that is the water, not the caustics.
 
+### 18.102 Drawn by presence: grass slices, thinned far woods, the triangle breakdown, and spiders on hills
+
+**The principle.** What the player cannot see is not drawn, and what is far is drawn thinly. In a dense wood (S7) with World v3 the frame carried several million triangles: the grass rings over the whole disc round the camera (blades behind the camera were dropped only after their vertex shader ran), and every tree out to 420 m in the view cone, the near two detail levels again in the shadow pass. The water is small beside them (about 77k triangles in its grid plus the breakers' curl).
+
+**Grass in slices.** Each grass ring is drawn as 16 slices round the camera (`GRASS.sectors`; world/grass.js), each its own mesh sharing the clump's blades. A slice is drawn only if its wedge (out to the ring's reach, a little wider for the blades' lean, from below the ground to above the tallest blade, with room for the hills) meets the camera's view. Looking level, about 5 to 7 slices of 16 are drawn, so the grass costs roughly 60 to 70% fewer vertices. `world2.grass.stats` holds the clumps and slices drawn.
+
+**Thinned far woods.** World v3's trees are generated per 64 m tile. Each tile's trees are shuffled once by a fixed hash, so the same trees are always first, and the middle (45 to 160 m) and far (160 to 420 m) detail levels draw at most 60 and 24 trees per tile (`THIN.cap`; world/trees.js). A dense wood stays a wood from far away, with fewer trunks behind trunks. The near level is never thinned. `world2.forest.thin = false` turns it off to compare.
+
+**The triangle breakdown.** The performance overlay (F3) now lists where the main pass's triangles come from, by part: grass, trees, ground, water, world, and the game's own chunks, people and insects (`game`), with the grass slices drawn. The renderer's total counts every pass, shadows included.
+
+**Spiders on hills.** Birds, dragonflies and the spider that walks out to a webbed wasp are made after their chunk is built. On hills their materials were lifted onto the ground only at the next sweep, and their bounds stayed at their unlifted height, so a spider on a web 30 m up a hill was culled as soon as the camera looked at it. They are now lifted when made and never culled by their bounds (`liftNew`).
+
 ### 18.101 Grass that stays calm, matte grass, and the performance overlay
 
 **The bug.** The grass's sway went wild as the game ran on, and wherever the wind kept changing it jittered like 2 frames a second; at night, in calm air, it was smooth. The sway was `sin(time × rate)`, and the gusts and eddies were the same kind of expression, with the rate depending on the wind. Every change of wind jumped the phase by the whole clock times the change. The game feeds the grass the wind at the wasp, which shifts a little every frame, so the longer the game had run, the wilder each jump.
