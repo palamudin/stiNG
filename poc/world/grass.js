@@ -54,7 +54,7 @@ export const GRASS = {
 // as a blade does when the wind lays it over and lets it up. Each row's swing peaks at 1. The shader reads it at a
 // phase and the wind's row, and the texture's filter interpolates between the steps and between the wind states.
 export const SWAY = { steps: 256, levels: 8 };
-function swayTable() {
+export function swayTable() {
   const N = SWAY.steps, L = SWAY.levels, data = new Uint8Array(N * L * 4);
   for (let j = 0; j < L; j++) {
     const w = j / (L - 1), row = [];
@@ -83,7 +83,7 @@ float w2bare(vec2 p, float wear) { // bare earth in patches that open as the wea
 `;
 
 // A clump's blades: the first n blades are the same whatever n is (a coarser ring's clump is a finer one's, minus blades)
-function clumpGeometry(blades, segs, seed = 45) {
+export function clumpGeometry(blades, segs, seed = 45) {
   // per vertex: aT (0 root .. 1 tip), aSide (-1, 1), aB (angle, offset x, offset z, random), aBi (the blade's number)
   const n = blades * (segs + 1) * 2, T = new Float32Array(n), S = new Float32Array(n), B = new Float32Array(n * 4), Bi = new Float32Array(n), P = new Float32Array(n * 3), idx = [];
   let v = 0;

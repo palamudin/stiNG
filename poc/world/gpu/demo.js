@@ -10,6 +10,7 @@ import { GpuWaves } from './waves.js';
 import { gpuWater, surfUniforms } from './water.js';
 import { GpuShore } from './shore.js';
 import { GpuFoamField, GFOAM } from './foamfield.js';
+import { GpuGrass } from './grass.js';
 import { WAVES, swellState } from '../waves.js';
 
 const $ = (id) => document.getElementById(id);
@@ -33,9 +34,9 @@ scene.add(sun, sun.target, hemi);
 const sunDir = new THREE.Vector3(0.45, 0.62, 0.3).normalize();
 
 const state = { seed: 7, treeDist: 1, wind: 4 };
-let src, clip, terrain, forest, waves, water, shore, fields, wtime = 0;
+let src, clip, terrain, forest, waves, water, shore, fields, grass, wtime = 0;
 function build() {
-  if (terrain) { scene.remove(terrain, forest.group, water.mesh); }
+  if (terrain) { scene.remove(terrain, forest.group, water.mesh); if (grass) scene.remove(grass.group); }
   src = wildSource({ seed: state.seed });
   clip = new GpuClip(renderer, src);
   forest = new GpuForest(renderer, clip, src, { range: 1 });
@@ -47,6 +48,7 @@ function build() {
   water = gpuWater(clip, waves, { waterAt: (x, z) => src.waterAt(x, z), shore, sea: src.sea, renderer, surfU, fields, debug: +(q.get('wdebug') || 0) });
   if (!q.has('nowater')) scene.add(water.mesh);
   if (!q.has('noterrain')) scene.add(terrain);
+  grass = q.has('nograss') ? null : new GpuGrass(renderer, { clip, source: src, sunDir: water.U.uSunDir }); if (grass) scene.add(grass.group);
   if (!q.has('noforest')) scene.add(forest.group);
   clip.build(cam.fx, cam.fz);
 }
@@ -122,6 +124,7 @@ function step(dt) {
   water.U.uWTime.value = wtime; water.U.uTime.value = wtime; water.U.uSwDir.value.copy(waves.U.swDir.value);
   if (shore) shore.update(camera.position, !shore._built); if (shore) shore._built = true;
   if (fields) for (const f of fields) f.update(dt, camera, w10, 4);
+  if (grass) grass.update(camera, ground(camera.position.x, camera.position.z), w10, dt);
   water.U.uSunDir.value.copy(sunDir);
 }
 
@@ -158,4 +161,4 @@ async function snap() {
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = (y * w + x) * 4, o = i; /* WebGPU reads back top row first */ for (let c = 0; c < 3; c++) im.data[o + c] = 255 * srgb(aces(toF(px[i + c]) * 0.6 * renderer.toneMappingExposure)); im.data[o + 3] = 255; }
   c2.putImageData(im, 0, 0); return cv2.toDataURL('image/png');
 }
-window.__gpu = { snap, draw, renderer, scene, camera, cam, state, player, get forest() { return forest; }, get clip() { return clip; }, manual(on) { manual = on; if (!on) { last = performance.now(); requestAnimationFrame(frame); } }, step, async counts() { return forest.counts(); }, render() { draw(); } };
+window.__gpu = { snap, draw, renderer, scene, camera, cam, state, player, get forest() { return forest; }, get grass() { return grass; }, get clip() { return clip; }, manual(on) { manual = on; if (!on) { last = performance.now(); requestAnimationFrame(frame); } }, step, async counts() { return forest.counts(); }, render() { draw(); } };
