@@ -418,7 +418,7 @@ function findStart() { // a meadow near the water, looking along the shore
   }
   return best || { x: 0, z: 0 };
 }
-const st = findStart(); cam.fx = st.x; cam.fz = st.z;
+if (!cmp) { const st = findStart(); cam.fx = st.x; cam.fz = st.z; } // (arriving by V: the place it brought)
 setZoom(state.zoom);
 makeWorld().then(() => { $('boot').classList.add('gone'); }, (e) => { $('bootMsg').textContent = 'The world failed to build: ' + e.message; console.error(e); });
 requestAnimationFrame(frame);

@@ -121,5 +121,6 @@ export function gpuTerrain(clip, opts = {}) {
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false; mesh.receiveShadow = true; mesh.castShadow = false;
   mesh.name = 'gpu-terrain';
+  mesh.uSnowLine = uSnowLine; // the season's snow line (seasons.js snowLine)
   return mesh;
 }

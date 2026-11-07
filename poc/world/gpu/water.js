@@ -40,7 +40,7 @@ export const GWATER_PRESETS = {
 // scattering a lot: milky where it is thick)
 export const SILT = { absorb: [0.22, 0.32, 0.55], scatter: [0.55, 0.48, 0.32] };
 // the look's controls and their defaults (the panel's 'Water', index.js waterCtl): see water look in gpuWater
-export const GLOOK = { preset: 'ours', clarity: 1, murk: 1, roughness: 0, refraction: 0.06, sssPeak: 1.6, sssView: 0.06, foamBias: 0.05, foamScale: 1.3, linger: 4, sediment: 0.05, stir: 0.6, riverSilt: 0.5, caustics: 1, lip: 1, spray: 1 };
+export const GLOOK = { preset: 'ours', clarity: 1, murk: 1, roughness: 0, refraction: 0.06, sssPeak: 1.6, sssView: 0.06, foamBias: 0.05, foamScale: 1.3, linger: 4, sediment: 0.05, stir: 0.6, riverSilt: 0.5, caustics: 1, lip: 1, spray: 1, bubbles: 1 };
 export const GSURF = { segments: 256, inner: 0.0625, innerGrow: 1.12, reach: 4000, skirt: 60000 };
 
 function polarGrid() {
@@ -82,7 +82,7 @@ export function gpuWater(clip, waves, opts = {}) {
   // it, murk: scattering times it, roughness, refraction); uLook2 (crest glow, glow toward the view, whitecap bias,
   // whitecap scale); uSed (silt everywhere, stirred by the surf, carried by rivers, 0); uHs the waves' height
   const uAbs = uniform(new THREE.Vector3(...GWATER_PRESETS.ours.absorb)), uSca = uniform(new THREE.Vector3(...GWATER_PRESETS.ours.scatter));
-  const uLook = uniform(new THREE.Vector4(1, 1, 0, 0.06)), uLook2 = uniform(new THREE.Vector4(1.6, 0.06, 0.05, 1.3)), uSed = uniform(new THREE.Vector4(0.05, 0.6, 0.5, 0)), uHs = uniform(0.5);
+  const uLook = uniform(new THREE.Vector4(1, 1, 0, 0.06)), uLook2 = uniform(new THREE.Vector4(1.6, 0.06, 0.05, 1.3)), uSed = uniform(new THREE.Vector4(0.05, 0.6, 0.5, 1)), uHs = uniform(0.5);
   // the surf (water3/swash.js): uSurf (amplitude, wavelength, speed, steepness), uSurfX (foam charge, the shoreline's
   // lead), the water's clock, the swell's direction, the sea's level (a lake has no surf)
   const SU = opts.surfU || surfUniforms(opts.sea ?? 0), { uSurf, uSurfX, uWTime, uSwDir, uSea } = SU;
@@ -208,7 +208,10 @@ export function gpuWater(clip, waves, opts = {}) {
     // everywhere (the weather's and the season's), more where the surf stirs the bed and where a river carries it
     const wa = RF.clipWaterAll(P), river = wa.y.clamp(0, 1);
     const sedK = uSed.x.add(uSed.y.mul(max(vCoastF.x.clamp(0, 1), vCoast.z.clamp(0, 1).mul(0.7))).mul(smoothstep(4, 0.5, depth))).add(uSed.z.mul(river)).clamp(0, 1.5).toVar();
-    const sa = uAbs.div(max(uLook.x, 0.05)).add(vec3(...SILT.absorb).mul(sedK)), sb = uSca.mul(uLook.y).add(vec3(...SILT.scatter).mul(sedK));
+    // and the air the breakers drive under: a cloud of bubbles under the white (it scatters, it hardly absorbs), so the
+    // surf zone is milky turquoise under thin foam instead of solid white on top
+    const bub = max(vCoast.z.clamp(0, 1), max(vCoastF.x.clamp(0, 1).mul(0.6), coastFoam.mul(0.5))).mul(smoothstep(5, 0.3, depth)).mul(uSed.w).toVar();
+    const sa = uAbs.div(max(uLook.x, 0.05)).add(vec3(...SILT.absorb).mul(sedK)), sb = uSca.mul(uLook.y).add(vec3(...SILT.scatter).mul(sedK)).add(vec3(1.6, 1.75, 1.75).mul(bub));
     const sig = sa.add(sb), alb = sb.div(max(sig, vec3(1e-4)));
     const ext = exp(sig.mul(path).negate());
     // its light: the sky's from above and the sun's through the surface, scattered back up (single scattering over a deep
@@ -288,16 +291,16 @@ export function gpuWater(clip, waves, opts = {}) {
       fm.assign(max(fm, slosh.mul(smoothstep(0.3, 0.65, laceD(P, lt, 1.6 * ls, vec2(uTime.mul(0.02), uTime.mul(0.013))).add(0.15))).mul(0.6).mul(fpatch)));
       const pat = laceD(P, lt, 3.1 * ls, vec2(uTime.mul(0.011), uTime.mul(-0.007))).mul(0.62).add(laceD(P, lt, 1.17 * ls, vec2(uTime.mul(-0.017), uTime.mul(-0.005))).mul(0.38)).add(0.12).toVar();
       const wf = vCoast.z.clamp(0, 1), lc = vCoast.w.clamp(0, 1).mul(float(1).sub(inField.mul(0.6)));
-      fm.assign(max(fm, smoothstep(float(1).sub(ff.mul(0.75)), float(1.08).sub(ff.mul(0.75)), pat).mul(ff.mul(0.6).add(0.35)).mul(smoothstep(0, 0.02, ff)))); // the field's foam: thick where fresh, eroding into lace as it fades
-      fm.assign(max(fm, smoothstep(float(1).sub(wf.mul(0.6)), float(1.12).sub(wf.mul(0.6)), pat).mul(wf.mul(0.4).add(0.6))));
+      fm.assign(max(fm, smoothstep(float(1).sub(ff.mul(0.55)), float(1.08).sub(ff.mul(0.55)), pat).mul(ff.mul(0.5).add(0.3)).mul(smoothstep(0, 0.02, ff)))); // the field's foam: thick where fresh, eroding into lace as it fades
+      fm.assign(max(fm, smoothstep(float(1).sub(wf.mul(0.5)), float(1.1).sub(wf.mul(0.5)), pat).mul(wf.mul(0.35).add(0.45))));
       fm.assign(max(fm, smoothstep(float(1).sub(lc.mul(0.5)), float(1.1).sub(lc.mul(0.5)), pat).mul(0.45)));
       const spf = laceD(P, lt, 5.3 * ls, vec2(uTime.mul(0.006), uTime.mul(-0.004))).mul(0.55).add(laceD(P, lt, 1.9 * ls, vec2(uTime.mul(-0.012), 0)).mul(0.45)).add(0.15);
       const sfz = vCoastF.x.clamp(0, 1);
       fm.assign(max(fm, smoothstep(float(0.98).sub(sfz.mul(0.3)), float(1.08).sub(sfz.mul(0.3)), spf).mul(smoothstep(-0.35, 0.45, nz({ p: P.div(0.22).add(uTime.mul(0.05)), s: int(629) }))).mul(sfz.mul(0.25).add(0.15))));
-      fm.assign(max(fm, smoothstep(float(1).sub(coastFoam.mul(0.7)), float(1.12).sub(coastFoam.mul(0.7)), pat).mul(0.85).mul(coastFoam)));
+      fm.assign(max(fm, smoothstep(float(1).sub(coastFoam.mul(0.55)), float(1.1).sub(coastFoam.mul(0.55)), pat).mul(0.75).mul(coastFoam)));
       // the lip's tip tearing into white as it throws
-      const tip = smoothstep(0.25, 0.75, vCurl);
-      fm.assign(max(fm, smoothstep(float(1).sub(tip.mul(0.8)), float(1.1).sub(tip.mul(0.8)), pat.add(nz({ p: P.div(0.35).add(uTime.mul(0.4)), s: int(631) }).mul(0.15))).mul(tip)));
+      const tip = smoothstep(0.45, 0.9, vCurl).mul(0.7);
+      fm.assign(max(fm, smoothstep(float(1).sub(tip.mul(0.6)), float(1.1).sub(tip.mul(0.6)), pat.add(nz({ p: P.div(0.35).add(uTime.mul(0.4)), s: int(631) }).mul(0.15))).mul(tip)));
     } else fm.assign(max(cap, coastFoam));
     const foamCol = uSkyUp.mul(0.8).add(uSunColor.mul(cs).mul(max(uSunDir.y, 0.05)).mul(0.55)).mul(0.92);
     col.assign(mix(col, foamCol, fm.clamp(0, 1).mul(0.85)));

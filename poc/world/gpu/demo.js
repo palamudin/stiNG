@@ -99,6 +99,17 @@ function build() {
 const cam = { fx: 0, fz: 0, yaw: 0.8, look: 0, dist: 60 };
 // ?at=x,z[,yaw]: start there (?at=coast: a beach of seed 7, facing the sea)
 { const a = q.get('at'); if (a === 'coast') Object.assign(cam, { fx: -1438, fz: 1317, yaw: 2.31, dist: 40, look: 0.1 }); else if (a) { const [x, z, y] = a.split(',').map(Number); cam.fx = x || 0; cam.fz = z || 0; if (Number.isFinite(y)) cam.yaw = y; } }
+// no place asked for: the old water's start (demo.js findStart), a meadow by the sea looking along the shore, so both
+// pages open on the same spot
+if (!q.get('at') && !q.has('cmp')) {
+  const s = wildSource({ seed: state.seed });
+  let best = null;
+  for (let r = 0; r < 12000 && !best; r += 60) for (let a = 0; a < 6.283; a += 0.3) {
+    const x = Math.cos(a) * r, z = Math.sin(a) * r, o = s.sample(x, z);
+    if (o[0] > 2 && o[0] < 7 && o[2] < 0.3 && o[4] <= s.sea) { let ok = true; for (let k = 1; k <= 5 && ok; k++) { const w = s.sample(x + 60 * k * Math.cos(a), z + 60 * k * Math.sin(a)); ok = w[0] < s.sea - 1; } if (ok) { best = { x, z }; break; } }
+  }
+  if (best) { cam.fx = best.x; cam.fz = best.z; }
+}
 // the V switch (compare.js): arriving from the old water, the same place, time, weather and pose
 const cmp = readCompare();
 if (cmp) {
@@ -185,6 +196,7 @@ function step(dt) {
   } else { state.haze = 1; state.dens = 1; sunAtSeason(state.hour, S.dec); } // the season's track always (as the old water's)
   // the season on the leaves and the grass (seasons.js seasonAt, as index.js)
   if (forest) { forest.uLeafTint.value.set(...S.leafTint); forest.uAutumn.value = S.autumn; forest.uLeafGone.value = S.leafGone; forest.uSnowOn.value = S.snow; }
+  if (terrain && terrain.uSnowLine) terrain.uSnowLine.value = (src.sea ?? 0) + S.snowLine;
   if (grass) { grass.uTint.value.set(...S.grassTint); grass.uBloom.value = S.bloom; grass.uSnowCover.value = S.snow; }
   state.runoff += (state.rain - state.runoff) * Math.min(1, dt / 6); // the rivers and the shore muddy as the rain goes on
   sky.update(sunDir, Math.max(1, camera.position.y - (src.sea ?? 0)), state.haze); sky.uSea.value = src.sea ?? 0;
@@ -239,7 +251,7 @@ function step(dt) {
     lk.uSca.value.set(pr.scatter[0], pr.scatter[1] + 0.015 * summer, pr.scatter[2]);
     lk.uLook.value.set(L.clarity * (1 + 0.35 * winter - 0.3 * ro), L.murk * (1 + 1.2 * ro + 0.5 * summer), L.roughness + (A ? 0.03 * state.rain : 0), L.refraction);
     lk.uLook2.value.set(L.sssPeak, L.sssView, L.foamBias + wk, L.foamScale);
-    lk.uSed.value.set(L.sediment + 0.35 * ro + 0.12 * spring, L.stir * (1 + ro), L.riverSilt * (1 + 1.5 * ro + 0.6 * spring), 0);
+    lk.uSed.value.set(L.sediment + 0.35 * ro + 0.12 * spring, L.stir * (1 + ro), L.riverSilt * (1 + 1.5 * ro + 0.6 * spring), L.bubbles ?? 1);
     lk.uHs.value = Math.max(0.1, (waves.stats && waves.stats.Hs) || 0.5);
     if (caustics) caustics.uStrength.value = L.caustics;
     lk.uLip.value = L.lip; if (spray) spray.uRate.value = L.spray * (A ? 1 + 0.08 * Math.max(0, state.wind - 5) : 1);

@@ -1,14 +1,12 @@
-// The breakers' spray on WebGPU: water thrown off a breaking crest, as particles. A pool of them, all on the GPU:
+// The breakers' spray on WebGPU: drops thrown off a breaking crest. A pool of them on the GPU, launched and then replayed:
 //   - each frame a few thousand candidate points are drawn round the eye (a fixed hash of the frame and the thread:
 //     the same on every machine); one over the surf zone where a crest is breaking (the coast's whitewater, from the
 //     shore table, gpu/coast.wgsl.js coastFieldAt) throws a particle in proportion to it, from the crest's height (its
 //     displacement, coastVert), forward with the wave's speed and up, the wind taking some;
-//   - every particle flies under gravity with drag toward the wind's speed, grows as it spreads into mist, and dies
-//     where it falls back into the water or when it has lived its time;
-//   - drawn as soft round billboards facing the eye, lit by the sun through the clouds' shadow (brighter looking into
-//     it: forward scattering) and the sky, faded where they meet the scene so they never cut a line into it.
+//   - nothing steps them after: a drop's place at any age is the closed form of its flight (below), so a pool of any
+//     size costs only its draw; drawn as thin streaks along their screen velocity, faded where they meet the scene.
 import * as THREE from 'three/webgpu';
-import { Fn, If, Return, float, int, uint, vec2, vec3, vec4, uniform, storage, instanceIndex, wgslFn, wgsl, atomicAdd, max, min, exp, clamp, smoothstep, mix, fract, sin, dot, length, normalize, pow, select, positionLocal, cameraViewMatrix, cameraProjectionMatrix, varyingProperty, uv, screenUV, viewportDepthTexture, perspectiveDepthToViewZ, cameraNear, cameraFar } from 'three/tsl';
+import { Fn, If, Return, float, int, uint, vec2, vec3, vec4, uniform, storage, instanceIndex, wgslFn, wgsl, atomicAdd, max, min, exp, abs, clamp, smoothstep, mix, fract, sin, dot, length, normalize, pow, select, positionLocal, cameraViewMatrix, cameraProjectionMatrix, varyingProperty, uv, screenUV, viewportDepthTexture, perspectiveDepthToViewZ, cameraNear, cameraFar } from 'three/tsl';
 import { COAST_WGSL } from './coast.wgsl.js';
 
 export const SPRAY = { n: 32768, spawn: 16384, radius: 160, life: 2.6, rate: 1 };
@@ -26,8 +24,8 @@ export class GpuSpray {
     this.velAttr = new THREE.StorageBufferAttribute(new Float32Array(N * 4), 4); // velocity, size (m)
     this.ringAttr = new THREE.StorageBufferAttribute(new Uint32Array(4), 1);
     const P = storage(this.posAttr, 'vec4', N), V = storage(this.velAttr, 'vec4', N), RING = storage(this.ringAttr, 'uint', 4).toAtomic();
-    this.uEye = uniform(new THREE.Vector3()); this.uFrame = uniform(0, 'uint'); this.uDt = uniform(0); this.uWind = uniform(new THREE.Vector2()); this.uOn = uniform(1); this.uRate = uniform(SPRAY.rate);
-    const RC = opts.clip.reads('SP'), RU = opts.clip.reads('SU'), shR = opts.shore.reader(), S = opts.surfU;
+    this.uEye = uniform(new THREE.Vector3()); this.uFrame = uniform(0, 'uint'); this.uDt = uniform(0); this.uWind = uniform(new THREE.Vector2()); this.uTime = uniform(0); this.uOn = uniform(1); this.uRate = uniform(SPRAY.rate);
+    const RC = opts.clip.reads('SP'), shR = opts.shore.reader(), S = opts.surfU;
     const surf = { surf: S.uSurf, surfX: S.uSurfX, t: S.uWTime, swDir: S.uSwDir };
     // spawning: a candidate point per thread, uniformly over a disc round the eye
     this.kSpawn = Fn(() => {
@@ -52,51 +50,46 @@ export class GpuSpray {
       const big = smoothstep(0.1, 0.9, S.uSurf.x).mul(0.7).add(0.3);
       for (let j = 0; j < 4; j++) {
         const a = hash({ a: id.add(101 + j * 13), b: this.uFrame }), b = hash({ a: id.add(203 + j * 17), b: this.uFrame }), c = hash({ a: id.add(307 + j * 19), b: this.uFrame });
-        const mist = j === 3;
+        const mist = false; // (mist: crest ribbons later, not puffs)
         const up = (mist ? mix(float(0.6), float(1.6), a) : mix(float(1.2), float(4.8), a.mul(a))).mul(big);
         const fwd = cel.mul(mist ? mix(float(0.15), float(0.4), b) : mix(float(0.35), float(0.95), b));
         const side = vec2(dir.y.negate(), dir.x).mul(c.sub(0.5).mul(1.4)).add(vec2(r4.sub(0.5), r5.sub(0.5)).mul(0.3));
         const v = vec3(dir.x.mul(fwd).add(side.x), up, dir.y.mul(fwd).add(side.y)).add(vec3(this.uWind.x, 0, this.uWind.y).mul(0.25));
         const slot = base.add(uint(j)).mod(uint(N));
-        P.element(slot).assign(RC.bind(vec4(o.add(vec3(c.sub(0.5), a.mul(0.2), b.sub(0.5)).mul(0.6)), mist ? mix(float(SPRAY.life * 0.8), float(SPRAY.life * 1.6), r6) : mix(float(SPRAY.life * 0.35), float(SPRAY.life), c))));
-        V.element(slot).assign(vec4(v, mist ? mix(float(0.35), float(0.7), b).negate() : mix(float(0.05), float(0.14), b))); // (mist: a negative size)
+        P.element(slot).assign(RC.bind(vec4(o.add(vec3(c.sub(0.5), a.mul(0.2), b.sub(0.5)).mul(0.6)), this.uTime)));
+        V.element(slot).assign(vec4(v, mix(float(SPRAY.life * 0.3), float(SPRAY.life * 0.8), c))); // the launch: velocity, life
       }
     })().compute(M, [64]);
-    // flight: gravity, drag toward the wind, the size growing into mist; dead under the water
-    this.kStep = Fn(() => {
-      const i = int(instanceIndex), p = P.element(i).toVar();
-      If(p.w.lessThanEqual(0), () => { Return(); });
-      const v = V.element(i).toVar(), dt = this.uDt;
-      const air = vec3(this.uWind.x, 0, this.uWind.y);
-      v.xyz.assign(air.add(v.xyz.sub(air).mul(exp(dt.mul(-1.6)))).add(vec3(0, -9.81, 0).mul(dt).mul(0.55)));
-      p.xyz.addAssign(v.xyz.mul(dt));
-      p.w.subAssign(dt);
-      v.w.assign(v.w.add(select(v.w.lessThan(0), dt.mul(-0.6), dt.mul(0.25)))); // spreading: the mist faster
-      const level = RU.clipWater(p.xz);
-      If(p.y.lessThan(level.sub(0.15)).and(v.y.lessThan(0)), () => { p.w.assign(0); });
-      P.element(i).assign(RU.bind(p)); V.element(i).assign(v);
-    })().compute(N, [64]);
-    // the billboards: one quad per particle (dead ones folded away), soft round dots
+    // flight, replayed: nothing steps the particles; each holds its launch (place, time, velocity, life) and its place
+    // at any age is the closed form of gravity with drag toward the wind's speed (dv/dt = -k (v - air) + g):
+    //   x(t) = x0 + (air + g/k) t + (v0 - air - g/k) (1 - e^-kt) / k
+    // drawn as a thin streak along its screen velocity (a drop's motion over a frame), not a disc
     const PR = storage(this.posAttr, 'vec4', N).toReadOnly(), VR = storage(this.velAttr, 'vec4', N).toReadOnly();
     const g = new THREE.InstancedBufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(new Float32Array([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0]), 3));
     g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]), 2));
     g.setIndex([0, 1, 2, 0, 2, 3]); g.instanceCount = N; g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e9);
     const mat = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false });
-    const vLife = varyingProperty('float', 'spLife'), vAge = varyingProperty('float', 'spAge'), vZ = varyingProperty('float', 'spZ'), vMist = varyingProperty('float', 'spMist');
+    const vAge = varyingProperty('float', 'spAge'), vZ = varyingProperty('float', 'spZ'), vFade = varyingProperty('float', 'spFade');
+    const K = 1.6, G = vec3(0, -9.81 * 0.55, 0);
     mat.vertexNode = Fn(() => {
       const p = PR.element(instanceIndex), v = VR.element(instanceIndex);
-      const alive = p.w.greaterThan(0);
-      vLife.assign(p.w); vAge.assign(v.w.abs()); vMist.assign(select(v.w.lessThan(0), float(1), float(0)));
-      const c = cameraViewMatrix.mul(vec4(p.xyz, 1)); vZ.assign(c.z);
-      const s = select(alive, v.w.abs(), float(0));
-      return cameraProjectionMatrix.mul(vec4(c.xy.add(positionLocal.xy.mul(s)), c.z, 1));
+      const t = this.uTime.sub(p.w).toVar(), life = v.w;
+      const alive = t.greaterThan(0).and(t.lessThan(life));
+      const air = vec3(this.uWind.x, 0, this.uWind.y), drift = air.add(G.div(K)), e = exp(t.mul(-K));
+      const x = p.xyz.add(drift.mul(t)).add(v.xyz.sub(drift).mul(float(1).sub(e).div(K)));
+      const vel = drift.add(v.xyz.sub(drift).mul(e));
+      vAge.assign(t.div(max(life, 0.01))); vFade.assign(select(alive, float(1), float(0)));
+      const c = cameraViewMatrix.mul(vec4(x, 1)), cv = cameraViewMatrix.mul(vec4(vel, 0)).xy; vZ.assign(c.z);
+      const sp = length(cv), dir = select(sp.greaterThan(1e-3), cv.div(sp), vec2(0, 1)), side = vec2(dir.y.negate(), dir.x);
+      const w = float(0.012).add(t.mul(0.01)), len = sp.mul(0.035).add(w); // a frame's travel at 30 fps
+      const off = dir.mul(positionLocal.y.mul(len)).add(side.mul(positionLocal.x.mul(w))).mul(select(alive, float(1), float(0)));
+      return cameraProjectionMatrix.mul(vec4(c.xy.add(off), c.z, 1));
     })();
     const sunDir = opts.sunDir, sunColor = opts.sunColor, skyUp = opts.skyUp;
     mat.colorNode = Fn(() => {
-      const d = length(uv().sub(0.5)).mul(2);
-      // a drop: a small bright dot thinning as it spreads; mist: a faint soft puff
-      const a = mix(smoothstep(1, 0.3, d).mul(smoothstep(0.6, 0.06, vAge)).mul(0.5), exp(d.mul(d).mul(-3.5)).mul(smoothstep(2.2, 0.4, vAge)).mul(0.07), vMist).mul(smoothstep(0, 0.4, vLife)).mul(smoothstep(1.5, 5, vZ.negate())); // (none in the eye's face)
+      const d = abs(uv().x.sub(0.5)).mul(2), e = abs(uv().y.sub(0.5)).mul(2);
+      const a = smoothstep(1, 0.2, d).mul(smoothstep(1, 0.5, e)).mul(float(1).sub(smoothstep(0.5, 1, vAge))).mul(vFade).mul(0.65).mul(smoothstep(1, 3, vZ.negate()));
       // soft against the scene: faded as the dot's depth nears what is behind it
       const sceneZ = perspectiveDepthToViewZ(viewportDepthTexture(screenUV).x, cameraNear, cameraFar);
       const soft = clamp(vZ.sub(sceneZ).mul(2.5), 0, 1);
@@ -113,7 +106,7 @@ export class GpuSpray {
     this.uOn.value = on ? 1 : 0; this.mesh.visible = on;
     this.uEye.value.copy(camera.position); this.uDt.value = Math.min(Math.max(dt, 0), 0.05); this.uWind.value.set(wind[0], wind[1]);
     this.uFrame.value = this.frame++ >>> 0;
+    this.time = (this.time || 0) + this.uDt.value; this.uTime.value = this.time;
     if (on) this.renderer.compute(this.kSpawn);
-    this.renderer.compute(this.kStep);
   }
 }
