@@ -69,5 +69,6 @@ export function buildPanel(hud, state, onChange = () => {}) {
   ];
   for (const r of rows) slider(B, L, ...r);
   check(B, state, 'spray', 'Breakers\' spray');
+  check(B, state, 'glints', 'Sun glints (off: being reworked)');
   return { refresh() { for (const f of outs) f(); } };
 }

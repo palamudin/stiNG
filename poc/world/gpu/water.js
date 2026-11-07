@@ -134,6 +134,7 @@ export function gpuWater(clip, waves, opts = {}) {
   const vBed = varyingProperty('float', 'vBed'); // the swell's velocity at the bed (the silt it stirs)
   const tBrk = bakeBreaker(); // the breaker's event (gpu/breaker.js), computed once; vCurl: how much of a breaking lip this is (its normal and its white)
   const uLip = uniform(1); // the lip's strength (the panel)
+  const uGlint = uniform(0); // the sun's highlight on the surface (off until the surface's roughness is settled: the panel)
   const uUnder = uniform(0); // the eye under the water (the fish's view)
   mat.positionNode = Fn(() => {
     const skirt = positionLocal.y.greaterThan(0.5);
@@ -372,7 +373,7 @@ export function gpuWater(clip, waves, opts = {}) {
     skyC.assign(mix(skyC, mix(uSkyHz.mul(0.25), body.mul(1.1), 0.6), below));
     hitK.mulAssign(float(1).sub(below));
     const sky = mix(skyC, hitC, hitK);
-    const col = mix(body, sky, F).add(spec.mul(smoothstep(0, 0.3, depth)).mul(float(1).sub(hitK))).toVar();
+    const col = mix(body, sky, F).add(spec.mul(uGlint).mul(smoothstep(0, 0.3, depth)).mul(float(1).sub(hitK))).toVar();
     // the crests' glow (surface.js): the sun through a thin steep crest, toward a view into the light; a little always
     { const crest = vH.div(max(uHs.mul(0.5), 0.05)).clamp(0, 1), steep = length(sl).mul(3).clamp(0, 1);
       const hv = normalize(vec2(Vv.x, Vv.z).add(1e-5)), hs = normalize(vec2(uSunDir.x, uSunDir.z).add(1e-5)), back = pow(max(dot(hv, hs), 0), float(3));
@@ -439,5 +440,5 @@ export function gpuWater(clip, waves, opts = {}) {
     uScale.value = Math.max(1, above / 2);
   };
   mesh.onAfterRender = () => {};
-  return { mesh, look: { uAbs, uSca, uLook, uLook2, uSed, uHs, uLip, uField, uWind }, U: { uUnder, uLace, uTime, uScale, uSunDir, uSunColor, uSkyUp, uSkyHz, uChop, uSurf, uSurfX, uWTime, uSwDir, uSea } };
+  return { mesh, look: { uAbs, uSca, uLook, uLook2, uSed, uHs, uLip, uGlint, uField, uWind }, U: { uUnder, uLace, uTime, uScale, uSunDir, uSunColor, uSkyUp, uSkyHz, uChop, uSurf, uSurfX, uWTime, uSwDir, uSea } };
 }

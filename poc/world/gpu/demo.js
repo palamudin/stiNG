@@ -98,7 +98,7 @@ const mapU = { uMap: uniform(0), uMapK: uniform(1) };
 const mapFor = (d) => THREE.MathUtils.smoothstep(Math.log(d), Math.log(MAP.from), Math.log(MAP.to));
 const pitchFor = (d) => 0.12 + 0.95 * THREE.MathUtils.smoothstep(Math.log10(d), -1.2, 3.7);
 const state = { seed: 7, treeDist: 1, wind: 4, hour: +(q.get('hour') || 11), cover: +(q.get('cover') ?? 0.35), cshadow: !q.has('nocshadow'), caustics: !q.has('nocaustics'),
-  spray: q.has('spray'), tideAmp: 0.8, tideSpeed: 60, trees: !q.has('notrees'), grass: !q.has('nograss2'), auto: q.has('auto'), day: +(q.get('day') ?? 100), rain: 0, haze: 1, dens: 1, kind: '', windDir: [0.94, 0.35], waterAuto: true, runoff: 0 };
+  spray: q.has('spray'), glints: q.has('glints'), tideAmp: 0.8, tideSpeed: 60, trees: !q.has('notrees'), grass: !q.has('nograss2'), auto: q.has('auto'), day: +(q.get('day') ?? 100), rain: 0, haze: 1, dens: 1, kind: '', windDir: [0.94, 0.35], waterAuto: true, runoff: 0 };
 let swe = null, currents = null, swellF = null, caustics, query, floaters, spray, src, clip, terrain, forest, waves, water, shore, fields, grass, wtime = 0;
 async function build() {
   if (terrain) { scene.remove(terrain, forest.group, water.mesh); if (grass) scene.remove(grass.group); }
@@ -287,7 +287,7 @@ function step(dt) {
     lk.uSed.value.set(L.sediment + 0.35 * ro + 0.12 * spring, L.stir * (1 + ro), L.riverSilt * (1 + 1.5 * ro + 0.6 * spring), L.bubbles ?? 1);
     lk.uHs.value = Math.max(0.1, (waves.stats && waves.stats.Hs) || 0.5);
     if (caustics) caustics.uStrength.value = L.caustics;
-    lk.uLip.value = L.lip; if (spray) spray.uRate.value = L.spray * (A ? 1 + 0.08 * Math.max(0, state.wind - 5) : 1);
+    lk.uLip.value = L.lip; lk.uGlint.value = state.glints ? 1 : 0; if (spray) spray.uRate.value = L.spray * (A ? 1 + 0.08 * Math.max(0, state.wind - 5) : 1);
     if (fields) for (const f of fields) { f.uBias.value = L.foamBias + wk; f.uScale.value = L.foamScale; f.update(dt, camera, w10, L.linger); } }
   if (grass && state.grass) grass.update(camera, ground(camera.position.x, camera.position.z), w10, dt);
   water.U.uSunDir.value.copy(sunDir);
