@@ -136,7 +136,7 @@ export function gpuWater(clip, waves, opts = {}) {
   mat.positionNode = Fn(() => {
     const skirt = positionLocal.y.greaterThan(0.5);
     const xz = select(skirt, positionLocal.xz.mul(GSURF.skirt), positionLocal.xz.mul(uScale)).add(cameraPosition.xz).toVar();
-    const level = RV.clipWater(xz).add(BFv ? BFv(xz).x : 0).toVar(), bed = RV.clipAt(xz).x.toVar(), depth = level.sub(bed).toVar();
+    const levelS = RV.clipWater(xz).toVar(), level = levelS.add(BFv ? BFv(xz).x.mul(select(levelS.lessThanEqual(uSea.add(0.5)), float(1), float(0))) : 0).toVar(), bed = RV.clipAt(xz).x.toVar(), depth = level.sub(bed).toVar();
     const dist = length(xz.sub(cameraPosition.xz)), cell = max(length(positionLocal.xz), 1).mul(cellStep).mul(uScale);
     // the coast's trains near a sea shore (none on a lake): their displacement, slope and foam; the open sea's long
     // swell (the first cascade) fades out where they carry it
@@ -144,7 +144,7 @@ export function gpuWater(clip, waves, opts = {}) {
     vCoast.assign(vec4(0)); vCoastF.assign(vec2(0)); vH.assign(0); vCurl.assign(0); vBed.assign(0); vRest.assign(vec2(0));
     const lipPsi = float(0).toVar(), lipB = float(0).toVar(), lipA = float(0).toVar(), lipDir = vec2(0).toVar(), lipU = float(-1).toVar(); vRest.assign(xz);
     const lipPh = float(0).toVar(), lipK = float(1).toVar(), l1Psi = float(0).toVar(), l1A = float(0).toVar(), l1Dir = vec2(1, 0).toVar(), l1U = float(-1).toVar(), l1Ph = float(0).toVar(), l1K = float(1).toVar();
-    if (shV) If(skirt.not().and(depth.greaterThan(-3)).and(level.lessThanEqual(uSea.add(3.5))).and(dist.lessThan(600)), () => {
+    if (shV) If(skirt.not().and(depth.greaterThan(-3)).and(levelS.lessThanEqual(uSea.add(0.5))).and(dist.lessThan(600)), () => {
       const sh = shV(xz);
       const m = cVert({ xz, sh: sh.v, know: sh.know, depth, cell, fl: float(0), ...surfArgs }).toVar();
       isCoast.assign(m.element(3).x); cd.assign(m.element(0).xyz); near.assign(m.element(0).w); shift.assign(select(isCoast.greaterThan(0.5), m.element(2).y, float(1)));
@@ -223,7 +223,7 @@ export function gpuWater(clip, waves, opts = {}) {
     const y = level.add(D.y).max(min(bed.add(0.04), level)).toVar(); // the trough held over the floor
     // the shoreline: over the sand a sheet at the swash's height, thin at its tip; in the last half metre of water lifted
     // to the same sheet
-    if (shV) If(skirt.not().and(depth.lessThan(0.5)).and(depth.greaterThan(-3)).and(level.lessThanEqual(uSea.add(3.5))).and(dist.lessThan(600)), () => {
+    if (shV) If(skirt.not().and(depth.lessThan(0.5)).and(depth.greaterThan(-3)).and(levelS.lessThanEqual(uSea.add(0.5))).and(dist.lessThan(600)), () => {
       const e = max(cell, 0.25);
       const grad = vec2(RV.clipAt(xz.add(vec2(e, 0))).x.sub(RV.clipAt(xz.sub(vec2(e, 0))).x), RV.clipAt(xz.add(vec2(0, e))).x.sub(RV.clipAt(xz.sub(vec2(0, e))).x)).div(e.mul(2));
       // on the sand the mesh lies just over it wherever the swash may reach; each pixel then finds whether the water is
@@ -256,11 +256,11 @@ export function gpuWater(clip, waves, opts = {}) {
       const fs = fetchShare(FchF, c);
       sl.addAssign(s.xy.mul(fs)); sv.addAssign(max(s.zw.sub(s.xy.mul(s.xy)), vec2(0)).mul(fs.mul(fs))); if (c >= 1) J.addAssign(d.w.sub(1).mul(w).mul(fs));
     }
-    const level = RF.clipWater(P).add(BFf ? BFf(P).x : 0), ground = RF.clipAtSmooth(P).x, still = level.sub(ground).toVar(); // bilinear: the line along a contour, not a sawtooth
+    const levelS = RF.clipWater(P), level = levelS.add(BFf ? BFf(P).x.mul(select(levelS.lessThanEqual(uSea.add(0.5)), float(1), float(0))) : 0), ground = RF.clipAtSmooth(P).x, still = level.sub(ground).toVar(); // bilinear: the line along a contour, not a sawtooth
     // the shoreline here (water3/swash.js): its foam, and the water over the floor with it (th); over the sand a pixel
     // the swash is not over now is not water
     const coastFoam = float(0).toVar(), th = still.toVar();
-    if (shV) If(still.lessThan(0.8).and(still.greaterThan(-3)).and(level.lessThanEqual(uSea.add(3.5))), () => {
+    if (shV) If(still.lessThan(0.8).and(still.greaterThan(-3)).and(levelS.lessThanEqual(uSea.add(0.5))), () => {
       const e = max(float(0.35), RF.cellAt(P).mul(1.5)); // the beach's slope over more than a texel: the clipmap's triangles are flat, and the swash's reach steps with them
       const grad = vec2(RF.clipAtSmooth(P.add(vec2(e, 0))).x.sub(RF.clipAtSmooth(P.sub(vec2(e, 0))).x), RF.clipAtSmooth(P.add(vec2(0, e))).x.sub(RF.clipAtSmooth(P.sub(vec2(0, e))).x)).div(e.mul(2));
       const sf = cFoam({ xz: P, depth: still, grad, wave: vCoast.z, fl: float(0), ...surfArgs }).toVar();
@@ -269,7 +269,22 @@ export function gpuWater(clip, waves, opts = {}) {
     Discard(still.lessThan(0).and(th.lessThanEqual(0)));
     const depth = max(still, th).max(0).toVar();
     const calm = smoothstep(0, 2, depth);
-    sl.mulAssign(calm); sl.addAssign(vCoast.xy);
+    sl.mulAssign(calm);
+    // the swell field's trains' slope per pixel (not a vertex's, interpolated across a triangle: the jagged faces), at
+    // the water's own place, and as a Gerstner surface's: the slope over the moved surface, dh / dX = -a k sin /
+    // (1 - q cos), so a crest's face is as steep as the shape the vertices drew
+    if (SWf) {
+      const sw = SWf.swell(PT), d0 = SWf.dir, d1 = SWf.dir1;
+      const slopeOf = (A, amp, w, dir, inside) => {
+        const ph = A.x.sub(w.mul(uWTime)), a = A.y.mul(amp), k = A.w, th = A.z, q = min(k.mul(a).mul(1.3), float(0.7));
+        const dirW = dir.mul(th.cos()).add(vec2(dir.y.negate(), dir.x).mul(th.sin()));
+        const s2 = k.mul(a).mul(0.5).clamp(0, 0.45);
+        const dh = a.mul(k).mul(ph.sin().add(s2.mul(ph.mul(2).sin()).mul(2))).negate().div(max(float(1).sub(q.mul(ph.cos())), 0.25));
+        const wf = inside.mul(float(1).sub(smoothstep(0.7, 2.2, k.mul(still.max(0)))));
+        return dirW.mul(dh).mul(wf);
+      };
+      sl.addAssign(slopeOf(sw.A0, SWf.amp.x, SWf.omega.x, d0, sw.inside).add(slopeOf(sw.A1, SWf.amp.y, SWf.omega.y, d1, sw.inside1)));
+    } else sl.addAssign(vCoast.xy);
     const n = normalize(vec3(sl.x.negate(), 1, sl.y.negate())).toVar();
     // on a plunging lip the analytic slope does not know the fold: the surface's own facet (turned to the eye) instead
     // (derivatives outside any branch: WGSL wants them in uniform control flow)
@@ -341,6 +356,11 @@ export function gpuWater(clip, waves, opts = {}) {
     const Fh = float(0.02).add(float(0.98).mul(pow(float(1).sub(max(dot(Vv.negate(), Hh), 0)), 5)));
     const spec = uSunColor.mul(cs).mul(Dm.mul(Fh).mul(0.25).div(max(cosI, 0.15))).mul(smoothstep(-0.02, 0.05, uSunDir.y));
     hitK.mulAssign(smoothstep(0.03, 0.006, s2)); // a rough far surface reflects the sky's average, not a sharp scene
+    // a face turned so far that its reflection points down or level sees water, not sky: the sea's own darker body
+    // toward the horizon (what the face of a wave mirrors: the water in front of it)
+    const below = smoothstep(0.03, -0.25, R.y);
+    skyC.assign(mix(skyC, mix(uSkyHz.mul(0.25), body.mul(1.1), 0.6), below));
+    hitK.mulAssign(float(1).sub(below));
     const sky = mix(skyC, hitC, hitK);
     const col = mix(body, sky, F).add(spec.mul(smoothstep(0, 0.3, depth)).mul(float(1).sub(hitK))).toVar();
     // the crests' glow (surface.js): the sun through a thin steep crest, toward a view into the light; a little always
