@@ -13,6 +13,7 @@ import { Fn, If, float, int, vec2, vec3, vec4, uniform, uniformArray, texture, p
 import { COAST_WGSL } from './coast.wgsl.js';
 import { bakeFoamTexture } from './foamtex.js';
 import { bakeBreaker } from './breaker.js';
+import { makeRunup } from './runup.js';
 
 // the coast (water3/swash.js, converted): entries taking the shore table's answer at the point
 const coastCode = wgsl(COAST_WGSL);
@@ -231,7 +232,7 @@ export function gpuWater(clip, waves, opts = {}) {
       // over it now (no triangle steps along the line)
       // (raised a little more with the distance: the ground's mesh and this one are interpolated over different
       // triangles, and a sheet just over one dips under the other in triangles)
-      y.assign(select(depth.lessThan(0), bed.add(0.012).add(dist.mul(0.004)), cEdge({ xz, level, bed, py: y, grad, fl: float(0), ...surfArgs })));
+      y.assign(select(depth.lessThan(0), bed.add(0.012).add(dist.mul(0.004)), SWv ? y : cEdge({ xz, level, bed, py: y, grad, fl: float(0), ...surfArgs })));
     });
     return RV.bind(vec3(xz.x.add(D.x), y, xz.y.add(D.z)));
   })();
@@ -261,7 +262,12 @@ export function gpuWater(clip, waves, opts = {}) {
     // the shoreline here (water3/swash.js): its foam, and the water over the floor with it (th); over the sand a pixel
     // the swash is not over now is not water
     const coastFoam = float(0).toVar(), th = still.toVar();
-    if (shV) If(still.lessThan(0.8).and(still.greaterThan(-3)).and(levelS.lessThanEqual(uSea.add(0.5))), () => {
+    // the run-up (gpu/runup.js): the edge driven by the field's own crests on the tide's level
+    if (SWf) If(still.lessThan(0.8).and(still.greaterThan(-4)).and(levelS.lessThanEqual(uSea.add(0.5))), () => {
+      const r = makeRunup(SWf, BFf, RF, uWTime, uSea)(P);
+      coastFoam.assign(r.z); th.assign(r.x);
+    });
+    if (shV && !SWf) If(still.lessThan(0.8).and(still.greaterThan(-3)).and(levelS.lessThanEqual(uSea.add(0.5))), () => {
       const e = max(float(0.35), RF.cellAt(P).mul(1.5)); // the beach's slope over more than a texel: the clipmap's triangles are flat, and the swash's reach steps with them
       const grad = vec2(RF.clipAtSmooth(P.add(vec2(e, 0))).x.sub(RF.clipAtSmooth(P.sub(vec2(e, 0))).x), RF.clipAtSmooth(P.add(vec2(0, e))).x.sub(RF.clipAtSmooth(P.sub(vec2(0, e))).x)).div(e.mul(2));
       const sf = cFoam({ xz: P, depth: still, grad, wave: vCoast.z, fl: float(0), ...surfArgs }).toVar();

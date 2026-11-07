@@ -105,13 +105,13 @@ async function build() {
   src = wildSource({ seed: state.seed });
   await stage('the land: the clipmap'); clip = new GpuClip(renderer, src);
   await stage('the woods');   forest = new GpuForest(renderer, clip, src, { range: 1 });
+  await stage('the swell field and the tide'); swellF = q.has('noswell') ? null : new GpuSwellField(renderer, src);
+  swe = q.has('notide') ? null : new GpuTide(renderer, src); // the tide, baked and replayed (gpu/tide.js)
   const surfU = surfUniforms(src.sea);
-  terrain = gpuTerrain(clip, { sea: src.sea, bands: forest.uBands, surf: q.has('noshore') ? null : surfU, map: mapU });
+  terrain = gpuTerrain(clip, { swell: swellF, tide: swe, wtime: surfU.uWTime, sea: src.sea, bands: forest.uBands, surf: q.has('noshore') ? null : surfU, map: mapU });
   await stage('the waves'); waves = new GpuWaves(renderer, { cascades: src.water.cascades, fetch: src.water.fetch, salt: src.cosmetic | 0 });
   await stage('the shore table'); shore = q.has('noshore') ? null : new GpuShore(renderer, src);
-  await stage('the swell field and the currents'); swellF = q.has('noswell') ? null : new GpuSwellField(renderer, src);
-  swe = q.has('notide') ? null : new GpuTide(renderer, src); // the tide, baked and replayed (gpu/tide.js)
-  currents = swellF && !q.has('nocurrents') ? new GpuCurrents(renderer, src, swellF) : null;
+  await stage('the currents');   currents = swellF && !q.has('nocurrents') ? new GpuCurrents(renderer, src, swellF) : null;
   await stage('the foam, the water'); fields = q.has('nofield') ? null : [GFOAM.far, GFOAM.near].map((level) => new GpuFoamField(renderer, { clip, waves, shore, surfU, level, swell: swellF, currents, swe: gpuLimits.maxStorageBuffersPerShaderStage >= 9 ? swe : null }));
   water = gpuWater(clip, waves, { swe, swell: swellF, sky, clouds, ssr: !q.has('nossr'), sunColor: sky.uSunColor, skyUp: sky.uSkyUp, skyHz: sky.uSkyHz, waterAt: (x, z) => src.waterAt(x, z), shore, sea: src.sea, renderer, surfU, fields, map: mapU, debug: +(q.get('wdebug') || 0) });
   if (!q.has('nowater')) scene.add(water.mesh);
@@ -296,6 +296,7 @@ function step(dt) {
     UW.level.value = wl + tideNow; const under = camera.position.y < UW.level.value - 0.03; UW.on.value = under ? 1 : 0; water.U.uUnder.value = UW.on.value;
     const lk = water.look, a = lk.uAbs.value, sc = lk.uSca.value, L = lk.uLook.value;
     UW.sig.value.set(a.x / Math.max(L.x, 0.05) + sc.x * L.y, a.y / Math.max(L.x, 0.05) + sc.y * L.y, a.z / Math.max(L.x, 0.05) + sc.z * L.y);
+    if (caustics) caustics.uSig.value.copy(UW.sig.value);
     UW.alb.value.set(sc.x * L.y / UW.sig.value.x, sc.y * L.y / UW.sig.value.y, sc.z * L.y / UW.sig.value.z); }
   if (caustics) caustics.update(sunDir, state.caustics && !q.has('nocaustics'));
   if (spray) spray.update(camera, dt, w10, state.spray);

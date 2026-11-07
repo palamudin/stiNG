@@ -11,6 +11,7 @@
 import * as THREE from 'three/webgpu';
 import { Fn, If, Return, float, int, vec2, vec3, vec4, uniform, storage, instanceIndex, texture, wgslFn, wgsl, max, min, exp, clamp, smoothstep, floor, mix, select, log2 } from 'three/tsl';
 import { COAST_WGSL } from './coast.wgsl.js';
+import { makeRunup } from './runup.js';
 import { SWASH } from '../water3/swash.js';
 const SWASH_UP = SWASH.up;
 
@@ -81,7 +82,15 @@ export class GpuFoamField {
           }
         });
         // the shoreline's own foam over the water by the line and the sand the swash covers
-        If(depth.lessThan(0.8).and(sea).and(S.uSurf.x.greaterThan(0)), () => {
+        // with the swell field: the run-up's own foam (gpu/runup.js), carried up with the climb and back with the backwash
+        if (SWr) If(depth.lessThan(0.8).and(sea), () => {
+          const r = makeRunup(SWr, BFr, RC, S.uWTime, S.uSea)(p);
+          If(r.x.greaterThan(-0.02), () => { wet.assign(true); make.assign(max(make, r.z.mul(0.9))); });
+          const e = float(0.6), grad = vec2(RC.clipAtSmooth(p.add(vec2(e, 0))).x.sub(RC.clipAtSmooth(p.sub(vec2(e, 0))).x), RC.clipAtSmooth(p.add(vec2(0, e))).x.sub(RC.clipAtSmooth(p.sub(vec2(0, e))).x)).div(e.mul(2));
+          const gl = grad.length(), down = select(gl.greaterThan(1e-4), grad.div(gl).negate(), vec2(0)), spd = S.uSurf.x.mul(9.81).mul(2).sqrt().mul(0.6);
+          v.addAssign(down.mul(select(r.w.lessThan(0.25), spd.negate(), spd.mul(0.7))).mul(smoothstep(-0.05, 0.05, r.x)));
+        });
+        if (!SWr) If(depth.lessThan(0.8).and(sea).and(S.uSurf.x.greaterThan(0)), () => {
           const e = max(float(0.35), float(TX));
           const grad = vec2(RC.clipAtSmooth(p.add(vec2(e, 0))).x.sub(RC.clipAtSmooth(p.sub(vec2(e, 0))).x), RC.clipAtSmooth(p.add(vec2(0, e))).x.sub(RC.clipAtSmooth(p.sub(vec2(0, e))).x)).div(e.mul(2));
           const sf = cFoam({ xz: p, depth, grad, wave, fl: float(0), ...surf }).toVar();

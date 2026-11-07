@@ -5,10 +5,11 @@
 // sand and mud at the water, stone on steep ground, snow up high; the rest of terrain.js (the heightfield shadow,
 // the canopy painted far off, the swash's wet sand, the close detail) comes over as the port goes on.
 import * as THREE from 'three/webgpu';
-import { Fn, float, int, vec2, vec3, vec4, attribute, positionLocal, positionWorld, cameraPosition, cameraViewMatrix, uniform, abs, max, min, mix, smoothstep, step, pow, length, normalize, dot, clamp, floor, fract, fwidth, If, wgslFn } from 'three/tsl';
+import { Fn, float, int, vec2, vec3, vec4, attribute, positionLocal, positionWorld, cameraPosition, cameraViewMatrix, uniform, abs, max, min, mix, smoothstep, step, pow, length, normalize, dot, clamp, floor, fract, fwidth, If, wgslFn, select } from 'three/tsl';
 import { MAP } from '../map.js';
 import { clipGrid } from '../clipmap.js';
 import { coastWet } from './water.js';
+import { makeRunup } from './runup.js';
 
 const lin = (r, g, b) => vec3(r ** 2.2, g ** 2.2, b ** 2.2);
 const hash2 = wgslFn(`fn tHash(p: vec2<f32>) -> f32 {
@@ -86,7 +87,17 @@ export function gpuTerrain(clip, opts = {}) {
   })();
   // the sand the swash has wetted (water3/swash.js sw3Wet): darker while the water fills its pores, a shine just after
   // the water leaves it, drying from the top down; on a sea beach only. (darkness, gloss, covered)
-  const wetN = opts.surf ? Fn(() => {
+  // (with the swell field: the run-up's own wetting, gpu/runup.js: wet where the waves that arrive have been, draining
+  // since; under the tide's water wet)
+  const RUN = opts.swell ? makeRunup(opts.swell.reader(), opts.tide ? opts.tide.reader() : null, RF, opts.wtime, uniform(opts.sea ?? 0)) : null;
+  const wetN = RUN ? Fn(() => {
+    const P = positionWorld.xz, w = vec3(0).toVar(), hs = RF.clipAtSmooth(P).x.sub(RF.clipWater(P));
+    If(hs.lessThan(4).and(RF.clipWater(P).lessThanEqual(float(opts.sea ?? 0).add(0.5))), () => {
+      const r = RUN(P);
+      w.assign(vec3(r.y, r.y.mul(float(1).sub(r.y)).mul(4).max(select(r.x.greaterThan(0), float(0.8), float(0))), select(r.x.greaterThan(0), float(1), float(0))));
+    });
+    return w;
+  })() : opts.surf ? Fn(() => {
     const S = opts.surf, P = positionWorld.xz, w = vec3(0).toVar(), TW = RF.clipWater(P), hs = RF.clipAtSmooth(P).x.sub(TW);
     If(hs.greaterThan(0).and(hs.lessThan(3)).and(TW.lessThanEqual(S.uSea.add(0.5))), () => {
       const e = max(float(0.35), RF.cellAt(P).mul(1.5));
@@ -131,7 +142,7 @@ export function gpuTerrain(clip, opts = {}) {
     col.assign(mix(col, lin(0.95, 0.96, 0.98), snow));
     return vec4(col, 1);
   })();
-  if (opts.surf) mat.roughnessNode = Fn(() => { const hg = TD.x.sub(RF.clipWater(P)); const sw = subst(P, float(1).sub(TN.y), TD); const mh = micro(P, sw); const tr = smoothstep(0.004, -0.003, mh.sub(micro(P.add(vec2(0.04, 0.03)), sw).add(micro(P.sub(vec2(0.04, 0.03)), sw)).mul(0.5))); return mix(float(0.92), mix(float(0.3), float(0.06), tr), wetN.y.max(smoothstep(0.03, -0.04, hg).mul(0.3))); })(); // the shine of ground the water has just left, the troughs' films brightest
+  if (opts.surf) mat.roughnessNode = Fn(() => { const hg = TD.x.sub(RF.clipWater(P)); const sw = subst(P, float(1).sub(TN.y), TD); const mh = micro(P, sw); const tr = smoothstep(0.004, -0.003, mh.sub(micro(P.add(vec2(0.04, 0.03)), sw).add(micro(P.sub(vec2(0.04, 0.03)), sw)).mul(0.5))); return mix(float(0.92), mix(float(0.3), float(0.06), tr), wetN.y.mul(smoothstep(-0.05, 0.0, hg))); })(); // (under the water no gloss: there is no air at the grains to shine) // the shine of ground the water has just left, the troughs' films brightest
   // the map (map.js MAP_GLSL): zooming out, the ground turns into one, from the same clipmap: a hypsometric palette,
   // hillshade from the north-west, dotted forests, dashed trails, contours every 20 m, water flat blue by depth and a
   // dark coast line. Unlit (emissive, scaled by uMapK to show at its own colours whatever the exposure), the lit

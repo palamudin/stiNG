@@ -9,7 +9,7 @@
 // it up where its sunlight entered the surface, at the mip for its own footprint (far views blur to an even light), the
 // depth picking and blending the slices. The result is a factor on the sun's light, for a lit material's received shadow.
 import * as THREE from 'three/webgpu';
-import { Fn, float, vec2, vec3, vec4, uniform, texture, attribute, positionWorld, cameraPosition, varyingProperty, dFdx, dFdy, length, max, min, abs, sqrt, floor, smoothstep, mix, refract, normalize, dot, log2, select } from 'three/tsl';
+import { Fn, float, vec2, vec3, vec4, uniform, texture, attribute, positionWorld, cameraPosition, varyingProperty, dFdx, dFdy, length, max, min, abs, sqrt, floor, smoothstep, mix, refract, normalize, dot, log2, select, exp } from 'three/tsl';
 
 export const CAUSTIC = { res: 512, near: 8, depths: [0.5, 1.5, 4.0], margin: 0.12, maxRatio: 16, n: 1.333 };
 
@@ -17,7 +17,7 @@ export class GpuCaustics {
   // clip: gpu/clip.js, waves: gpu/waves.js, sunDir: a vec3 uniform (toward the sun)
   constructor(clip, waves, sunDir, renderer) {
     this.clip = clip; this.waves = waves; this.uSun = sunDir; this.renderer = renderer;
-    this.uOn = uniform(1); this.uStrength = uniform(1); this.uLit = uniform(1);
+    this.uOn = uniform(1); this.uStrength = uniform(1); this.uLit = uniform(1); this.uSig = uniform(new THREE.Vector3(0.45, 0.075, 0.035)); // the water's extinction per metre (demo.js keeps it the water's)
     const C = CAUSTIC, res = C.res, Ls = waves.cascades, N = waves.N, m = C.margin, n = C.n;
     let ci = 0; for (let c = 1; c < Ls.length; c++) if (Math.abs(Math.log(Ls[c] / C.near)) < Math.abs(Math.log(Ls[ci] / C.near))) ci = c;
     const L = this.L = Ls[ci], tS = waves.slope[ci];
@@ -89,7 +89,9 @@ export class GpuCaustics {
         select(D.lessThan(d1), mix(c.r, c.g, D.sub(d0).div(d1 - d0)),
           select(D.lessThan(d2), mix(c.g, c.b, D.sub(d1).div(d2 - d1)), mix(c.b, float(1), smoothstep(d2, 3 * d2, D)))));
       const k = this.uOn.mul(this.uLit).mul(select(D.greaterThan(0.0005), float(1), float(0)));
-      return R.bind(vec3(mix(float(1), mix(float(1), max(cd, 0), this.uStrength), k)));
+      // and the sunlight's own way down through the water (it reaches the floor dimmer and bluer with the depth; the view's
+      // way up is the water's and the fog's)
+      return R.bind(vec3(mix(float(1), mix(float(1), max(cd, 0), this.uStrength), k)).mul(exp(this.uSig.mul(D).negate())));
     })();
   }
 }
