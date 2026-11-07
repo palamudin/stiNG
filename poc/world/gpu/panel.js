@@ -38,6 +38,11 @@ export function buildPanel(hud, state, onChange = () => {}) {
   };
 
   // the weather and the season
+  // what is drawn (to look at the water alone), and the panel itself (H brings it back)
+  const V = section('Show', true);
+  check(V, state, 'trees', 'Trees'); check(V, state, 'grass', 'Grass');
+  const hb = document.createElement('button'); hb.textContent = 'Hide the panel (H)'; hb.style.cssText = 'font: 11px system-ui; margin-top: 4px';
+  hb.addEventListener('click', () => { hud.hidden = true; }); V.appendChild(hb);
   const W = section('Weather and season', true);
   check(W, state, 'auto', 'Weather follows the clock (day by day, its odds by the season)');
   slider(W, state, 'day', 'Day of year', 0, 359, 1, (v) => `${v | 0} ${seasonName(v)}`);

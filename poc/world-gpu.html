@@ -6,6 +6,7 @@
   html, body { margin: 0; height: 100%; background: #0b0f14; overflow: hidden; font: 13px/1.4 system-ui, sans-serif; color: #e8edf2; }
   canvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
   #hud { position: fixed; left: 12px; top: 12px; max-width: min(560px, calc(100vw - 24px)); background: rgba(10, 14, 20, 0.72); border-radius: 8px; padding: 10px 12px; }
+  #hud[hidden] { display: none; }
   #stats { white-space: pre-wrap; font: 12px/1.45 ui-monospace, monospace; margin: 0 0 8px; }
   .row { display: flex; gap: 10px; align-items: center; }
   .row label { min-width: 96px; } .row input { flex: 1; } .row output { min-width: 44px; text-align: right; }
@@ -29,7 +30,7 @@
   <div class="row"><label for="cover">Cloud cover</label><input id="cover" type="range" min="0" max="1" step="0.01" value="0.35"><output id="oCover"></output></div>
   <div class="row"><label for="cshadow">Cloud shadows</label><input id="cshadow" type="checkbox" checked style="flex:0"></div>
   <div class="row"><label for="caustics">Caustics</label><input id="caustics" type="checkbox" checked style="flex:0"></div>
-  <p class="note">WebGPU spike: ground from a compute-filled clipmap; every tree placed, culled to the view and sorted into its level on the GPU, drawn indirectly. Drag to look, WASD to move, wheel to zoom (out past a few hundred metres the ground turns into a map, with pins for places), P for the player cube (right button: first person). B drops floating things in the water. <code>?webgl</code> forces the WebGL 2 fallback.</p>
+  <p class="note">WebGPU spike: ground from a compute-filled clipmap; every tree placed, culled to the view and sorted into its level on the GPU, drawn indirectly. Drag to look, WASD to move, wheel to zoom (out past a few hundred metres the ground turns into a map, with pins for places), P for the player cube (right button: first person). B drops floating things in the water. H hides this panel (and brings it back). <code>?webgl</code> forces the WebGL 2 fallback.</p>
 </div>
 <script type="module" src="./world/gpu/demo.js"></script>
 </body></html>

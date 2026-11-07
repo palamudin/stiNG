@@ -63,7 +63,7 @@ const mapU = { uMap: uniform(0), uMapK: uniform(1) };
 const mapFor = (d) => THREE.MathUtils.smoothstep(Math.log(d), Math.log(MAP.from), Math.log(MAP.to));
 const pitchFor = (d) => 0.12 + 0.95 * THREE.MathUtils.smoothstep(Math.log10(d), -1.2, 3.7);
 const state = { seed: 7, treeDist: 1, wind: 4, hour: +(q.get('hour') || 11), cover: +(q.get('cover') ?? 0.35), cshadow: !q.has('nocshadow'), caustics: !q.has('nocaustics'),
-  spray: q.has('spray'), auto: q.has('auto'), day: +(q.get('day') ?? 100), rain: 0, haze: 1, dens: 1, kind: '', windDir: [0.94, 0.35], waterAuto: true, runoff: 0 };
+  spray: q.has('spray'), trees: !q.has('notrees'), grass: !q.has('nograss2'), auto: q.has('auto'), day: +(q.get('day') ?? 100), rain: 0, haze: 1, dens: 1, kind: '', windDir: [0.94, 0.35], waterAuto: true, runoff: 0 };
 let swellF = null, caustics, query, floaters, spray, src, clip, terrain, forest, waves, water, shore, fields, grass, wtime = 0;
 function build() {
   if (terrain) { scene.remove(terrain, forest.group, water.mesh); if (grass) scene.remove(grass.group); }
@@ -119,7 +119,8 @@ cv.addEventListener('pointerdown', (e) => { if (e.button === 2) { if (player.on)
 cv.addEventListener('pointermove', (e) => { if (drag && drag.id === e.pointerId) { cam.yaw = drag.yaw - (e.clientX - drag.x) * 0.005; cam.look = THREE.MathUtils.clamp(drag.look - (e.clientY - drag.y) * 0.005, -1.45, 1.45); } });
 cv.addEventListener('pointerup', () => { drag = null; });
 cv.addEventListener('wheel', (e) => { e.preventDefault(); if (player.on) player.d = THREE.MathUtils.clamp(player.d * (1 + e.deltaY * 0.001), 1.2, 40); else cam.dist = THREE.MathUtils.clamp(cam.dist * (1 + e.deltaY * 0.0012), 0.5, 6000); }, { passive: false });
-addEventListener('keydown', (e) => { if (e.code === 'KeyP' && !e.repeat) setPlayer(!player.on); if (e.code === 'KeyB' && !e.repeat) dropFloaters(); });
+addEventListener('keydown', (e) => { if (e.code === 'KeyH' && !e.repeat) $('hud').hidden = !$('hud').hidden; // H: the panel away and back
+  if (e.code === 'KeyP' && !e.repeat) setPlayer(!player.on); if (e.code === 'KeyB' && !e.repeat) dropFloaters(); });
 // the flotsam: a boat, a buoy, crates and barrels in the water ahead of the eye (or of the player)
 function dropFloaters() {
   const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd); fwd.y = 0; if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, -1); fwd.normalize();
@@ -215,14 +216,15 @@ function step(dt) {
     renderer.toneMappingExposure = THREE.MathUtils.clamp(Math.PI / Math.max(lum + lumM, 0.05), 0.02, 40); }
   // the map: its blend, and the woods and grass giving way to it
   mapU.uMap.value = cam.map || 0; mapU.uMapK.value = 0.85 / Math.max(renderer.toneMappingExposure, 1e-3);
-  forest.group.visible = !q.has('noforest') && (cam.map || 0) < 0.55;
+  forest.group.visible = !q.has('noforest') && state.trees && (cam.map || 0) < 0.55;
+  if (grass) grass.group.visible = state.grass;
   updatePins();
   // the sun's shadow box follows the eye
   const f = player.on ? player.pos : new THREE.Vector3(cam.fx, ground(cam.fx, cam.fz), cam.fz);
   sun.target.position.copy(f); sun.position.copy(f).addScaledVector(keyDir, 300);
   clip.update(camera.position.x, camera.position.z, dt);
   if (forest.rangeK !== state.treeDist) forest.setRange(state.treeDist);
-  if (!q.has('noforest')) forest.update(camera, dt, [state.wind * state.windDir[0], state.wind * state.windDir[1]]);
+  if (!q.has('noforest') && state.trees) forest.update(camera, dt, [state.wind * state.windDir[0], state.wind * state.windDir[1]]);
   // the swell (index.js): from a long fetch at the wind (never under the sea's minimum), and the surf it drives
   wtime += dt;
   const w10 = [Math.max(state.wind, 1.5) * state.windDir[0], Math.max(state.wind, 1.5) * state.windDir[1]];
@@ -248,7 +250,7 @@ function step(dt) {
     if (caustics) caustics.uStrength.value = L.caustics;
     lk.uLip.value = L.lip; if (spray) spray.uRate.value = L.spray * (A ? 1 + 0.08 * Math.max(0, state.wind - 5) : 1);
     if (fields) for (const f of fields) { f.uBias.value = L.foamBias + wk; f.uScale.value = L.foamScale; f.update(dt, camera, w10, L.linger); } }
-  if (grass) grass.update(camera, ground(camera.position.x, camera.position.z), w10, dt);
+  if (grass && state.grass) grass.update(camera, ground(camera.position.x, camera.position.z), w10, dt);
   water.U.uSunDir.value.copy(sunDir);
   if (caustics) caustics.update(sunDir, state.caustics && !q.has('nocaustics'));
   if (spray) spray.update(camera, dt, w10, state.spray);
