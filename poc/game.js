@@ -1332,6 +1332,16 @@ function buildBird() {
   return g;
 }
 const birdViews = new Map();
+// birds and dragonflies are drawn only in view (lifted: the test is at their lifted height) and within CRITTER_FAR m
+// (a dragonfly's 7 cm is a pixel at 60 m), their shadows only within 25 m; each is several meshes, so every one in
+// the active chunks drawn always came to a hundred draws
+const CRITTER_FAR = { bird: 160, dragonfly: 60, shadow: 25 };
+function critterPresent(g, r) {
+  const c = camera.position, x = g.position.x, z = g.position.z, y = g.position.y + terrAt(x, z), d = Math.hypot(x - c.x, y - c.y, z - c.z);
+  const far = r > 0.2 ? CRITTER_FAR.bird : CRITTER_FAR.dragonfly;
+  g.visible = d < far && (d < CRITTER_FAR.shadow || inView(x, y, z, r));
+  return g.visible;
+}
 const spiderPool = [];
 function renderBirdsAndSpiders(t, dt) {
   const seen = new Set();
@@ -1346,6 +1356,7 @@ function renderBirdsAndSpiders(t, dt) {
       const p = st ? new THREE.Vector3(st.x, st.y, st.z) : V(birdPos(bd, t));
       const v = st ? new THREE.Vector3(st.vx, st.vy, st.vz) : V(birdPos(bd, t + 1)).sub(p);
       g.position.lerp(p, g.userData.init ? 1 - Math.exp(-dt * 20) : 1); g.userData.init = true;
+      if (!critterPresent(g, 0.3)) return; // by presence (never culled by their bounds on hills: tested here)
       if (v.lengthSq() > 1e-8) { g.rotation.order = 'YXZ'; g.rotation.y = Math.atan2(v.x, v.z); g.rotation.x = -Math.atan2(v.y, Math.hypot(v.x, v.z)); }
       const diving = st && st.mode === 'dive';
       const flap = diving ? 0.15 : Math.sin(t * 0.35 + i) * 0.7;
@@ -1366,6 +1377,7 @@ function renderBirdsAndSpiders(t, dt) {
       const p = st ? new THREE.Vector3(st.x, st.y, st.z) : V(dragonPos(df, t));
       const v = st ? new THREE.Vector3(st.vx, st.vy, st.vz) : V(dragonPos(df, t + 1)).sub(p);
       g.position.lerp(p, g.userData.init ? 1 - Math.exp(-dt * 25) : 1); g.userData.init = true;
+      if (!critterPresent(g, 0.1)) return;
       if (v.lengthSq() > 1e-8) { g.rotation.order = 'YXZ'; g.rotation.y = Math.atan2(v.x, v.z); g.rotation.x = -Math.atan2(v.y, Math.hypot(v.x, v.z)) * 0.5; }
       const flap = Math.sin(performance.now() * 0.6 + i * 7) * 0.5;
       g.userData.w1.rotation.z = flap; g.userData.w2.rotation.z = -flap; g.userData.w3.rotation.z = -flap * 0.8; g.userData.w4.rotation.z = flap * 0.8;
@@ -1794,6 +1806,8 @@ const CARRY_MAT = { pollen: mat('#e8b830'), wasp: mat('#d4a514'), moth: mat('#8a
 // A wasp is lifted onto the ground whole, by the ground under it (terrAt), never vertex by vertex like the world's
 // fixed things: a body lifted per vertex leans with the slope below it, and in flight only the player pitches the
 // wasp. Its materials are kept apart from the lifted ones (the same colours elsewhere are lifted per vertex).
+const MIRROR_LAYER = 5; // World v3's water mirrors what is on this layer (water3/surface.js MIRROR): the wasps, lit by the sun and the sky
+for (const l of [sun, hemi]) l.layers.enable(MIRROR_LAYER);
 const RIGID = new Map();
 function rigidMat(m) {
   let r = RIGID.get(m);
@@ -1814,6 +1828,7 @@ function rigidWasp(g) {
     if (o.castShadow && big && !skip.has(o)) casters.push(o); else o.castShadow = false;
   });
   g.userData.casters = casters; g.userData.casting = true; g.userData.perf = 'wasps';
+  g.traverse((o) => o.layers.enable(MIRROR_LAYER)); // seen in the water's mirror (World v3)
   return g;
 }
 // By presence (GDD 18.102): a wasp is drawn whole only within WASP_LOD.near m of the camera (1.5 cm is 3 pixels at
@@ -3908,7 +3923,7 @@ let last = performance.now(), acc = 0, panelTimer = 0;
 // the sim's steps, the rest of the frame's own work (views, HUD, audio) and handing the frame to the GPU; the GPU's
 // milliseconds a frame where the browser gives timer queries (EXT_disjoint_timer_query_webgl2: desktop Chrome and Edge),
 // per pass in World v3; each as a share of the frame (load); the draw calls and triangles. Averaged over half a second.
-const PERF = { gpu: new GpuTimer(renderer), acc: { n: 0, frame: 0, sim: 0, cpu: 0, submit: 0 }, t0: 0, el: null };
+const PERF = { cpuBy: {}, gpu: new GpuTimer(renderer), acc: { n: 0, frame: 0, sim: 0, cpu: 0, submit: 0 }, t0: 0, el: null };
 // where the triangles come from: every visible mesh of the scene (and World v3's water scene), its triangles times its
 // instances, summed by the part it belongs to (the nearest named group: grass, forest, terrain, water, ...; the game's
 // own chunks, people and insects as 'game'), the five largest. The main pass only: shadows draw their casters again
@@ -3925,7 +3940,35 @@ function drawPart(o) {
   DRAWS.part.set(o, k);
   return k;
 }
+// World v3's own passes draw from scenes of their own (the waves, clouds, sky, post chain, clipmap, foam ...): each
+// named by where it hangs in the World (its key), so the overlay can say which
+function nameScenes(o, path, depth, seen) {
+  if (!o || typeof o !== 'object' || seen.has(o) || depth > 3) return; seen.add(o);
+  if (o.isScene) { if (!o.name) o.name = path; return; }
+  if (o.isObject3D || o.isTexture || o.isMaterial || o.isBufferGeometry || o.isWebGLRenderer || ArrayBuffer.isView(o)) return;
+  for (const k of Object.keys(o)) { const v = o[k]; if (v && typeof v === 'object') nameScenes(v, path ? path + '.' + k.replace(/^_/, '') : k.replace(/^_/, ''), depth + 1, seen); }
+}
+// the CPU by part: World v3's parts (each one's update, the post chain's and the clouds' render) timed by wrapping
+// their methods once the overlay is on, with the game's own phases of the frame (window.__prof's keys)
+function hookCpu() {
+  if (!world2 || PERF.cpuHooked) return; PERF.cpuHooked = true;
+  const wrap = (o, m, k) => {
+    if (!o || typeof o[m] !== 'function') return;
+    const f = o[m];
+    o[m] = function (...a) { if (!opts.perf) return f.apply(this, a); const t = performance.now(); try { return f.apply(this, a); } finally { PERF.cpuBy[k] = (PERF.cpuBy[k] || 0) + performance.now() - t; } };
+  };
+  for (const k of Object.keys(world2)) { const o = world2[k]; if (o && typeof o === 'object' && !o.isObject3D && typeof o.update === 'function') wrap(o, 'update', 'w3 ' + k); }
+  for (const k of ['post', 'clouds', 'sky']) if (world2[k]) wrap(world2[k], 'render', 'w3 ' + k + ' render');
+  if (world2.surface) wrap(world2.surface, 'render', 'w3 surface render');
+}
+function perfCpu() {
+  const f = Math.max(1, PERF.cpuN || 1), top = Object.entries(PERF.cpuBy).filter(([, v]) => v / f >= 0.05).sort((a, b) => b[1] - a[1]).slice(0, 9).map(([k, v]) => `${k} ${(v / f).toFixed(2)}`).join(' · ');
+  PERF.cpuBy = {}; PERF.cpuN = 0;
+  return `CPU ms a frame: ${top || '-'}`;
+}
 function hookDraws() {
+  hookCpu();
+  if (world2 && !DRAWS.named) { DRAWS.named = true; nameScenes(world2, '', 0, new Set([world2.scene, world2.renderer, world2.camera])); }
   if (DRAWS.hooked) return; DRAWS.hooked = true;
   const orig = renderer.renderBufferDirect, info = renderer.info.render;
   renderer.renderBufferDirect = function (camera, scn, geometry, material, object, group) {
@@ -3958,7 +4001,7 @@ function perfTris() {
 }
 function perfFrame(raw, sim, cpu, submit) {
   if (!opts.perf) { if (PERF.el && !PERF.el.hidden) PERF.el.hidden = true; return; }
-  hookDraws(); DRAWS.frames++;
+  hookDraws(); DRAWS.frames++; PERF.cpuN = (PERF.cpuN || 0) + 1;
   const A = PERF.acc; A.n++; A.frame += raw * 1000; A.sim += sim; A.cpu += cpu; A.submit += submit;
   const now = performance.now(); if (now - PERF.t0 < 500) return;
   PERF.t0 = now;
@@ -3970,7 +4013,7 @@ function perfFrame(raw, sim, cpu, submit) {
     + `CPU ${(cp + sb).toFixed(1)} ms (${pct(cp + sb)}): sim ${sm.toFixed(1)} · frame ${(cp - sm).toFixed(1)} · submit ${sb.toFixed(1)}<br>`
     + (g === null ? 'GPU: no timer queries in this browser' : `GPU ${g.toFixed(1)} ms (${pct(g)})${passes ? `<br><span>${passes}</span>` : ''}`)
     + `<br>${info.calls} calls · ${(info.triangles / 1e6).toFixed(2)} M triangles (all passes, shadows too) · ${world2 ? 'World v3' : 'classic'}${world2 && world2.grass ? ` · grass ${world2.grass.matte ? 'matte' : 'glossy'}` : ''}`
-    + `<br><span>${perfTris()}</span><br><span>${perfDraws()}</span>`;
+    + `<br><span>${perfTris()}</span><br><span>${perfDraws()}</span><br><span>${perfCpu()}</span>`;
   el.hidden = false;
   A.n = A.frame = A.sim = A.cpu = A.submit = 0;
 }
@@ -4003,7 +4046,7 @@ function frame(now) {
   document.body.classList.toggle('atmenu', atMenu);
   if (atMenu && sim && !running) input.yaw += dt * 0.06;
   if (sim) {
-    const P = window.__prof, tm = P ? (k, t0) => { P[k] = (P[k] || 0) + performance.now() - t0; } : null;
+    const P = window.__prof || (opts.perf ? PERF.cpuBy : null), tm = P ? (k, t0) => { P[k] = (P[k] || 0) + performance.now() - t0; } : null;
     let t0 = performance.now();
     const alpha = running && !paused ? acc / DT : 1;
     const t = sim.tick + alpha;
@@ -4100,6 +4143,7 @@ function w2Frame(dt, focus) {
   // World v3's year opens in late winter (snow until t 0.06), greens by 0.08, turns from 0.55, bare and snowy past 0.76:
   // the colony's spring-to-autumn runs over t 0.08..0.78 of it, its winter at 0.9
   const day = 360 * (sim.winter ? 0.9 : 0.08 + 0.7 * Math.min(1, Math.max(0, sim.seasonFrac)));
+  if (world2.surface) world2.surface.mirrorAt = focus; // the water under the wasp is the mirror's plane
   world2.set({ map: ov.m, hour: md / 60, day, moon: NIGHT.full, cloud, rain, storm, snow: 0, haze: 1 + rain, mist: 1 + 3 * rain, wet: rain, wind: w2Breeze(wd), wind10: [wd.x * 1.26, wd.z * 1.26] });
   const fy = focus ? terrAt(focus.x, focus.z) : 0;
   const fd = focus ? Math.max(0.05, Math.hypot(camera.position.x - focus.x, camera.position.y - focus.y - fy, camera.position.z - focus.z)) : 10;

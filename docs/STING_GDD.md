@@ -2483,6 +2483,22 @@ On a jump the CPU path no longer blurs a level out to its parent: the window it 
 
 The game now asks for a square at least 16 m across (`causticsMin`), pushed 30% of its size ahead along the view (`causticsAhead`), on a 512 texture with a 384 grid. That is about the old detail (3 cm texels, 7 cm cells, against 2.3 and 5 cm) over 2.7 times the width. Water seen at a slant still clouds with distance: that is the water, not the caustics.
 
+### 18.105 The water's mirror, birds by presence, and the CPU by part
+
+**What was wrong.** The wasp showed in the water as if it were under the surface, and larger the higher it flew. That was the refraction, not a reflection. The water reads the scene under it where the bent ray lands on screen, and the scene there includes the wasp, drawn in front of the water. The bend grows with the depth and the angle, so the wasp's own picture was pulled into the water.
+
+**The mirror** (water3/surface.js `MIRROR`, `mirror()`; called from `World.render` before the post chain). What the game puts on layer 5 (its wasps, with the sun and sky lights) is drawn in two passes, each into a target half the screen's size:
+- **Reflection:** a camera at the eye mirrored in the water's plane under the driven wasp draws those things. The surface reads this target where its own point projects through that camera, rippled by the surface's normal. It goes over the sky and screen-space reflection, premultiplied. This is a true planar reflection: in place, at the right size, from the wasp itself.
+- **Mask:** the same things drawn from the eye. Where the refraction's pixel lands on them, the water reads straight down instead.
+
+The mirror draws only while there is water under the wasp and the eye is within 40 m of it. The cameras see only that layer, so it costs a few draws.
+
+**Birds and dragonflies by presence.** Once lifted onto the ground and no longer culled by their bounds (18.102), every bird and dragonfly in the active chunks was drawn, several meshes each: about 100 draws. They are now drawn only when both hold:
+- in view, at their lifted height, or within 25 m for their shadows;
+- within 160 m (birds) or 60 m (dragonflies).
+
+**The overlay's CPU line.** Each World v3 part's `update` is timed by wrapping it when the overlay is on, along with the post chain's, clouds', sky's and surface's `render`. The game's own phases of the frame use the `window.__prof` keys. The line shows the top items in ms a frame. World v3's helper scenes are named by where they hang in the World, so the draws line names them (waves, clouds, sky, post, clipmap, foam) instead of "other scene".
+
 ### 18.104 The grass's clump cache
 
 Every grass clump in a ring is the same tuft of blades, but each clump's place decides the rest:
