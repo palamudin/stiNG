@@ -28,7 +28,7 @@ export class GpuFoamField {
     const A = storage(this.aAttr, 'float', n * n), B = storage(this.bAttr, 'float', n * n);
     this.uOrigin = uniform(new THREE.Vector2()); this.uPrev = uniform(new THREE.Vector2()); this.uDt = uniform(0); this.uLinger = uniform(4); this.uDrift = uniform(new THREE.Vector2());
     this.uBias = uniform(0.05); this.uScale = uniform(1.3);
-    const SWr = opts.swell ? opts.swell.reader() : null; this.uWindU = uniform(5);
+    const SWr = opts.swell ? opts.swell.reader() : null; const CUr = opts.currents ? opts.currents.reader() : null; // gpu/currents.js: the surface's currents this.uWindU = uniform(5);
     const RC = opts.clip.reads(TX < 1 ? 'FFN' : 'FFF'), shR = opts.shore ? opts.shore.reader() : null, S = opts.surfU, waves = opts.waves;
     const surf = { surf: S.uSurf, surfX: S.uSurfX, t: S.uWTime, swDir: S.uSwDir };
     const L1 = waves.cascades[1], L2 = waves.cascades[2], N = waves.N;
@@ -92,6 +92,8 @@ export class GpuFoamField {
         });
       }
       If(wet.not(), () => { B.element(t).assign(0); Return(); });
+      // carried by the surface's currents (the rivers, the surf's longshore current, the waves' drift, the rips that return it)
+      if (CUr) v.addAssign(CUr(p));
       const prev = prevAt(p.sub(v.mul(this.uDt)));
       // fresh foam is as thick as the breaking that makes it (not piled up past it: a band of solid white), a little more
       // where breaking goes on, and fades over the linger time where it stops, eroding into lace as it thins
