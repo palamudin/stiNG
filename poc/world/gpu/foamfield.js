@@ -58,7 +58,12 @@ export class GpuFoamField {
           if (SWr) { // the swell field's breakers (gpu/swellfield.js): broken waves' crests make white, carried along their rays
             const sw = SWr.swell(p), ph = sw.A0.x.sub(SWr.omega.x.mul(S.uWTime)), psi = ph.add(Math.PI).mod(2 * Math.PI).sub(Math.PI).negate();
             const a = sw.A0.y.mul(S.uSurf.x), inF = sw.inside.mul(float(1).sub(smoothstep(0.7, 2.2, sw.A0.w.mul(depth))));
-            const ww = sw.B0.y.mul(inF).mul(smoothstep(-0.9, -0.1, psi)).mul(exp(psi.max(0).mul(-0.9))).mul(smoothstep(0.05, 0.3, a));
+            // made where the wave gives up its energy (the field's loss: breaking on the floor, a shoal's focus, a current's
+            // block), on the crest's front and its tail; the open water's whitecaps weighted by the wave energy the field has
+            // brought here (more over a focusing shoal, less in a headland's shadow)
+            const loss = smoothstep(0.0, 0.04, sw.B0.w);
+            const ww = max(loss, sw.B0.y.mul(0.3)).mul(inF).mul(smoothstep(-0.9, -0.1, psi)).mul(exp(psi.max(0).mul(-0.9))).mul(smoothstep(0.05, 0.3, a));
+            make.mulAssign(mix(float(1), sw.A0.y.mul(sw.A0.y).clamp(0.2, 2.5), sw.inside));
             wave.assign(ww); make.assign(max(make, ww.mul(0.8)));
             const th = sw.A0.z, d0 = SWr.dir, dirW = d0.mul(th.cos()).add(vec2(d0.y.negate(), d0.x).mul(th.sin()));
             v.addAssign(dirW.mul(depth.max(0.1).mul(9.81).sqrt()).mul(0.25).mul(inF));

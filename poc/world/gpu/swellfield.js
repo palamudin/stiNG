@@ -123,7 +123,12 @@ export class GpuSwellField {
             // how far the wave has run since it broke (m along its ray): the breaker's stage (the lip rising, pitching, falling
             // into the trough, the collapse into a bore), as the travel parameter of Malan's breaking waves
             const since = select(qx.y.greaterThan(0.5), qx.z.add(float(h).div(max(cos(th), 0.3))), float(0)).mul(select(broke.greaterThan(0.5), float(1), float(0)));
-            W.element(at(row, j)).assign(vec4(ph, a, th, k)); X.element(at(row, j)).assign(vec4(ratio.min(4), broke, since.min(500), 0));
+            // the energy the wave loses here (its share per metre of travel): to breaking (what the depth limit took), and all
+            // of it where a current blocks it; kept a wavelength's way on (the turbulence and the white it leaves). The
+            // foam's cause, not a guess: where the floor, a shoal's focusing or a current makes the water give its energy up
+            const lost = select(blocked.and(g.y.greaterThan(0.5)), float(1), max(aFree.mul(aFree).sub(a.mul(a)), 0).div(max(aFree.mul(aFree), 1e-4))).div(h);
+            const diss = max(lost, qx.w.mul(exp(float(-h).div(max(lam, 4))))).mul(g.y);
+            W.element(at(row, j)).assign(vec4(ph, a, th, k)); X.element(at(row, j)).assign(vec4(ratio.min(4), broke, since.min(500), diss.min(1)));
           });
         }
         storageBarrier(); workgroupBarrier();

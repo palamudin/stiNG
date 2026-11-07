@@ -174,7 +174,7 @@ export function gpuWater(clip, waves, opts = {}) {
       const psi = t0.ph.add(Math.PI).mod(2 * Math.PI).sub(Math.PI).negate().toVar(); // < 0 ahead of the crest
       lipPsi.assign(psi); lipB.assign(smoothstep(0.7, 1.0, sw.B0.x).mul(wF)); lipA.assign(t0.a); lipDir.assign(t0.dirW);
       lipU.assign(select(sw.B0.y.greaterThan(0.5), sw.B0.z.div(max(float(6.2832).div(max(t0.k, 1e-3)).mul(0.3), 2)), float(-1))); // the breaker's stage: 0 the break .. 1 the lip in the trough
-      const brk = sw.B0.y.mul(wF);
+      const brk = max(smoothstep(0.0, 0.04, sw.B0.w), sw.B0.y.mul(0.35)).mul(wF); // the white where the wave loses its energy (gpu/swellfield.js), a little over every bore
       vCoast.z.assign(brk.mul(smoothstep(-0.9, -0.1, psi)).mul(exp(psi.max(0).mul(-0.9))).mul(smoothstep(0.05, 0.3, t0.a)));
       vCoast.w.assign(brk.mul(0.35).mul(smoothstep(0.05, 0.3, t0.a)));
       ub.assign(t0.a.mul(SWv.omega.x).div(max(t0.k.mul(depth.max(0.05)).mul(2).exp().sub(t0.k.mul(depth.max(0.05)).mul(-2).exp()).mul(0.5), 1e-3)).mul(wF));
