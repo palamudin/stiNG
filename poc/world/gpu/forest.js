@@ -10,14 +10,15 @@
 // Every list is one indirect draw of the card mesh (treecards.js), reading its trees by its own offset. No thinning:
 // what is drawn is what is in view, out to the reach.
 import * as THREE from 'three/webgpu';
-import { Fn, If, Return, float, int, uint, vec2, vec3, vec4, uniform, uniformArray, storage, instanceIndex, attribute, texture, screenCoordinate, positionLocal, positionWorld, cameraPosition, cameraViewMatrix, wgslFn, wgsl, sin, cos, length, min, max, mix, smoothstep, clamp, select, floor, fract, atomicAdd, atomicLoad, atomicStore, normalize, dot, uv } from 'three/tsl';
+import { Fn, If, Return,  float, int, uint, vec2, vec3, vec4, uniform, uniformArray, storage, instanceIndex, attribute, texture, screenCoordinate, positionLocal, positionWorld, cameraPosition, cameraViewMatrix, wgslFn, wgsl, sin, cos, length, min, max, mix, smoothstep, clamp, select, floor, fract, atomicAdd, atomicLoad, atomicStore, normalize, dot, uv } from 'three/tsl';
 import { treeDesign, meshTreeCards, leafAtlas } from '../treecards.js';
 import { FOREST } from '../trees.js';
 import { WILD_WGSL } from './wild.wgsl.js';
+import { bakeImpostors } from './impostor.js';
 
 const KINDS = ['oak', 'birch', 'pine', 'bush'];
 const CAPS = [4096, 16384, 32768]; // instances per list, by level
-const TILE = 64, SLOTS = 169, POOL = 6144, JOBS = 128; // a tile's 13 x 13 cells; tiles held; tiles placed per frame at most
+const TILE = 64, SLOTS = 169, POOL = 8192, JOBS = 128, CARD_CAP = 49152; // a tile's 13 x 13 cells; tiles held; tiles placed per frame at most
 const PER_KV = CAPS[0] + CAPS[1] + CAPS[2], OFF = [0, CAPS[0], CAPS[0] + CAPS[1]];
 const wildCode = wgsl(WILD_WGSL);
 const h01 = wgslFn('fn fH01(x: i32, y: i32, s: i32) -> f32 { return w2hash01_(x, y, s); }', [wildCode]);
@@ -28,9 +29,10 @@ export class GpuForest {
   constructor(renderer, clip, source, opts = {}) {
     this.renderer = renderer; this.clip = clip; this.source = source;
     // the bands twice the WebGL build's: full detail to 90 m, the middle level to 320 m, the far one to 900 m
-    this.cfg = { ...FOREST, bands: [0, 90, 320, 900], ...opts };
+    // beyond, cards (one baked picture per tree, eight ways round) to 3 km
+    this.cfg = { ...FOREST, bands: [0, 90, 320, 900], cards: 3000, ...opts };
     this.nk = KINDS.length; this.nv = this.cfg.variants;
-    this.lists = this.nk * this.nv * 3;
+    this.lists = this.nk * this.nv * 3; this.cardLists = this.nk * this.nv; this.allLists = this.lists + this.cardLists;
     this.range = opts.range ?? 1; this.rangeK = 1;
     this.group = new THREE.Group(); this.group.name = 'gpu-forest';
     // the instance data: two vec4 per tree (x, y, z, turn), (horizontal scale, vertical scale, variety, fade)
@@ -38,14 +40,24 @@ export class GpuForest {
     this.instAttr = new THREE.StorageBufferAttribute(new Float32Array(nInst * 8), 4);
     this.inst = storage(this.instAttr, 'vec4', nInst * 2);
     this.instR = storage(this.instAttr, 'vec4', nInst * 2).toReadOnly();
-    this.cntAttr = new THREE.StorageBufferAttribute(new Uint32Array(this.lists), 1);
-    this.cnt = storage(this.cntAttr, 'uint', this.lists).toAtomic();
-    this.args = new THREE.IndirectStorageBufferAttribute(new Uint32Array(this.lists * 5), 5);
-    this.argsS = storage(this.args, 'uint', this.lists * 5);
+    const nCard = this.cardLists * CARD_CAP;
+    this.cardAttr = new THREE.StorageBufferAttribute(new Float32Array(nCard * 8), 4);
+    this.cardInst = storage(this.cardAttr, 'vec4', nCard * 2); this.cardR = storage(this.cardAttr, 'vec4', nCard * 2).toReadOnly();
+    const NL = this.allLists;
+    this.cntAttr = new THREE.StorageBufferAttribute(new Uint32Array(NL), 1);
+    this.cnt = storage(this.cntAttr, 'uint', NL).toAtomic();
+    this.args = new THREE.IndirectStorageBufferAttribute(new Uint32Array(NL * 5), 5);
+    this.argsS = storage(this.args, 'uint', NL * 5);
+    // the tiles in view this frame (a pass over the tiles before the one over their trees, dispatched indirectly)
+    this.visAttr = new THREE.StorageBufferAttribute(new Uint32Array(POOL), 1); this.vis = storage(this.visAttr, 'uint', POOL); this.visR = storage(this.visAttr, 'uint', POOL).toReadOnly();
+    this.visCntAttr = new THREE.StorageBufferAttribute(new Uint32Array(2), 1); this.visCnt = storage(this.visCntAttr, 'uint', 2).toAtomic();
+    this.visNAttr = new THREE.StorageBufferAttribute(new Uint32Array(1), 1); this.visN = storage(this.visNAttr, 'uint', 1); this.visNR = storage(this.visNAttr, 'uint', 1).toReadOnly();
+    this.dispatch = new THREE.IndirectStorageBufferAttribute(new Uint32Array([1, 1, 1]), 1); this.dispatchS = storage(this.dispatch, 'uint', 3);
+    this.tileAttr = new THREE.StorageBufferAttribute(new Float32Array(POOL * 4), 4); this.tileInfo = storage(this.tileAttr, 'vec4', POOL); this.tileInfoR = storage(this.tileAttr, 'vec4', POOL).toReadOnly();
     // the view: six planes, the eye, the bands, the grid's origin
     this.uPlanes = uniformArray([0, 1, 2, 3, 4, 5].map(() => new THREE.Vector4()), 'vec4');
     this.uEye = uniform(new THREE.Vector3()); this.uOrg = uniform(new THREE.Vector2()); this.uN = uniform(1, 'int');
-    this.uBands = uniform(new THREE.Vector4()); this.uFade = uniform(this.cfg.fade); this.uShadowR = uniform(opts.shadowR ?? 60);
+    this.uBands = uniform(new THREE.Vector4()); this.uNActive = uniform(0, 'int'); this.uFade = uniform(this.cfg.fade); this.uShadowR = uniform(opts.shadowR ?? 60);
     this.uTime = uniform(0); this.uWind = uniform(new THREE.Vector2(3, 1));
     // the placed trees: per pool tile 169 slots of two vec4: (x, z, kind * variants + variant or -1, turn), (horizontal
     // scale, vertical scale, variety, 0); the resident tiles' pool indices; the placement jobs (tile i, j, pool)
@@ -55,13 +67,14 @@ export class GpuForest {
     this.active = storage(this.activeAttr, 'uint', POOL).toReadOnly();
     this.uJobs = uniformArray(Array.from({ length: JOBS }, () => new THREE.Vector4()), 'vec4');
     this.tiles = new Map(); this.free = Array.from({ length: POOL }, (_, i) => POOL - 1 - i); this._activeDirty = true; this._want = [];
-    this.stats = { cells: 0, tiles: 0, placed: 0, lists: this.lists, ms: 0 };
+    this.stats = { cells: 0, tiles: 0, placed: 0, lists: this.allLists, ms: 0 };
     this._meshes();
+    this._cards(renderer);
     this._kernels();
     this.setRange(1);
   }
 
-  setRange(k) { this.rangeK = k; const B = this.cfg.bands.map((b) => b * this.range * k); this.uBands.value.set(B[1], B[2], B[3], 0); this.R = B[3] + this.cfg.fade * 3; }
+  setRange(k) { this.rangeK = k; const B = this.cfg.bands.map((b) => b * this.range * k), C = this.cfg.cards * this.range * k; this.uBands.value.set(B[1], B[2], B[3], C); this.Rmesh = B[3] + this.cfg.fade * 3; this.R = Math.max(this.Rmesh, C); }
 
   _meshes() {
     const atlas = leafAtlas(), tex = new THREE.DataTexture(atlas.data, atlas.size, atlas.size, THREE.RGBAFormat, THREE.UnsignedByteType);
@@ -93,6 +106,48 @@ export class GpuForest {
         mesh.name = `tree ${KINDS[k]} ${v} L${l}`;
         this.group.add(mesh); this.meshes.push(mesh);
       }
+    }
+    this.args.needsUpdate = true;
+  }
+
+  // the far cards: the baked pictures, one quad per tree turned to the eye (tilted toward a high eye, about its foot,
+  // so from above the crown still shows as a mass), the view facing the eye picked from the eight, lit from the
+  // baked normal; one indirect draw per kind and variety
+  _cards(renderer) {
+    const imp = this.imp = bakeImpostors(renderer, KINDS, this.nv, this.atlas);
+    const meta = uniformArray(imp.meta, 'vec4'), V = imp.V, rows = imp.rows;
+    const geo = () => { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array([-1, 0, 0, 1, 0, 0, 1, 1, 0, -1, 1, 0]), 3)); g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]), 2)); g.setIndex([0, 1, 2, 0, 2, 3]); g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e9); return g; };
+    const mat = new THREE.MeshStandardNodeMaterial({ roughness: 0.9, metalness: 0, side: THREE.DoubleSide });
+    const uBase = uniform(0, 'int').onObjectUpdate(({ object }) => object.userData.base), uRow = uniform(0, 'int').onObjectUpdate(({ object }) => object.userData.row);
+    const I = this.cardR, slot = uBase.add(int(instanceIndex)).mul(2), d0 = I.element(slot), d1 = I.element(slot.add(1));
+    const M = meta.element(uRow);
+    const toC = cameraPosition.sub(d0.xyz), az = toC.x.atan(toC.z);
+    mat.positionNode = Fn(() => {
+      const w = M.x.mul(d1.x), hgt = M.y.mul(d1.y), right = vec3(cos(az), 0, sin(az).negate());
+      const elev = toC.y.atan(length(toC.xz));
+      const upv = normalize(mix(vec3(0, 1, 0), normalize(toC), smoothstep(0.35, 1.2, elev).mul(0.85)));
+      return vec3(d0.x, d0.y.sub(d1.y.mul(0.12)), d0.z).add(right.mul(positionLocal.x.mul(w).mul(0.5))).add(upv.mul(positionLocal.y.mul(hgt)));
+    })();
+    const rel = az.sub(d0.w), slice = floor(fract(rel.div(6.2831853).add(0.5 / V)).mul(V)).toVarying('vCardSlice');
+    const azV = az.toVarying('vCardAz'), fade = d1.w.toVarying('vCardFade'), vr = d1.z.toVarying('vCardVar');
+    const auv = vec2(slice.add(uv().x).div(V), float(uRow).add(float(1).sub(uv().y)).div(rows));
+    const A = texture(imp.A.texture, auv), Nn = texture(imp.N.texture, auv).xyz.mul(2).sub(1);
+    mat.maskNode = Fn(() => A.a.greaterThanEqual(0.5).and(float(1).sub(ign({ p: screenCoordinate.xy })).lessThanEqual(fade)))();
+    const NW = vec3(cos(azV).mul(Nn.x).add(sin(azV).mul(Nn.z)), Nn.y, sin(azV).negate().mul(Nn.x).add(cos(azV).mul(Nn.z)));
+    mat.normalNode = cameraViewMatrix.mul(vec4(NW.normalize(), 0)).xyz.normalize();
+    mat.colorNode = Fn(() => {
+      const c = A.rgb.toVar();
+      If(A.a.greaterThan(0.75), () => { c.mulAssign(mix(vec3(1.07, 1.0, 0.82), vec3(0.86, 1.0, 1.1), vr)); });
+      return vec4(c.mul(float(0.55).add(uv().y.mul(0.45))), 1); // darker toward the ground
+    })();
+    this.cardMeshes = [];
+    for (let kv = 0; kv < this.cardLists; kv++) {
+      const g = geo(), id = this.lists + kv;
+      this.args.array.set([6, 0, 0, 0, 0], id * 5);
+      g.setIndirect(this.args, id * 20);
+      const m = new THREE.Mesh(g, mat); m.frustumCulled = false; m.castShadow = false; m.receiveShadow = true;
+      m.userData.base = kv * CARD_CAP; m.userData.row = kv; m.name = 'card ' + kv;
+      this.group.add(m); this.cardMeshes.push(m);
     }
     this.args.needsUpdate = true;
   }
@@ -175,6 +230,7 @@ export class GpuForest {
       const iz0 = int(floor(float(tj).mul(TILE / G))), iz1 = int(floor(float(tj.add(1)).mul(TILE / G)));
       const ix = ix0.add(c.mod(13)).toVar(), iz = iz0.add(c.div(13)).toVar();
       const o = pool.mul(SLOTS).add(c).mul(2).toVar(); // a variable: it is used inside and after branches
+      If(c.equal(0), () => { this.tileInfo.element(pool).assign(vec4(float(ti).add(0.5).mul(TILE), float(tj).add(0.5).mul(TILE), 0, 0)); });
       If(ix.greaterThanEqual(ix1).or(iz.greaterThanEqual(iz1)), () => { this.cache.element(o).assign(vec4(0, 0, -1, 0)); Return(); });
       const q = place({ ix, iz, g: float(G), meadow: float(this.cfg.meadow), wildFrom: float(src.wildFrom || 0), seed: int(W.seed), sea: float(W.sea), relief: float(W.relief), blocky: float(W.blocky), rivers: float(W.rivers), forests: float(W.forests), trails: float(W.trails) }).toVar();
       If(q.z.lessThan(0), () => { this.cache.element(o).assign(vec4(q.x, q.y, -1, 0)); Return(); });
@@ -186,17 +242,40 @@ export class GpuForest {
       this.cache.element(o).assign(vec4(q.x, q.y, float(int(q.z).mul(nv).add(v)), h01({ x: ix, y: iz, s: int(24) }).mul(6.283)));
       this.cache.element(o.add(1)).assign(vec4(sxz, sy, h01({ x: ix, y: iz, s: int(25) }), 0));
     })().compute(JOBS * SLOTS, [64]);
-    // each frame: the cached trees of the resident tiles, stood on the ground, culled, sorted into levels
-    const RC = this.clip.reads('C');
+    // each frame, first the tiles: those in reach and in view (a box round the tile against the six planes) or within
+    // the sun's shadow reach go on the list of tiles to cull, and the second pass is dispatched over their trees
+    const RC = this.clip.reads('C'), RT = this.clip.reads('T');
+    this.kTiles = Fn(() => {
+      const t = int(instanceIndex);
+      If(t.greaterThanEqual(this.uNActive), () => { Return(); });
+      const pool = this.active.element(t), ti = this.tileInfoR.element(int(pool));
+      const dxz = length(ti.xy.sub(this.uEye.xz)).toVar();
+      If(dxz.greaterThan(this.uBands.w.max(this.uBands.z).add(this.uFade.mul(3)).add(46)), () => { Return(); });
+      const c = vec3(ti.x, RT.clipAt(ti.xy).x.add(20), ti.y);
+      const inBox = (k) => { const pl = P.element(k); return pl.xyz.dot(c).add(pl.w).greaterThan(pl.x.abs().mul(32).add(pl.y.abs().mul(60)).add(pl.z.abs().mul(32)).negate()); };
+      const inside = inBox(0).and(inBox(1)).and(inBox(2)).and(inBox(3)).and(inBox(4)).and(inBox(5));
+      If(inside.not().and(dxz.greaterThan(this.uShadowR.add(46))), () => { Return(); });
+      const n = atomicAdd(this.visCnt.element(0), uint(1));
+      this.vis.element(int(n)).assign(pool);
+    })().compute(POOL, [64]);
+    this.kTileArgs = Fn(() => {
+      const n = atomicLoad(this.visCnt.element(0)).toVar();
+      this.dispatchS.element(0).assign(n.mul(SLOTS).add(63).div(64).max(uint(1)));
+      this.dispatchS.element(1).assign(uint(1)); this.dispatchS.element(2).assign(uint(1));
+      this.visN.element(0).assign(n);
+      atomicStore(this.visCnt.element(0), uint(0));
+    })().compute(1, [1]);
+    // then the trees of those tiles: stood on the ground, culled, sorted into the levels and the cards
     this.kCull = Fn(() => {
-      const t = int(instanceIndex), pool = int(this.active.element(t.div(SLOTS))), o = pool.mul(SLOTS).add(t.mod(SLOTS)).mul(2).toVar();
-      If(t.greaterThanEqual(this.uN), () => { Return(); });
+      const t = int(instanceIndex), v = t.div(SLOTS);
+      If(uint(v).greaterThanEqual(this.visNR.element(0)), () => { Return(); });
+      const pool = int(this.visR.element(v)), o = pool.mul(SLOTS).add(t.mod(SLOTS)).mul(2).toVar();
       const c0 = this.cache.element(o).toVar();
       If(c0.z.lessThan(0), () => { Return(); });
       const c1 = this.cache.element(o.add(1)).toVar();
       const bx = c0.x, bz = c0.y, sy = c1.y;
       const dxz = length(vec2(bx, bz).sub(this.uEye.xz));
-      If(dxz.greaterThan(this.uBands.z.add(this.uFade.mul(3))), () => { Return(); });
+      If(dxz.greaterThan(this.uBands.w.max(this.uBands.z.add(this.uFade.mul(3)))), () => { Return(); });
       const hh = RC.clipAt(vec2(bx, bz)).x.toVar();
       const c = vec3(bx, hh.add(sy.mul(7)), bz), rad = sy.mul(10).add(2);
       const inside = P.element(0).xyz.dot(c).add(P.element(0).w).greaterThan(rad.negate())
@@ -209,7 +288,7 @@ export class GpuForest {
       const d = length(vec3(bx, hh, bz).sub(this.uEye)).toVar(), B = this.uBands, F = this.uFade;
       const f0 = float(1).sub(smoothstep(B.x, B.x.add(F), d)).toVar();
       const f1 = smoothstep(B.x.sub(F.mul(2)), B.x, d).mul(float(1).sub(smoothstep(B.y, B.y.add(F.mul(2)), d))).toVar();
-      const f2 = smoothstep(B.y.sub(F.mul(3)), B.y, d).mul(float(1).sub(smoothstep(B.z, B.z.add(F.mul(3)), d))).toVar();
+      const f2 = smoothstep(B.y.sub(F.mul(3)), B.y, d).mul(float(1).sub(smoothstep(B.z, B.z.add(F.mul(3)), d))).toVar(); // (the cards take 1 - this past B.z)
       const kv = int(c0.z).toVar(), d0 = vec4(bx, hh, bz, c0.w).toVar();
       const put = (l, fl) => If(fl.greaterThan(0.001), () => {
         const id = kv.mul(3).add(l);
@@ -221,13 +300,24 @@ export class GpuForest {
         });
       });
       put(0, f0); put(1, f1); put(2, f2);
+      // the cards: in as the far meshes go out (their dithers complementary), out by the cards' reach
+      const f3 = smoothstep(B.z, B.z.add(F.mul(3)), d).mul(float(1).sub(smoothstep(B.w.sub(150), B.w, d))).toVar();
+      If(f3.greaterThan(0.001), () => {
+        const id = int(this.lists).add(kv);
+        const n = atomicAdd(this.cnt.element(id), uint(1)).toVar();
+        If(n.lessThan(uint(CARD_CAP)), () => {
+          const oi = kv.mul(CARD_CAP).add(int(n)).mul(2);
+          this.cardInst.element(oi).assign(d0);
+          this.cardInst.element(oi.add(1)).assign(vec4(c1.x, c1.y, c1.z, f3));
+        });
+      });
     })().compute(POOL * SLOTS, [64]);
     this.kFinish = Fn(() => {
       const id = int(instanceIndex), l = id.mod(3);
-      const cap = select(l.equal(0), uint(CAPS[0]), select(l.equal(1), uint(CAPS[1]), uint(CAPS[2])));
+      const cap = select(id.greaterThanEqual(this.lists), uint(CARD_CAP), select(l.equal(0), uint(CAPS[0]), select(l.equal(1), uint(CAPS[1]), uint(CAPS[2]))));
       this.argsS.element(id.mul(5).add(1)).assign(min(atomicLoad(this.cnt.element(id)), cap));
       atomicStore(this.cnt.element(id), uint(0));
-    })().compute(this.lists, [64]);
+    })().compute(this.allLists, [64]);
   }
 
   // which tiles are wanted: those within the reach (and a tile's slack), nearest first, those in view before the
@@ -272,13 +362,13 @@ export class GpuForest {
       this.activeAttr.needsUpdate = true; this._activeDirty = false; this.nActive = n;
     }
     this.uTime.value += dt; if (wind) this.uWind.value.set(wind[0], wind[1]);
-    const cells = (this.nActive || 0) * SLOTS; this.uN.value = cells;
-    if (cells) this.renderer.compute(this.kCull, cells);
+    const cells = (this.nActive || 0) * SLOTS; this.uNActive.value = this.nActive || 0;
+    if (cells) { this.renderer.compute(this.kTiles, this.nActive); this.renderer.compute(this.kTileArgs, 1); this.renderer.compute(this.kCull, this.dispatch); }
     this.renderer.compute(this.kFinish);
     this.stats.cells = cells; this.stats.tiles = this.tiles.size;
   }
   // the counts drawn last frame (a readback, for the overlay and the tests; async)
-  async counts() { const a = new Uint32Array(await this.renderer.getArrayBufferAsync(this.args)); const out = []; for (let i = 0; i < this.lists; i++) out.push(a[i * 5 + 1]); return out; }
+  async counts() { const a = new Uint32Array(await this.renderer.getArrayBufferAsync(this.args)); const out = []; for (let i = 0; i < this.allLists; i++) out.push(a[i * 5 + 1]); return out; }
 }
 // the wild source's parameters as the WGSL twin takes them
 function wildUniformsOf(src) { const P = src.params || {}; return { seed: P.seed | 0, sea: P.sea ?? src.sea ?? 0, relief: P.relief ?? 1, blocky: P.blocky ?? 0, rivers: P.rivers ?? 1, forests: P.forests ?? 1, trails: P.trails ?? 1 }; }

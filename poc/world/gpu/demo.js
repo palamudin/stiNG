@@ -33,8 +33,8 @@ function build() {
   if (terrain) { scene.remove(terrain, forest.group); }
   src = wildSource({ seed: state.seed });
   clip = new GpuClip(renderer, src);
-  terrain = gpuTerrain(clip, { sea: src.sea });
   forest = new GpuForest(renderer, clip, src, { range: 1 });
+  terrain = gpuTerrain(clip, { sea: src.sea, bands: forest.uBands });
   if (!q.has('noterrain')) scene.add(terrain);
   if (!q.has('noforest')) scene.add(forest.group);
   clip.build(cam.fx, cam.fz);
@@ -118,8 +118,8 @@ async function frame(now) {
     fps = frames / ft; frames = 0; ft = 0;
     try { await renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER); await renderer.resolveTimestampsAsync(THREE.TimestampQuery.COMPUTE); gpuMs = (renderer.info.render.timestamp || 0) + (renderer.info.compute.timestamp || 0); } catch (e) { gpuMs = 0; }
     if (now - countT > 1000) { countT = now; forest.counts().then((c) => { counts = c; }); }
-    const trees = counts ? counts.reduce((a, b) => a + b, 0) : 0, byL = counts ? [0, 1, 2].map((l) => counts.filter((_, i) => i % 3 === l).reduce((a, b) => a + b, 0)) : [0, 0, 0];
-    $('stats').textContent = `${backend} · ${fps.toFixed(0)} fps · gpu ${gpuMs ? gpuMs.toFixed(2) + ' ms' : '…'} · ${renderer.info.render.drawCalls} draws · ${(renderer.info.render.triangles / 1000).toFixed(0)}k tris\ntrees drawn ${trees} (near ${byL[0]}, mid ${byL[1]}, far ${byL[2]}) of ${forest.stats.cells} cached cells culled on the GPU · ${forest.stats.tiles} tiles placed once · reach ${forest.R.toFixed(0)} m` + (player.on ? `\nplayer (P off) · ${player.fp ? 'first person' : 'third person'} (right button)` : '');
+    const ml = forest.lists, trees = counts ? counts.reduce((a, b) => a + b, 0) : 0, byL = counts ? [0, 1, 2].map((l) => counts.filter((_, i) => i < ml && i % 3 === l).reduce((a, b) => a + b, 0)).concat([counts.slice(ml).reduce((a, b) => a + b, 0)]) : [0, 0, 0, 0];
+    $('stats').textContent = `${backend} · ${fps.toFixed(0)} fps · gpu ${gpuMs ? gpuMs.toFixed(2) + ' ms' : '…'} · ${renderer.info.render.drawCalls} draws · ${(renderer.info.render.triangles / 1000).toFixed(0)}k tris\ntrees drawn ${trees} (near ${byL[0]}, mid ${byL[1]}, far ${byL[2]}, cards ${byL[3]}) of ${forest.stats.cells} cached cells culled on the GPU · ${forest.stats.tiles} tiles placed once · reach ${forest.R.toFixed(0)} m` + (player.on ? `\nplayer (P off) · ${player.fp ? 'first person' : 'third person'} (right button)` : '');
   }
   requestAnimationFrame(frame);
 }

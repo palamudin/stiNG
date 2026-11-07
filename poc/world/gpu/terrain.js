@@ -64,6 +64,13 @@ export function gpuTerrain(clip, opts = {}) {
     const rock = smoothstep(0.28, 0.45, slope.add(pa.mul(0.05)));
     const rc = mix(lin(0.52, 0.50, 0.47), lin(0.40, 0.38, 0.36), smoothstep(-0.3, 0.3, vnoise({ p: P.div(3.3) })));
     col.assign(mix(col, rc, rock));                                                          // stone on steep ground
+    // the canopy painted into the ground (terrain.js uTreeFar): under the far cards it fills the gaps between them, and
+    // beyond the cards' reach it is the forest itself
+    if (opts.bands) {
+      const B = opts.bands, fk = smoothstep(0.35, 0.75, TD.z.add(pa.mul(0.1)));
+      const can = lin(0.17, 0.32, 0.10).mul(float(0.8).add(vnoise({ p: P.div(23) }).mul(0.25)));
+      col.assign(mix(col, can, fk.mul(max(smoothstep(B.z.mul(0.9), B.z.mul(1.2), dist).mul(0.6), smoothstep(B.w.mul(0.85), B.w, dist)))));
+    }
     const snow = smoothstep(uSnowLine, uSnowLine.add(40), alt.add(pa.mul(25))).mul(float(1).sub(smoothstep(0.35, 0.6, slope)));
     col.assign(mix(col, lin(0.95, 0.96, 0.98), snow));
     return vec4(col, 1);
