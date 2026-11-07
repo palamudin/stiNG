@@ -8,6 +8,8 @@ import { gpuTerrain } from './terrain.js';
 import { GpuForest } from './forest.js';
 import { GpuWaves } from './waves.js';
 import { gpuWater } from './water.js';
+import { GpuShore } from './shore.js';
+import { WAVES, swellState } from '../waves.js';
 
 const $ = (id) => document.getElementById(id);
 const q = new URLSearchParams(location.search);
@@ -30,7 +32,7 @@ scene.add(sun, sun.target, hemi);
 const sunDir = new THREE.Vector3(0.45, 0.62, 0.3).normalize();
 
 const state = { seed: 7, treeDist: 1, wind: 4 };
-let src, clip, terrain, forest, waves, water, wtime = 0;
+let src, clip, terrain, forest, waves, water, shore, wtime = 0;
 function build() {
   if (terrain) { scene.remove(terrain, forest.group, water.mesh); }
   src = wildSource({ seed: state.seed });
@@ -38,7 +40,8 @@ function build() {
   forest = new GpuForest(renderer, clip, src, { range: 1 });
   terrain = gpuTerrain(clip, { sea: src.sea, bands: forest.uBands });
   waves = new GpuWaves(renderer, { cascades: src.water.cascades, fetch: src.water.fetch, salt: src.cosmetic | 0 });
-  water = gpuWater(clip, waves, { waterAt: (x, z) => src.waterAt(x, z) });
+  shore = q.has('noshore') ? null : new GpuShore(renderer, src);
+  water = gpuWater(clip, waves, { waterAt: (x, z) => src.waterAt(x, z), shore, sea: src.sea });
   if (!q.has('nowater')) scene.add(water.mesh);
   if (!q.has('noterrain')) scene.add(terrain);
   if (!q.has('noforest')) scene.add(forest.group);
@@ -106,7 +109,15 @@ function step(dt) {
   clip.update(camera.position.x, camera.position.z, dt);
   if (forest.rangeK !== state.treeDist) forest.setRange(state.treeDist);
   if (!q.has('noforest')) forest.update(camera, dt, [state.wind * 0.94, state.wind * 0.35]);
-  wtime += dt; waves.update(wtime, [Math.max(state.wind, 1.5) * 0.94, Math.max(state.wind, 1.5) * 0.35], Math.PI * 60, { Hs: 0.8, T: 8 });
+  // the swell (index.js): from a long fetch at the wind (never under the sea's minimum), and the surf it drives
+  wtime += dt;
+  const w10 = [Math.max(state.wind, 1.5) * 0.94, Math.max(state.wind, 1.5) * 0.35];
+  const sw = swellState(Math.max(Math.hypot(w10[0], w10[1]), WAVES.swellMin), src.water.swellFetch || src.water.fetch);
+  const swell = { Hs: Math.max(WAVES.swellHmin, sw.Hs), T: Math.min(10.5, Math.max(WAVES.swellT - 1, WAVES.swellT - 1 + 2.5 * sw.Hs)) };
+  waves.update(wtime, w10, Math.PI * 60, swell);
+  water.U.uSurf.value.set(Math.min(1.5, Math.max(0.2, 0.35 + 0.55 * swell.Hs)), Math.min(60, Math.max(12, 0.45 * 9.81 * swell.T * swell.T / (2 * Math.PI))), 1, 1);
+  water.U.uWTime.value = wtime; water.U.uSwDir.value.copy(waves.U.swDir.value);
+  if (shore) shore.update(camera.position, !shore._built); if (shore) shore._built = true;
   water.U.uSunDir.value.copy(sunDir);
 }
 
