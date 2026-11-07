@@ -24,7 +24,7 @@ export class GpuCaustics {
     this.rt = new THREE.RenderTarget(res, res, { type: THREE.HalfFloatType, depthBuffer: false, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter, wrapS: THREE.RepeatWrapping, wrapT: THREE.RepeatWrapping });
     this.rt.texture.wrapS = this.rt.texture.wrapT = THREE.RepeatWrapping; this.rt.texture.generateMipmaps = true; this.rt.texture.minFilter = THREE.LinearMipmapLinearFilter;
     const fres = (ci_) => { const st2 = float(1).sub(ci_.mul(ci_)).div(n * n), ct = sqrt(max(float(1).sub(st2), 0)); const rs = ci_.sub(ct.mul(n)).div(ci_.add(ct.mul(n))), rp = ci_.mul(n).sub(ct).div(ci_.mul(n).add(ct)); return rs.mul(rs).add(rp.mul(rp)).mul(0.5); };
-    this.scene = new THREE.Scene(); this.cam = new THREE.Camera();
+    this.scene = new THREE.Scene(); this.cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1); // (unused by the splat: its vertices are placed in clip space)
     C.depths.forEach((depth, k) => {
       const cells = Math.max(32, Math.round(N * (k === 0 ? 1 : k === 1 ? 0.75 : 0.5))), lod = Math.max(0, Math.log2(N / cells)), size = N / 2 ** Math.round(lod);
       // the slope by a cubic B-spline from four bilinear taps
