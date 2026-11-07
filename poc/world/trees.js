@@ -20,7 +20,7 @@ import { CLOUD_SHADOW_GLSL } from './clouds.js';
 const TMP_VR = new THREE.Matrix4();
 // Thinning by presence: past the near band a 64 m tile draws at most this many trees (by detail level: near, mid, far);
 // a dense wood (S7: up to 220 trees a chunk) is drawn whole round the eye and as a lighter stand further out
-export const THIN = { cap: [Infinity, 60, 24] };
+export const THIN = { cap: [Infinity, 60, 24], steep: 14 }; // steep: the cap's growth with the sine of the look down on a tile
 const thinHash = (a, b, c, d) => { let h = (Math.imul(a | 0, 0x27d4eb2d) ^ Math.imul(b | 0, 0x165667b1) ^ Math.imul(c | 0, 0x9e3779b1) ^ Math.imul(d | 0, 0x85ebca77)) >>> 0; h ^= h >>> 15; h = Math.imul(h, 0x2c1b3c6d) >>> 0; h ^= h >>> 12; return (h >>> 0) / 4294967296; };
 export const FOREST = { tile: 64, variants: 3, bands: [0, 45, 160, 420], fade: 12, grid: 5.2, meadow: 0.012, budgetMs: 4, far: [1200, 6000], impostor: 128, views: 8 };
 
@@ -40,8 +40,10 @@ const TREE_VERT = /* glsl */ `
   float sway = (0.45 + 0.35 * sin(uTime * 1.05 + ph) + 0.2 * sin(uTime * 2.6 + ph * 1.7)) * ws;
   transformed.xz += wd * sway * aSway * 0.32;
   if (aLeaf > 0.5) {
-    float fl = (0.03 + 0.05 * ws) * sin(uTime * (5.0 + 3.0 * fract(aCtr.x * 7.1)) + aCtr.y * 3.0 + ph);
-    vec3 off = transformed - aCtr; transformed = aCtr + off * (1.0 + fl) + vec3(0.0, fl * 0.5, 0.0);
+    // a cluster shifts a little with the gusts (it does not swell: a swelling crown read from afar as the tree pulsing)
+    float fq = 5.0 + 3.0 * fract(aCtr.x * 7.1), fp = aCtr.y * 3.0 + ph;
+    float fl = (0.04 + 0.06 * ws) * sin(uTime * fq + fp), fs = (0.03 + 0.04 * ws) * sin(uTime * fq * 0.8 + fp + 1.7);
+    transformed += vec3(wd.x * fl - wd.y * fs, fs * 0.3, wd.y * fl + wd.x * fs) * min(1.0, length(aCtr));
   }
   float cs = cos(aI0.z), sn = sin(aI0.z);
   transformed = vec3(cs * transformed.x - sn * transformed.z, transformed.y, sn * transformed.x + cs * transformed.z) * vec3(aI1.x, aI1.y, aI1.x);
@@ -234,7 +236,12 @@ export class Forest {
     const rings = [[G, this.bands[3] - this.cfg.fade * 2, F[0], 1], [G * 2, F[0], F[1], 2]];
     for (const [sp, rin, rout, mul] of rings) {
       const n = Math.ceil(rout / sp), cells = [];
-      for (let j = -n; j <= n; j++) for (let i = -n; i <= n; i++) { const d = Math.hypot(i, j) * sp; if (d <= rout + sp && d >= rin - sp * 3) cells.push(i, j); }
+      // every cell of the disc, the outermost first: high up the ring reaches in (by the eye's height), so the count
+      // drawn is set each frame to the cells beyond the ring's inner edge at that height (update)
+      const all = [];
+      for (let j = -n; j <= n; j++) for (let i = -n; i <= n; i++) { const d = Math.hypot(i, j) * sp; if (d <= rout + sp) all.push([d, i, j]); }
+      all.sort((a, b) => b[0] - a[0]); const dsc = new Float32Array(all.length);
+      all.forEach(([d, i, j], q) => { cells.push(i, j); dsc[q] = d; });
       const geo = new THREE.InstancedBufferGeometry();
       geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([-1, 0, 0, 1, 0, 0, 1, 1, 0, -1, 1, 0]), 3));
       geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]), 2));
@@ -244,7 +251,7 @@ export class Forest {
       const U = {
         ...this.uniforms, tImpA: { value: this.impA.texture }, tImpN: { value: this.impN.texture }, uMeta: { value: meta },
         uSp: { value: sp }, uGrid: { value: G }, uRin: { value: rin }, uRout: { value: rout }, uMul: { value: mul }, uCam: { value: new THREE.Vector3() }, uVP: { value: new THREE.Matrix4() },
-        uSea: { value: this.source.sea }, uWildFrom: { value: this.source.wildFrom || 0 }, uFade: { value: this.cfg.fade * 2 },
+        uSea: { value: this.source.sea }, uWildFrom: { value: this.source.wildFrom || 0 }, uFade: { value: this.cfg.fade * 2 }, uAlt: { value: 0 },
       };
       const mat = new THREE.ShaderMaterial({
         glslVersion: THREE.GLSL3, uniforms: U, side: THREE.DoubleSide, transparent: false, alphaToCoverage: true,
@@ -253,7 +260,7 @@ export class Forest {
       });
       mat.customProgramCacheKey = () => 'w3far' + mul + '/' + this.world.clip.cfg.levels;
       const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = false; mesh.castShadow = false; mesh.receiveShadow = false;
-      mesh.userData = { U, instances: cells.length / 2, ring: true, world2: true };
+      mesh.userData = { U, instances: cells.length / 2, ring: true, world2: true, dsc, rin, sp };
       this.group.add(mesh); this.farMeshes.push(mesh);
     }
   }
@@ -305,7 +312,14 @@ export class Forest {
     if (this.farMeshes) {
       const cam = this.world.camera;
       const vr = TMP_VR.copy(cam.matrixWorldInverse).setPosition(0, 0, 0); // the view's rotation: points go in from the eye
-      for (const m of this.farMeshes) { m.userData.U.uCam.value.copy(cam.position); m.userData.U.uVP.value.multiplyMatrices(cam.projectionMatrix, vr); }
+      const alt = Math.max(0, cam.position.y - this.source.height(cam.position.x, cam.position.z));
+      for (const m of this.farMeshes) {
+        const ud = m.userData; ud.U.uCam.value.copy(cam.position); ud.U.uVP.value.multiplyMatrices(cam.projectionMatrix, vr); ud.U.uAlt.value = alt;
+        // the cells drawn: those beyond the ring's inner edge at this height (the list runs outermost first)
+        const r0 = Math.sqrt(Math.max(0, (ud.rin - ud.U.uFade.value) ** 2 - alt * alt)) - ud.sp * 3;
+        let lo = 0, hi = ud.dsc.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (ud.dsc[mid] >= r0) lo = mid + 1; else hi = mid; }
+        m.geometry.instanceCount = lo; ud.instances = lo;
+      }
       this.stats.far = this.farMeshes.reduce((a, m) => a + m.userData.instances, 0);
     }
   }
@@ -323,13 +337,17 @@ export class Forest {
       if (t.y0 === undefined) { let lo = 1e9, hi = -1e9; for (let q = 0; q < 9; q++) { const h = this.source.height((t.i + 0.5 * (q % 3)) * T, (t.j + 0.5 * Math.floor(q / 3)) * T); lo = Math.min(lo, h); hi = Math.max(hi, h); } t.y0 = lo - 12; t.y1 = hi + 30; } // the ground at nine points, with slack for what lies between and the trees' height
       TMPB.min.set(t.i * T, t.y0, t.j * T); TMPB.max.set((t.i + 1) * T, t.y1, (t.j + 1) * T);
       const seen = this._frustum.intersectsBox(TMPB);
+      const sinE = Math.max(0, eye.y - (t.y0 + t.y1) * 0.5 + 9) / Math.max(d, 1); // the eye's height over the tile's ground, by its distance
       if (!seen && Math.hypot((t.i + 0.5) * T - eye.x, (t.j + 0.5) * T - eye.z) > this._shadowR + half) { culled++; continue; }
       for (let l = 0; l < 3; l++) {
         if (!seen && l === 2) continue; // out of view, the far level casts no shadow
         if (d + half < B[l] - F || d - half > B[l + 1] + F) continue;
         // by presence (GDD 18.101): every tree near the eye; further out a dense tile draws at most THIN.cap of its trees
         // (an even share of each list, the same trees every time; the canopy painted into the ground fills in beyond)
-        const share = this.thin && t.n > THIN.cap[l] ? THIN.cap[l] / t.n : 1;
+        // and by the view: the cap is for a tile seen edge on, where its trees stand behind one another; the
+        // steeper the eye looks down on it the less they overlap and the more are kept, until from above all are
+        const cap = THIN.cap[l] * Math.max(1, THIN.steep * sinE);
+        const share = this.thin && t.n > cap ? cap / t.n : 1;
         for (let k = 0; k < this.kinds.length; k++) for (let v = 0; v < this.cfg.variants; v++) { const a0 = t.items[k][v], a = share < 1 ? a0.subarray(0, Math.ceil(a0.length / 8 * share) * 8) : a0; if (a.length) { (seen ? lists : shadowOnly)[k][v][l].push(a); counts[k][v][l] += a.length / 8; if (seen) mains[k][v][l] += a.length / 8; if (l === 0) trees += a.length / 8; } }
       }
     }
@@ -390,7 +408,7 @@ bool wildPlace(int ix, int iz, float G, float sea, float wildFrom, out vec2 base
 const FAR_VERT = (nk, nv, V) => PLACE_GLSL + /* glsl */ `
 in vec2 aCell;
 uniform vec4 uMeta[${nk * nv}];
-uniform float uSp, uGrid, uRin, uRout, uMul, uSea, uWildFrom, uFade, uTime; uniform vec3 uCam; uniform mat4 uVP; uniform vec2 uWind;
+uniform float uSp, uGrid, uRin, uRout, uMul, uSea, uWildFrom, uFade, uTime, uAlt; uniform vec3 uCam; uniform mat4 uVP; uniform vec2 uWind;
 out vec2 vUv; out float vKill, vVar, vFade; out vec3 vW; flat out int vSlice; flat out int vRow;
 void main() {
   vec2 org = floor(uCam.xz / uSp) * uSp;
@@ -399,7 +417,9 @@ void main() {
   if (uMul > 1.5) { ix += int(w2hash01(ix, iz, 19) * 2.0); iz += int(w2hash01(ix, iz, 20) * 2.0); } // one of the four cells of a doubled cell
   vec2 base; int k; float sxz, sy, rot; vKill = 1.0; vFade = 0.0; vVar = 0.0; vW = vec3(0.0); vUv = uv; vSlice = 0; vRow = 0;
   gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
-  float dist = length((vec2(float(ix), float(iz)) + 0.5) * uGrid - uCam.xz);
+  // from the eye as the meshes' bands are (trees.js _bin): the eye's height over its ground counts, so from high up
+  // the cards take over where the meshes end and no ring of bare ground opens between them
+  float dist = length(vec2(length((vec2(float(ix), float(iz)) + 0.5) * uGrid - uCam.xz), uAlt));
   if (dist < uRin - uFade || dist > uRout) return;
   if (!wildPlace(ix, iz, uGrid, uSea, uWildFrom, base, k, sxz, sy, rot, vVar)) return;
   if (k >= ${nk}) return;
