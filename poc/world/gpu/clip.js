@@ -57,7 +57,7 @@ export class GpuClip {
   // A set of them per use (tag): a storage buffer read inside a shared function is bound only in the stage that
   // built it first, so the vertex and the fragment stages of a material each take their own set
   reads(tag) {
-    const C = this.cfg, last = C.levels - 1, n = C.levels * PER, Lv = this.uLv, Fd = this.uFade;
+    const C = this.cfg, last = C.levels - 1, n = C.levels * PER, Lv = uniformArray(this.uLv.array, 'vec4'), Fd = uniformArray(this.uFade.array, 'float'); // own nodes over the same values: a uniform read only inside shared functions is bound only in the stage that built it first
     const G = storage(this.groundBuf, 'vec4', n).toReadOnly(), Wt = storage(this.waterBuf, 'vec4', n).toReadOnly();
     const o = {};
     const slot = (l, i, j) => l.mul(PER).add(j.bitAnd(127).mul(W)).add(i.bitAnd(127));
@@ -101,6 +101,10 @@ export class GpuClip {
       const hz = surface(l, p.add(vec2(0, e))).x.sub(surface(l, p.sub(vec2(0, e))).x);
       return normalize(vec3(hx.negate(), e.mul(2), hz.negate()));
     }).setLayout({ name: 'clipNormal' + tag, type: 'vec3', inputs: [{ name: 'p', type: 'vec2' }] });
+    // a value with a zero-weighted read of this set's uniforms and buffers added: a node read only inside shared
+    // functions may not be declared in a stage's module (three.js 0.186), so a material's stage body passes its
+    // result through this once
+    o.bind = (v) => v.add(Lv.element(0).x.add(Fd.element(0)).add(G.element(0).x).add(Wt.element(0).x).mul(0));
     return o;
   }
 

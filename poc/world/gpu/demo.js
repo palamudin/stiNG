@@ -6,6 +6,8 @@ import { wildSource } from '../sources/wild.js';
 import { GpuClip } from './clip.js';
 import { gpuTerrain } from './terrain.js';
 import { GpuForest } from './forest.js';
+import { GpuWaves } from './waves.js';
+import { gpuWater } from './water.js';
 
 const $ = (id) => document.getElementById(id);
 const q = new URLSearchParams(location.search);
@@ -28,13 +30,16 @@ scene.add(sun, sun.target, hemi);
 const sunDir = new THREE.Vector3(0.45, 0.62, 0.3).normalize();
 
 const state = { seed: 7, treeDist: 1, wind: 4 };
-let src, clip, terrain, forest;
+let src, clip, terrain, forest, waves, water, wtime = 0;
 function build() {
-  if (terrain) { scene.remove(terrain, forest.group); }
+  if (terrain) { scene.remove(terrain, forest.group, water.mesh); }
   src = wildSource({ seed: state.seed });
   clip = new GpuClip(renderer, src);
   forest = new GpuForest(renderer, clip, src, { range: 1 });
   terrain = gpuTerrain(clip, { sea: src.sea, bands: forest.uBands });
+  waves = new GpuWaves(renderer, { cascades: src.water.cascades, fetch: src.water.fetch, salt: src.cosmetic | 0 });
+  water = gpuWater(clip, waves, { waterAt: (x, z) => src.waterAt(x, z) });
+  if (!q.has('nowater')) scene.add(water.mesh);
   if (!q.has('noterrain')) scene.add(terrain);
   if (!q.has('noforest')) scene.add(forest.group);
   clip.build(cam.fx, cam.fz);
@@ -99,6 +104,8 @@ function step(dt) {
   clip.update(camera.position.x, camera.position.z, dt);
   if (forest.rangeK !== state.treeDist) forest.setRange(state.treeDist);
   if (!q.has('noforest')) forest.update(camera, dt, [state.wind * 0.94, state.wind * 0.35]);
+  wtime += dt; waves.update(wtime, [Math.max(state.wind, 1.5) * 0.94, Math.max(state.wind, 1.5) * 0.35], Math.PI * 60, { Hs: 0.8, T: 8 });
+  water.U.uSunDir.value.copy(sunDir);
 }
 
 function resize() { const w = innerWidth, h = innerHeight; renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }
