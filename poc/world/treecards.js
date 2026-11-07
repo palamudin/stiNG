@@ -74,7 +74,7 @@ export function treeDesign(kind, v, opts = {}) {
   const clus = (p, r, level) => clusters.push({ p, r, level });
   if (kind === 'oak' || kind === 'birch') {
     const top = kind === 'oak' ? crownY + crownR * 0.3 : height * 0.92;
-    if (trunk) seg([0, -0.2, 0], [0, top, 0], trunkR * 1.25, trunkR * 0.45, 0);
+    if (trunk) seg([0, -0.2, 0], [0, top, 0], trunkR * 1.25, trunkR * 0.45, 2); // the trunk at every level of detail (a crown never floats)
     const nb = kind === 'oak' ? 6 + Math.floor(R(2, 1) * 3) : 5 + Math.floor(R(2, 1) * 3);
     for (let i = 0; i < nb; i++) {
       const t = kind === 'oak' ? 0.55 + 0.4 * (i / nb) : 0.45 + 0.5 * (i / nb), y = top * t, a = R(3, i) * 6.283, up = kind === 'oak' ? 0.35 + 0.4 * R(4, i) : 0.6 + 0.3 * R(4, i);
@@ -95,7 +95,7 @@ export function treeDesign(kind, v, opts = {}) {
     clus([0, top + crownR * 0.1, 0], crownR * 0.5, 2);
     for (let i = 0; i < 5; i++) { const a = R(12, i) * 6.283, r = crownR * 0.6; clus([Math.cos(a) * r, crownY + (R(13, i) - 0.4) * crownR * 0.8, Math.sin(a) * r], crownR * 0.55, 2); }
   } else if (kind === 'pine') {
-    if (trunk) seg([0, -0.2, 0], [0, height, 0], trunkR * 1.2, trunkR * 0.15, 0);
+    if (trunk) seg([0, -0.2, 0], [0, height, 0], trunkR * 1.2, trunkR * 0.15, 2); // the trunk at every level
     const tiers = 7 + Math.floor(R(2, 1) * 3);
     for (let i = 0; i < tiers; i++) {
       const t = i / (tiers - 1), y = height * (0.25 + 0.7 * t), w = crownR * (1.15 - 0.95 * t) + 0.35;
