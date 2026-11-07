@@ -73,8 +73,11 @@ export function gpuTerrain(clip, opts = {}) {
     col.assign(mix(col, lin(0.55, 0.42, 0.28), smoothstep(0.2, 0.6, TD.w)));              // trails
     const sand = float(1).sub(smoothstep(0.6, 1.8, hgt.add(pa.mul(0.4))));
     col.assign(mix(col, lin(0.86, 0.78, 0.56), sand));                                       // sand at the water
-    col.mulAssign(mix(float(1), float(0.55), wetN.x.mul(sand))); // the sand the swash has wetted, darker
-    col.assign(mix(col, lin(0.42, 0.37, 0.27), float(1).sub(smoothstep(-1.2, -0.2, hgt))));   // under it: mud
+    // wet: the sand the swash has wetted, and all the ground under the water (its pores full: darker and a little
+    // deeper in colour, the same wet sand as the swash's, the water's refraction and absorption on top of it)
+    const wet = max(wetN.x, smoothstep(0.03, -0.04, hgt));
+    col.assign(mix(col, col.mul(col).mul(1.15).add(col.mul(0.25)), wet.mul(0.6)).mul(mix(float(1), float(0.62), wet)));
+    col.assign(mix(col, lin(0.36, 0.33, 0.25), float(1).sub(smoothstep(-3.5, -1.5, hgt)).mul(0.6)));   // deeper: finer, darker silt over the sand
     const rock = smoothstep(0.28, 0.45, slope.add(pa.mul(0.05)));
     const rc = mix(lin(0.52, 0.50, 0.47), lin(0.40, 0.38, 0.36), smoothstep(-0.3, 0.3, vnoise({ p: P.div(3.3) })));
     col.assign(mix(col, rc, rock));                                                          // stone on steep ground
