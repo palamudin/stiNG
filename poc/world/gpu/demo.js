@@ -13,6 +13,8 @@ import { GpuFoamField, GFOAM } from './foamfield.js';
 import { GpuGrass } from './grass.js';
 import { GpuSky } from './sky.js';
 import { GpuClouds } from './clouds.js';
+import { MAP, Places, placeCard } from '../map.js';
+import { uniform } from 'three/tsl';
 import { WAVES, swellState } from '../waves.js';
 
 const $ = (id) => document.getElementById(id);
@@ -40,6 +42,10 @@ const sunDir = new THREE.Vector3(0.45, 0.62, 0.3).normalize();
 const keyDir = new THREE.Vector3();
 function sunAt(hour) { const a = (hour - 6) / 12 * Math.PI, el = Math.sin(a) * 0.96 - 0.04, az = 1.9 + (hour - 12) / 12 * Math.PI; sunDir.set(Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az)).normalize(); }
 
+// the map's blend (0 the picture .. 1 the map) and the scale that shows its colours as they are whatever the exposure
+const mapU = { uMap: uniform(0), uMapK: uniform(1) };
+const mapFor = (d) => THREE.MathUtils.smoothstep(Math.log(d), Math.log(MAP.from), Math.log(MAP.to));
+const pitchFor = (d) => 0.12 + 0.95 * THREE.MathUtils.smoothstep(Math.log10(d), -1.2, 3.7);
 const state = { seed: 7, treeDist: 1, wind: 4, hour: +(q.get('hour') || 11), cover: +(q.get('cover') ?? 0.35) };
 let src, clip, terrain, forest, waves, water, shore, fields, grass, wtime = 0;
 function build() {
@@ -48,11 +54,11 @@ function build() {
   clip = new GpuClip(renderer, src);
   forest = new GpuForest(renderer, clip, src, { range: 1 });
   const surfU = surfUniforms(src.sea);
-  terrain = gpuTerrain(clip, { sea: src.sea, bands: forest.uBands, surf: q.has('noshore') ? null : surfU });
+  terrain = gpuTerrain(clip, { sea: src.sea, bands: forest.uBands, surf: q.has('noshore') ? null : surfU, map: mapU });
   waves = new GpuWaves(renderer, { cascades: src.water.cascades, fetch: src.water.fetch, salt: src.cosmetic | 0 });
   shore = q.has('noshore') ? null : new GpuShore(renderer, src);
   fields = q.has('nofield') ? null : [GFOAM.far, GFOAM.near].map((level) => new GpuFoamField(renderer, { clip, waves, shore, surfU, level }));
-  water = gpuWater(clip, waves, { sunColor: sky.uSunColor, skyUp: sky.uSkyUp, skyHz: sky.uSkyHz, waterAt: (x, z) => src.waterAt(x, z), shore, sea: src.sea, renderer, surfU, fields, debug: +(q.get('wdebug') || 0) });
+  water = gpuWater(clip, waves, { sunColor: sky.uSunColor, skyUp: sky.uSkyUp, skyHz: sky.uSkyHz, waterAt: (x, z) => src.waterAt(x, z), shore, sea: src.sea, renderer, surfU, fields, map: mapU, debug: +(q.get('wdebug') || 0) });
   if (!q.has('nowater')) scene.add(water.mesh);
   if (!q.has('noterrain')) scene.add(terrain);
   grass = q.has('nograss') ? null : new GpuGrass(renderer, { clip, source: src, sunDir: water.U.uSunDir, sunColor: sky.uSunColor }); if (grass) scene.add(grass.group);
@@ -102,6 +108,7 @@ function step(dt) {
     player.pos.z += (-Math.cos(cam.yaw) * fwd - Math.sin(cam.yaw) * side) * sp * dt;
     player.pos.y = Math.max(player.pos.y + up * sp * dt, ground(player.pos.x, player.pos.z) + 0.3);
     player.mesh.position.copy(player.pos); player.mesh.rotation.set(0, cam.yaw, 0); player.mesh.visible = !player.fp;
+    cam.map = 0; camera.fov = 55;
     if (player.fp) { camera.position.copy(player.pos).y += 0.1; camera.lookAt(camera.position.clone().add(dir)); }
     else { camera.position.copy(player.pos).addScaledVector(dir, -player.d); camera.position.y = Math.max(camera.position.y + 0.4, ground(camera.position.x, camera.position.z) + 0.15); camera.lookAt(player.pos.x, player.pos.y + 0.3, player.pos.z); }
     cam.fx = player.pos.x; cam.fz = player.pos.z;
@@ -109,8 +116,13 @@ function step(dt) {
     const sp = Math.max(0.4, cam.dist * 0.6) * fast;
     cam.fx += (-Math.sin(cam.yaw) * fwd + Math.cos(cam.yaw) * side) * sp * dt;
     cam.fz += (-Math.cos(cam.yaw) * fwd - Math.sin(cam.yaw) * side) * sp * dt;
-    const gy = ground(cam.fx, cam.fz), pitch = 0.12 + 0.9 * THREE.MathUtils.smoothstep(Math.log10(cam.dist), 0, 3.5);
-    camera.position.set(cam.fx + Math.sin(cam.yaw) * Math.cos(pitch) * cam.dist, gy + Math.sin(pitch) * cam.dist, cam.fz + Math.cos(cam.yaw) * Math.cos(pitch) * cam.dist);
+    // into the map (map.js, as the template's): the view tips toward straight down, narrows (backing off to keep the
+    // framing) and turns north-up
+    const gy = ground(cam.fx, cam.fz), m = cam.map = mapFor(cam.dist), pitch = THREE.MathUtils.lerp(pitchFor(cam.dist), MAP.pitch, m);
+    const fov = THREE.MathUtils.lerp(55, MAP.fov, m), back = Math.tan(55 / 2 * Math.PI / 180) / Math.tan(fov / 2 * Math.PI / 180), D = cam.dist * THREE.MathUtils.lerp(1, back, m);
+    if (m > 0.5 && !drag) cam.yaw += (0 - cam.yaw) * Math.min(1, dt * 1.5 * (m - 0.5) * 2);
+    camera.fov = fov;
+    camera.position.set(cam.fx + Math.sin(cam.yaw) * Math.cos(pitch) * D, gy + Math.sin(pitch) * D, cam.fz + Math.cos(cam.yaw) * Math.cos(pitch) * D);
     camera.position.y = Math.max(camera.position.y, ground(camera.position.x, camera.position.z) + 0.3);
     camera.lookAt(cam.fx, gy, cam.fz); if (cam.look) camera.rotateX(cam.look);
   }
@@ -125,6 +137,10 @@ function step(dt) {
   sun.color.copy(sky.sunColor).add(mc); sun.intensity = 1; hemi.color.setRGB(sky.skyUp.r + 0.25 * mc.r, sky.skyUp.g + 0.25 * mc.g, sky.skyUp.b + 0.25 * mc.b); hemi.groundColor.copy(hemi.color).multiplyScalar(0.25); hemi.intensity = 1;
   { const g2 = Math.max(0, sunDir.y), c = sky.sunColor, u = sky.skyUp, lum = 0.2126 * (c.r * g2 + u.r) + 0.7152 * (c.g * g2 + u.g) + 0.0722 * (c.b * g2 + u.b), lumM = (0.2126 * mc.r + 0.7152 * mc.g + 0.0722 * mc.b) * Math.max(0, md.y);
     renderer.toneMappingExposure = THREE.MathUtils.clamp(Math.PI / Math.max(lum + lumM, 0.05), 0.02, 40); }
+  // the map: its blend, and the woods and grass giving way to it
+  mapU.uMap.value = cam.map || 0; mapU.uMapK.value = 0.85 / Math.max(renderer.toneMappingExposure, 1e-3);
+  forest.group.visible = !q.has('noforest') && (cam.map || 0) < 0.55;
+  updatePins();
   // the sun's shadow box follows the eye
   const f = player.on ? player.pos : new THREE.Vector3(cam.fx, ground(cam.fx, cam.fz), cam.fz);
   sun.target.position.copy(f); sun.position.copy(f).addScaledVector(keyDir, 300);
@@ -146,6 +162,37 @@ function step(dt) {
   water.U.uSunDir.value.copy(sunDir);
 }
 
+
+// the map's pins: places scanned from the source (map.js Places), projected each frame, clustered when they crowd
+let places = null, cardPlace = null; const pinEls = [];
+function updatePins() {
+  const m = cam.map || 0, layer = $('pins');
+  if (!places || places.src !== src) places = new Places(src, { cell: 220, radius: 6000 });
+  if (m > 0.02) places.scan(cam.fx, cam.fz, 2);
+  const on = m > 0.15, W = innerWidth, H = innerHeight, V = new THREE.Vector3(), shown = [];
+  if (on) {
+    for (const p of [{ kind: 'you', name: 'you', x: cam.fx, z: cam.fz }, ...places.list]) {
+      V.set(p.x, ground(p.x, p.z), p.z).project(camera);
+      if (V.z > 1 || Math.abs(V.x) > 1.05 || Math.abs(V.y) > 1.05) continue;
+      const sx = (V.x * 0.5 + 0.5) * W, sy = (-V.y * 0.5 + 0.5) * H;
+      const near = shown.find((s) => s.kind === p.kind && Math.hypot(s.sx - sx, s.sy - sy) < 34);
+      if (near && p.kind !== 'you') { near.n++; continue; }
+      shown.push({ p, sx, sy, n: 1, kind: p.kind }); if (shown.length > 60) break;
+    }
+  }
+  while (pinEls.length < shown.length) { const e = document.createElement('div'); e.className = 'pin'; e.addEventListener('click', () => openCard(e._p)); layer.appendChild(e); pinEls.push(e); }
+  pinEls.forEach((e, i) => { const s = shown[i]; if (!s) { e.classList.remove('on'); return; } e._p = s.p; e.className = 'pin on ' + s.kind; e.style.left = s.sx + 'px'; e.style.top = s.sy + 'px'; e.innerHTML = s.p.name + (s.n > 1 ? `<span class="n">+${s.n - 1}</span>` : ''); });
+}
+function openCard(p) {
+  if (p.kind === 'you') return;
+  cardPlace = p;
+  const c = placeCard(p, { x: cam.fx, z: cam.fz }, { bloom: 1, freeze: 0, autumn: 0, t: 0.5 });
+  $('card').querySelector('.t').textContent = c.title; $('card').querySelector('.k').textContent = `${c.kind} · ${c.sub || ''} · ${c.dist} away`;
+  $('card').querySelector('.b').innerHTML = c.lines.map((l) => `<div>${l}</div>`).join('');
+  $('card').hidden = false;
+}
+$('bCardX').addEventListener('click', () => { $('card').hidden = true; });
+$('bCardGo').addEventListener('click', () => { if (cardPlace) { cam.fx = cardPlace.x; cam.fz = cardPlace.z; cam.dist = 60; } $('card').hidden = true; });
 function resize() { const w = innerWidth, h = innerHeight; renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }
 addEventListener('resize', resize); resize();
 $('treeDist').addEventListener('input', (e) => { state.treeDist = parseFloat(e.target.value); $('oTreeDist').textContent = Math.round(state.treeDist * 100) + '%'; });

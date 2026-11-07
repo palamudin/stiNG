@@ -20,6 +20,7 @@ const cEdge = wgslFn('fn wCoastEdge(xz: vec2<f32>, level: f32, bed: f32, py: f32
 const nz = wgslFn('fn wNoise(p: vec2<f32>, s: i32) -> f32 { return w2noise(p, s); }', [coastCode]);
 const cFoam = wgslFn('fn wCoastFoam(xz: vec2<f32>, depth: f32, grad: vec2<f32>, wave: f32, fl: f32, surf: vec4<f32>, surfX: vec4<f32>, t: f32, swDir: vec2<f32>) -> vec4<f32> { return coastShoreFoam(xz, depth, grad, wave, fl, surf, surfX, t, swDir); }', [coastCode]);
 
+const lin3 = (r, g, b) => vec3(r ** 2.2, g ** 2.2, b ** 2.2);
 export const GSURF = { segments: 256, inner: 0.0625, innerGrow: 1.12, reach: 4000, skirt: 60000 };
 
 function polarGrid() {
@@ -190,7 +191,10 @@ export function gpuWater(clip, waves, opts = {}) {
     const foamCol = uSkyUp.mul(0.8).add(uSunColor.mul(max(uSunDir.y, 0.05)).mul(0.55)).mul(0.92);
     col.assign(mix(col, foamCol, fm.clamp(0, 1).mul(0.85)));
     // the edge: the water fades to nothing as it thins, so the line is the sand seen through no water
-    return RF.bind(vec4(mix(under, col, smoothstep(0, 0.05, depth)), 1));
+    const outc = mix(under, col, smoothstep(0, 0.05, depth)).toVar();
+    // the map (map.js): flat blue by depth, the coast line drawn by the ground under it
+    if (opts.map) outc.assign(mix(outc, mix(lin3(0.55, 0.78, 0.9), lin3(0.2, 0.45, 0.75), smoothstep(0, 14, still)).mul(opts.map.uMapK), opts.map.uMap));
+    return RF.bind(vec4(outc, 1));
   })();
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false; mesh.renderOrder = 10; mesh.name = 'gpu-water';

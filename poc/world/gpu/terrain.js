@@ -5,7 +5,8 @@
 // sand and mud at the water, stone on steep ground, snow up high; the rest of terrain.js (the heightfield shadow,
 // the canopy painted far off, the swash's wet sand, the close detail) comes over as the port goes on.
 import * as THREE from 'three/webgpu';
-import { Fn, float, int, vec2, vec3, vec4, attribute, positionLocal, positionWorld, cameraPosition, cameraViewMatrix, uniform, abs, max, mix, smoothstep, pow, length, If, wgslFn } from 'three/tsl';
+import { Fn, float, int, vec2, vec3, vec4, attribute, positionLocal, positionWorld, cameraPosition, cameraViewMatrix, uniform, abs, max, min, mix, smoothstep, step, pow, length, normalize, dot, clamp, floor, fract, fwidth, If, wgslFn } from 'three/tsl';
+import { MAP } from '../map.js';
 import { clipGrid } from '../clipmap.js';
 import { coastWet } from './water.js';
 
@@ -89,6 +90,34 @@ export function gpuTerrain(clip, opts = {}) {
     return vec4(col, 1);
   })();
   if (opts.surf) mat.roughnessNode = mix(float(0.92), float(0.3), wetN.y); // the shine of sand the water has just left
+  // the map (map.js MAP_GLSL): zooming out, the ground turns into one, from the same clipmap: a hypsometric palette,
+  // hillshade from the north-west, dotted forests, dashed trails, contours every 20 m, water flat blue by depth and a
+  // dark coast line. Unlit (emissive, scaled by uMapK to show at its own colours whatever the exposure), the lit
+  // picture fading out under it as uMap goes 0 to 1
+  if (opts.map) {
+    const uMap = opts.map.uMap, uMapK = opts.map.uMapK;
+    const mapCol = Fn(() => {
+      const T = TD, W = RF.clipWater(P), h = T.x.sub(uSea), depth = W.sub(T.x);
+      const c = lin(0.62, 0.78, 0.42).toVar();
+      c.assign(mix(c, lin(0.74, 0.76, 0.46), smoothstep(40, 160, h))); c.assign(mix(c, lin(0.78, 0.68, 0.5), smoothstep(160, 360, h)));
+      c.assign(mix(c, lin(0.66, 0.6, 0.56), smoothstep(360, 560, h))); c.assign(mix(c, lin(0.95, 0.95, 0.97), smoothstep(uSnowLine.sub(40), uSnowLine.add(40), h)));
+      c.assign(mix(c, c.mul(vec3(0.72, 0.84, 0.66)), smoothstep(0.3, 0.7, T.z).mul(0.8)));
+      c.mulAssign(clamp(dot(TN, normalize(vec3(-0.5, 0.75, -0.5))), 0, 1).mul(0.6).add(0.55)); // hillshade
+      const inDot = float(1).sub(step(0.55, length(fract(P.div(9)).sub(0.5)).mul(2)));
+      c.mulAssign(mix(float(1), float(0.78), smoothstep(0.35, 0.7, T.z).mul(inDot)));
+      c.assign(mix(c, lin(0.45, 0.3, 0.18), smoothstep(0.3, 0.6, T.w).mul(step(0.5, fract(P.x.add(P.y).div(6))))));
+      const cf = fract(h.div(MAP.contour)), cw = max(fwidth(h.div(MAP.contour)).mul(1.2), 1e-3);
+      c.mulAssign(float(1).sub(float(1).sub(smoothstep(0, cw, min(cf, float(1).sub(cf)))).mul(0.28).mul(float(1).sub(smoothstep(1, 3, cw)))));
+      const wc = mix(lin(0.55, 0.78, 0.9), lin(0.2, 0.45, 0.75), smoothstep(0, 14, depth));
+      const out = mix(c, wc, step(0, depth)).toVar();
+      const e = max(fwidth(depth).mul(1.5), 1e-3);
+      out.assign(mix(out, lin(0.12, 0.2, 0.3), float(1).sub(smoothstep(0, e, abs(depth))).mul(0.85))); // the coast line
+      return out;
+    })();
+    const lit = mat.colorNode;
+    mat.colorNode = vec4(lit.rgb.mul(float(1).sub(uMap)), 1);
+    mat.emissiveNode = mapCol.mul(uMap).mul(uMapK);
+  }
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false; mesh.receiveShadow = true; mesh.castShadow = false;
   mesh.name = 'gpu-terrain';
