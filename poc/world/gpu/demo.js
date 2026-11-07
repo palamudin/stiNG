@@ -231,6 +231,7 @@ function step(dt) {
     lk.uSed.value.set(L.sediment + 0.35 * ro + 0.12 * spring, L.stir * (1 + ro), L.riverSilt * (1 + 1.5 * ro + 0.6 * spring), 0);
     lk.uHs.value = Math.max(0.1, (waves.stats && waves.stats.Hs) || 0.5);
     if (caustics) caustics.uStrength.value = L.caustics;
+    lk.uLip.value = L.lip; if (spray) spray.uRate.value = L.spray * (A ? 1 + 0.08 * Math.max(0, state.wind - 5) : 1);
     if (fields) for (const f of fields) { f.uBias.value = L.foamBias + wk; f.uScale.value = L.foamScale; f.update(dt, camera, w10, L.linger); } }
   if (grass) grass.update(camera, ground(camera.position.x, camera.position.z), w10, dt);
   water.U.uSunDir.value.copy(sunDir);
@@ -313,4 +314,4 @@ async function snap() {
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = (y * w + x) * 4, o = i; /* WebGPU reads back top row first */ for (let c = 0; c < 3; c++) im.data[o + c] = 255 * srgb(aces(toF(px[i + c]) * 0.6 * renderer.toneMappingExposure)); im.data[o + 3] = 255; }
   c2.putImageData(im, 0, 0); return cv2.toDataURL('image/png');
 }
-window.__gpu = { snap, draw, renderer, scene, camera, cam, state, player, get caustics() { return caustics; }, clouds, drop: () => dropFloaters(), get floaters() { return floaters; }, get query() { return query; }, get spray() { return spray; }, get forest() { return forest; }, get grass() { return grass; }, sky, get clip() { return clip; }, manual(on) { manual = on; if (!on) { last = performance.now(); requestAnimationFrame(frame); } }, step, async counts() { return forest.counts(); }, render() { draw(); } };
+window.__gpu = { snap, draw, renderer, scene, camera, cam, state, player, get caustics() { return caustics; }, clouds, drop: () => dropFloaters(), get floaters() { return floaters; }, get query() { return query; }, get spray() { return spray; }, setPlayer, get forest() { return forest; }, get grass() { return grass; }, sky, get clip() { return clip; }, manual(on) { manual = on; if (!on) { last = performance.now(); requestAnimationFrame(frame); } }, step, async counts() { return forest.counts(); }, render() { draw(); } };

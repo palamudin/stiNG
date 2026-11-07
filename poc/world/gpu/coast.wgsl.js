@@ -4,6 +4,7 @@ const SW3_LEE: f32 = 0.55f;
 const SW3_UP: f32 = 0.3f;
 const SW3_LEAD: f32 = 0.58f;
 
+var<private> gBreak: vec4<f32> = vec4(0f);
 var<private> gShoreKnow: f32 = 0f;
 var<private> gShoreIn: vec4<f32> = vec4<f32>(10000f, 0f, 0f, 10000f);
 var<private> gKnowIn: f32 = 0f;
@@ -169,21 +170,21 @@ fn shoreAt(p_4: vec2<f32>) -> vec4<f32> {
     var p_5: vec2<f32>;
 
     p_5 = p_4;
-    let _e5 = gKnowIn;
-    gShoreKnow = _e5;
-    let _e6 = gShoreIn;
-    return _e6;
+    let _e6 = gKnowIn;
+    gShoreKnow = _e6;
+    let _e7 = gShoreIn;
+    return _e7;
 }
 
 fn sw3Noise(p_6: vec2<f32>) -> f32 {
     var p_7: vec2<f32>;
 
     p_7 = p_6;
-    let _e16 = p_7;
-    let _e21 = w2noise((_e16 / vec2(240f)), 611i);
-    let _e24 = p_7;
-    let _e29 = w2noise((_e24 / vec2(70f)), 612i);
-    return ((_e21 * 5f) + (_e29 * 1.6f));
+    let _e17 = p_7;
+    let _e22 = w2noise((_e17 / vec2(240f)), 611i);
+    let _e25 = p_7;
+    let _e30 = w2noise((_e25 / vec2(70f)), 612i);
+    return ((_e22 * 5f) + (_e30 * 1.6f));
 }
 
 fn sw3Ctx(p_8: vec2<f32>) -> bool {
@@ -195,48 +196,48 @@ fn sw3Ctx(p_8: vec2<f32>) -> bool {
 
     p_9 = p_8;
     gNear = 0f;
-    let _e17 = p_9;
-    let _e18 = shoreAt(_e17);
-    sh = _e18;
-    let _e20 = gShoreKnow;
-    if (_e20 > 0f) {
-        let _e23 = sh;
-        local = length(_e23.yz);
+    let _e18 = p_9;
+    let _e19 = shoreAt(_e18);
+    sh = _e19;
+    let _e21 = gShoreKnow;
+    if (_e21 > 0f) {
+        let _e24 = sh;
+        local = length(_e24.yz);
     } else {
         local = 0f;
     }
-    let _e28 = local;
-    coh = _e28;
-    let _e30 = gShoreKnow;
-    let _e33 = sh;
-    if ((_e30 <= 0f) || (abs(_e33.x) > 9000f)) {
+    let _e29 = local;
+    coh = _e29;
+    let _e31 = gShoreKnow;
+    let _e34 = sh;
+    if ((_e31 <= 0f) || (abs(_e34.x) > 9000f)) {
         return false;
     }
-    let _e40 = coh;
-    if (_e40 > 0.0001f) {
-        let _e43 = sh;
-        let _e45 = coh;
-        local_1 = (_e43.yz / vec2(_e45));
+    let _e41 = coh;
+    if (_e41 > 0.0001f) {
+        let _e44 = sh;
+        let _e46 = coh;
+        local_1 = (_e44.yz / vec2(_e46));
     } else {
         local_1 = vec2(0f);
     }
-    let _e51 = local_1;
-    gDir = _e51;
-    let _e52 = sh;
-    gTau = _e52.w;
-    let _e54 = sh;
-    gShoreD = _e54.x;
-    let _e56 = gShoreKnow;
-    let _e60 = sh;
-    gNear = (_e56 * (1f - smoothstep(180f, 420f, -(_e60.x))));
-    let _e70 = uSwDir;
-    let _e71 = sh;
-    gExpo = mix(SW3_LEE, 1f, smoothstep(-0.3f, 0.7f, dot(_e70, _e71.yz)));
-    let _e76 = p_9;
-    let _e77 = sw3Noise(_e76);
-    gPn = _e77;
-    let _e78 = gNear;
-    return (_e78 > 0f);
+    let _e52 = local_1;
+    gDir = _e52;
+    let _e53 = sh;
+    gTau = _e53.w;
+    let _e55 = sh;
+    gShoreD = _e55.x;
+    let _e57 = gShoreKnow;
+    let _e61 = sh;
+    gNear = (_e57 * (1f - smoothstep(180f, 420f, -(_e61.x))));
+    let _e71 = uSwDir;
+    let _e72 = sh;
+    gExpo = mix(SW3_LEE, 1f, smoothstep(-0.3f, 0.7f, dot(_e71, _e72.yz)));
+    let _e77 = p_9;
+    let _e78 = sw3Noise(_e77);
+    gPn = _e78;
+    let _e79 = gNear;
+    return (_e79 > 0f);
 }
 
 fn sw3Omega(i_1: i32) -> f32 {
@@ -244,16 +245,16 @@ fn sw3Omega(i_1: i32) -> f32 {
     var local_2: f32;
 
     i_2 = i_1;
-    let _e19 = uSurf;
-    let _e21 = i_2;
-    if (_e21 == 0i) {
+    let _e20 = uSurf;
+    let _e22 = i_2;
+    if (_e22 == 0i) {
         local_2 = 1f;
     } else {
         local_2 = 0.61f;
     }
-    let _e27 = local_2;
-    let _e31 = uSurf;
-    return (sqrt((61.638054f / (_e19.y * _e27))) * _e31.z);
+    let _e28 = local_2;
+    let _e32 = uSurf;
+    return (sqrt((61.638054f / (_e20.y * _e28))) * _e32.z);
 }
 
 fn sw3Phase(i_3: i32, t: f32, tau: f32, pn: f32) -> f32 {
@@ -267,25 +268,25 @@ fn sw3Phase(i_3: i32, t: f32, tau: f32, pn: f32) -> f32 {
     t_1 = t;
     tau_1 = tau;
     pn_1 = pn;
-    let _e22 = i_4;
-    let _e23 = sw3Omega(_e22);
-    let _e24 = t_1;
-    let _e25 = tau_1;
-    let _e28 = pn_1;
-    let _e29 = i_4;
-    if (_e29 == 0i) {
+    let _e23 = i_4;
+    let _e24 = sw3Omega(_e23);
+    let _e25 = t_1;
+    let _e26 = tau_1;
+    let _e29 = pn_1;
+    let _e30 = i_4;
+    if (_e30 == 0i) {
         local_3 = 1f;
     } else {
         local_3 = 1.37f;
     }
-    let _e35 = local_3;
-    let _e38 = i_4;
-    return (((_e23 * (_e24 + _e25)) + (_e28 * _e35)) + (f32(_e38) * 2.1f));
+    let _e36 = local_3;
+    let _e39 = i_4;
+    return (((_e24 * (_e25 + _e26)) + (_e29 * _e36)) + (f32(_e39) * 2.1f));
 }
 
 fn sw3Period() -> f32 {
-    let _e16 = sw3Omega(0i);
-    return (6.2831855f / _e16);
+    let _e17 = sw3Omega(0i);
+    return (6.2831855f / _e17);
 }
 
 fn sw3Group(p_10: vec2<f32>, t_2: f32) -> f32 {
@@ -294,11 +295,11 @@ fn sw3Group(p_10: vec2<f32>, t_2: f32) -> f32 {
 
     p_11 = p_10;
     t_3 = t_2;
-    let _e22 = p_11;
-    let _e26 = t_3;
-    let _e29 = t_3;
-    let _e36 = w2noise(((_e22 / vec2(250f)) + vec2<f32>((_e26 * 0.021f), (-(_e29) * 0.017f))), 613i);
-    return (0.45f + (0.55f * (0.5f + (0.5f * _e36))));
+    let _e23 = p_11;
+    let _e27 = t_3;
+    let _e30 = t_3;
+    let _e37 = w2noise(((_e23 / vec2(250f)) + vec2<f32>((_e27 * 0.021f), (-(_e30) * 0.017f))), 613i);
+    return (0.45f + (0.55f * (0.5f + (0.5f * _e37))));
 }
 
 fn sw3Beach(p_12: vec2<f32>, grad: vec2<f32>) {
@@ -311,24 +312,24 @@ fn sw3Beach(p_12: vec2<f32>, grad: vec2<f32>) {
     p_13 = p_12;
     grad_1 = grad;
     gNear = 1f;
-    let _e21 = grad_1;
-    gl = length(_e21);
-    let _e24 = gl;
-    if (_e24 > 0.0001f) {
-        let _e27 = grad_1;
-        let _e28 = gl;
-        local_4 = (_e27 / vec2(_e28));
+    let _e22 = grad_1;
+    gl = length(_e22);
+    let _e25 = gl;
+    if (_e25 > 0.0001f) {
+        let _e28 = grad_1;
+        let _e29 = gl;
+        local_4 = (_e28 / vec2(_e29));
     } else {
         local_4 = vec2(0f);
     }
-    let _e34 = local_4;
-    up = _e34;
-    let _e40 = uSwDir;
-    let _e41 = up;
-    gExpo = mix(SW3_LEE, 1f, smoothstep(-0.3f, 0.7f, dot(_e40, _e41)));
-    let _e45 = p_13;
-    let _e46 = sw3Noise(_e45);
-    gPn = _e46;
+    let _e35 = local_4;
+    up = _e35;
+    let _e41 = uSwDir;
+    let _e42 = up;
+    gExpo = mix(SW3_LEE, 1f, smoothstep(-0.3f, 0.7f, dot(_e41, _e42)));
+    let _e46 = p_13;
+    let _e47 = sw3Noise(_e46);
+    gPn = _e47;
     return;
 }
 
@@ -341,17 +342,17 @@ fn sw3Runup(tb: f32, H: f32, T: f32) -> f32 {
     tb_1 = tb;
     H_1 = H;
     T_1 = T;
-    let _e22 = H_1;
-    let _e25 = T_1;
-    let _e27 = T_1;
-    HL = ((((_e22 * 9.81f) * _e25) * _e27) / 6.2831855f);
-    let _e34 = tb_1;
-    let _e36 = HL;
-    let _e40 = HL;
-    let _e42 = tb_1;
-    let _e44 = tb_1;
-    let _e54 = H_1;
-    return min((1.1f * (((0.35f * _e34) * sqrt(_e36)) + (0.5f * sqrt((_e40 * (((0.563f * _e42) * _e44) + 0.004f)))))), (0.575f * _e54));
+    let _e23 = H_1;
+    let _e26 = T_1;
+    let _e28 = T_1;
+    HL = ((((_e23 * 9.81f) * _e26) * _e28) / 6.2831855f);
+    let _e35 = tb_1;
+    let _e37 = HL;
+    let _e41 = HL;
+    let _e43 = tb_1;
+    let _e45 = tb_1;
+    let _e55 = H_1;
+    return min((1.1f * (((0.35f * _e35) * sqrt(_e37)) + (0.5f * sqrt((_e41 * (((0.563f * _e43) * _e45) + 0.004f)))))), (0.575f * _e55));
 }
 
 fn sw3Reach(p_14: vec2<f32>, tb_2: f32, tc: f32, cyc: f32) -> f32 {
@@ -365,25 +366,25 @@ fn sw3Reach(p_14: vec2<f32>, tb_2: f32, tc: f32, cyc: f32) -> f32 {
     tb_3 = tb_2;
     tc_1 = tc;
     cyc_1 = cyc;
-    let _e26 = p_15;
-    let _e30 = cyc_1;
-    let _e33 = cyc_1;
-    let _e39 = w2noise(((_e26 / vec2(1.6f)) + vec2<f32>((_e30 * 7.3f), (_e33 * 3.1f))), 621i);
-    let _e43 = p_15;
-    let _e47 = cyc_1;
-    let _e50 = cyc_1;
-    let _e57 = w2noise(((_e43 / vec2(0.5f)) + vec2<f32>((_e47 * 1.7f), (-(_e50) * 2.9f))), 625i);
-    fing = ((0.85f + (0.3f * _e39)) + (0.08f * _e57));
-    let _e61 = tb_3;
-    let _e63 = uSurf;
-    let _e66 = gExpo;
-    let _e68 = p_15;
-    let _e69 = tc_1;
-    let _e70 = sw3Group(_e68, _e69);
-    let _e72 = sw3Period();
-    let _e73 = sw3Runup(_e61, (((2f * _e63.x) * _e66) * _e70), _e72);
-    let _e74 = fing;
-    return (_e73 * _e74);
+    let _e27 = p_15;
+    let _e31 = cyc_1;
+    let _e34 = cyc_1;
+    let _e40 = w2noise(((_e27 / vec2(1.6f)) + vec2<f32>((_e31 * 7.3f), (_e34 * 3.1f))), 621i);
+    let _e44 = p_15;
+    let _e48 = cyc_1;
+    let _e51 = cyc_1;
+    let _e58 = w2noise(((_e44 / vec2(0.5f)) + vec2<f32>((_e48 * 1.7f), (-(_e51) * 2.9f))), 625i);
+    fing = ((0.85f + (0.3f * _e40)) + (0.08f * _e58));
+    let _e62 = tb_3;
+    let _e64 = uSurf;
+    let _e67 = gExpo;
+    let _e69 = p_15;
+    let _e70 = tc_1;
+    let _e71 = sw3Group(_e69, _e70);
+    let _e73 = sw3Period();
+    let _e74 = sw3Runup(_e62, (((2f * _e64.x) * _e67) * _e71), _e73);
+    let _e75 = fing;
+    return (_e74 * _e75);
 }
 
 fn sw3Tup(R: f32, tb_4: f32) -> f32 {
@@ -392,10 +393,10 @@ fn sw3Tup(R: f32, tb_4: f32) -> f32 {
 
     R_1 = R;
     tb_5 = tb_4;
-    let _e21 = R_1;
-    let _e28 = tb_5;
-    let _e34 = sw3Period();
-    return clamp((sqrt(((2f * max(_e21, 0.005f)) / 9.81f)) / max(_e28, 0.012f)), 0.35f, (0.5f * _e34));
+    let _e22 = R_1;
+    let _e29 = tb_5;
+    let _e35 = sw3Period();
+    return clamp((sqrt(((2f * max(_e22, 0.005f)) / 9.81f)) / max(_e29, 0.012f)), 0.35f, (0.5f * _e35));
 }
 
 fn sw3Arc(t_4: f32, R_2: f32, tu: f32) -> f32 {
@@ -408,22 +409,22 @@ fn sw3Arc(t_4: f32, R_2: f32, tu: f32) -> f32 {
     t_5 = t_4;
     R_3 = R_2;
     tu_1 = tu;
-    let _e22 = t_5;
-    let _e23 = tu_1;
-    x_4 = ((_e22 / _e23) - 1f);
-    let _e28 = t_5;
-    let _e31 = t_5;
-    let _e33 = tu_1;
-    if ((_e28 <= 0f) || (_e31 >= (2f * _e33))) {
+    let _e23 = t_5;
+    let _e24 = tu_1;
+    x_4 = ((_e23 / _e24) - 1f);
+    let _e29 = t_5;
+    let _e32 = t_5;
+    let _e34 = tu_1;
+    if ((_e29 <= 0f) || (_e32 >= (2f * _e34))) {
         local_5 = 0f;
     } else {
-        let _e38 = R_3;
-        let _e40 = x_4;
+        let _e39 = R_3;
         let _e41 = x_4;
-        local_5 = (_e38 * (1f - (_e40 * _e41)));
+        let _e42 = x_4;
+        local_5 = (_e39 * (1f - (_e41 * _e42)));
     }
-    let _e46 = local_5;
-    return _e46;
+    let _e47 = local_5;
+    return _e47;
 }
 
 fn sw3Shore(p_16: vec2<f32>, tb_6: f32, t_6: f32, s_8: ptr<function, f32>) -> f32 {
@@ -446,91 +447,91 @@ fn sw3Shore(p_16: vec2<f32>, tb_6: f32, t_6: f32, s_8: ptr<function, f32>) -> f3
     p_17 = p_16;
     tb_7 = tb_6;
     t_7 = t_6;
-    let _e25 = sw3Period();
-    T0_ = _e25;
-    let _e28 = sw3Omega(0i);
-    let _e29 = t_7;
-    let _e30 = uSurfX;
-    let _e34 = gPn;
-    f_1 = ((((_e28 * (_e29 + _e30.y)) + _e34) + SW3_LEAD) / 6.2831855f);
-    let _e40 = f_1;
-    cyc_2 = floor(_e40);
-    let _e43 = f_1;
-    let _e44 = cyc_2;
-    fr = (_e43 - _e44);
+    let _e26 = sw3Period();
+    T0_ = _e26;
+    let _e29 = sw3Omega(0i);
+    let _e30 = t_7;
+    let _e31 = uSurfX;
+    let _e35 = gPn;
+    f_1 = ((((_e29 * (_e30 + _e31.y)) + _e35) + SW3_LEAD) / 6.2831855f);
+    let _e41 = f_1;
+    cyc_2 = floor(_e41);
+    let _e44 = f_1;
+    let _e45 = cyc_2;
+    fr = (_e44 - _e45);
     (*s_8) = 1f;
-    let _e51 = fr;
-    let _e52 = T0_;
-    gSwT = (_e51 * _e52);
-    let _e56 = tb_7;
-    gSwSteep = smoothstep(0.08f, 0.25f, _e56);
+    let _e52 = fr;
+    let _e53 = T0_;
+    gSwT = (_e52 * _e53);
+    let _e57 = tb_7;
+    gSwSteep = smoothstep(0.08f, 0.25f, _e57);
     loop {
-        let _e60 = k;
-        if !((_e60 < 3i)) {
+        let _e61 = k;
+        if !((_e61 < 3i)) {
             break;
         }
         {
-            let _e67 = fr;
-            let _e68 = k;
-            let _e71 = T0_;
-            tk = ((_e67 + f32(_e68)) * _e71);
-            let _e74 = p_17;
-            let _e75 = tb_7;
-            let _e76 = t_7;
-            let _e77 = tk;
-            let _e79 = cyc_2;
-            let _e80 = k;
-            let _e83 = sw3Reach(_e74, _e75, (_e76 - _e77), (_e79 - f32(_e80)));
-            R_4 = _e83;
-            let _e85 = R_4;
-            let _e86 = tb_7;
-            let _e87 = sw3Tup(_e85, _e86);
-            tu_2 = _e87;
-            let _e89 = tk;
-            let _e90 = R_4;
-            let _e91 = tu_2;
-            let _e92 = sw3Arc(_e89, _e90, _e91);
-            hk = _e92;
-            let _e94 = hk;
-            let _e95 = h_1;
-            if (_e94 > _e95) {
+            let _e68 = fr;
+            let _e69 = k;
+            let _e72 = T0_;
+            tk = ((_e68 + f32(_e69)) * _e72);
+            let _e75 = p_17;
+            let _e76 = tb_7;
+            let _e77 = t_7;
+            let _e78 = tk;
+            let _e80 = cyc_2;
+            let _e81 = k;
+            let _e84 = sw3Reach(_e75, _e76, (_e77 - _e78), (_e80 - f32(_e81)));
+            R_4 = _e84;
+            let _e86 = R_4;
+            let _e87 = tb_7;
+            let _e88 = sw3Tup(_e86, _e87);
+            tu_2 = _e88;
+            let _e90 = tk;
+            let _e91 = R_4;
+            let _e92 = tu_2;
+            let _e93 = sw3Arc(_e90, _e91, _e92);
+            hk = _e93;
+            let _e95 = hk;
+            let _e96 = h_1;
+            if (_e95 > _e96) {
                 {
-                    let _e97 = hk;
-                    h_1 = _e97;
-                    let _e98 = tk;
-                    gSwT = _e98;
+                    let _e98 = hk;
+                    h_1 = _e98;
                     let _e99 = tk;
-                    let _e100 = tu_2;
-                    if (_e99 < _e100) {
-                        let _e102 = tk;
-                        let _e104 = tu_2;
-                        local_7 = ((SW3_UP * _e102) / _e104);
+                    gSwT = _e99;
+                    let _e100 = tk;
+                    let _e101 = tu_2;
+                    if (_e100 < _e101) {
+                        let _e103 = tk;
+                        let _e105 = tu_2;
+                        local_7 = ((SW3_UP * _e103) / _e105);
                     } else {
-                        let _e106 = tk;
-                        let _e108 = tu_2;
-                        if (_e106 < (2f * _e108)) {
-                            let _e114 = tk;
-                            let _e115 = tu_2;
-                            let _e118 = tu_2;
-                            local_6 = (SW3_UP + ((0.7f * (_e114 - _e115)) / _e118));
+                        let _e107 = tk;
+                        let _e109 = tu_2;
+                        if (_e107 < (2f * _e109)) {
+                            let _e115 = tk;
+                            let _e116 = tu_2;
+                            let _e119 = tu_2;
+                            local_6 = (SW3_UP + ((0.7f * (_e115 - _e116)) / _e119));
                         } else {
                             local_6 = 1f;
                         }
-                        let _e123 = local_6;
-                        local_7 = _e123;
+                        let _e124 = local_6;
+                        local_7 = _e124;
                     }
-                    let _e125 = local_7;
-                    (*s_8) = _e125;
+                    let _e126 = local_7;
+                    (*s_8) = _e126;
                 }
             }
         }
         continuing {
-            let _e64 = k;
-            k = (_e64 + 1i);
+            let _e65 = k;
+            k = (_e65 + 1i);
         }
     }
-    let _e126 = h_1;
-    return max(_e126, 0f);
+    let _e127 = h_1;
+    return max(_e127, 0f);
 }
 
 fn sw3Wet(p_18: vec2<f32>, hgt: f32, tb_8: f32, t_8: f32) -> vec3<f32> {
@@ -556,85 +557,85 @@ fn sw3Wet(p_18: vec2<f32>, hgt: f32, tb_8: f32, t_8: f32) -> vec3<f32> {
     hgt_1 = hgt;
     tb_9 = tb_8;
     t_9 = t_8;
-    let _e26 = hgt_1;
-    if (_e26 <= 0f) {
+    let _e27 = hgt_1;
+    if (_e27 <= 0f) {
         return vec3<f32>(1f, 1f, 1f);
     }
-    let _e33 = sw3Period();
-    T0_1 = _e33;
-    let _e36 = sw3Omega(0i);
-    let _e37 = t_9;
-    let _e38 = uSurfX;
-    let _e42 = gPn;
-    f_2 = ((((_e36 * (_e37 + _e38.y)) + _e42) + SW3_LEAD) / 6.2831855f);
-    let _e48 = f_2;
-    cyc_3 = floor(_e48);
-    let _e51 = f_2;
-    let _e52 = cyc_3;
-    fr_1 = (_e51 - _e52);
+    let _e34 = sw3Period();
+    T0_1 = _e34;
+    let _e37 = sw3Omega(0i);
+    let _e38 = t_9;
+    let _e39 = uSurfX;
+    let _e43 = gPn;
+    f_2 = ((((_e37 * (_e38 + _e39.y)) + _e43) + SW3_LEAD) / 6.2831855f);
+    let _e49 = f_2;
+    cyc_3 = floor(_e49);
+    let _e52 = f_2;
+    let _e53 = cyc_3;
+    fr_1 = (_e52 - _e53);
     loop {
-        let _e60 = k_1;
-        if !((_e60 < 7i)) {
+        let _e61 = k_1;
+        if !((_e61 < 7i)) {
             break;
         }
         {
-            let _e67 = fr_1;
-            let _e68 = k_1;
-            let _e71 = T0_1;
-            tk_1 = ((_e67 + f32(_e68)) * _e71);
-            let _e74 = p_19;
-            let _e75 = tb_9;
-            let _e76 = t_9;
-            let _e77 = tk_1;
-            let _e79 = cyc_3;
-            let _e80 = k_1;
-            let _e83 = sw3Reach(_e74, _e75, (_e76 - _e77), (_e79 - f32(_e80)));
-            R_5 = _e83;
-            let _e85 = hgt_1;
-            let _e86 = R_5;
-            if (_e85 >= _e86) {
+            let _e68 = fr_1;
+            let _e69 = k_1;
+            let _e72 = T0_1;
+            tk_1 = ((_e68 + f32(_e69)) * _e72);
+            let _e75 = p_19;
+            let _e76 = tb_9;
+            let _e77 = t_9;
+            let _e78 = tk_1;
+            let _e80 = cyc_3;
+            let _e81 = k_1;
+            let _e84 = sw3Reach(_e75, _e76, (_e77 - _e78), (_e80 - f32(_e81)));
+            R_5 = _e84;
+            let _e86 = hgt_1;
+            let _e87 = R_5;
+            if (_e86 >= _e87) {
                 continue;
             }
-            let _e88 = R_5;
-            let _e89 = tb_9;
-            let _e90 = sw3Tup(_e88, _e89);
-            tu_3 = _e90;
-            let _e93 = hgt_1;
-            let _e94 = R_5;
-            r = sqrt((1f - (_e93 / _e94)));
-            let _e99 = tu_3;
-            let _e101 = r;
-            ta = (_e99 * (1f - _e101));
-            let _e105 = tu_3;
-            let _e107 = r;
-            tl = (_e105 * (1f + _e107));
-            let _e111 = tk_1;
-            let _e112 = ta;
-            if (_e111 < _e112) {
+            let _e89 = R_5;
+            let _e90 = tb_9;
+            let _e91 = sw3Tup(_e89, _e90);
+            tu_3 = _e91;
+            let _e94 = hgt_1;
+            let _e95 = R_5;
+            r = sqrt((1f - (_e94 / _e95)));
+            let _e100 = tu_3;
+            let _e102 = r;
+            ta = (_e100 * (1f - _e102));
+            let _e106 = tu_3;
+            let _e108 = r;
+            tl = (_e106 * (1f + _e108));
+            let _e112 = tk_1;
+            let _e113 = ta;
+            if (_e112 < _e113) {
                 continue;
             }
-            let _e114 = tk_1;
-            let _e115 = tl;
-            if (_e114 <= _e115) {
+            let _e115 = tk_1;
+            let _e116 = tl;
+            if (_e115 <= _e116) {
                 return vec3<f32>(1f, 1f, 1f);
             }
-            let _e121 = tk_1;
-            let _e122 = tl;
-            age = (_e121 - _e122);
-            let _e126 = o;
-            let _e128 = age;
-            o.x = max(_e126.x, exp((-(_e128) / 45f)));
-            let _e135 = o;
-            let _e137 = age;
-            o.y = max(_e135.y, exp((-(_e137) / 1.5f)));
+            let _e122 = tk_1;
+            let _e123 = tl;
+            age = (_e122 - _e123);
+            let _e127 = o;
+            let _e129 = age;
+            o.x = max(_e127.x, exp((-(_e129) / 45f)));
+            let _e136 = o;
+            let _e138 = age;
+            o.y = max(_e136.y, exp((-(_e138) / 1.5f)));
         }
         continuing {
-            let _e64 = k_1;
-            k_1 = (_e64 + 1i);
+            let _e65 = k_1;
+            k_1 = (_e65 + 1i);
         }
     }
-    let _e143 = o;
-    return _e143;
+    let _e144 = o;
+    return _e144;
 }
 
 fn sw3EdgeY(xz: vec2<f32>, level: f32, bed: f32, py: f32, grad_2: vec2<f32>, t_10: f32, fl: f32) -> f32 {
@@ -659,50 +660,50 @@ fn sw3EdgeY(xz: vec2<f32>, level: f32, bed: f32, py: f32, grad_2: vec2<f32>, t_1
     grad_3 = grad_2;
     t_11 = t_10;
     fl_1 = fl;
-    let _e32 = level_1;
-    let _e33 = bed_1;
-    depth = (_e32 - _e33);
-    let _e36 = depth;
-    let _e39 = depth;
-    if ((_e36 >= 0.5f) || (_e39 <= -3f)) {
-        let _e44 = py_1;
-        return _e44;
+    let _e33 = level_1;
+    let _e34 = bed_1;
+    depth = (_e33 - _e34);
+    let _e37 = depth;
+    let _e40 = depth;
+    if ((_e37 >= 0.5f) || (_e40 <= -3f)) {
+        let _e45 = py_1;
+        return _e45;
     }
-    let _e45 = xz_1;
-    let _e46 = grad_3;
-    sw3Beach(_e45, _e46);
-    let _e47 = gExpo;
-    let _e49 = fl_1;
-    gExpo = (_e47 * (1f - _e49));
-    let _e53 = level_1;
-    let _e54 = xz_1;
-    let _e55 = grad_3;
-    let _e57 = t_11;
-    let _e60 = sw3Shore(_e54, length(_e55), _e57, (&s_9));
-    let _e62 = bed_1;
-    th = ((_e53 + _e60) - _e62);
-    let _e65 = bed_1;
-    let _e66 = th;
-    if (_e66 > 0f) {
-        let _e72 = th;
-        local_8 = min(0.12f, (0.012f + (0.3f * _e72)));
+    let _e46 = xz_1;
+    let _e47 = grad_3;
+    sw3Beach(_e46, _e47);
+    let _e48 = gExpo;
+    let _e50 = fl_1;
+    gExpo = (_e48 * (1f - _e50));
+    let _e54 = level_1;
+    let _e55 = xz_1;
+    let _e56 = grad_3;
+    let _e58 = t_11;
+    let _e61 = sw3Shore(_e55, length(_e56), _e58, (&s_9));
+    let _e63 = bed_1;
+    th = ((_e54 + _e61) - _e63);
+    let _e66 = bed_1;
+    let _e67 = th;
+    if (_e67 > 0f) {
+        let _e73 = th;
+        local_8 = min(0.12f, (0.012f + (0.3f * _e73)));
     } else {
-        let _e76 = th;
-        local_8 = max(_e76, -0.15f);
+        let _e77 = th;
+        local_8 = max(_e77, -0.15f);
     }
-    let _e81 = local_8;
-    sheet = (_e65 + _e81);
-    let _e84 = depth;
-    if (_e84 < 0f) {
-        let _e87 = sheet;
-        local_9 = _e87;
+    let _e82 = local_8;
+    sheet = (_e66 + _e82);
+    let _e85 = depth;
+    if (_e85 < 0f) {
+        let _e88 = sheet;
+        local_9 = _e88;
     } else {
-        let _e88 = py_1;
-        let _e89 = sheet;
-        local_9 = max(_e88, _e89);
+        let _e89 = py_1;
+        let _e90 = sheet;
+        local_9 = max(_e89, _e90);
     }
-    let _e92 = local_9;
-    return _e92;
+    let _e93 = local_9;
+    return _e93;
 }
 
 fn sw3ShoreFoam(depth_1: f32, th_1: f32, s_10: f32, wave: f32) -> f32 {
@@ -723,58 +724,58 @@ fn sw3ShoreFoam(depth_1: f32, th_1: f32, s_10: f32, wave: f32) -> f32 {
     th_2 = th_1;
     s_11 = s_10;
     wave_1 = wave;
-    let _e26 = th_2;
-    if (_e26 <= 0f) {
+    let _e27 = th_2;
+    if (_e27 <= 0f) {
         return 0f;
     }
-    let _e30 = th_2;
-    let _e31 = depth_2;
-    zeta = (_e30 - _e31);
-    let _e34 = s_11;
-    if (_e34 < SW3_UP) {
+    let _e31 = th_2;
+    let _e32 = depth_2;
+    zeta = (_e31 - _e32);
+    let _e35 = s_11;
+    if (_e35 < SW3_UP) {
         local_10 = 0f;
     } else {
-        let _e37 = s_11;
-        local_10 = ((_e37 - SW3_UP) / 0.7f);
+        let _e38 = s_11;
+        local_10 = ((_e38 - SW3_UP) / 0.7f);
     }
-    let _e44 = local_10;
-    p_20 = _e44;
-    let _e46 = zeta;
-    let _e50 = p_20;
-    top = (_e46 - (0.75f * smoothstep(0.3f, 1f, _e50)));
-    let _e58 = p_20;
-    reach = (0.75f * smoothstep(0.15f, 1f, _e58));
-    let _e64 = top;
-    let _e65 = depth_2;
-    let _e70 = reach;
-    let _e72 = reach;
-    let _e75 = depth_2;
-    let _e81 = s_11;
-    let _e84 = s_11;
-    if (_e84 < SW3_UP) {
+    let _e45 = local_10;
+    p_20 = _e45;
+    let _e47 = zeta;
+    let _e51 = p_20;
+    top = (_e47 - (0.75f * smoothstep(0.3f, 1f, _e51)));
+    let _e59 = p_20;
+    reach = (0.75f * smoothstep(0.15f, 1f, _e59));
+    let _e65 = top;
+    let _e66 = depth_2;
+    let _e71 = reach;
+    let _e73 = reach;
+    let _e76 = depth_2;
+    let _e82 = s_11;
+    let _e85 = s_11;
+    if (_e85 < SW3_UP) {
         local_11 = 0.9f;
     } else {
-        let _e89 = p_20;
-        local_11 = mix(0.85f, 0.5f, _e89);
+        let _e90 = p_20;
+        local_11 = mix(0.85f, 0.5f, _e90);
     }
-    let _e92 = local_11;
-    let _e96 = wave_1;
-    mass = ((((smoothstep(0f, 0.12f, (_e64 + _e65)) * (1f - smoothstep((0.35f * _e70), (_e72 + 0.1f), _e75))) * smoothstep(0f, 0.06f, _e81)) * _e92) * (1f - (0.4f * clamp(_e96, 0f, 1f))));
-    let _e104 = gSwSteep;
-    let _e105 = gSwT;
-    let _e114 = depth_2;
-    splash = ((_e104 * exp((-(_e105) / 0.7f))) * (1f - smoothstep(0.1f, 0.6f, abs((_e114 + 0.1f)))));
-    let _e122 = mass;
-    let _e124 = splash;
-    return max(_e122, (0.95f * _e124));
+    let _e93 = local_11;
+    let _e97 = wave_1;
+    mass = ((((smoothstep(0f, 0.12f, (_e65 + _e66)) * (1f - smoothstep((0.35f * _e71), (_e73 + 0.1f), _e76))) * smoothstep(0f, 0.06f, _e82)) * _e93) * (1f - (0.4f * clamp(_e97, 0f, 1f))));
+    let _e105 = gSwSteep;
+    let _e106 = gSwT;
+    let _e115 = depth_2;
+    splash = ((_e105 * exp((-(_e106) / 0.7f))) * (1f - smoothstep(0.1f, 0.6f, abs((_e115 + 0.1f)))));
+    let _e123 = mass;
+    let _e125 = splash;
+    return max(_e123, (0.95f * _e125));
 }
 
 fn sw3EdgeShift(depth_3: f32) -> f32 {
     var depth_4: f32;
 
     depth_4 = depth_3;
-    let _e22 = depth_4;
-    return smoothstep(0.4f, 2f, _e22);
+    let _e23 = depth_4;
+    return smoothstep(0.4f, 2f, _e23);
 }
 
 fn w3Coast(p_21: vec2<f32>, depth_5: f32, cell: f32) -> vec3<f32> {
@@ -836,283 +837,291 @@ fn w3Coast(p_21: vec2<f32>, depth_5: f32, cell: f32) -> vec3<f32> {
     cell_1 = cell;
     gCoastSlope = vec2(0f);
     gCoastFoam = vec3(0f);
-    let _e30 = uSurf;
-    if (_e30.x <= 0f) {
+    gBreak = vec4(0f);
+    let _e33 = uSurf;
+    if (_e33.x <= 0f) {
         return vec3(0f);
     }
-    let _e36 = gNear;
-    let _e37 = gExpo;
-    let _e42 = depth_6;
-    env = ((_e36 * _e37) * smoothstep(-0.9f, 0.5f, _e42));
-    let _e46 = depth_6;
-    shoal = pow(clamp((max(_e46, 0.6f) / 14f), 0.04f, 1f), -0.25f);
-    let _e59 = depth_6;
-    cel = sqrt((9.81f * clamp(_e59, 0.3f, 14f)));
-    let _e67 = depth_6;
-    amax = ((0.42f * max(_e67, 0f)) + 0.02f);
-    let _e74 = p_22;
-    let _e75 = uWTime;
-    let _e76 = sw3Group(_e74, _e75);
-    group = _e76;
+    let _e39 = gNear;
+    let _e40 = gExpo;
+    let _e45 = depth_6;
+    env = ((_e39 * _e40) * smoothstep(-0.9f, 0.5f, _e45));
+    let _e49 = depth_6;
+    shoal = pow(clamp((max(_e49, 0.6f) / 14f), 0.04f, 1f), -0.25f);
+    let _e62 = depth_6;
+    cel = sqrt((9.81f * clamp(_e62, 0.3f, 14f)));
+    let _e70 = depth_6;
+    amax = ((0.42f * max(_e70, 0f)) + 0.02f);
+    let _e77 = p_22;
+    let _e78 = uWTime;
+    let _e79 = sw3Group(_e77, _e78);
+    group = _e79;
     loop {
-        let _e96 = i_5;
-        if !((_e96 < 2i)) {
+        let _e99 = i_5;
+        if !((_e99 < 2i)) {
             break;
         }
         {
-            let _e103 = i_5;
-            let _e104 = sw3Omega(_e103);
-            w = _e104;
-            let _e106 = w;
-            let _e107 = cel;
-            k_2 = (_e106 / _e107);
-            let _e110 = uSurf;
-            let _e112 = i_5;
-            if (_e112 == 0i) {
+            let _e106 = i_5;
+            let _e107 = sw3Omega(_e106);
+            w = _e107;
+            let _e109 = w;
+            let _e110 = cel;
+            k_2 = (_e109 / _e110);
+            let _e113 = uSurf;
+            let _e115 = i_5;
+            if (_e115 == 0i) {
                 local_12 = 1f;
             } else {
                 local_12 = 0.45f;
             }
-            let _e118 = local_12;
-            let _e120 = env;
-            let _e122 = shoal;
-            let _e124 = group;
-            a0_ = ((((_e110.x * _e118) * _e120) * _e122) * _e124);
-            let _e127 = a0_;
-            let _e128 = amax;
-            let _e129 = i_5;
-            if (_e129 == 0i) {
+            let _e121 = local_12;
+            let _e123 = env;
+            let _e125 = shoal;
+            let _e127 = group;
+            a0_ = ((((_e113.x * _e121) * _e123) * _e125) * _e127);
+            let _e130 = a0_;
+            let _e131 = amax;
+            let _e132 = i_5;
+            if (_e132 == 0i) {
                 local_13 = 1f;
             } else {
                 local_13 = 0.5f;
             }
-            let _e135 = local_13;
-            a_1 = min(_e127, (_e128 * _e135));
-            let _e139 = i_5;
-            let _e140 = uWTime;
-            let _e141 = gTau;
-            let _e142 = gPn;
-            let _e143 = sw3Phase(_e139, _e140, _e141, _e142);
-            ph = _e143;
-            let _e145 = ph;
-            let _e147 = (_e145 + 3.1415927f);
-            psi = ((_e147 - (floor((_e147 / 6.2831855f)) * 6.2831855f)) - 3.1415927f);
-            let _e158 = ph;
-            c_1 = (0.5f + (0.5f * cos(_e158)));
-            let _e163 = ph;
-            s_12 = sin(_e163);
-            let _e166 = c_1;
-            cp = pow(max(_e166, 0f), 0.6f);
-            let _e172 = a_1;
-            let _e173 = depth_6;
-            rel = (_e172 / max(_e173, 0.05f));
-            let _e178 = a0_;
-            let _e179 = depth_6;
-            rel0_ = (_e178 / max(_e179, 0.05f));
-            let _e184 = ph;
-            cyc_4 = floor(((_e184 + 3.1415927f) / 6.2831855f));
-            let _e193 = p_22;
-            let _e197 = cyc_4;
+            let _e138 = local_13;
+            a_1 = min(_e130, (_e131 * _e138));
+            let _e142 = i_5;
+            let _e143 = uWTime;
+            let _e144 = gTau;
+            let _e145 = gPn;
+            let _e146 = sw3Phase(_e142, _e143, _e144, _e145);
+            ph = _e146;
+            let _e148 = ph;
+            let _e150 = (_e148 + 3.1415927f);
+            psi = ((_e150 - (floor((_e150 / 6.2831855f)) * 6.2831855f)) - 3.1415927f);
+            let _e161 = ph;
+            c_1 = (0.5f + (0.5f * cos(_e161)));
+            let _e166 = ph;
+            s_12 = sin(_e166);
+            let _e169 = c_1;
+            cp = pow(max(_e169, 0f), 0.6f);
+            let _e175 = a_1;
+            let _e176 = depth_6;
+            rel = (_e175 / max(_e176, 0.05f));
+            let _e181 = a0_;
+            let _e182 = depth_6;
+            rel0_ = (_e181 / max(_e182, 0.05f));
+            let _e187 = ph;
+            cyc_4 = floor(((_e187 + 3.1415927f) / 6.2831855f));
+            let _e196 = p_22;
             let _e200 = cyc_4;
-            let _e203 = i_5;
-            let _e211 = w2noise(((_e193 / vec2(33f)) + vec2<f32>((_e197 * 7.3f), ((_e200 * 3.1f) + (f32(_e203) * 31f)))), 614i);
-            early = (0.5f + (0.5f * _e211));
-            let _e217 = a0_;
-            energy = smoothstep(0.03f, 0.2f, _e217);
-            let _e222 = early;
-            let _e227 = early;
-            let _e230 = rel0_;
-            let _e232 = energy;
-            breaking = (smoothstep((0.3f + (0.09f * _e222)), (0.39f + (0.09f * _e227)), _e230) * _e232);
-            let _e235 = breaking;
-            let _e240 = psi;
-            let _e246 = psi;
-            collapse = ((_e235 * smoothstep(-0.75f, -0.12f, _e240)) * (1f - smoothstep(0.05f, 0.7f, _e246)));
-            let _e252 = i_5;
-            if (_e252 == 0i) {
+            let _e203 = cyc_4;
+            let _e206 = i_5;
+            let _e214 = w2noise(((_e196 / vec2(33f)) + vec2<f32>((_e200 * 7.3f), ((_e203 * 3.1f) + (f32(_e206) * 31f)))), 614i);
+            early = (0.5f + (0.5f * _e214));
+            let _e220 = a0_;
+            energy = smoothstep(0.03f, 0.2f, _e220);
+            let _e225 = early;
+            let _e230 = early;
+            let _e233 = rel0_;
+            let _e235 = energy;
+            breaking = (smoothstep((0.3f + (0.09f * _e225)), (0.39f + (0.09f * _e230)), _e233) * _e235);
+            let _e238 = breaking;
+            let _e243 = psi;
+            let _e249 = psi;
+            collapse = ((_e238 * smoothstep(-0.75f, -0.12f, _e243)) * (1f - smoothstep(0.05f, 0.7f, _e249)));
+            let _e254 = i_5;
+            if (_e254 == 0i) {
+                let _e257 = psi;
+                let _e258 = breaking;
+                let _e259 = a_1;
+                gBreak = vec4<f32>(_e257, _e258, _e259, 0f);
+            }
+            let _e263 = i_5;
+            if (_e263 == 0i) {
                 local_14 = 0.48f;
             } else {
                 local_14 = 0.12f;
             }
-            let _e258 = local_14;
-            let _e259 = collapse;
-            body = (1f - (_e258 * _e259));
-            let _e263 = i_5;
-            if (_e263 == 0i) {
-                let _e267 = uSurf;
-                let _e270 = a_1;
-                let _e274 = rel;
-                let _e280 = rel;
-                local_15 = ((((2f * _e267.w) * _e270) * smoothstep(0.16f, 0.28f, _e274)) * (1f - smoothstep(0.4f, 0.6f, _e280)));
+            let _e269 = local_14;
+            let _e270 = collapse;
+            body = (1f - (_e269 * _e270));
+            let _e274 = i_5;
+            if (_e274 == 0i) {
+                let _e278 = uSurf;
+                let _e281 = a_1;
+                let _e285 = rel;
+                let _e291 = rel;
+                local_15 = ((((2f * _e278.w) * _e281) * smoothstep(0.16f, 0.28f, _e285)) * (1f - smoothstep(0.4f, 0.6f, _e291)));
             } else {
                 local_15 = 0f;
             }
-            let _e286 = local_15;
-            pitch = _e286;
-            let _e288 = pitch;
-            let _e291 = k_2;
-            pitch = min(_e288, (0.35f / (1.08f * _e291)));
-            let _e295 = pitch;
-            let _e299 = k_2;
-            let _e300 = cell_1;
-            pitch = (_e295 * (1f - smoothstep(0.03f, 0.1f, ((_e299 * _e300) / 6.2831855f))));
-            let _e307 = pitch;
-            let _e313 = psi;
-            pitch = (_e307 * (1f - (0.65f * smoothstep(-0.05f, 0.55f, _e313))));
-            let _e318 = pinch;
-            let _e320 = pitch;
-            let _e322 = k_2;
-            pinch = (_e318 - ((1.08f * _e320) * _e322));
-            let _e325 = pinch;
-            let _e326 = uSurf;
-            let _e328 = a_1;
-            let _e330 = k_2;
-            qak = max(min(_e325, (((_e326.w * _e328) * _e330) * 8f)), 0f);
-            let _e338 = pinch;
-            let _e339 = qak;
-            pinch = (_e338 - _e339);
-            let _e341 = c_1;
-            let _e342 = c_1;
-            let _e344 = c_1;
-            let _e346 = c_1;
-            let _e348 = c_1;
-            c5_ = ((((_e341 * _e342) * _e344) * _e346) * _e348);
-            let _e354 = k_2;
-            let _e355 = cell_1;
-            bl = (1f - smoothstep(0.1f, 0.3f, ((_e354 * _e355) / 6.2831855f)));
-            let _e363 = d_1;
-            let _e365 = bl;
-            let _e366 = a_1;
-            let _e368 = body;
-            let _e371 = cp;
-            let _e373 = c_1;
-            d_1.y = (_e363.y + (((_e365 * _e366) * _e368) * (((2f * _e371) * _e373) - 0.78f)));
-            let _e379 = d_1;
-            let _e381 = d_1;
-            let _e383 = bl;
-            let _e384 = gDir;
-            let _e386 = qak;
-            let _e387 = k_2;
-            let _e389 = s_12;
-            let _e391 = pitch;
-            let _e392 = c5_;
-            let _e394 = c_1;
-            let _e398 = (_e381.xz + ((_e383 * _e384) * (((_e386 / _e387) * _e389) + ((_e391 * _e392) * _e394))));
-            d_1.x = _e398.x;
-            d_1.z = _e398.y;
-            let _e403 = sl;
-            let _e404 = bl;
-            let _e405 = gDir;
-            let _e407 = a_1;
-            let _e408 = body;
-            let _e410 = k_2;
-            let _e414 = cp;
-            let _e416 = s_12;
-            let _e419 = qak;
-            let _e420 = ph;
-            let _e425 = pitch;
-            let _e427 = k_2;
-            let _e429 = c5_;
-            let _e431 = s_12;
-            sl = (_e403 + ((_e404 * _e405) * ((((((_e407 * _e408) * _e410) * 1.6f) * _e414) * _e416) / max(((1f - (_e419 * cos(_e420))) + ((((3f * _e425) * _e427) * _e429) * _e431)), 0.2f))));
-            let _e441 = a_1;
-            big = smoothstep(0.2f, 0.5f, _e441);
-            let _e444 = psi;
-            let _e450 = big;
-            let _e457 = rel;
-            let _e462 = psi;
-            tail = max(exp((-(max(_e444, 0f)) * mix(0.45f, 1f, _e450))), ((0.65f * smoothstep(0.3f, 0.55f, _e457)) * smoothstep(2.4f, 0.3f, _e462)));
-            let _e467 = foam;
-            let _e468 = breaking;
-            let _e473 = big;
-            let _e476 = psi;
-            let _e479 = tail;
-            let _e483 = big;
-            foam = (_e467 + (((_e468 * smoothstep(mix(-0.7f, -0.35f, _e473), 0f, _e476)) * _e479) * mix(0.32f, 0.58f, _e483)));
-            let _e487 = i_5;
-            if (_e487 == 0i) {
+            let _e297 = local_15;
+            pitch = _e297;
+            let _e299 = pitch;
+            let _e302 = k_2;
+            pitch = min(_e299, (0.35f / (1.08f * _e302)));
+            let _e306 = pitch;
+            let _e310 = k_2;
+            let _e311 = cell_1;
+            pitch = (_e306 * (1f - smoothstep(0.03f, 0.1f, ((_e310 * _e311) / 6.2831855f))));
+            let _e318 = pitch;
+            let _e324 = psi;
+            pitch = (_e318 * (1f - (0.65f * smoothstep(-0.05f, 0.55f, _e324))));
+            let _e329 = pinch;
+            let _e331 = pitch;
+            let _e333 = k_2;
+            pinch = (_e329 - ((1.08f * _e331) * _e333));
+            let _e336 = pinch;
+            let _e337 = uSurf;
+            let _e339 = a_1;
+            let _e341 = k_2;
+            qak = max(min(_e336, (((_e337.w * _e339) * _e341) * 8f)), 0f);
+            let _e349 = pinch;
+            let _e350 = qak;
+            pinch = (_e349 - _e350);
+            let _e352 = c_1;
+            let _e353 = c_1;
+            let _e355 = c_1;
+            let _e357 = c_1;
+            let _e359 = c_1;
+            c5_ = ((((_e352 * _e353) * _e355) * _e357) * _e359);
+            let _e365 = k_2;
+            let _e366 = cell_1;
+            bl = (1f - smoothstep(0.1f, 0.3f, ((_e365 * _e366) / 6.2831855f)));
+            let _e374 = d_1;
+            let _e376 = bl;
+            let _e377 = a_1;
+            let _e379 = body;
+            let _e382 = cp;
+            let _e384 = c_1;
+            d_1.y = (_e374.y + (((_e376 * _e377) * _e379) * (((2f * _e382) * _e384) - 0.78f)));
+            let _e390 = d_1;
+            let _e392 = d_1;
+            let _e394 = bl;
+            let _e395 = gDir;
+            let _e397 = qak;
+            let _e398 = k_2;
+            let _e400 = s_12;
+            let _e402 = pitch;
+            let _e403 = c5_;
+            let _e405 = c_1;
+            let _e409 = (_e392.xz + ((_e394 * _e395) * (((_e397 / _e398) * _e400) + ((_e402 * _e403) * _e405))));
+            d_1.x = _e409.x;
+            d_1.z = _e409.y;
+            let _e414 = sl;
+            let _e415 = bl;
+            let _e416 = gDir;
+            let _e418 = a_1;
+            let _e419 = body;
+            let _e421 = k_2;
+            let _e425 = cp;
+            let _e427 = s_12;
+            let _e430 = qak;
+            let _e431 = ph;
+            let _e436 = pitch;
+            let _e438 = k_2;
+            let _e440 = c5_;
+            let _e442 = s_12;
+            sl = (_e414 + ((_e415 * _e416) * ((((((_e418 * _e419) * _e421) * 1.6f) * _e425) * _e427) / max(((1f - (_e430 * cos(_e431))) + ((((3f * _e436) * _e438) * _e440) * _e442)), 0.2f))));
+            let _e452 = a_1;
+            big = smoothstep(0.2f, 0.5f, _e452);
+            let _e455 = psi;
+            let _e461 = big;
+            let _e468 = rel;
+            let _e473 = psi;
+            tail = max(exp((-(max(_e455, 0f)) * mix(0.45f, 1f, _e461))), ((0.65f * smoothstep(0.3f, 0.55f, _e468)) * smoothstep(2.4f, 0.3f, _e473)));
+            let _e478 = foam;
+            let _e479 = breaking;
+            let _e484 = big;
+            let _e487 = psi;
+            let _e490 = tail;
+            let _e494 = big;
+            foam = (_e478 + (((_e479 * smoothstep(mix(-0.7f, -0.35f, _e484), 0f, _e487)) * _e490) * mix(0.32f, 0.58f, _e494)));
+            let _e498 = i_5;
+            if (_e498 == 0i) {
                 {
-                    let _e490 = psi;
-                    adv = ((_e490 + 0.58f) / 0.58f);
-                    let _e496 = psi;
-                    pl = ((_e496 + 0.08f) / 0.28f);
-                    let _e502 = breaking;
-                    let _e504 = adv;
-                    let _e506 = adv;
-                    let _e511 = pl;
-                    let _e513 = pl;
-                    let _e523 = rel;
-                    let _e528 = uSurfX;
-                    charge = (((_e502 * ((1.25f * exp((-(_e504) * _e506))) + (0.45f * exp((-(_e511) * _e513))))) * (0.65f + (0.35f * smoothstep(0.15f, 0.5f, _e523)))) * _e528.x);
-                    let _e531 = energy;
-                    let _e534 = psi;
-                    let _e537 = psi;
-                    let _e547 = depth_6;
-                    backwash = (((_e531 * smoothstep(0.25f, 1.1f, _e534)) * exp((-(max(_e537, 0f)) * 0.42f))) * smoothstep(3f, 0.15f, _e547));
-                    let _e550 = ph;
-                    let _e556 = w;
-                    since = ((_e550 - (floor((_e550 / 6.2831855f)) * 6.2831855f)) / _e556);
-                    let _e560 = w;
-                    period = (6.2831855f / _e560);
+                    let _e501 = psi;
+                    adv = ((_e501 + 0.58f) / 0.58f);
+                    let _e507 = psi;
+                    pl = ((_e507 + 0.08f) / 0.28f);
+                    let _e513 = breaking;
+                    let _e515 = adv;
+                    let _e517 = adv;
+                    let _e522 = pl;
+                    let _e524 = pl;
+                    let _e534 = rel;
+                    let _e539 = uSurfX;
+                    charge = (((_e513 * ((1.25f * exp((-(_e515) * _e517))) + (0.45f * exp((-(_e522) * _e524))))) * (0.65f + (0.35f * smoothstep(0.15f, 0.5f, _e534)))) * _e539.x);
+                    let _e542 = energy;
+                    let _e545 = psi;
+                    let _e548 = psi;
+                    let _e558 = depth_6;
+                    backwash = (((_e542 * smoothstep(0.25f, 1.1f, _e545)) * exp((-(max(_e548, 0f)) * 0.42f))) * smoothstep(3f, 0.15f, _e558));
+                    let _e561 = ph;
+                    let _e567 = w;
+                    since = ((_e561 - (floor((_e561 / 6.2831855f)) * 6.2831855f)) / _e567);
+                    let _e571 = w;
+                    period = (6.2831855f / _e571);
                     mem = 0f;
                     j = 0i;
                     loop {
-                        let _e567 = j;
-                        if !((_e567 < 4i)) {
+                        let _e578 = j;
+                        if !((_e578 < 4i)) {
                             break;
                         }
                         {
-                            let _e574 = ph;
-                            let _e578 = j;
-                            cid = (floor((_e574 / 6.2831855f)) - f32(_e578));
-                            let _e582 = since;
-                            let _e583 = j;
-                            let _e585 = period;
-                            age_1 = (_e582 + (f32(_e583) * _e585));
-                            let _e589 = mem;
-                            let _e594 = p_22;
-                            let _e598 = cid;
-                            let _e601 = cid;
-                            let _e607 = w2noise(((_e594 / vec2(40f)) + vec2<f32>((_e598 * 7.3f), (_e601 * 3.1f))), 615i);
-                            let _e612 = age_1;
-                            let _e616 = breaking;
+                            let _e585 = ph;
+                            let _e589 = j;
+                            cid = (floor((_e585 / 6.2831855f)) - f32(_e589));
+                            let _e593 = since;
+                            let _e594 = j;
+                            let _e596 = period;
+                            age_1 = (_e593 + (f32(_e594) * _e596));
+                            let _e600 = mem;
+                            let _e605 = p_22;
+                            let _e609 = cid;
+                            let _e612 = cid;
+                            let _e618 = w2noise(((_e605 / vec2(40f)) + vec2<f32>((_e609 * 7.3f), (_e612 * 3.1f))), 615i);
                             let _e623 = age_1;
-                            mem = (_e589 + (((0.55f + (0.65f * (0.5f + (0.5f * _e607)))) * exp((-(_e612) / mix(3.5f, 10f, _e616)))) * smoothstep(0f, 1f, _e623)));
+                            let _e627 = breaking;
+                            let _e634 = age_1;
+                            mem = (_e600 + (((0.55f + (0.65f * (0.5f + (0.5f * _e618)))) * exp((-(_e623) / mix(3.5f, 10f, _e627)))) * smoothstep(0f, 1f, _e634)));
                         }
                         continuing {
-                            let _e571 = j;
-                            j = (_e571 + 1i);
+                            let _e582 = j;
+                            j = (_e582 + 1i);
                         }
                     }
-                    let _e627 = mem;
-                    let _e628 = breaking;
-                    let _e632 = depth_6;
-                    let _e638 = depth_6;
-                    residual = clamp(((((_e627 * _e628) * smoothstep(7f, 0.25f, _e632)) * smoothstep(-0.7f, 0.15f, _e638)) * 0.42f), 0f, 1f);
+                    let _e638 = mem;
+                    let _e639 = breaking;
+                    let _e643 = depth_6;
+                    let _e649 = depth_6;
+                    residual = clamp(((((_e638 * _e639) * smoothstep(7f, 0.25f, _e643)) * smoothstep(-0.7f, 0.15f, _e649)) * 0.42f), 0f, 1f);
                 }
             }
         }
         continuing {
-            let _e100 = i_5;
-            i_5 = (_e100 + 1i);
+            let _e103 = i_5;
+            i_5 = (_e103 + 1i);
         }
     }
-    let _e646 = sl;
-    gCoastSlope = _e646;
-    let _e647 = charge;
-    let _e650 = backwash;
-    let _e654 = residual;
-    let _e660 = depth_6;
-    sand = clamp(((((_e647 * 0.12f) + (_e650 * 0.9f)) + (_e654 * 0.3f)) * smoothstep(3f, 0.15f, _e660)), 0f, 1f);
-    let _e667 = foam;
-    let _e668 = charge;
-    let _e673 = residual;
-    let _e675 = backwash;
-    let _e681 = sand;
-    let _e682 = residual;
-    gCoastFoam = vec3<f32>(clamp((_e667 + _e668), 0f, 1f), clamp((_e673 + (0.5f * _e675)), 0f, 1f), max(_e681, (_e682 * 0.6f)));
-    let _e687 = d_1;
-    return _e687;
+    let _e657 = sl;
+    gCoastSlope = _e657;
+    let _e658 = charge;
+    let _e661 = backwash;
+    let _e665 = residual;
+    let _e671 = depth_6;
+    sand = clamp(((((_e658 * 0.12f) + (_e661 * 0.9f)) + (_e665 * 0.3f)) * smoothstep(3f, 0.15f, _e671)), 0f, 1f);
+    let _e678 = foam;
+    let _e679 = charge;
+    let _e684 = residual;
+    let _e686 = backwash;
+    let _e692 = sand;
+    let _e693 = residual;
+    gCoastFoam = vec3<f32>(clamp((_e678 + _e679), 0f, 1f), clamp((_e684 + (0.5f * _e686)), 0f, 1f), max(_e692, (_e693 * 0.6f)));
+    let _e698 = d_1;
+    return _e698;
 }
 
 fn coastSet(surf: vec4<f32>, surfX: vec4<f32>, t_12: f32, swDir: vec2<f32>) {
@@ -1125,14 +1134,14 @@ fn coastSet(surf: vec4<f32>, surfX: vec4<f32>, t_12: f32, swDir: vec2<f32>) {
     surfX_1 = surfX;
     t_13 = t_12;
     swDir_1 = swDir;
-    let _e28 = surf_1;
-    uSurf = _e28;
-    let _e29 = surfX_1;
-    uSurfX = _e29;
-    let _e30 = t_13;
-    uWTime = _e30;
-    let _e31 = swDir_1;
-    uSwDir = _e31;
+    let _e29 = surf_1;
+    uSurf = _e29;
+    let _e30 = surfX_1;
+    uSurfX = _e30;
+    let _e31 = t_13;
+    uWTime = _e31;
+    let _e32 = swDir_1;
+    uSwDir = _e32;
     return;
 }
 
@@ -1152,6 +1161,7 @@ fn coastVert(xz_2: vec2<f32>, sh_1: vec4<f32>, know: f32, depth_7: f32, cell_2: 
     var fz: f32 = 0f;
     var on: f32 = 0f;
     var d_2: vec3<f32>;
+    var local_16: vec2<f32>;
 
     xz_3 = xz_2;
     sh_2 = sh_1;
@@ -1163,57 +1173,70 @@ fn coastVert(xz_2: vec2<f32>, sh_1: vec4<f32>, know: f32, depth_7: f32, cell_2: 
     surfX_3 = surfX_2;
     t_15 = t_14;
     swDir_3 = swDir_2;
-    let _e40 = surf_3;
-    let _e41 = surfX_3;
-    let _e42 = t_15;
-    let _e43 = swDir_3;
-    coastSet(_e40, _e41, _e42, _e43);
-    let _e44 = sh_2;
-    gShoreIn = _e44;
-    let _e45 = know_1;
-    gKnowIn = _e45;
-    let _e56 = depth_8;
-    let _e60 = uSurf;
-    let _e65 = xz_3;
-    let _e66 = sw3Ctx(_e65);
-    if (((_e56 > -3f) && (_e60.x > 0f)) && _e66) {
+    let _e41 = surf_3;
+    let _e42 = surfX_3;
+    let _e43 = t_15;
+    let _e44 = swDir_3;
+    coastSet(_e41, _e42, _e43, _e44);
+    let _e45 = sh_2;
+    gShoreIn = _e45;
+    let _e46 = know_1;
+    gKnowIn = _e46;
+    gBreak = vec4(0f);
+    let _e59 = depth_8;
+    let _e63 = uSurf;
+    let _e68 = xz_3;
+    let _e69 = sw3Ctx(_e68);
+    if (((_e59 > -3f) && (_e63.x > 0f)) && _e69) {
         {
             on = 1f;
-            let _e69 = depth_8;
-            if (_e69 > 0f) {
+            let _e72 = depth_8;
+            if (_e72 > 0f) {
                 {
-                    let _e72 = xz_3;
-                    let _e73 = depth_8;
-                    let _e74 = cell_3;
-                    let _e75 = w3Coast(_e72, _e73, _e74);
-                    let _e77 = fl_3;
-                    d_2 = (_e75 * (1f - _e77));
-                    let _e81 = d_2;
-                    let _e82 = gNear;
-                    c0_ = vec4<f32>(_e81.x, _e81.y, _e81.z, _e82);
-                    let _e87 = gCoastSlope;
-                    let _e89 = fl_3;
-                    let _e91 = (_e87 * (1f - _e89));
-                    let _e92 = gCoastFoam;
-                    let _e95 = fl_3;
-                    let _e97 = (_e92.xy * (1f - _e95));
-                    c1_ = vec4<f32>(_e91.x, _e91.y, _e97.x, _e97.y);
-                    let _e103 = gCoastFoam;
-                    let _e106 = fl_3;
-                    fz = (_e103.z * (1f - _e106));
+                    let _e75 = xz_3;
+                    let _e76 = depth_8;
+                    let _e77 = cell_3;
+                    let _e78 = w3Coast(_e75, _e76, _e77);
+                    let _e80 = fl_3;
+                    d_2 = (_e78 * (1f - _e80));
+                    let _e84 = d_2;
+                    let _e85 = gNear;
+                    c0_ = vec4<f32>(_e84.x, _e84.y, _e84.z, _e85);
+                    let _e90 = gCoastSlope;
+                    let _e92 = fl_3;
+                    let _e94 = (_e90 * (1f - _e92));
+                    let _e95 = gCoastFoam;
+                    let _e98 = fl_3;
+                    let _e100 = (_e95.xy * (1f - _e98));
+                    c1_ = vec4<f32>(_e94.x, _e94.y, _e100.x, _e100.y);
+                    let _e106 = gCoastFoam;
+                    let _e109 = fl_3;
+                    fz = (_e106.z * (1f - _e109));
                 }
             }
         }
     }
-    let _e109 = c0_;
-    let _e110 = c1_;
-    let _e111 = fz;
-    let _e112 = depth_8;
-    let _e113 = sw3EdgeShift(_e112);
-    let _e116 = vec4<f32>(_e111, _e113, 0f, 0f);
-    let _e117 = on;
-    let _e121 = vec4<f32>(_e117, 0f, 0f, 0f);
-    return mat4x4<f32>(vec4<f32>(_e109.x, _e109.y, _e109.z, _e109.w), vec4<f32>(_e110.x, _e110.y, _e110.z, _e110.w), vec4<f32>(_e116.x, _e116.y, _e116.z, _e116.w), vec4<f32>(_e121.x, _e121.y, _e121.z, _e121.w));
+    let _e112 = c0_;
+    let _e113 = c1_;
+    let _e114 = fz;
+    let _e115 = depth_8;
+    let _e116 = sw3EdgeShift(_e115);
+    let _e117 = gBreak;
+    let _e119 = gBreak;
+    let _e122 = fl_3;
+    let _e125 = vec4<f32>(_e114, _e116, _e117.x, (_e119.y * (1f - _e122)));
+    let _e126 = on;
+    let _e127 = gBreak;
+    let _e129 = on;
+    if (_e129 > 0.5f) {
+        let _e132 = gDir;
+        local_16 = _e132;
+    } else {
+        local_16 = vec2(0f);
+    }
+    let _e136 = local_16;
+    let _e139 = vec4<f32>(_e126, _e127.z, _e136.x, _e136.y);
+    return mat4x4<f32>(vec4<f32>(_e112.x, _e112.y, _e112.z, _e112.w), vec4<f32>(_e113.x, _e113.y, _e113.z, _e113.w), vec4<f32>(_e125.x, _e125.y, _e125.z, _e125.w), vec4<f32>(_e139.x, _e139.y, _e139.z, _e139.w));
 }
 
 fn coastEdgeY(xz_4: vec2<f32>, level_2: f32, bed_2: f32, py_2: f32, grad_4: vec2<f32>, fl_4: f32, surf_4: vec4<f32>, surfX_4: vec4<f32>, t_16: f32, swDir_4: vec2<f32>) -> f32 {
@@ -1238,20 +1261,20 @@ fn coastEdgeY(xz_4: vec2<f32>, level_2: f32, bed_2: f32, py_2: f32, grad_4: vec2
     surfX_5 = surfX_4;
     t_17 = t_16;
     swDir_5 = swDir_4;
-    let _e40 = surf_5;
-    let _e41 = surfX_5;
-    let _e42 = t_17;
-    let _e43 = swDir_5;
-    coastSet(_e40, _e41, _e42, _e43);
-    let _e44 = xz_5;
-    let _e45 = level_3;
-    let _e46 = bed_3;
-    let _e47 = py_3;
-    let _e48 = grad_5;
-    let _e49 = t_17;
-    let _e50 = fl_5;
-    let _e51 = sw3EdgeY(_e44, _e45, _e46, _e47, _e48, _e49, _e50);
-    return _e51;
+    let _e41 = surf_5;
+    let _e42 = surfX_5;
+    let _e43 = t_17;
+    let _e44 = swDir_5;
+    coastSet(_e41, _e42, _e43, _e44);
+    let _e45 = xz_5;
+    let _e46 = level_3;
+    let _e47 = bed_3;
+    let _e48 = py_3;
+    let _e49 = grad_5;
+    let _e50 = t_17;
+    let _e51 = fl_5;
+    let _e52 = sw3EdgeY(_e45, _e46, _e47, _e48, _e49, _e50, _e51);
+    return _e52;
 }
 
 fn coastShoreFoam(xz_6: vec2<f32>, depth_9: f32, grad_6: vec2<f32>, wave_2: f32, fl_6: f32, surf_6: vec4<f32>, surfX_6: vec4<f32>, t_18: f32, swDir_6: vec2<f32>) -> vec4<f32> {
@@ -1276,31 +1299,31 @@ fn coastShoreFoam(xz_6: vec2<f32>, depth_9: f32, grad_6: vec2<f32>, wave_2: f32,
     surfX_7 = surfX_6;
     t_19 = t_18;
     swDir_7 = swDir_6;
-    let _e38 = surf_7;
-    let _e39 = surfX_7;
-    let _e40 = t_19;
-    let _e41 = swDir_7;
-    coastSet(_e38, _e39, _e40, _e41);
-    let _e42 = xz_7;
-    let _e43 = grad_7;
-    sw3Beach(_e42, _e43);
-    let _e44 = gExpo;
-    let _e46 = fl_7;
-    gExpo = (_e44 * (1f - _e46));
-    let _e50 = depth_10;
-    let _e51 = xz_7;
-    let _e52 = grad_7;
-    let _e54 = t_19;
-    let _e57 = sw3Shore(_e51, length(_e52), _e54, (&s_13));
-    th_3 = (_e50 + _e57);
-    let _e60 = depth_10;
-    let _e61 = th_3;
-    let _e62 = s_13;
-    let _e63 = wave_3;
-    let _e64 = sw3ShoreFoam(_e60, _e61, _e62, _e63);
-    let _e65 = th_3;
-    let _e66 = s_13;
-    return vec4<f32>(_e64, _e65, _e66, 0f);
+    let _e39 = surf_7;
+    let _e40 = surfX_7;
+    let _e41 = t_19;
+    let _e42 = swDir_7;
+    coastSet(_e39, _e40, _e41, _e42);
+    let _e43 = xz_7;
+    let _e44 = grad_7;
+    sw3Beach(_e43, _e44);
+    let _e45 = gExpo;
+    let _e47 = fl_7;
+    gExpo = (_e45 * (1f - _e47));
+    let _e51 = depth_10;
+    let _e52 = xz_7;
+    let _e53 = grad_7;
+    let _e55 = t_19;
+    let _e58 = sw3Shore(_e52, length(_e53), _e55, (&s_13));
+    th_3 = (_e51 + _e58);
+    let _e61 = depth_10;
+    let _e62 = th_3;
+    let _e63 = s_13;
+    let _e64 = wave_3;
+    let _e65 = sw3ShoreFoam(_e61, _e62, _e63, _e64);
+    let _e66 = th_3;
+    let _e67 = s_13;
+    return vec4<f32>(_e65, _e66, _e67, 0f);
 }
 
 fn coastFieldAt(p_23: vec2<f32>, sh_3: vec4<f32>, know_2: f32, depth_11: f32, cell_4: f32, surf_8: vec4<f32>, surfX_8: vec4<f32>, t_20: f32, swDir_8: vec2<f32>) -> mat4x4<f32> {
@@ -1325,36 +1348,36 @@ fn coastFieldAt(p_23: vec2<f32>, sh_3: vec4<f32>, know_2: f32, depth_11: f32, ce
     surfX_9 = surfX_8;
     t_21 = t_20;
     swDir_9 = swDir_8;
-    let _e38 = surf_9;
-    let _e39 = surfX_9;
-    let _e40 = t_21;
-    let _e41 = swDir_9;
-    coastSet(_e38, _e39, _e40, _e41);
-    let _e42 = sh_4;
-    gShoreIn = _e42;
-    let _e43 = know_3;
-    gKnowIn = _e43;
-    let _e50 = depth_12;
-    let _e53 = uSurf;
-    let _e58 = p_24;
-    let _e59 = sw3Ctx(_e58);
-    if (((_e50 > 0f) && (_e53.x > 0f)) && _e59) {
+    let _e39 = surf_9;
+    let _e40 = surfX_9;
+    let _e41 = t_21;
+    let _e42 = swDir_9;
+    coastSet(_e39, _e40, _e41, _e42);
+    let _e43 = sh_4;
+    gShoreIn = _e43;
+    let _e44 = know_3;
+    gKnowIn = _e44;
+    let _e51 = depth_12;
+    let _e54 = uSurf;
+    let _e59 = p_24;
+    let _e60 = sw3Ctx(_e59);
+    if (((_e51 > 0f) && (_e54.x > 0f)) && _e60) {
         {
-            let _e61 = p_24;
-            let _e62 = depth_12;
-            let _e63 = cell_5;
-            let _e64 = w3Coast(_e61, _e62, _e63);
-            let _e65 = gCoastFoam;
-            let _e67 = gNear;
-            let _e68 = gExpo;
-            a_2 = vec4<f32>(_e65.x, _e67, _e68, 1f);
-            let _e71 = gDir;
-            b_1 = vec4<f32>(_e71.x, _e71.y, 0f, 0f);
+            let _e62 = p_24;
+            let _e63 = depth_12;
+            let _e64 = cell_5;
+            let _e65 = w3Coast(_e62, _e63, _e64);
+            let _e66 = gCoastFoam;
+            let _e68 = gNear;
+            let _e69 = gExpo;
+            a_2 = vec4<f32>(_e66.x, _e68, _e69, 1f);
+            let _e72 = gDir;
+            b_1 = vec4<f32>(_e72.x, _e72.y, 0f, 0f);
         }
     }
-    let _e77 = a_2;
-    let _e78 = b_1;
-    return mat4x4<f32>(vec4<f32>(_e77.x, _e77.y, _e77.z, _e77.w), vec4<f32>(_e78.x, _e78.y, _e78.z, _e78.w), vec4<f32>(0f, 0f, 0f, 0f), vec4<f32>(0f, 0f, 0f, 0f));
+    let _e78 = a_2;
+    let _e79 = b_1;
+    return mat4x4<f32>(vec4<f32>(_e78.x, _e78.y, _e78.z, _e78.w), vec4<f32>(_e79.x, _e79.y, _e79.z, _e79.w), vec4<f32>(0f, 0f, 0f, 0f), vec4<f32>(0f, 0f, 0f, 0f));
 }
 
 fn coastWet(xz_8: vec2<f32>, hgt_2: f32, grad_8: vec2<f32>, surf_10: vec4<f32>, surfX_10: vec4<f32>, t_22: f32, swDir_10: vec2<f32>) -> vec3<f32> {
@@ -1373,19 +1396,19 @@ fn coastWet(xz_8: vec2<f32>, hgt_2: f32, grad_8: vec2<f32>, surf_10: vec4<f32>, 
     surfX_11 = surfX_10;
     t_23 = t_22;
     swDir_11 = swDir_10;
-    let _e34 = surf_11;
-    let _e35 = surfX_11;
-    let _e36 = t_23;
-    let _e37 = swDir_11;
-    coastSet(_e34, _e35, _e36, _e37);
-    let _e38 = xz_9;
-    let _e39 = grad_9;
-    sw3Beach(_e38, _e39);
-    let _e40 = xz_9;
-    let _e41 = hgt_3;
-    let _e42 = grad_9;
-    let _e44 = t_23;
-    let _e45 = sw3Wet(_e40, _e41, length(_e42), _e44);
-    return _e45;
+    let _e35 = surf_11;
+    let _e36 = surfX_11;
+    let _e37 = t_23;
+    let _e38 = swDir_11;
+    coastSet(_e35, _e36, _e37, _e38);
+    let _e39 = xz_9;
+    let _e40 = grad_9;
+    sw3Beach(_e39, _e40);
+    let _e41 = xz_9;
+    let _e42 = hgt_3;
+    let _e43 = grad_9;
+    let _e45 = t_23;
+    let _e46 = sw3Wet(_e41, _e42, length(_e43), _e45);
+    return _e46;
 }
 `;

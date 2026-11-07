@@ -34,7 +34,7 @@ export class GpuSpray {
       const id = uint(instanceIndex);
       If(this.uOn.lessThan(0.5).or(S.uSurf.x.lessThanEqual(0)), () => { Return(); });
       const r1 = hash({ a: id, b: this.uFrame }), r2 = hash({ a: id.add(77777), b: this.uFrame }), r3 = hash({ a: id.add(15485863), b: this.uFrame });
-      const ang = r1.mul(6.2831853), rad = r2.sqrt().mul(SPRAY.radius);
+      const ang = r1.mul(6.2831853), rad = r2.pow(0.75).mul(SPRAY.radius); // denser toward the eye
       const p = this.uEye.xz.add(vec2(ang.cos(), ang.sin()).mul(rad)).toVar();
       const level = RC.clipWater(p).toVar(), depth = level.sub(RC.clipAt(p).x).toVar();
       If(depth.lessThan(0.15).or(depth.greaterThan(7)).or(level.greaterThan(S.uSea.add(0.5))), () => { Return(); });
@@ -46,13 +46,21 @@ export class GpuSpray {
       const cv = cVert({ xz: p, sh: sh.v, know: sh.know, depth, cell: float(0.5), fl: float(0), ...surf });
       const dir = m.element(1).xy, cel = depth.max(0.3).mul(9.81).sqrt();
       const r4 = hash({ a: id.add(3), b: this.uFrame.add(1) }), r5 = hash({ a: id.add(5), b: this.uFrame.add(2) }), r6 = hash({ a: id.add(9), b: this.uFrame.add(3) });
-      const slot = atomicAdd(RING.element(0), uint(1)).mod(uint(N));
-      const up = mix(float(1.2), float(4.5), r4.mul(r4)).mul(smoothstep(0.1, 0.9, S.uSurf.x).mul(0.7).add(0.3));
-      const fwd = cel.mul(mix(float(0.35), float(0.9), r5));
-      const side = vec2(dir.y.negate(), dir.x).mul(r6.sub(0.5).mul(1.2));
-      const v = vec3(dir.x.mul(fwd).add(side.x), up, dir.y.mul(fwd).add(side.y)).add(vec3(this.uWind.x, 0, this.uWind.y).mul(0.25));
-      P.element(slot).assign(RC.bind(vec4(p.x.add(cv.element(0).x), level.add(cv.element(0).y).add(0.05), p.y.add(cv.element(0).z), mix(float(SPRAY.life * 0.4), float(SPRAY.life), r6))));
-      V.element(slot).assign(vec4(v, mix(float(0.08), float(0.22), r5)));
+      // a burst of four: three drops of spray and a puff of mist (bigger, slower, longer)
+      const base = atomicAdd(RING.element(0), uint(4));
+      const o = vec3(p.x.add(cv.element(0).x), level.add(cv.element(0).y).add(0.05), p.y.add(cv.element(0).z));
+      const big = smoothstep(0.1, 0.9, S.uSurf.x).mul(0.7).add(0.3);
+      for (let j = 0; j < 4; j++) {
+        const a = hash({ a: id.add(101 + j * 13), b: this.uFrame }), b = hash({ a: id.add(203 + j * 17), b: this.uFrame }), c = hash({ a: id.add(307 + j * 19), b: this.uFrame });
+        const mist = j === 3;
+        const up = (mist ? mix(float(0.6), float(1.6), a) : mix(float(1.2), float(4.8), a.mul(a))).mul(big);
+        const fwd = cel.mul(mist ? mix(float(0.15), float(0.4), b) : mix(float(0.35), float(0.95), b));
+        const side = vec2(dir.y.negate(), dir.x).mul(c.sub(0.5).mul(1.4)).add(vec2(r4.sub(0.5), r5.sub(0.5)).mul(0.3));
+        const v = vec3(dir.x.mul(fwd).add(side.x), up, dir.y.mul(fwd).add(side.y)).add(vec3(this.uWind.x, 0, this.uWind.y).mul(0.25));
+        const slot = base.add(uint(j)).mod(uint(N));
+        P.element(slot).assign(RC.bind(vec4(o.add(vec3(c.sub(0.5), a.mul(0.2), b.sub(0.5)).mul(0.6)), mist ? mix(float(SPRAY.life * 0.8), float(SPRAY.life * 1.6), r6) : mix(float(SPRAY.life * 0.35), float(SPRAY.life), c))));
+        V.element(slot).assign(vec4(v, mist ? mix(float(0.35), float(0.7), b).negate() : mix(float(0.05), float(0.14), b))); // (mist: a negative size)
+      }
     })().compute(M, [64]);
     // flight: gravity, drag toward the wind, the size growing into mist; dead under the water
     this.kStep = Fn(() => {
@@ -63,7 +71,7 @@ export class GpuSpray {
       v.xyz.assign(air.add(v.xyz.sub(air).mul(exp(dt.mul(-1.6)))).add(vec3(0, -9.81, 0).mul(dt).mul(0.55)));
       p.xyz.addAssign(v.xyz.mul(dt));
       p.w.subAssign(dt);
-      v.w.assign(v.w.add(dt.mul(0.35)));
+      v.w.assign(v.w.add(select(v.w.lessThan(0), dt.mul(-0.6), dt.mul(0.25)))); // spreading: the mist faster
       const level = RU.clipWater(p.xz);
       If(p.y.lessThan(level.sub(0.15)).and(v.y.lessThan(0)), () => { p.w.assign(0); });
       P.element(i).assign(RU.bind(p)); V.element(i).assign(v);
@@ -75,19 +83,20 @@ export class GpuSpray {
     g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]), 2));
     g.setIndex([0, 1, 2, 0, 2, 3]); g.instanceCount = N; g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e9);
     const mat = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false });
-    const vLife = varyingProperty('float', 'spLife'), vAge = varyingProperty('float', 'spAge'), vZ = varyingProperty('float', 'spZ');
+    const vLife = varyingProperty('float', 'spLife'), vAge = varyingProperty('float', 'spAge'), vZ = varyingProperty('float', 'spZ'), vMist = varyingProperty('float', 'spMist');
     mat.vertexNode = Fn(() => {
       const p = PR.element(instanceIndex), v = VR.element(instanceIndex);
       const alive = p.w.greaterThan(0);
-      vLife.assign(p.w); vAge.assign(v.w);
+      vLife.assign(p.w); vAge.assign(v.w.abs()); vMist.assign(select(v.w.lessThan(0), float(1), float(0)));
       const c = cameraViewMatrix.mul(vec4(p.xyz, 1)); vZ.assign(c.z);
-      const s = select(alive, v.w, float(0));
+      const s = select(alive, v.w.abs(), float(0));
       return cameraProjectionMatrix.mul(vec4(c.xy.add(positionLocal.xy.mul(s)), c.z, 1));
     })();
     const sunDir = opts.sunDir, sunColor = opts.sunColor, skyUp = opts.skyUp;
     mat.colorNode = Fn(() => {
       const d = length(uv().sub(0.5)).mul(2);
-      const a = smoothstep(1, 0.2, d).mul(smoothstep(0, 0.4, vLife)).mul(smoothstep(0.9, 0.12, vAge)).mul(0.55);
+      // a drop: a small bright dot thinning as it spreads; mist: a faint soft puff
+      const a = mix(smoothstep(1, 0.3, d).mul(smoothstep(0.6, 0.06, vAge)).mul(0.5), exp(d.mul(d).mul(-3.5)).mul(smoothstep(2.2, 0.4, vAge)).mul(0.07), vMist).mul(smoothstep(0, 0.4, vLife)).mul(smoothstep(1.5, 5, vZ.negate())); // (none in the eye's face)
       // soft against the scene: faded as the dot's depth nears what is behind it
       const sceneZ = perspectiveDepthToViewZ(viewportDepthTexture(screenUV).x, cameraNear, cameraFar);
       const soft = clamp(vZ.sub(sceneZ).mul(2.5), 0, 1);

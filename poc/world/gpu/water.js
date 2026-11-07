@@ -9,7 +9,7 @@
 // Still to come over from surface.js: the shore table's coastal swell and swash, the foam fields and lace, the
 // screen-space reflection and the mirror, glints, rain rings, caustics.
 import * as THREE from 'three/webgpu';
-import { Fn, If, float, int, vec2, vec3, vec4, uniform, uniformArray, texture, positionLocal, positionWorld, cameraPosition, screenUV, viewportSharedTexture, abs, max, min, mix, clamp, smoothstep, pow, exp, sqrt, length, normalize, dot, reflect, select, varyingProperty, wgslFn, wgsl, Discard, Loop, Break, cameraProjectionMatrix, cameraViewMatrix, cameraNear, cameraFar, viewportDepthTexture, perspectiveDepthToViewZ } from 'three/tsl';
+import { Fn, If, float, int, vec2, vec3, vec4, uniform, uniformArray, texture, positionLocal, positionWorld, cameraPosition, screenUV, viewportSharedTexture, abs, max, min, mix, clamp, smoothstep, pow, exp, sqrt, length, normalize, dot, reflect, select, varyingProperty, wgslFn, wgsl, Discard, Loop, Break, cross, dFdx, dFdy, cameraProjectionMatrix, cameraViewMatrix, cameraNear, cameraFar, viewportDepthTexture, perspectiveDepthToViewZ } from 'three/tsl';
 import { COAST_WGSL } from './coast.wgsl.js';
 import { bakeFoamTexture } from './foamtex.js';
 
@@ -40,7 +40,7 @@ export const GWATER_PRESETS = {
 // scattering a lot: milky where it is thick)
 export const SILT = { absorb: [0.22, 0.32, 0.55], scatter: [0.55, 0.48, 0.32] };
 // the look's controls and their defaults (the panel's 'Water', index.js waterCtl): see water look in gpuWater
-export const GLOOK = { preset: 'ours', clarity: 1, murk: 1, roughness: 0, refraction: 0.06, sssPeak: 1.6, sssView: 0.06, foamBias: 0.05, foamScale: 1.3, linger: 4, sediment: 0.05, stir: 0.6, riverSilt: 0.5, caustics: 1 };
+export const GLOOK = { preset: 'ours', clarity: 1, murk: 1, roughness: 0, refraction: 0.06, sssPeak: 1.6, sssView: 0.06, foamBias: 0.05, foamScale: 1.3, linger: 4, sediment: 0.05, stir: 0.6, riverSilt: 0.5, caustics: 1, lip: 1, spray: 1 };
 export const GSURF = { segments: 256, inner: 0.0625, innerGrow: 1.12, reach: 4000, skirt: 60000 };
 
 function polarGrid() {
@@ -113,6 +113,8 @@ export function gpuWater(clip, waves, opts = {}) {
   const share = (c, dist) => smoothstep(Ls[c] / N * 2.5, Ls[c] / N * 1.2, dist.mul(cellStep).add(0.001));
   const vCoast = varyingProperty('vec4', 'vCoast'), vCoastF = varyingProperty('vec2', 'vCoastF'); // set in the vertex stage, read in the fragment
   const vH = varyingProperty('float', 'vH'); // the waves' lift here (the crests' glow)
+  const vCurl = varyingProperty('float', 'vCurl'); // how much of a plunging lip this is (its normal and its white)
+  const uLip = uniform(1); // the lip's strength (the panel)
   mat.positionNode = Fn(() => {
     const skirt = positionLocal.y.greaterThan(0.5);
     const xz = select(skirt, positionLocal.xz.mul(GSURF.skirt), positionLocal.xz.mul(uScale)).add(cameraPosition.xz).toVar();
@@ -121,12 +123,14 @@ export function gpuWater(clip, waves, opts = {}) {
     // the coast's trains near a sea shore (none on a lake): their displacement, slope and foam; the open sea's long
     // swell (the first cascade) fades out where they carry it
     const cd = vec3(0).toVar(), near = float(0).toVar(), shift = float(1).toVar(), isCoast = float(0).toVar();
-    vCoast.assign(vec4(0)); vCoastF.assign(vec2(0)); vH.assign(0);
+    vCoast.assign(vec4(0)); vCoastF.assign(vec2(0)); vH.assign(0); vCurl.assign(0);
+    const lipPsi = float(0).toVar(), lipB = float(0).toVar(), lipA = float(0).toVar(), lipDir = vec2(0).toVar();
     if (shV) If(skirt.not().and(depth.greaterThan(-3)).and(level.lessThanEqual(uSea.add(0.5))).and(dist.lessThan(600)), () => {
       const sh = shV(xz);
       const m = cVert({ xz, sh: sh.v, know: sh.know, depth, cell, fl: float(0), ...surfArgs }).toVar();
       isCoast.assign(m.element(3).x); cd.assign(m.element(0).xyz); near.assign(m.element(0).w); shift.assign(select(isCoast.greaterThan(0.5), m.element(2).y, float(1)));
       vCoast.assign(m.element(1)); vCoastF.assign(vec2(m.element(2).x, m.element(0).w));
+      lipPsi.assign(m.element(2).z); lipB.assign(m.element(2).w); lipA.assign(m.element(3).y); lipDir.assign(m.element(3).zw);
     });
     const D = vec3(0).toVar();
     for (let c = 0; c < C; c++) {
@@ -136,6 +140,20 @@ export function gpuWater(clip, waves, opts = {}) {
     const k = smoothstep(0, 4, depth.max(0)).mul(uChop);
     D.assign(D.mul(k).add(cd)); vH.assign(D.y);
     D.x.mulAssign(shift); D.z.mulAssign(shift); // near the line the waves only lift and lower the water
+    // the plunging lip (after Malan's breaking waves, SIGGRAPH 2022, as a shape instead of a baked one): where the first
+    // train is breaking (the band of depth where its height reaches the breaking limit: its crests curl as they cross
+    // it), the water over the crest and just behind it is thrown forward over the face and falls, so the surface folds
+    // over into a tube; only where the grid is fine enough to carry it (near the eye)
+    if (shV) {
+      const b = lipB, curl = smoothstep(0.02, 0.4, b).mul(float(1).sub(smoothstep(0.72, 0.98, b))).mul(uLip);
+      const hr = cd.y.div(max(lipA.mul(1.22), 0.03)).clamp(0, 1.2), w = exp(lipPsi.sub(0.12).div(0.5).pow(2).negate());
+      const fine = smoothstep(lipA.mul(2.5), lipA.mul(0.8), cell).mul(smoothstep(0.08, 0.25, lipA));
+      const k2 = curl.mul(w).mul(fine).toVar();
+      const thr = k2.mul(lipA).mul(1.7).mul(hr.mul(hr));
+      const dy = k2.mul(lipA).mul(hr.mul(hr).mul(0.3).sub(hr.mul(hr).mul(hr).mul(1.1).mul(smoothstep(-0.1, 0.6, lipPsi))));
+      D.addAssign(vec3(lipDir.x.mul(thr), dy, lipDir.y.mul(thr)));
+      vCurl.assign(k2.mul(hr));
+    }
     const y = level.add(D.y).max(min(bed.add(0.04), level)).toVar(); // the trough held over the floor
     // the shoreline: over the sand a sheet at the swash's height, thin at its tip; in the last half metre of water lifted
     // to the same sheet
@@ -174,6 +192,10 @@ export function gpuWater(clip, waves, opts = {}) {
     const calm = smoothstep(0, 2, depth);
     sl.mulAssign(calm); sl.addAssign(vCoast.xy);
     const n = normalize(vec3(sl.x.negate(), 1, sl.y.negate())).toVar();
+    // on a plunging lip the analytic slope does not know the fold: the surface's own facet (turned to the eye) instead
+    // (derivatives outside any branch: WGSL wants them in uniform control flow)
+    { const ng0 = normalize(cross(dFdx(positionWorld), dFdy(positionWorld))), ng = select(dot(ng0, Vv).greaterThan(0), ng0.negate(), ng0);
+      n.assign(normalize(mix(n, ng, smoothstep(0.02, 0.35, vCurl)))); }
     // under: the scene behind, along the bent ray, through depth / cos of the path, absorbed per channel
     const cosV = max(Vv.y.negate(), 0.08);
     const path = depth.div(cosV).min(80);
@@ -235,7 +257,7 @@ export function gpuWater(clip, waves, opts = {}) {
     // the crests' glow (surface.js): the sun through a thin steep crest, toward a view into the light; a little always
     { const crest = vH.div(max(uHs.mul(0.5), 0.05)).clamp(0, 1), steep = length(sl).mul(3).clamp(0, 1);
       const hv = normalize(vec2(Vv.x, Vv.z).add(1e-5)), hs = normalize(vec2(uSunDir.x, uSunDir.z).add(1e-5)), back = pow(max(dot(hv, hs), 0), float(3));
-      const tint = mix(vec3(0.04, 0.42, 0.3), vec3(0.28, 0.3, 0.12), sedK.clamp(0, 1));
+      const tint = mix(vec3(0.04, 0.42, 0.3), vec3(0.28, 0.3, 0.12), sedK.clamp(0, 1)).mul(vCurl.mul(2.5).add(1)); // a lip is thin water: it glows
       col.addAssign(tint.mul(uSunColor.mul(cs).mul(max(uSunDir.y, 0)).mul(0.5).add(uSkyUp.mul(0.35))).mul(crest).mul(crest.mul(steep).mul(back).mul(uLook2.x).div(1.6).add(uLook2.y.div(0.06).mul(0.08))).mul(calm).mul(float(1).sub(F))); }
     const cap = smoothstep(0.55, 0.15, J).mul(calm);
     // ---- foam (surface.js): whitecaps where the surface folds, the open water's sloshing lace now and then, the
@@ -263,6 +285,9 @@ export function gpuWater(clip, waves, opts = {}) {
       const sfz = vCoastF.x.clamp(0, 1);
       fm.assign(max(fm, smoothstep(float(0.98).sub(sfz.mul(0.3)), float(1.08).sub(sfz.mul(0.3)), spf).mul(smoothstep(-0.35, 0.45, nz({ p: P.div(0.22).add(uTime.mul(0.05)), s: int(629) }))).mul(sfz.mul(0.25).add(0.15))));
       fm.assign(max(fm, smoothstep(float(1).sub(coastFoam.mul(0.7)), float(1.12).sub(coastFoam.mul(0.7)), pat).mul(0.85).mul(coastFoam)));
+      // the lip's tip tearing into white as it throws
+      const tip = smoothstep(0.25, 0.75, vCurl);
+      fm.assign(max(fm, smoothstep(float(1).sub(tip.mul(0.8)), float(1.1).sub(tip.mul(0.8)), pat.add(nz({ p: P.div(0.35).add(uTime.mul(0.4)), s: int(631) }).mul(0.15))).mul(tip)));
     } else fm.assign(max(cap, coastFoam));
     const foamCol = uSkyUp.mul(0.8).add(uSunColor.mul(cs).mul(max(uSunDir.y, 0.05)).mul(0.55)).mul(0.92);
     col.assign(mix(col, foamCol, fm.clamp(0, 1).mul(0.85)));
@@ -279,5 +304,5 @@ export function gpuWater(clip, waves, opts = {}) {
     uScale.value = Math.max(1, above / 2);
   };
   mesh.onAfterRender = () => {};
-  return { mesh, look: { uAbs, uSca, uLook, uLook2, uSed, uHs }, U: { uLace, uTime, uScale, uSunDir, uSunColor, uSkyUp, uSkyHz, uChop, uSurf, uSurfX, uWTime, uSwDir, uSea } };
+  return { mesh, look: { uAbs, uSca, uLook, uLook2, uSed, uHs, uLip }, U: { uLace, uTime, uScale, uSunDir, uSunColor, uSkyUp, uSkyHz, uChop, uSurf, uSurfX, uWTime, uSwDir, uSea } };
 }

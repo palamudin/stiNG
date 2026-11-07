@@ -59,6 +59,7 @@ export function buildPanel(hud, state, onChange = () => {}) {
     ['sssPeak', 'Crest glow', 0, 6, 0.01], ['sssView', 'Glow to view', 0, 0.5, 0.001, (v) => v.toFixed(3)],
     ['foamBias', 'Whitecap bias', -0.5, 1.5, 0.01], ['foamScale', 'Whitecap scale', 0, 6, 0.01], ['linger', 'Foam linger', 0.2, 15, 0.1, (v) => v.toFixed(1) + ' s'],
     ['caustics', 'Caustics', 0, 3, 0.01],
+    ['lip', 'Plunging lip', 0, 2, 0.01], ['spray', 'Spray amount', 0, 4, 0.01],
   ];
   for (const r of rows) slider(B, L, ...r);
   check(B, state, 'spray', 'Breakers\' spray');

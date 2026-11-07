@@ -58,20 +58,22 @@ function convertPlain(glsl, uses) {
   return w.trim() + '\n';
 }
 const coastGLSL = `${NOISE_GLSL}
+vec4 gBreak = vec4(0.0); // the first train's breaking here: (its phase from the crest, breaking 0..1, its height, -)
 float gShoreKnow = 0.0; vec4 gShoreIn = vec4(1.0e4, 0.0, 0.0, 1.0e4); float gKnowIn = 0.0;
 vec4 shoreAt(vec2 p) { gShoreKnow = gKnowIn; return gShoreIn; }
 ${SWASH_GLSL.replace('uniform vec4 uSurf, uSurfX; uniform float uWTime; uniform vec2 uSwDir;', 'vec4 uSurf = vec4(0.0); vec4 uSurfX = vec4(0.0); float uWTime = 0.0; vec2 uSwDir = vec2(1.0, 0.0);')}
-${SURF_GLSL}
+${SURF_GLSL.replace('  gCoastSlope = vec2(0.0); gCoastFoam = vec3(0.0);\n  if (uSurf.x', '  gCoastSlope = vec2(0.0); gCoastFoam = vec3(0.0); gBreak = vec4(0.0);\n  if (uSurf.x').replace('    float body = 1.0 - (i == 0 ? 0.48 : 0.12) * collapse;', '    if (i == 0) gBreak = vec4(psi, breaking, a, 0.0);\n    float body = 1.0 - (i == 0 ? 0.48 : 0.12) * collapse;')}
 void coastSet(vec4 surf, vec4 surfX, float t, vec2 swDir) { uSurf = surf; uSurfX = surfX; uWTime = t; uSwDir = swDir; }
-// the trains here: [0] (displacement, gNear), [1] (slope, foam x y), [2] (foam z, the edge's shift, -, -), [3] (on, -, -, -)
+// the trains here: [0] (displacement, gNear), [1] (slope, foam x y), [2] (foam z, the edge's shift, the first train's
+// phase from its crest, its breaking), [3] (on, its height, the direction toward the shore)
 mat4 coastVert(vec2 xz, vec4 sh, float know, float depth, float cell, float fl, vec4 surf, vec4 surfX, float t, vec2 swDir) {
   coastSet(surf, surfX, t, swDir); gShoreIn = sh; gKnowIn = know;
-  vec4 c0 = vec4(0.0), c1 = vec4(0.0); float fz = 0.0, on = 0.0;
+  vec4 c0 = vec4(0.0), c1 = vec4(0.0); float fz = 0.0, on = 0.0; gBreak = vec4(0.0);
   if (depth > -3.0 && uSurf.x > 0.0 && sw3Ctx(xz)) {
     on = 1.0;
     if (depth > 0.0) { vec3 d = w3Coast(xz, depth, cell) * (1.0 - fl); c0 = vec4(d, gNear); c1 = vec4(gCoastSlope * (1.0 - fl), gCoastFoam.xy * (1.0 - fl)); fz = gCoastFoam.z * (1.0 - fl); }
   }
-  return mat4(c0, c1, vec4(fz, sw3EdgeShift(depth), 0.0, 0.0), vec4(on, 0.0, 0.0, 0.0));
+  return mat4(c0, c1, vec4(fz, sw3EdgeShift(depth), gBreak.x, gBreak.y * (1.0 - fl)), vec4(on, gBreak.z, on > 0.5 ? gDir : vec2(0.0)));
 }
 float coastEdgeY(vec2 xz, float level, float bed, float py, vec2 grad, float fl, vec4 surf, vec4 surfX, float t, vec2 swDir) { coastSet(surf, surfX, t, swDir); return sw3EdgeY(xz, level, bed, py, grad, t, fl); }
 // the shoreline's foam at a pixel: (sw3ShoreFoam, the swash's height over the floor th, s), as surface.js's fragment
