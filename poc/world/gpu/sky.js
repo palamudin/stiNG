@@ -64,12 +64,15 @@ export class GpuSky {
   // the water's reflection of it
   night(v, blur) { return fNight({ v, blur: float(blur), sun: this.uSun, moonDir: this.uMoonDir, moonColor: this.uMoonColor }); }
   // the background: the table by direction and the sun's disc (post.js sunDisc)
-  background() {
+  background(cloudTex = null) {
     return Fn(() => {
       const v = positionWorldDirection, cs = dot(v, this.uSun), r = 0.5 * A.sunAngle, a = acos(clamp(cs, -1, 1));
       const mu2 = sqrt(max(float(1).sub(a.div(r).mul(a.div(r))), 0)), limb = float(1).sub(float(1).sub(pow(mu2, 0.5)).mul(0.6));
       const disc = this.uSunColor.mul(limb).mul(smoothstep(r * 1.05, r * 0.95, a)).div(Math.PI * r * r).mul(0.6);
-      return this.skyAt(v).add(disc).add(this.night(v, 0));
+      const sky = this.skyAt(v).add(disc).add(this.night(v, 0));
+      if (!cloudTex) return sky;
+      const c = texture(cloudTex, screenUV); // the clouds (gpu/clouds.js): their light, and what they let through
+      return sky.mul(c.a).add(c.rgb);
     })();
   }
   // the aerial perspective (post.js airT): the analytic optical depth of exponential air and the mist along the segment

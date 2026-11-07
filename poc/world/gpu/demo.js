@@ -12,6 +12,7 @@ import { GpuShore } from './shore.js';
 import { GpuFoamField, GFOAM } from './foamfield.js';
 import { GpuGrass } from './grass.js';
 import { GpuSky } from './sky.js';
+import { GpuClouds } from './clouds.js';
 import { WAVES, swellState } from '../waves.js';
 
 const $ = (id) => document.getElementById(id);
@@ -27,7 +28,8 @@ const backend = renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL 2 (fallback
 const scene = new THREE.Scene();
 // the sky (gpu/sky.js): the background, the aerial perspective, the sun's and the sky's light
 const sky = new GpuSky(renderer);
-scene.backgroundNode = sky.background(); scene.fogNode = sky.fog();
+const clouds = new GpuClouds(renderer, sky);
+scene.backgroundNode = sky.background(clouds.rt.texture); scene.fogNode = sky.fog();
 const camera = new THREE.PerspectiveCamera(55, 1, 0.05, 20000);
 const sun = new THREE.DirectionalLight(0xfff1dc, 3.2), hemi = new THREE.HemisphereLight(0xbcd4f0, 0x4a4630, 1.1);
 sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
@@ -38,7 +40,7 @@ const sunDir = new THREE.Vector3(0.45, 0.62, 0.3).normalize();
 const keyDir = new THREE.Vector3();
 function sunAt(hour) { const a = (hour - 6) / 12 * Math.PI, el = Math.sin(a) * 0.96 - 0.04, az = 1.9 + (hour - 12) / 12 * Math.PI; sunDir.set(Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az)).normalize(); }
 
-const state = { seed: 7, treeDist: 1, wind: 4, hour: +(q.get('hour') || 11) };
+const state = { seed: 7, treeDist: 1, wind: 4, hour: +(q.get('hour') || 11), cover: +(q.get('cover') ?? 0.35) };
 let src, clip, terrain, forest, waves, water, shore, fields, grass, wtime = 0;
 function build() {
   if (terrain) { scene.remove(terrain, forest.group, water.mesh); if (grass) scene.remove(grass.group); }
@@ -132,6 +134,7 @@ function step(dt) {
   // the swell (index.js): from a long fetch at the wind (never under the sea's minimum), and the surf it drives
   wtime += dt;
   const w10 = [Math.max(state.wind, 1.5) * 0.94, Math.max(state.wind, 1.5) * 0.35];
+  clouds.set(state.cover, 1, dt, w10);
   const sw = swellState(Math.max(Math.hypot(w10[0], w10[1]), WAVES.swellMin), src.water.swellFetch || src.water.fetch);
   const swell = { Hs: Math.max(WAVES.swellHmin, sw.Hs), T: Math.min(10.5, Math.max(WAVES.swellT - 1, WAVES.swellT - 1 + 2.5 * sw.Hs)) };
   waves.update(wtime, w10, Math.PI * 60, swell);
@@ -147,6 +150,8 @@ function resize() { const w = innerWidth, h = innerHeight; renderer.setSize(w, h
 addEventListener('resize', resize); resize();
 $('treeDist').addEventListener('input', (e) => { state.treeDist = parseFloat(e.target.value); $('oTreeDist').textContent = Math.round(state.treeDist * 100) + '%'; });
 $('oTreeDist').textContent = '100%';
+$('cover').value = state.cover; $('oCover').textContent = Math.round(state.cover * 100) + '%';
+$('cover').addEventListener('input', (e) => { state.cover = parseFloat(e.target.value); $('oCover').textContent = Math.round(state.cover * 100) + '%'; });
 $('hour').value = state.hour; const showHour = () => { const h = Math.floor(state.hour), m = Math.round((state.hour - h) * 60); $('oHour').textContent = `${h}:${String(m).padStart(2, '0')}`; }; showHour();
 $('hour').addEventListener('input', (e) => { state.hour = parseFloat(e.target.value); showHour(); });
 build();
@@ -171,7 +176,9 @@ requestAnimationFrame(frame);
 // tests (headless): ?offscreen draws into a target instead of the canvas (a headless browser's WebGPU may not
 // present), and snap() reads it back tone-mapped (ACES, sRGB) as a PNG data URL
 const off = q.has('offscreen') ? new THREE.RenderTarget(1, 1, { type: THREE.HalfFloatType }) : null;
-function draw() { if (off) { const w = innerWidth, h = innerHeight; if (off.width !== w || off.height !== h) off.setSize(w, h); renderer.setRenderTarget(off); renderer.render(scene, camera); renderer.setRenderTarget(null); } else renderer.render(scene, camera); }
+function draw() { { const sz = renderer.getDrawingBufferSize(new THREE.Vector2()); clouds.render(camera, off ? off.width : sz.x, off ? off.height : sz.y); }
+  draw2(); }
+function draw2() { if (off) { const w = innerWidth, h = innerHeight; if (off.width !== w || off.height !== h) off.setSize(w, h); renderer.setRenderTarget(off); renderer.render(scene, camera); renderer.setRenderTarget(null); } else renderer.render(scene, camera); }
 async function snap() {
   const w = off.width, h = off.height, px = await renderer.readRenderTargetPixelsAsync(off, 0, 0, w, h), cv2 = document.createElement('canvas'); cv2.width = w; cv2.height = h;
   const c2 = cv2.getContext('2d'), im = c2.createImageData(w, h), toF = THREE.DataUtils.fromHalfFloat, aces = (x) => Math.min(1, Math.max(0, (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14))), srgb = (x) => (x <= 0.0031308 ? 12.92 * x : 1.055 * Math.pow(x, 1 / 2.4) - 0.055);
