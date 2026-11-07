@@ -27,6 +27,21 @@ import { uniform, texture, uv } from 'three/tsl';
 import { WAVES, swellState } from '../waves.js';
 
 const $ = (id) => document.getElementById(id);
+// the loading screen (#boot): each stage named as it starts, so a stall shows where; an error anywhere is shown on it
+// (and on a strip at the top once the world runs), never a silent black screen
+const bootT0 = performance.now(), bootLog = [];
+async function stage(msg) {
+  bootLog.push(`${((performance.now() - bootT0) / 1000).toFixed(1)}s  ${msg}`);
+  const m = $('bootMsg'), l = $('bootLog'); if (m) m.textContent = msg; if (l) l.textContent = bootLog.slice(-8).join('\n');
+  await new Promise((r) => setTimeout(r, 0)); // let the page paint it
+}
+function bootError(e) {
+  const t = String((e && (e.stack || e.message)) || e).slice(0, 1200), b = $('boot');
+  if (b && !b.classList.contains('gone')) { $('bootMsg').textContent = 'stuck: ' + String((e && e.message) || e); const l = $('bootLog'); if (l) l.textContent = bootLog.join('\n') + '\n\n' + t; b.classList.add('err'); }
+  else { let s = $('errStrip'); if (!s) { s = document.createElement('pre'); s.id = 'errStrip'; document.body.appendChild(s); } s.textContent = t; }
+}
+addEventListener('error', (e) => bootError(e.error || e.message)); addEventListener('unhandledrejection', (e) => bootError(e.reason));
+await stage('starting the renderer');
 const q = new URLSearchParams(location.search);
 const renderer = new THREE.WebGPURenderer({ antialias: !q.has('noaa'), trackTimestamp: !q.has('nots'), forceWebGL: q.has('webgl') });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -34,6 +49,7 @@ renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.0;
 document.body.appendChild(renderer.domElement);
 await renderer.init();
+await stage(`${renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL 2 (fallback)'}: the sky and the clouds`);
 const backend = renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL 2 (fallback)';
 
 const scene = new THREE.Scene();
@@ -66,26 +82,26 @@ const pitchFor = (d) => 0.12 + 0.95 * THREE.MathUtils.smoothstep(Math.log10(d), 
 const state = { seed: 7, treeDist: 1, wind: 4, hour: +(q.get('hour') || 11), cover: +(q.get('cover') ?? 0.35), cshadow: !q.has('nocshadow'), caustics: !q.has('nocaustics'),
   spray: q.has('spray'), trees: !q.has('notrees'), grass: !q.has('nograss2'), auto: q.has('auto'), day: +(q.get('day') ?? 100), rain: 0, haze: 1, dens: 1, kind: '', windDir: [0.94, 0.35], waterAuto: true, runoff: 0 };
 let currents = null, swellF = null, caustics, query, floaters, spray, src, clip, terrain, forest, waves, water, shore, fields, grass, wtime = 0;
-function build() {
+async function build() {
   if (terrain) { scene.remove(terrain, forest.group, water.mesh); if (grass) scene.remove(grass.group); }
   src = wildSource({ seed: state.seed });
-  clip = new GpuClip(renderer, src);
-  forest = new GpuForest(renderer, clip, src, { range: 1 });
+  await stage('the land: the clipmap'); clip = new GpuClip(renderer, src);
+  await stage('the woods');   forest = new GpuForest(renderer, clip, src, { range: 1 });
   const surfU = surfUniforms(src.sea);
   terrain = gpuTerrain(clip, { sea: src.sea, bands: forest.uBands, surf: q.has('noshore') ? null : surfU, map: mapU });
-  waves = new GpuWaves(renderer, { cascades: src.water.cascades, fetch: src.water.fetch, salt: src.cosmetic | 0 });
-  shore = q.has('noshore') ? null : new GpuShore(renderer, src);
-  swellF = q.has('noswell') ? null : new GpuSwellField(renderer, src);
+  await stage('the waves'); waves = new GpuWaves(renderer, { cascades: src.water.cascades, fetch: src.water.fetch, salt: src.cosmetic | 0 });
+  await stage('the shore table'); shore = q.has('noshore') ? null : new GpuShore(renderer, src);
+  await stage('the swell field and the currents'); swellF = q.has('noswell') ? null : new GpuSwellField(renderer, src);
   currents = swellF && !q.has('nocurrents') ? new GpuCurrents(renderer, src, swellF) : null;
-  fields = q.has('nofield') ? null : [GFOAM.far, GFOAM.near].map((level) => new GpuFoamField(renderer, { clip, waves, shore, surfU, level, swell: swellF, currents }));
+  await stage('the foam, the water'); fields = q.has('nofield') ? null : [GFOAM.far, GFOAM.near].map((level) => new GpuFoamField(renderer, { clip, waves, shore, surfU, level, swell: swellF, currents }));
   water = gpuWater(clip, waves, { swell: swellF, sky, clouds, ssr: !q.has('nossr'), sunColor: sky.uSunColor, skyUp: sky.uSkyUp, skyHz: sky.uSkyHz, waterAt: (x, z) => src.waterAt(x, z), shore, sea: src.sea, renderer, surfU, fields, map: mapU, debug: +(q.get('wdebug') || 0) });
   if (!q.has('nowater')) scene.add(water.mesh);
   if (!q.has('noterrain')) scene.add(terrain);
-  grass = q.has('nograss') ? null : new GpuGrass(renderer, { clip, source: src, sunDir: water.U.uSunDir, sunColor: sky.uSunColor, clouds }); if (grass) scene.add(grass.group);
+  await stage('the grass'); grass = q.has('nograss') ? null : new GpuGrass(renderer, { clip, source: src, sunDir: water.U.uSunDir, sunColor: sky.uSunColor, clouds }); if (grass) scene.add(grass.group);
   if (!q.has('noforest')) scene.add(forest.group);
   // the clouds' shadow on every lit thing's sun (the water and the grass's translucency take it themselves)
   // and on the ground under water, the waves' caustics
-  caustics = new GpuCaustics(clip, waves, water.U.uSunDir, renderer); caustics.uOn.value = state.caustics ? 1 : 0;
+  await stage('caustics, spray, floaters'); caustics = new GpuCaustics(clip, waves, water.U.uSunDir, renderer); caustics.uOn.value = state.caustics ? 1 : 0;
   clouds.receive(terrain.material, q.has('nocaustics') ? null : caustics.at());
   for (const o of [forest.group, grass && grass.group, player.mesh]) if (o) o.traverse((m) => { if (m.material) clouds.receive(m.material); });
   // the breakers' spray
@@ -313,14 +329,17 @@ $('cover').addEventListener('input', (e) => { state.cover = parseFloat(e.target.
 const panel = buildPanel($('hud'), state);
 $('hour').value = state.hour; const showHour = () => { const h = Math.floor(state.hour), m = Math.round((state.hour - h) * 60); $('oHour').textContent = `${h}:${String(m).padStart(2, '0')}`; }; showHour();
 $('hour').addEventListener('input', (e) => { state.hour = parseFloat(e.target.value); showHour(); });
-build();
+await build();
+await stage('the first frame: compiling the shaders (the longest wait)');
 
 let last = performance.now(), fps = 0, frames = 0, ft = 0, gpuMs = 0, counts = null, countT = 0, manual = false;
+let bootFrames = 0;
 async function frame(now) {
   if (manual) return;
   const dt = Math.min(0.1, (now - last) / 1000); last = now;
   step(dt);
   draw();
+  if (++bootFrames === 3) { const b = $('boot'); if (b && !b.classList.contains('err')) b.classList.add('gone'); } // the world is running
   frames++; ft += dt;
   if (ft > 0.5) {
     fps = frames / ft; frames = 0; ft = 0;
