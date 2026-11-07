@@ -43,6 +43,14 @@ function polarGrid() {
   return { geo, cellStep: g - 1 };
 }
 
+// the surf's uniforms, shared by the water and the sand (its wetness)
+export function surfUniforms(sea = 0) {
+  return { uSurf: uniform(new THREE.Vector4(0.8, 30, 1, 1)), uSurfX: uniform(new THREE.Vector4(1.6, 0.3, 0, 0)), uWTime: uniform(0), uSwDir: uniform(new THREE.Vector2(1, 0)), uSea: uniform(sea) };
+}
+// the sand's wetness (water3/swash.js sw3Wet): (darkness, gloss, covered) where the swash has been over it in its last
+// waves, drying from then
+export const coastWet = wgslFn('fn wCoastWet(xz: vec2<f32>, hgt: f32, grad: vec2<f32>, surf: vec4<f32>, surfX: vec4<f32>, t: f32, swDir: vec2<f32>) -> vec3<f32> { return coastWet(xz, hgt, grad, surf, surfX, t, swDir); }', [coastCode]);
+
 export function gpuWater(clip, waves, opts = {}) {
   const { geo, cellStep } = polarGrid();
   const C = waves.C, N = waves.N, Ls = waves.cascades;
@@ -51,7 +59,7 @@ export function gpuWater(clip, waves, opts = {}) {
   const uChop = uniform(1);
   // the surf (water3/swash.js): uSurf (amplitude, wavelength, speed, steepness), uSurfX (foam charge, the shoreline's
   // lead), the water's clock, the swell's direction, the sea's level (a lake has no surf)
-  const uSurf = uniform(new THREE.Vector4(0.8, 30, 1, 1)), uSurfX = uniform(new THREE.Vector4(1.6, 0.3, 0, 0)), uWTime = uniform(0), uSwDir = uniform(new THREE.Vector2(1, 0)), uSea = uniform(opts.sea ?? 0);
+  const SU = opts.surfU || surfUniforms(opts.sea ?? 0), { uSurf, uSurfX, uWTime, uSwDir, uSea } = SU;
   const RV = clip.reads('WV'), RF = clip.reads('WF');
   const shV = opts.shore ? opts.shore.reader() : null;
   // the foam's lace (surface.js laceTap, lacePat, laceD): the baked texture read twice, the second rotated and shifted,

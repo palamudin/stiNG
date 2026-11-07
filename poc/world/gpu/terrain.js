@@ -7,6 +7,7 @@
 import * as THREE from 'three/webgpu';
 import { Fn, float, int, vec2, vec3, vec4, attribute, positionLocal, positionWorld, cameraPosition, cameraViewMatrix, uniform, abs, max, mix, smoothstep, pow, length, If, wgslFn } from 'three/tsl';
 import { clipGrid } from '../clipmap.js';
+import { coastWet } from './water.js';
 
 const lin = (r, g, b) => vec3(r ** 2.2, g ** 2.2, b ** 2.2);
 const hash2 = wgslFn(`fn tHash(p: vec2<f32>) -> f32 {
@@ -48,6 +49,17 @@ export function gpuTerrain(clip, opts = {}) {
   const P = positionWorld.xz;
   const TD = RF.clipAt(P), TN = RF.clipNormal(P);
   mat.normalNode = cameraViewMatrix.mul(vec4(TN, 0)).xyz.normalize(); // the clipmap's normal (world), in view space as the node material wants it
+  // the sand the swash has wetted (water3/swash.js sw3Wet): darker while the water fills its pores, a shine just after
+  // the water leaves it, drying from the top down; on a sea beach only. (darkness, gloss, covered)
+  const wetN = opts.surf ? Fn(() => {
+    const S = opts.surf, P = positionWorld.xz, w = vec3(0).toVar(), TW = RF.clipWater(P), hs = RF.clipAtSmooth(P).x.sub(TW);
+    If(hs.greaterThan(0).and(hs.lessThan(3)).and(TW.lessThanEqual(S.uSea.add(0.5))), () => {
+      const e = max(float(0.35), RF.cellAt(P).mul(1.5));
+      const grad = vec2(RF.clipAtSmooth(P.add(vec2(e, 0))).x.sub(RF.clipAtSmooth(P.sub(vec2(e, 0))).x), RF.clipAtSmooth(P.add(vec2(0, e))).x.sub(RF.clipAtSmooth(P.sub(vec2(0, e))).x)).div(e.mul(2));
+      w.assign(coastWet({ xz: P, hgt: hs, grad, surf: S.uSurf, surfX: S.uSurfX, t: S.uWTime, swDir: S.uSwDir }));
+    });
+    return w;
+  })() : vec3(0);
   mat.colorNode = Fn(() => {
     const dist = length(cameraPosition.sub(positionWorld));
     const slope = float(1).sub(TN.y);
@@ -60,6 +72,7 @@ export function gpuTerrain(clip, opts = {}) {
     col.assign(mix(col, lin(0.55, 0.42, 0.28), smoothstep(0.2, 0.6, TD.w)));              // trails
     const sand = float(1).sub(smoothstep(0.6, 1.8, hgt.add(pa.mul(0.4))));
     col.assign(mix(col, lin(0.86, 0.78, 0.56), sand));                                       // sand at the water
+    col.mulAssign(mix(float(1), float(0.55), wetN.x.mul(sand))); // the sand the swash has wetted, darker
     col.assign(mix(col, lin(0.42, 0.37, 0.27), float(1).sub(smoothstep(-1.2, -0.2, hgt))));   // under it: mud
     const rock = smoothstep(0.28, 0.45, slope.add(pa.mul(0.05)));
     const rc = mix(lin(0.52, 0.50, 0.47), lin(0.40, 0.38, 0.36), smoothstep(-0.3, 0.3, vnoise({ p: P.div(3.3) })));
@@ -75,6 +88,7 @@ export function gpuTerrain(clip, opts = {}) {
     col.assign(mix(col, lin(0.95, 0.96, 0.98), snow));
     return vec4(col, 1);
   })();
+  if (opts.surf) mat.roughnessNode = mix(float(0.92), float(0.3), wetN.y); // the shine of sand the water has just left
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false; mesh.receiveShadow = true; mesh.castShadow = false;
   mesh.name = 'gpu-terrain';

@@ -7,7 +7,7 @@ import { GpuClip } from './clip.js';
 import { gpuTerrain } from './terrain.js';
 import { GpuForest } from './forest.js';
 import { GpuWaves } from './waves.js';
-import { gpuWater } from './water.js';
+import { gpuWater, surfUniforms } from './water.js';
 import { GpuShore } from './shore.js';
 import { WAVES, swellState } from '../waves.js';
 
@@ -38,10 +38,11 @@ function build() {
   src = wildSource({ seed: state.seed });
   clip = new GpuClip(renderer, src);
   forest = new GpuForest(renderer, clip, src, { range: 1 });
-  terrain = gpuTerrain(clip, { sea: src.sea, bands: forest.uBands });
+  const surfU = surfUniforms(src.sea);
+  terrain = gpuTerrain(clip, { sea: src.sea, bands: forest.uBands, surf: q.has('noshore') ? null : surfU });
   waves = new GpuWaves(renderer, { cascades: src.water.cascades, fetch: src.water.fetch, salt: src.cosmetic | 0 });
   shore = q.has('noshore') ? null : new GpuShore(renderer, src);
-  water = gpuWater(clip, waves, { waterAt: (x, z) => src.waterAt(x, z), shore, sea: src.sea, renderer, debug: +(q.get('wdebug') || 0) });
+  water = gpuWater(clip, waves, { waterAt: (x, z) => src.waterAt(x, z), shore, sea: src.sea, renderer, surfU, debug: +(q.get('wdebug') || 0) });
   if (!q.has('nowater')) scene.add(water.mesh);
   if (!q.has('noterrain')) scene.add(terrain);
   if (!q.has('noforest')) scene.add(forest.group);
