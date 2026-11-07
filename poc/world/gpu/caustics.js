@@ -75,7 +75,10 @@ export class GpuCaustics {
   at(p = positionWorld) {
     const R = this._R || (this._R = this.clip.reads('CA')), C = CAUSTIC, L = this.L, res = C.res;
     return Fn(() => {
-      const D = R.clipWater(p.xz).sub(p.y).max(0).toVar();
+      // the water over the floor now: the still level and, on the sea, the tide's (gpu/tide.js): ground the ebb has bared
+      // has no water over it and no caustics
+      const lv = R.clipWater(p.xz), TR = this.tide ? (this._TR || (this._TR = this.tide.reader())) : null;
+      const D = lv.add(TR ? TR(p.xz).x.mul(select(lv.lessThanEqual((this.clip.sea ?? 0) + 0.5), float(1), float(0))) : 0).sub(p.y).max(0).toVar();
       const rs = refract(this.uSun.negate(), vec3(0, 1, 0), 1 / C.n);
       const entry = p.xz.add(rs.xz.div(rs.y).mul(D));
       const fp = length(cameraPosition.sub(p)).mul(0.0018);

@@ -24,7 +24,7 @@ import { weatherAt, seasonAt } from '../seasons.js';
 import { GpuSky } from './sky.js';
 import { GpuClouds } from './clouds.js';
 import { MAP, Places, placeCard } from '../map.js';
-import { uniform, texture, uv } from 'three/tsl';
+import { uniform, texture, uv, Fn, float, vec4, length, normalize, select, max, exp, mix, positionWorld, cameraPosition, output } from 'three/tsl';
 import { WAVES, swellState } from '../waves.js';
 
 const $ = (id) => document.getElementById(id);
@@ -60,7 +60,21 @@ const scene = new THREE.Scene();
 // the sky (gpu/sky.js): the background, the aerial perspective, the sun's and the sky's light
 const sky = new GpuSky(renderer);
 const clouds = new GpuClouds(renderer, sky);
-scene.backgroundNode = sky.background(clouds.rt.texture); scene.fogNode = sky.fog();
+scene.backgroundNode = sky.background(clouds.rt.texture);
+// under water (the fish's view): everything is seen through the water between it and the eye: the path in the water
+// (the whole distance to a thing under the surface; to the surface along the ray for a thing above it) attenuated per
+// channel (Beer-Lambert, the water's own absorption and scattering) with the water's glow in its place, dimmer with the
+// depth the daylight has come down through; the air's haze above water. One fog node, the uniform switching
+const UW = { on: uniform(0), level: uniform(0), sig: uniform(new THREE.Vector3(0.5, 0.12, 0.08)), alb: uniform(new THREE.Vector3(0.05, 0.3, 0.45)) };
+scene.fogNode = Fn(() => {
+  const air = sky.fog();
+  const d = length(positionWorld.sub(cameraPosition)), v = normalize(positionWorld.sub(cameraPosition));
+  const dw = select(positionWorld.y.lessThan(UW.level.add(0.05)), d, UW.level.sub(cameraPosition.y).div(max(v.y, 0.02)).min(d));
+  const T = exp(UW.sig.mul(dw).negate());
+  const light = sky.uSkyUp.mul(0.5).add(sky.uSunColor.mul(max(sky.uSun.y, 0)).mul(0.35)).mul(exp(UW.sig.mul(max(UW.level.sub(cameraPosition.y), 0)).negate()));
+  const glow = UW.alb.mul(light).div(Math.PI);
+  return mix(air, vec4(output.rgb.mul(T).add(glow.mul(float(1).sub(T))), output.a), UW.on);
+})();
 const camera = new THREE.PerspectiveCamera(55, 1, 0.05, 20000);
 const sun = new THREE.DirectionalLight(0xfff1dc, 3.2), hemi = new THREE.HemisphereLight(0xbcd4f0, 0x4a4630, 1.1);
 sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
@@ -106,7 +120,7 @@ async function build() {
   if (!q.has('noforest')) scene.add(forest.group);
   // the clouds' shadow on every lit thing's sun (the water and the grass's translucency take it themselves)
   // and on the ground under water, the waves' caustics
-  await stage('caustics, spray, floaters'); caustics = new GpuCaustics(clip, waves, water.U.uSunDir, renderer); caustics.uOn.value = state.caustics ? 1 : 0;
+  await stage('caustics, spray, floaters'); caustics = new GpuCaustics(clip, waves, water.U.uSunDir, renderer); caustics.tide = swe; caustics.uOn.value = state.caustics ? 1 : 0;
   clouds.receive(terrain.material, q.has('nocaustics') ? null : caustics.at());
   for (const o of [forest.group, grass && grass.group, player.mesh]) if (o) o.traverse((m) => { if (m.material) clouds.receive(m.material); });
   // the breakers' spray
@@ -177,11 +191,11 @@ function step(dt) {
     const up = (keys.has('Space') || keys.has('KeyE') ? 1 : 0) - (keys.has('KeyC') || keys.has('KeyQ') ? 1 : 0), sp = 4 * fast;
     player.pos.x += (-Math.sin(cam.yaw) * fwd + Math.cos(cam.yaw) * side) * sp * dt;
     player.pos.z += (-Math.cos(cam.yaw) * fwd - Math.sin(cam.yaw) * side) * sp * dt;
-    player.pos.y = Math.max(player.pos.y + up * sp * dt, ground(player.pos.x, player.pos.z) + 0.3);
+    player.pos.y = Math.max(player.pos.y + up * sp * dt, src.height(player.pos.x, player.pos.z) + 0.3); // (the floor, not the water: it can dive)
     player.mesh.position.copy(player.pos); player.mesh.rotation.set(0, cam.yaw, 0); player.mesh.visible = !player.fp;
     cam.map = 0; camera.fov = 55;
     if (player.fp) { camera.position.copy(player.pos).y += 0.1; camera.lookAt(camera.position.clone().add(dir)); }
-    else { camera.position.copy(player.pos).addScaledVector(dir, -player.d); camera.position.y = Math.max(camera.position.y + 0.4, ground(camera.position.x, camera.position.z) + 0.15); camera.lookAt(player.pos.x, player.pos.y + 0.3, player.pos.z); }
+    else { camera.position.copy(player.pos).addScaledVector(dir, -player.d); camera.position.y = Math.max(camera.position.y + 0.4, src.height(camera.position.x, camera.position.z) + 0.15); camera.lookAt(player.pos.x, player.pos.y + 0.3, player.pos.z); }
     cam.fx = player.pos.x; cam.fz = player.pos.z;
   } else {
     const sp = Math.max(0.4, cam.dist * 0.6) * fast;
@@ -277,6 +291,12 @@ function step(dt) {
     if (fields) for (const f of fields) { f.uBias.value = L.foamBias + wk; f.uScale.value = L.foamScale; f.update(dt, camera, w10, L.linger); } }
   if (grass && state.grass) grass.update(camera, ground(camera.position.x, camera.position.z), w10, dt);
   water.U.uSunDir.value.copy(sunDir);
+  { const wl = src.waterAt ? src.waterAt(camera.position.x, camera.position.z) : src.sea, isSea = wl <= (src.sea ?? 0) + 0.5;
+    const tideNow = swe && isSea ? swe.R.amp.value * Math.cos(swe.R.phase.value) : 0;
+    UW.level.value = wl + tideNow; const under = camera.position.y < UW.level.value - 0.03; UW.on.value = under ? 1 : 0; water.U.uUnder.value = UW.on.value;
+    const lk = water.look, a = lk.uAbs.value, sc = lk.uSca.value, L = lk.uLook.value;
+    UW.sig.value.set(a.x / Math.max(L.x, 0.05) + sc.x * L.y, a.y / Math.max(L.x, 0.05) + sc.y * L.y, a.z / Math.max(L.x, 0.05) + sc.z * L.y);
+    UW.alb.value.set(sc.x * L.y / UW.sig.value.x, sc.y * L.y / UW.sig.value.y, sc.z * L.y / UW.sig.value.z); }
   if (caustics) caustics.update(sunDir, state.caustics && !q.has('nocaustics'));
   if (spray) spray.update(camera, dt, w10, state.spray);
   // the floaters: their cells' points to the GPU, last frames' heights back, the bodies stepped

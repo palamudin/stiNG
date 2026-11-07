@@ -133,6 +133,7 @@ export function gpuWater(clip, waves, opts = {}) {
   const vBed = varyingProperty('float', 'vBed'); // the swell's velocity at the bed (the silt it stirs)
   const tBrk = bakeBreaker(); // the breaker's event (gpu/breaker.js), computed once; vCurl: how much of a breaking lip this is (its normal and its white)
   const uLip = uniform(1); // the lip's strength (the panel)
+  const uUnder = uniform(0); // the eye under the water (the fish's view)
   mat.positionNode = Fn(() => {
     const skirt = positionLocal.y.greaterThan(0.5);
     const xz = select(skirt, positionLocal.xz.mul(GSURF.skirt), positionLocal.xz.mul(uScale)).add(cameraPosition.xz).toVar();
@@ -403,6 +404,21 @@ export function gpuWater(clip, waves, opts = {}) {
     // the edge: only the last millimetres fade (a hairline, no seam); a thin sheet still mirrors the sky as any water
     // does (the reflection does not thin with the depth: only the body's colour does, through its absorption)
     const outc = mix(under, col, smoothstep(0, 0.006, depth)).toVar();
+    // from below (the eye under the water, looking up at the surface): Snell's window: inside the critical angle
+    // (48.6 degrees from straight up) the sky and the clouds bent through the surface (the whole hemisphere squeezed
+    // into the cone, the sun in it), outside it the surface a mirror (total internal reflection) of the water's own
+    // dim body; between them Fresnel. The water between the eye and the surface is the fog's (demo.js)
+    If(uUnder.greaterThan(0.5).and(Vv.y.greaterThan(0)), () => {
+      const nb = n.negate(), ci = max(dot(Vv.negate(), nb), 0); // the normal turned to the eye below
+      const st2 = float(1.333 * 1.333).mul(float(1).sub(ci.mul(ci))); // sin^2 of the bent ray in the air
+      const tir = st2.greaterThanEqual(1);
+      const ct = sqrt(max(float(1).sub(st2), 0)), td = normalize(Vv.mul(1.333).add(nb.mul(ci.mul(1.333).sub(ct)))); // the bent ray (refract, water to air)
+      const rs = ci.mul(1.333).sub(ct).div(ci.mul(1.333).add(ct)), rp = ci.sub(ct.mul(1.333)).div(ci.add(ct.mul(1.333)));
+      const Fu = select(tir, float(1), rs.mul(rs).add(rp.mul(rp)).mul(0.5));
+      const airC = (env ? texture(env, opts.clouds.envUV(vec3(td.x, td.y.max(0.004), td.z))).level(0.5).rgb : uSkyUp).add(uSunColor.mul(pow(max(dot(td, uSunDir), 0), float(900)).mul(30)));
+      const mirror = scat.mul(0.6); // the water's body seen in the surface's mirror
+      outc.assign(mix(airC, mirror, Fu));
+    });
     // the map (map.js): flat blue by depth, the coast line drawn by the ground under it
     if (opts.map) outc.assign(mix(outc, mix(lin3(0.55, 0.78, 0.9), lin3(0.2, 0.45, 0.75), smoothstep(0, 14, still)).mul(opts.map.uMapK), opts.map.uMap));
     return RF.bind(vec4(outc, 1));
@@ -414,5 +430,5 @@ export function gpuWater(clip, waves, opts = {}) {
     uScale.value = Math.max(1, above / 2);
   };
   mesh.onAfterRender = () => {};
-  return { mesh, look: { uAbs, uSca, uLook, uLook2, uSed, uHs, uLip, uField, uWind }, U: { uLace, uTime, uScale, uSunDir, uSunColor, uSkyUp, uSkyHz, uChop, uSurf, uSurfX, uWTime, uSwDir, uSea } };
+  return { mesh, look: { uAbs, uSca, uLook, uLook2, uSed, uHs, uLip, uField, uWind }, U: { uUnder, uLace, uTime, uScale, uSunDir, uSunColor, uSkyUp, uSkyHz, uChop, uSurf, uSurfX, uWTime, uSwDir, uSea } };
 }
