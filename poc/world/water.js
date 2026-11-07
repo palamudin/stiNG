@@ -80,7 +80,9 @@ uniform vec4 uBody[${B}];  // centre x, z, radius, water level at the centre
 uniform vec4 uBodyB[${B}]; // ground gradient x, z, floor depth (0: the floor is drawn), kind (0 none, 1 bowl, 2 flat)
 uniform vec4 uBodyC[${B}]; // a pond's lobes: phases a, b, and 1 when it has them (sources/sting.js pondEdge)
 uniform int uBodies;
+#ifdef W_MIRROR
 uniform sampler2D tMirror, tMirrorMask; uniform mat4 uVPM; uniform vec4 uMirrorOff; uniform float uMirrorOn; // the mirror (water3/surface.js MIRROR): xyz eye to mirrored eye, w its plane
+#endif
 // a body's edge at a point's bearing: lobed for a pond, its radius otherwise
 float wBodyR(vec4 b, vec4 l, vec2 d) { if (l.z < 0.5) return b.z; float a = atan(d.y, d.x); return b.z * (0.86 + 0.08 * sin(2.0 * a + l.x) + 0.06 * sin(3.0 * a + l.y)); }
 const float W_N = ${f(WATER.n)};
@@ -194,7 +196,10 @@ vec4 wSSR(vec3 P, vec3 R, float yb) {
         vec2 um = cm.xy / cm.w * 0.5 + 0.5; float dm = texture(tDepth, um).r, sm = dm >= 1.0 ? 1e9 : rayDist(um, dm), qm2 = length(qm - uCamPos);
         if (qm2 > sm) { b = mm; hu = um; hq = qm2; hs = sm; } else a = mm;
       }
-      if (hq - hs < 0.01 + 0.02 * hs && !(uMirrorOn > 0.5 && texture(tMirrorMask, hu).a > 0.02)) {
+#ifdef W_MIRROR
+      if (uMirrorOn > 0.5 && texture(tMirrorMask, hu).a > 0.02) hs = -1e9;
+#endif
+      if (hq - hs < 0.01 + 0.02 * hs) {
         float edge = min(min(hu.x, 1.0 - hu.x), min(hu.y, 1.0 - hu.y));
         return vec4(texture(tColor, hu).rgb, smoothstep(0.0, 0.08, edge));
       }
@@ -327,10 +332,12 @@ vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, floa
   vec3 refl = mix(skyAt(R), ss.rgb, ss.a);
   // the mirror: the wasps drawn from the eye mirrored in this water's plane, where this point shows them (only on the
   // water at the mirror's level: a body at another level does not show them)
+#ifdef W_MIRROR
   if (uMirrorOn > 0.5 && abs(P.y - uMirrorOff.w) < 0.05) {
     vec4 cm = uVPM * vec4(P - uCamPos + uMirrorOff.xyz, 1.0);
     if (cm.w > 0.0) { vec4 mc = texture(tMirror, cm.xy / cm.w * 0.5 + 0.5 + n.xz * 0.012); refl = refl * (1.0 - clamp(mc.a, 0.0, 1.0)) + mc.rgb; }
   }
+#endif
   // ---- the sun: the slope distribution of the footprint (mean m, variance sv), widened by the sun's disc
   vec3 Lsun = uSun; float sunOn = step(0.0, Lsun.y);
   vec3 Hh = normalize(V + Lsun);

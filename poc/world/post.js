@@ -151,7 +151,7 @@ void main() {
 }`, this.U);
   }
   _composite(C) {
-    return pass(`${SKY_GLSL}\n${NOISE_GLSL}\n${this.clipGLSL ? this.clipGLSL + '\n#define W_CLIP' : ''}\n${C && this.shoreGLSL ? this.shoreGLSL + '\n#define W_SHORE' : ''}\n#define W_CASCADES ${C}\n${C ? waterGLSL(C) : ''}
+    return pass(`${SKY_GLSL}\n${NOISE_GLSL}\n${this.clipGLSL ? this.clipGLSL + '\n#define W_CLIP' : ''}\n${C && this.shoreGLSL ? this.shoreGLSL + '\n#define W_SHORE' : ''}\n#define W_CASCADES ${C}\n${this.renderer.capabilities.maxTextures >= 32 ? '#define W_MIRROR' : ''}\n${C ? waterGLSL(C) : ''}
 uniform sampler2D tColor, tDepth, uSkyView; uniform mat4 uInvProj, uCamWorld, uViewProj; uniform vec3 uCamPos, uSun, uSunColor, uSkyUp, uSkyHz;
 uniform float uLogF, uSea, uMist, uMistH, uTime, uWet, uRain, uWaterOn, uDebug, uCloudOn, uCloudBase, uFlash; uniform vec2 uRes; uniform sampler2D tCloud;
 #if W_CASCADES == 0

@@ -2498,6 +2498,12 @@ The mirror draws only while there is water under the wasp and the eye is within 
 - The mirror's uniforms are shared with the post chain, and the bodies read it as the surface does, only on water at the mirror's level.
 - Both screen-space marches now refine their crossing, as the surface's does, and leave what the mirror draws (the wasps, by its mask) to the mirror.
 
+**The texture budget.** The mirror makes the water's shaders read two more textures. Without it, the post chain's composite (the whole frame, ponds included) reads exactly 16, and Water 3's surface reads 18. A card that lets a shader read only 16, common with Chrome on Direct3D, failed to build the composite with the mirror, and World v3 drew nothing (v135).
+
+The mirror is now built in (`W_MIRROR`, `W3_MIRROR`) only where a shader may read 32 or more (`MIRROR.units`). Checked headless with the limit reported as 16: the composite builds with 16 textures and the surface with 18, and there are no errors.
+
+The surface's own 18 is over a 16 limit with or without the mirror: on such a card the open water (Water 3: the sea and wild lakes) would not build. That is a separate fix, in the world thread's surface.
+
 **Birds and dragonflies by presence.** Once lifted onto the ground and no longer culled by their bounds (18.102), every bird and dragonfly in the active chunks was drawn, several meshes each: about 100 draws. They are now drawn only when both hold:
 - in view, at their lifted height, or within 25 m for their shadows;
 - within 160 m (birds) or 60 m (dragonflies).

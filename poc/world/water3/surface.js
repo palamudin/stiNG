@@ -80,7 +80,10 @@ const f = (v) => (Number.isInteger(v) ? v.toFixed(1) : String(v));
 const _vr = new THREE.Matrix4();
 // the mirror's layer (the game's things to reflect; -1: none), its target's size (of the drawing buffer), how high
 // above the water the eye may be for it
-export const MIRROR = { layer: 5, scale: 0.5, above: 40 };
+// The mirror reads two more textures in the water's shaders, which already read many: a card that lets a shader read
+// only 16 (common: Chrome on Direct3D) would fail to build them, and the whole frame with the post chain's. So it is
+// built in only where a shader may read MIRROR.units or more
+export const MIRROR = { layer: 5, scale: 0.5, above: 40, units: 32, on: (r) => !!r && r.capabilities.maxTextures >= MIRROR.units };
 const _mv2 = new THREE.Vector2(), _md = new THREE.Vector3(), _mu = new THREE.Vector3(), _mq = new THREE.Quaternion(), _mc = new THREE.Color(), _mr = new THREE.Matrix4();
 
 export class WaterSurface {
@@ -113,6 +116,7 @@ ${NOISE_GLSL}
 ${world.clip.glsl()}
 ${shore ? shore.glsl() + '\n#define W3_COAST' : ''}
 ${this.ssr ? '#define W3_SSR' : ''}
+${MIRROR.on(world.renderer) ? '#define W3_MIRROR' : ''}
 uniform vec3 uCam; uniform float uGridScale, uSeaLevel, uTime; uniform vec4 uWL, uWave; uniform vec2 uDrift, uCamL;
 // the water's kind, its roughness: the sea's wind sea grows over the sea's fetch; a lake's over its own width (twice
 // the distance to its shore, from the shore table), so its long waves are a small share of the sea's and its ripples
@@ -253,7 +257,9 @@ float laceD(vec2 x, vec2 xl, float s, vec2 drift) {
   float t = gLaceT * 2.0;
   return t < 1.0 ? mix(lacePat(x, xl, 0.25 * s, drift), lacePat(x, xl, 0.8 * s, drift), t) : mix(lacePat(x, xl, 0.8 * s, drift), lacePat(x, xl, 2.5 * s, drift), t - 1.0);
 } uniform mat4 uVP; uniform float uWLost, uRain, uIce, uGlint, uWPeak;
+#ifdef W3_MIRROR
 uniform sampler2D tMirror, tMirrorMask; uniform mat4 uVPM; uniform vec4 uMirrorOff; uniform float uMirrorOn; // the mirror (MIRROR): xyz eye to mirrored eye, w its plane
+#endif
 in vec3 vW, vRel; in vec2 vXZ, vLoc; in float vCell, vNear, vJ; in vec2 vCoastSlope; in vec3 vCoast, vFlow; in vec4 vRough; out vec4 oColor;
 uniform float uDebug;
 const float W_N = ${f(WATER.n)};
@@ -326,7 +332,10 @@ vec4 wSSR(vec3 P, vec3 R) { // P: from the eye (vRel), as uVP takes it
         vec2 um = cm.xy / cm.w * 0.5 + 0.5; float dm = texture(tDepth, um).r, sm = dm >= 1.0 ? 1e9 : exp2(dm * uLogF) - 1.0;
         if (cm.w > sm) { b = m; hu = um; hw = cm.w; hs = sm; } else a = m;
       }
-      if (hw - hs < 0.01 + 0.02 * hs && !(uMirrorOn > 0.5 && texture(tMirrorMask, hu).a > 0.02)) { // (the mirror draws the wasps)
+#ifdef W3_MIRROR
+      if (uMirrorOn > 0.5 && texture(tMirrorMask, hu).a > 0.02) hs = -1e9; // the mirror draws the wasps
+#endif
+      if (hw - hs < 0.01 + 0.02 * hs) {
         float e = min(min(hu.x, 1.0 - hu.x), min(hu.y, 1.0 - hu.y));
         return vec4(texture(tScene, hu).rgb, smoothstep(0.0, 0.08, e));
       }
@@ -411,7 +420,9 @@ void main() {
   // the scene under the water is read where the bent ray lands; where that pixel shows a thing above the water (the
   // wasp, drawn into the scene in front of the water) it is not the floor: read straight down instead (the mirror's
   // mask: the mirrored things as the eye sees them). Without this the wasp showed in the water as if under it
+#ifdef W3_MIRROR
   if (uMirrorOn > 0.5 && texture(tMirrorMask, ruv).a > 0.02) ruv = suv;
+#endif
   vec3 floorCol = texture(tScene, ruv).rgb;
   // the floor's light: the sun's share lost to the surface and the water on its way down and focused by the
   // caustics, the sky's share lost to the water; then the path up to the eye (Beer-Lambert) and the water's own glow
@@ -437,10 +448,12 @@ void main() {
 #endif
   // the mirror: the game's own things (the wasps) drawn from the eye mirrored in the water's plane, read where this
   // point of the water shows them (the true reflection: in place, at its size, from the thing itself), rippled
+#ifdef W3_MIRROR
   if (uMirrorOn > 0.5) {
     vec4 cm = uVPM * vec4(vRel + uMirrorOff.xyz, 1.0);
     if (cm.w > 0.0) { vec2 mu = cm.xy / cm.w * 0.5 + 0.5 + n.xz * 0.012 * edge; vec4 mc = texture(tMirror, mu); refl = refl * (1.0 - clamp(mc.a, 0.0, 1.0)) + mc.rgb; } // drawn over a clear target: premultiplied
   }
+#endif
   vec3 Hh = normalize(V + uSun);
   vec2 sh = vec2(-Hh.x, -Hh.z) / max(Hh.y, 1e-3) - m;
   vec2 s2 = sv + vec2(${((0.00465 / 2) ** 2 / 4).toExponential(3)}) + vec2(1e-7);
@@ -573,7 +586,7 @@ void main() {
     let L = W.waterAt(at.x, at.z); if (!(L > W.heightAt(at.x, at.z) - 0.01)) L = -Infinity;
     const PU = W.post.U;
     for (let k = 0; k < PU.uBodies.value; k++) { const b = PU.uBody.value[k]; if (Math.hypot(at.x - b.x, at.z - b.y) < b.z * 1.15 && b.w > L && b.w < e.y) L = b.w; }
-    const on = MIRROR.layer >= 0 && L > -1e8 && e.y > L && e.y - L < MIRROR.above;
+    const on = MIRROR.on(r) && MIRROR.layer >= 0 && L > -1e8 && e.y > L && e.y - L < MIRROR.above;
     U.uMirrorOn.value = on ? 1 : 0;
     if (!on) return;
     const sz = r.getDrawingBufferSize(_mv2), w = Math.max(64, Math.round(sz.x * MIRROR.scale)), h = Math.max(64, Math.round(sz.y * MIRROR.scale));
