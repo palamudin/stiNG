@@ -2493,6 +2493,11 @@ The game now asks for a square at least 16 m across (`causticsMin`), pushed 30% 
 
 The mirror draws only while there is water under the wasp and the eye is within 40 m of it. The cameras see only that layer, so it costs a few draws.
 
+**Ponds and birdbaths.** In the town the water is not World v3's surface: ponds, birdbaths and fountains are water bodies the post chain draws (water.js). There, the wasp's double was the bodies' own screen-space reflection, still taking hits with a step-long allowance, which hung a streak under the wasp, longer the higher it flew. The fixes:
+- The mirror takes its plane from the body the wasp is over (`uBody`), so it works over a pond too.
+- The mirror's uniforms are shared with the post chain, and the bodies read it as the surface does, only on water at the mirror's level.
+- Both screen-space marches now refine their crossing, as the surface's does, and leave what the mirror draws (the wasps, by its mask) to the mirror.
+
 **Birds and dragonflies by presence.** Once lifted onto the ground and no longer culled by their bounds (18.102), every bird and dragonfly in the active chunks was drawn, several meshes each: about 100 draws. They are now drawn only when both hold:
 - in view, at their lifted height, or within 25 m for their shadows;
 - within 160 m (birds) or 60 m (dragonflies).

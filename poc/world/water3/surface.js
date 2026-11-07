@@ -100,7 +100,7 @@ export class WaterSurface {
       uSurf: world.uSurf, uSurfX: world.uSurfX, uWTime: world.uWTime, uSwDir: world.uSwDir,
       uWave: world.uWave, // (the panel's wave scale, the sea's fetch m, -, -)
       tScene: { value: null }, tDepth: { value: null }, uVP: { value: new THREE.Matrix4() }, tFoam: { value: null },
-      tMirror: { value: null }, tMirrorMask: { value: null }, uVPM: { value: new THREE.Matrix4() }, uMirrorOff: { value: new THREE.Vector3() }, uMirrorOn: { value: 0 },
+      tMirror: world.post.U.tMirror, tMirrorMask: world.post.U.tMirrorMask, uVPM: world.post.U.uVPM, uMirrorOff: world.post.U.uMirrorOff, uMirrorOn: world.post.U.uMirrorOn, // (shared with the post chain's water bodies)
       uLook: world.uLook, uLook2: world.uLook2, uLook3: world.uLook3, uLace: world.uLace, uAbs: world.uAbs, uSca: world.uSca, // the panel's 'Water'
       uLogF: world.post.U.uLogF, uDebug: world.post.U.uDebug, uRain: world.post.U.uRain, uIce: world.post.U.uIce, uGlint: world.post.U.uGlint, uWPeak: world.post.U.uWPeak,
       tCaus: { value: world.caustics ? world.caustics.rt.texture : null }, uCaus: world.post.U.uCaus,
@@ -253,7 +253,7 @@ float laceD(vec2 x, vec2 xl, float s, vec2 drift) {
   float t = gLaceT * 2.0;
   return t < 1.0 ? mix(lacePat(x, xl, 0.25 * s, drift), lacePat(x, xl, 0.8 * s, drift), t) : mix(lacePat(x, xl, 0.8 * s, drift), lacePat(x, xl, 2.5 * s, drift), t - 1.0);
 } uniform mat4 uVP; uniform float uWLost, uRain, uIce, uGlint, uWPeak;
-uniform sampler2D tMirror, tMirrorMask; uniform mat4 uVPM; uniform vec3 uMirrorOff; uniform float uMirrorOn; // the mirror (MIRROR)
+uniform sampler2D tMirror, tMirrorMask; uniform mat4 uVPM; uniform vec4 uMirrorOff; uniform float uMirrorOn; // the mirror (MIRROR): xyz eye to mirrored eye, w its plane
 in vec3 vW, vRel; in vec2 vXZ, vLoc; in float vCell, vNear, vJ; in vec2 vCoastSlope; in vec3 vCoast, vFlow; in vec4 vRough; out vec4 oColor;
 uniform float uDebug;
 const float W_N = ${f(WATER.n)};
@@ -326,7 +326,7 @@ vec4 wSSR(vec3 P, vec3 R) { // P: from the eye (vRel), as uVP takes it
         vec2 um = cm.xy / cm.w * 0.5 + 0.5; float dm = texture(tDepth, um).r, sm = dm >= 1.0 ? 1e9 : exp2(dm * uLogF) - 1.0;
         if (cm.w > sm) { b = m; hu = um; hw = cm.w; hs = sm; } else a = m;
       }
-      if (hw - hs < 0.01 + 0.02 * hs) {
+      if (hw - hs < 0.01 + 0.02 * hs && !(uMirrorOn > 0.5 && texture(tMirrorMask, hu).a > 0.02)) { // (the mirror draws the wasps)
         float e = min(min(hu.x, 1.0 - hu.x), min(hu.y, 1.0 - hu.y));
         return vec4(texture(tScene, hu).rgb, smoothstep(0.0, 0.08, e));
       }
@@ -438,7 +438,7 @@ void main() {
   // the mirror: the game's own things (the wasps) drawn from the eye mirrored in the water's plane, read where this
   // point of the water shows them (the true reflection: in place, at its size, from the thing itself), rippled
   if (uMirrorOn > 0.5) {
-    vec4 cm = uVPM * vec4(vRel + uMirrorOff, 1.0);
+    vec4 cm = uVPM * vec4(vRel + uMirrorOff.xyz, 1.0);
     if (cm.w > 0.0) { vec2 mu = cm.xy / cm.w * 0.5 + 0.5 + n.xz * 0.012 * edge; vec4 mc = texture(tMirror, mu); refl = refl * (1.0 - clamp(mc.a, 0.0, 1.0)) + mc.rgb; } // drawn over a clear target: premultiplied
   }
   vec3 Hh = normalize(V + uSun);
@@ -568,7 +568,12 @@ void main() {
   // under that point and the eye is within MIRROR.above m of it; a few draws (the camera sees only that layer)
   mirror(scene, camera) {
     const W = this.world, r = W.renderer, U = this.U, at = this.mirrorAt || camera.position, e = camera.position;
-    const L = W.waterAt(at.x, at.z), on = MIRROR.layer >= 0 && L > W.heightAt(at.x, at.z) - 0.01 && e.y > L && e.y - L < MIRROR.above;
+    // the plane: the open water's level under that point, or the level of the body it is over (a pond, a birdbath:
+    // drawn by the post chain, water.js)
+    let L = W.waterAt(at.x, at.z); if (!(L > W.heightAt(at.x, at.z) - 0.01)) L = -Infinity;
+    const PU = W.post.U;
+    for (let k = 0; k < PU.uBodies.value; k++) { const b = PU.uBody.value[k]; if (Math.hypot(at.x - b.x, at.z - b.y) < b.z * 1.15 && b.w > L && b.w < e.y) L = b.w; }
+    const on = MIRROR.layer >= 0 && L > -1e8 && e.y > L && e.y - L < MIRROR.above;
     U.uMirrorOn.value = on ? 1 : 0;
     if (!on) return;
     const sz = r.getDrawingBufferSize(_mv2), w = Math.max(64, Math.round(sz.x * MIRROR.scale)), h = Math.max(64, Math.round(sz.y * MIRROR.scale));
@@ -590,7 +595,7 @@ void main() {
     r.setRenderTarget(M.mask); r.clear(); r.render(scene, M.eye);
     r.setRenderTarget(prev); r.setClearColor(cc, ca); r.shadowMap.needsUpdate = sm; scene.background = bg;
     _mr.copy(vc.matrixWorldInverse).setPosition(0, 0, 0); U.uVPM.value.multiplyMatrices(vc.projectionMatrix, _mr);
-    U.uMirrorOff.value.set(0, e.y - vc.position.y, 0); // the eye to the mirrored eye: the water's points are given from the eye
+    U.uMirrorOff.value.set(0, e.y - vc.position.y, 0, L); // the eye to the mirrored eye (the water's points are given from the eye); the plane
   }
   // once a frame: the camera, the light, the gusts' drift
   update(camera, time, wind) {

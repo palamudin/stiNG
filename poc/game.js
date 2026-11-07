@@ -3937,7 +3937,7 @@ function drawPart(o) {
   let p = o, top = o;
   while (p && !k) { k = TRI_NAME[p.name] || p.userData.perf || null; top = p; p = p.parent; }
   if (!k) k = top === scene ? 'game other' : world2 && world2.surface && top === world2.surface.scene ? 'water' : top.isScene ? (top.name || 'other scene') : 'post';
-  DRAWS.part.set(o, k);
+  if (k !== 'other scene') DRAWS.part.set(o, k); // (a scene made after the naming: named at the next sweep)
   return k;
 }
 // World v3's own passes draw from scenes of their own (the waves, clouds, sky, post chain, clipmap, foam ...): each
@@ -3968,7 +3968,8 @@ function perfCpu() {
 }
 function hookDraws() {
   hookCpu();
-  if (world2 && !DRAWS.named) { DRAWS.named = true; nameScenes(world2, '', 0, new Set([world2.scene, world2.renderer, world2.camera])); }
+  // named for each World (a new game makes a new one), and again every few seconds for the scenes its parts make later
+  if (world2 && (DRAWS.named !== world2 || performance.now() - (DRAWS.namedAt || 0) > 3000)) { DRAWS.named = world2; DRAWS.namedAt = performance.now(); nameScenes(world2, '', 0, new Set([world2.scene, world2.renderer, world2.camera])); }
   if (DRAWS.hooked) return; DRAWS.hooked = true;
   const orig = renderer.renderBufferDirect, info = renderer.info.render;
   renderer.renderBufferDirect = function (camera, scn, geometry, material, object, group) {

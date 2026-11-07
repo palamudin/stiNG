@@ -80,6 +80,7 @@ uniform vec4 uBody[${B}];  // centre x, z, radius, water level at the centre
 uniform vec4 uBodyB[${B}]; // ground gradient x, z, floor depth (0: the floor is drawn), kind (0 none, 1 bowl, 2 flat)
 uniform vec4 uBodyC[${B}]; // a pond's lobes: phases a, b, and 1 when it has them (sources/sting.js pondEdge)
 uniform int uBodies;
+uniform sampler2D tMirror, tMirrorMask; uniform mat4 uVPM; uniform vec4 uMirrorOff; uniform float uMirrorOn; // the mirror (water3/surface.js MIRROR): xyz eye to mirrored eye, w its plane
 // a body's edge at a point's bearing: lobed for a pond, its radius otherwise
 float wBodyR(vec4 b, vec4 l, vec2 d) { if (l.z < 0.5) return b.z; float a = atan(d.y, d.x); return b.z * (0.86 + 0.08 * sin(2.0 * a + l.x) + 0.06 * sin(3.0 * a + l.y)); }
 const float W_N = ${f(WATER.n)};
@@ -182,11 +183,21 @@ vec4 wSSR(vec3 P, vec3 R, float yb) {
     float d = texture(tDepth, uv).r; if (d >= 1.0) { front = true; tp = t; t *= 1.35; continue; }
     float sd = rayDist(uv, d), qd = length(q - uCamPos);
     vec3 S = uCamPos + viewRay(uv) * sd;
-    // a hit: the ray has gone from in front of the scene to behind it since the last step, by no more than that step
-    // (so it passed through the surface there, not behind a thin thing far in front), on something above the water
-    if (qd > sd && front && qd - sd < (t - tp) * 1.5 + 0.02 && S.y > yb + 0.002) {
-      float edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
-      return vec4(texture(tColor, uv).rgb, smoothstep(0.0, 0.08, edge));
+    // a crossing: the ray has gone from in front of the scene to behind it since the last step, on something above the
+    // water. Found again by halving the step, and taken only within a thin shell behind what the pixel shows (a step-
+    // long allowance hung a streak under a thin thing, the wasp, longer the further the eye); what the mirror draws
+    // (the wasps) is left to it
+    if (qd > sd && front && S.y > yb + 0.002) {
+      float a = tp, b = t; vec2 hu = uv; float hq = qd, hs = sd;
+      for (int k = 0; k < 6; k++) {
+        float mm = 0.5 * (a + b); vec3 qm = P + R * mm; vec4 cm = uViewProj * vec4(qm, 1.0);
+        vec2 um = cm.xy / cm.w * 0.5 + 0.5; float dm = texture(tDepth, um).r, sm = dm >= 1.0 ? 1e9 : rayDist(um, dm), qm2 = length(qm - uCamPos);
+        if (qm2 > sm) { b = mm; hu = um; hq = qm2; hs = sm; } else a = mm;
+      }
+      if (hq - hs < 0.01 + 0.02 * hs && !(uMirrorOn > 0.5 && texture(tMirrorMask, hu).a > 0.02)) {
+        float edge = min(min(hu.x, 1.0 - hu.x), min(hu.y, 1.0 - hu.y));
+        return vec4(texture(tColor, hu).rgb, smoothstep(0.0, 0.08, edge));
+      }
     }
     front = qd <= sd; tp = t; t *= 1.35;
   }
@@ -314,6 +325,12 @@ vec3 waterShade(vec2 uv, vec3 v, vec3 P, vec2 x0, vec2 g, vec2 gx, vec2 gy, floa
   vec3 R = reflect(v, n); R.y = abs(R.y);
   vec4 ss = wSSR(P, R, P.y);
   vec3 refl = mix(skyAt(R), ss.rgb, ss.a);
+  // the mirror: the wasps drawn from the eye mirrored in this water's plane, where this point shows them (only on the
+  // water at the mirror's level: a body at another level does not show them)
+  if (uMirrorOn > 0.5 && abs(P.y - uMirrorOff.w) < 0.05) {
+    vec4 cm = uVPM * vec4(P - uCamPos + uMirrorOff.xyz, 1.0);
+    if (cm.w > 0.0) { vec4 mc = texture(tMirror, cm.xy / cm.w * 0.5 + 0.5 + n.xz * 0.012); refl = refl * (1.0 - clamp(mc.a, 0.0, 1.0)) + mc.rgb; }
+  }
   // ---- the sun: the slope distribution of the footprint (mean m, variance sv), widened by the sun's disc
   vec3 Lsun = uSun; float sunOn = step(0.0, Lsun.y);
   vec3 Hh = normalize(V + Lsun);

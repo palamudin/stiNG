@@ -48,6 +48,8 @@ export class Post {
       uWL: { value: new THREE.Vector4(1, 1, 1, 1) }, uWLost: { value: 0 }, uWPeak: { value: 0.05 }, uGlint: { value: WATER.glint },
       uBody: { value: Array.from({ length: WATER.bodies }, () => new THREE.Vector4()) }, uBodyB: { value: Array.from({ length: WATER.bodies }, () => new THREE.Vector4()) }, uBodyC: { value: Array.from({ length: WATER.bodies }, () => new THREE.Vector4()) }, uBodies: { value: 0 },
       tCaus: { value: null }, uCaus: { value: new THREE.Vector4(1, 0, 1, 0) },
+      // the water's mirror (water3/surface.js MIRROR), shared with the surface: the game's things mirrored in the water
+      tMirror: { value: null }, tMirrorMask: { value: null }, uVPM: { value: new THREE.Matrix4() }, uMirrorOff: { value: new THREE.Vector4() }, uMirrorOn: { value: 0 },
       tCloud: { value: null }, uCloudOn: { value: 0 }, uCloudBase: { value: 1000 }, uIce: { value: 0 }, uFlash: { value: 0 },
       uMap: { value: 0 }, uSnowLine: { value: 1e9 },
       ...sky.uniforms,
