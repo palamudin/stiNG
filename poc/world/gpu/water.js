@@ -9,7 +9,7 @@
 // Still to come over from surface.js: the shore table's coastal swell and swash, the foam fields and lace, the
 // screen-space reflection and the mirror, glints, rain rings, caustics.
 import * as THREE from 'three/webgpu';
-import { Fn, If, float, int, vec2, vec3, vec4, uniform, uniformArray, texture, positionLocal, positionWorld, cameraPosition, screenUV, viewportSharedTexture, abs, max, min, mix, clamp, smoothstep, pow, exp, length, normalize, dot, reflect, select, varyingProperty, wgslFn, wgsl, Discard } from 'three/tsl';
+import { Fn, If, float, int, vec2, vec3, vec4, uniform, uniformArray, texture, positionLocal, positionWorld, cameraPosition, screenUV, viewportSharedTexture, abs, max, min, mix, clamp, smoothstep, pow, exp, length, normalize, dot, reflect, select, varyingProperty, wgslFn, wgsl, Discard, Loop, Break, cameraProjectionMatrix, cameraViewMatrix, cameraNear, cameraFar, viewportDepthTexture, perspectiveDepthToViewZ } from 'three/tsl';
 import { COAST_WGSL } from './coast.wgsl.js';
 import { bakeFoamTexture } from './foamtex.js';
 
@@ -158,9 +158,42 @@ export function gpuWater(clip, waves, opts = {}) {
     // above: the sky by Fresnel (Schlick, water n = 1.33) and the sun's highlight
     const R = reflect(Vv, n), cosI = max(dot(Vv.negate(), n), 0);
     const F = float(0.02).add(float(0.98).mul(pow(float(1).sub(cosI), 5)));
-    const sky = mix(uSkyHz, uSkyUp, smoothstep(0, 0.45, R.y.max(0)));
+    // the sky in the water: the sky-view table (gpu/sky.js) by the reflected direction, held above the horizon, with the
+    // night's moon and stars, blurred by the ripples, and the clouds where the reflected direction falls on the screen
+    const Ru = normalize(vec3(R.x, R.y.max(0.02), R.z));
+    const skyC = (opts.sky ? opts.sky.skyAt(Ru).add(opts.sky.night(Ru, 0.004)) : mix(uSkyHz, uSkyUp, smoothstep(0, 0.45, R.y.max(0)))).toVar();
+    if (opts.clouds) {
+      const cc = cameraProjectionMatrix.mul(cameraViewMatrix).mul(vec4(cameraPosition.add(Ru.mul(5000)), 1)), cuv = vec2(cc.x.div(cc.w).mul(0.5).add(0.5), float(0.5).sub(cc.y.div(cc.w).mul(0.5)));
+      If(cc.w.greaterThan(0).and(cuv.x.greaterThan(0)).and(cuv.x.lessThan(1)).and(cuv.y.greaterThan(0)).and(cuv.y.lessThan(1)), () => {
+        const cl = texture(opts.clouds.rt.texture, cuv); skyC.assign(skyC.mul(cl.a).add(cl.rgb));
+      });
+    }
+    // the scene in the water (post.js's screen-space march): along the reflected ray in growing steps, each projected
+    // and tested against the scene's depth; a crossing refined by halving; faded at the screen's edges
+    const hitC = vec3(0).toVar(), hitK = float(0).toVar();
+    if (opts.ssr !== false) {
+      const VP = cameraProjectionMatrix.mul(cameraViewMatrix), P0 = positionWorld.add(vec3(0, 0.02, 0));
+      const t = float(0.4).toVar(), tPrev = float(0).toVar(), found = float(0).toVar();
+      const proj = (P) => { const c = VP.mul(vec4(P, 1)); return vec3(c.x.div(c.w).mul(0.5).add(0.5), float(0.5).sub(c.y.div(c.w).mul(0.5)), c.w); };
+      const sceneZ = (uv) => perspectiveDepthToViewZ(viewportDepthTexture(uv).x, cameraNear, cameraFar).negate();
+      Loop(28, () => {
+        const q = proj(P0.add(Ru.mul(t))).toVar(); // (the reflected ray held above the horizon: one dipping into the water finds the floor under it)
+        If(q.x.lessThan(0).or(q.x.greaterThan(1)).or(q.y.lessThan(0)).or(q.y.greaterThan(1)).or(q.z.lessThan(0)), () => { Break(); });
+        const dz = q.z.sub(sceneZ(q.xy));
+        If(dz.greaterThan(0).and(dz.lessThan(t.sub(tPrev).mul(1.5).add(0.3))), () => {
+          // refine between the last step and this one
+          const lo = tPrev.toVar(), hi = t.toVar();
+          Loop(6, () => { const m = lo.add(hi).mul(0.5), qm = proj(P0.add(Ru.mul(m))); If(qm.z.sub(sceneZ(qm.xy)).greaterThan(0), () => { hi.assign(m); }).Else(() => { lo.assign(m); }); });
+          const qh = proj(P0.add(Ru.mul(hi)));
+          const edge = smoothstep(0, 0.08, qh.x).mul(smoothstep(1, 0.92, qh.x)).mul(smoothstep(0, 0.08, qh.y)).mul(smoothstep(1, 0.92, qh.y));
+          hitC.assign(viewportSharedTexture(qh.xy).rgb); hitK.assign(edge); found.assign(1); Break();
+        });
+        tPrev.assign(t); t.mulAssign(1.32);
+      });
+    }
+    const sky = mix(skyC, hitC, hitK);
     const spec = pow(max(dot(R, uSunDir), 0), float(700)).mul(uSunColor).mul(6).add(pow(max(dot(R, uSunDir), 0), float(60)).mul(uSunColor).mul(0.15));
-    const col = mix(body, sky, F).add(spec.mul(smoothstep(0, 0.3, depth))).toVar();
+    const col = mix(body, sky, F).add(spec.mul(smoothstep(0, 0.3, depth)).mul(float(1).sub(hitK))).toVar();
     const cap = smoothstep(0.55, 0.15, J).mul(calm);
     // ---- foam (surface.js): whitecaps where the surface folds, the open water's sloshing lace now and then, the
     // breakers' white and lace, the surf zone's bed of bubbles, the swash's lace; one baked pattern covered to a share
