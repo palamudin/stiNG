@@ -1,15 +1,14 @@
-// The woods on WebGPU (WEBGPU.md): GPU-driven. Each frame one compute pass walks every cell of the 5.2 m grid
-// within the trees' reach round the eye and, for each:
-//   - places its tree by the same rules, hashes and grid as scatter.js (and trees.js PLACE_GLSL), reading the GPU
-//     clipmap for the ground, the water, the forest and the slope: nothing is placed or held per tree in JS;
-//   - culls it against the view (a sphere round the tree against the six planes of the frame widened 5%); a tree
-//     out of view is kept only within the sun's shadow reach, so it still shades what is seen;
-//   - picks its level of detail by its distance from the eye (FOREST.bands, scaled by the range), with the bands'
-//     dithered overlap: a tree in an overlap goes in both levels, each with its share;
-//   - appends it to its list (kind, variant, level) with an atomic counter.
-// A second pass writes each list's count into its indirect draw and clears the counters. Every list is one indirect
-// draw of the card mesh (treecards.js), reading its trees from the instance buffer by its own offset. No tiles, no
-// thinning, no CPU work per tree: what is drawn is what is in view, out to the range.
+// The woods on WebGPU (WEBGPU.md): GPU-driven, computed once and drawn from a table.
+//   placement, once per 64 m tile as it comes into reach: a compute pass places the tree of every 5.2 m cell by
+//     scatter.js's own rules, from the wild source's WGSL twin (exact ground, forest, water, slope: the same trees the
+//     CPU places), into the tile's 13 x 13 slots of a pool on the GPU. JS only says which tiles are wanted;
+//   each frame, one pass over the cached trees of the resident tiles: each is stood on the ground as drawn (the
+//     clipmap), culled against the view (a sphere round the crown against the frame's six planes widened 5%, or kept
+//     within the sun's shadow reach), given its level of detail by its distance (bands with dithered overlaps: a tree
+//     in an overlap goes in both levels, each with its share), and appended to its list (kind, variant, level) with an
+//     atomic counter; a second pass writes each list's count into its indirect draw and clears the counters.
+// Every list is one indirect draw of the card mesh (treecards.js), reading its trees by its own offset. No thinning:
+// what is drawn is what is in view, out to the reach.
 import * as THREE from 'three/webgpu';
 import { Fn, If, Return, float, int, uint, vec2, vec3, vec4, uniform, uniformArray, storage, instanceIndex, attribute, texture, screenCoordinate, positionLocal, positionWorld, cameraPosition, cameraViewMatrix, wgslFn, wgsl, sin, cos, length, min, max, mix, smoothstep, clamp, select, floor, fract, atomicAdd, atomicLoad, atomicStore, normalize, dot, uv } from 'three/tsl';
 import { treeDesign, meshTreeCards, leafAtlas } from '../treecards.js';
@@ -18,7 +17,7 @@ import { WILD_WGSL } from './wild.wgsl.js';
 
 const KINDS = ['oak', 'birch', 'pine', 'bush'];
 const CAPS = [4096, 16384, 32768]; // instances per list, by level
-const MAX_CELLS = 440 * 440; // the grid at the longest reach (ultra, 200%)
+const TILE = 64, SLOTS = 169, POOL = 6144, JOBS = 128; // a tile's 13 x 13 cells; tiles held; tiles placed per frame at most
 const PER_KV = CAPS[0] + CAPS[1] + CAPS[2], OFF = [0, CAPS[0], CAPS[0] + CAPS[1]];
 const wildCode = wgsl(WILD_WGSL);
 const h01 = wgslFn('fn fH01(x: i32, y: i32, s: i32) -> f32 { return w2hash01_(x, y, s); }', [wildCode]);
@@ -28,7 +27,8 @@ const ign = wgslFn('fn fIgn(p: vec2<f32>) -> f32 { return fract(52.9829189 * fra
 export class GpuForest {
   constructor(renderer, clip, source, opts = {}) {
     this.renderer = renderer; this.clip = clip; this.source = source;
-    this.cfg = { ...FOREST, ...opts };
+    // the bands twice the WebGL build's: full detail to 90 m, the middle level to 320 m, the far one to 900 m
+    this.cfg = { ...FOREST, bands: [0, 90, 320, 900], ...opts };
     this.nk = KINDS.length; this.nv = this.cfg.variants;
     this.lists = this.nk * this.nv * 3;
     this.range = opts.range ?? 1; this.rangeK = 1;
@@ -47,7 +47,15 @@ export class GpuForest {
     this.uEye = uniform(new THREE.Vector3()); this.uOrg = uniform(new THREE.Vector2()); this.uN = uniform(1, 'int');
     this.uBands = uniform(new THREE.Vector4()); this.uFade = uniform(this.cfg.fade); this.uShadowR = uniform(opts.shadowR ?? 60);
     this.uTime = uniform(0); this.uWind = uniform(new THREE.Vector2(3, 1));
-    this.stats = { cells: 0, lists: this.lists, ms: 0 };
+    // the placed trees: per pool tile 169 slots of two vec4: (x, z, kind * variants + variant or -1, turn), (horizontal
+    // scale, vertical scale, variety, 0); the resident tiles' pool indices; the placement jobs (tile i, j, pool)
+    this.cacheAttr = new THREE.StorageBufferAttribute(new Float32Array(POOL * SLOTS * 8), 4);
+    this.cache = storage(this.cacheAttr, 'vec4', POOL * SLOTS * 2);
+    this.activeAttr = new THREE.StorageBufferAttribute(new Uint32Array(POOL), 1);
+    this.active = storage(this.activeAttr, 'uint', POOL).toReadOnly();
+    this.uJobs = uniformArray(Array.from({ length: JOBS }, () => new THREE.Vector4()), 'vec4');
+    this.tiles = new Map(); this.free = Array.from({ length: POOL }, (_, i) => POOL - 1 - i); this._activeDirty = true; this._want = [];
+    this.stats = { cells: 0, tiles: 0, placed: 0, lists: this.lists, ms: 0 };
     this._meshes();
     this._kernels();
     this.setRange(1);
@@ -134,41 +142,63 @@ export class GpuForest {
   }
 
   _kernels() {
-    const G = this.cfg.grid, nv = this.nv, clip = this.clip, sea = this.source.sea ?? 0, wildFrom = this.source.wildFrom || 0;
-    const P = this.uPlanes;
-    this.kCull = Fn(() => {
-      const N = this.uN, idx = int(instanceIndex);
-      If(idx.greaterThanEqual(N.mul(N)), () => { Return(); });
-      const ix = int(this.uOrg.x).add(idx.mod(N)), iz = int(this.uOrg.y).add(idx.div(N));
-      const base = vec2(float(ix).add(0.15).add(h01({ x: ix, y: iz, s: int(21) }).mul(0.7)), float(iz).add(0.15).add(h01({ x: ix, y: iz, s: int(22) }).mul(0.7))).mul(G);
-      const dxz = length(base.sub(this.uEye.xz));
-      If(dxz.greaterThan(this.uBands.z.add(this.uFade.mul(3))), () => { Return(); });
-      if (wildFrom > 0) If(length(base).lessThan(wildFrom), () => { Return(); });
-      const gd = clip.clipAt(base), h = gd.x, f = gd.z, wet = gd.y, trail = gd.w, wl = clip.clipWater(base);
-      If(h.lessThan(wl.add(0.7)).or(trail.greaterThan(0.25)), () => { Return(); });
-      const p = f.mul(0.88).add(this.cfg.meadow), r = h01({ x: ix, y: iz, s: int(23) });
-      const k = int(0).toVar();
-      If(r.greaterThan(p), () => {
-        If(r.greaterThanEqual(p.add(min(1, f.mul(3)).mul(float(1).sub(f)).mul(0.22)).add(0.004)), () => { Return(); });
-        k.assign(3);
-      }).Else(() => {
-        const n = clip.clipNormal(base);
-        If(float(1).sub(n.y).greaterThan(0.52), () => { Return(); });
-        const alt = h.sub(sea);
-        If(alt.greaterThan(float(120).add(n2({ p: base.div(300), s: int(31) }).mul(40))).or(wet.lessThan(0.38).and(f.greaterThan(0.4))), () => { k.assign(2); })
-          .ElseIf(wet.greaterThan(0.62).and(h01({ x: ix, y: iz, s: int(28) }).lessThan(0.45)), () => { k.assign(1); });
-      });
-      // every value the appends share is made a variable here, outside their branches (TSL emits a shared node where
-      // it is first used, so one first used inside the near level's branch was unset for a tree only in the far one)
-      const bush = k.equal(3).toVar();
+    const G = this.cfg.grid, nv = this.nv, P = this.uPlanes, src = this.source;
+    const U = src.params ? src.params : { seed: 0, sea: 0, relief: 1, blocky: 0, rivers: 1, forests: 1, trails: 1 };
+    // placement (scatter.js, the wild part): the cell's tree or none, from the exact wild source
+    const place = wgslFn(`fn fPlace(ix: i32, iz: i32, g: f32, meadow: f32, wildFrom: f32, seed: i32, sea: f32, relief: f32, blocky: f32, rivers: f32, forests: f32, trails: f32) -> vec4<f32> {
+  let k0 = wildParams(seed, sea, relief, blocky, rivers, forests, trails);
+  let x = (f32(ix) + 0.15 + 0.7 * w2hash01_(ix, iz, 21)) * g;
+  let z = (f32(iz) + 0.15 + 0.7 * w2hash01_(ix, iz, 22)) * g;
+  let none = vec4<f32>(x, z, -1.0, 0.0);
+  if (wildFrom > 0.0 && length(vec2<f32>(x, z)) < wildFrom) { return none; }
+  var S: vec4<f32>; var wl: f32;
+  wildSampleW(vec2<f32>(x, z), &S, &wl);
+  let h = S.x; let f = S.z; let wet = S.y; let trail = S.w;
+  if (h < wl + 0.7 || trail > 0.25) { return none; }
+  let p = f * 0.88 + meadow; let r = w2hash01_(ix, iz, 23);
+  if (r > p) {
+    if (r < p + 0.22 * min(1.0, f * 3.0) * (1.0 - f) + 0.004) { return vec4<f32>(x, z, 3.0, 0.0); }
+    return none;
+  }
+  let slope = abs(wildSample(vec2<f32>(x + 1.5, z)).x - h) / 1.5 + abs(wildSample(vec2<f32>(x, z + 1.5)).x - h) / 1.5;
+  if (slope > 0.9) { return none; }
+  var k = 0.0;
+  if (h - sea > 120.0 + 40.0 * w2noise(vec2<f32>(x, z) / 300.0, 31) || (wet < 0.38 && f > 0.4)) { k = 2.0; }
+  else if (wet > 0.62 && w2hash01_(ix, iz, 28) < 0.45) { k = 1.0; }
+  return vec4<f32>(x, z, k, 0.0);
+}`, [wildCode]);
+    const W = wildUniformsOf(src);
+    this.kPlace = Fn(() => {
+      const t = int(instanceIndex), job = this.uJobs.element(t.div(SLOTS)), c = t.mod(SLOTS);
+      const ti = int(job.x), tj = int(job.y), pool = int(job.z);
+      const ix0 = int(floor(float(ti).mul(TILE / G))), ix1 = int(floor(float(ti.add(1)).mul(TILE / G)));
+      const iz0 = int(floor(float(tj).mul(TILE / G))), iz1 = int(floor(float(tj.add(1)).mul(TILE / G)));
+      const ix = ix0.add(c.mod(13)).toVar(), iz = iz0.add(c.div(13)).toVar();
+      const o = pool.mul(SLOTS).add(c).mul(2).toVar(); // a variable: it is used inside and after branches
+      If(ix.greaterThanEqual(ix1).or(iz.greaterThanEqual(iz1)), () => { this.cache.element(o).assign(vec4(0, 0, -1, 0)); Return(); });
+      const q = place({ ix, iz, g: float(G), meadow: float(this.cfg.meadow), wildFrom: float(src.wildFrom || 0), seed: int(W.seed), sea: float(W.sea), relief: float(W.relief), blocky: float(W.blocky), rivers: float(W.rivers), forests: float(W.forests), trails: float(W.trails) }).toVar();
+      If(q.z.lessThan(0), () => { this.cache.element(o).assign(vec4(q.x, q.y, -1, 0)); Return(); });
+      const bush = q.z.equal(3).toVar();
       const s = select(bush, float(0.8).add(h01({ x: ix, y: iz, s: int(26) }).mul(0.6)), float(0.82).add(h01({ x: ix, y: iz, s: int(29) }).mul(0.45))).toVar();
       const sy = select(bush, float(0.8).add(h01({ x: ix, y: iz, s: int(27) }).mul(0.5)), s).toVar();
       const sxz = select(bush, s, s.mul(float(0.9).add(h01({ x: ix, y: iz, s: int(30) }).mul(0.2)))).toVar();
-      const rot = h01({ x: ix, y: iz, s: int(24) }).mul(6.283).toVar(), vari = h01({ x: ix, y: iz, s: int(25) }).toVar();
-      const v = int(h01({ x: int(floor(base.x.mul(7))), y: int(floor(base.y.mul(7))), s: int(11) }).mul(nv)).toVar();
-      const hh = h.toVar(), bx = base.x.toVar(), bz = base.y.toVar();
-      // in view, or near enough to shade what is: a sphere round the crown against the six planes
-      const c = vec3(base.x, h.add(sy.mul(7)), base.y), rad = sy.mul(10).add(2);
+      const v = int(h01({ x: int(floor(q.x.mul(7))), y: int(floor(q.y.mul(7))), s: int(11) }).mul(nv));
+      this.cache.element(o).assign(vec4(q.x, q.y, float(int(q.z).mul(nv).add(v)), h01({ x: ix, y: iz, s: int(24) }).mul(6.283)));
+      this.cache.element(o.add(1)).assign(vec4(sxz, sy, h01({ x: ix, y: iz, s: int(25) }), 0));
+    })().compute(JOBS * SLOTS, [64]);
+    // each frame: the cached trees of the resident tiles, stood on the ground, culled, sorted into levels
+    const RC = this.clip.reads('C');
+    this.kCull = Fn(() => {
+      const t = int(instanceIndex), pool = int(this.active.element(t.div(SLOTS))), o = pool.mul(SLOTS).add(t.mod(SLOTS)).mul(2).toVar();
+      If(t.greaterThanEqual(this.uN), () => { Return(); });
+      const c0 = this.cache.element(o).toVar();
+      If(c0.z.lessThan(0), () => { Return(); });
+      const c1 = this.cache.element(o.add(1)).toVar();
+      const bx = c0.x, bz = c0.y, sy = c1.y;
+      const dxz = length(vec2(bx, bz).sub(this.uEye.xz));
+      If(dxz.greaterThan(this.uBands.z.add(this.uFade.mul(3))), () => { Return(); });
+      const hh = RC.clipAt(vec2(bx, bz)).x.toVar();
+      const c = vec3(bx, hh.add(sy.mul(7)), bz), rad = sy.mul(10).add(2);
       const inside = P.element(0).xyz.dot(c).add(P.element(0).w).greaterThan(rad.negate())
         .and(P.element(1).xyz.dot(c).add(P.element(1).w).greaterThan(rad.negate()))
         .and(P.element(2).xyz.dot(c).add(P.element(2).w).greaterThan(rad.negate()))
@@ -177,22 +207,21 @@ export class GpuForest {
         .and(P.element(5).xyz.dot(c).add(P.element(5).w).greaterThan(rad.negate()));
       If(inside.not().and(dxz.greaterThan(this.uShadowR)), () => { Return(); });
       const d = length(vec3(bx, hh, bz).sub(this.uEye)).toVar(), B = this.uBands, F = this.uFade;
-      // the levels' shares (trees.js vFade): level l from B[l] to B[l+1], each edge dithered over its fade
       const f0 = float(1).sub(smoothstep(B.x, B.x.add(F), d)).toVar();
       const f1 = smoothstep(B.x.sub(F.mul(2)), B.x, d).mul(float(1).sub(smoothstep(B.y, B.y.add(F.mul(2)), d))).toVar();
       const f2 = smoothstep(B.y.sub(F.mul(3)), B.y, d).mul(float(1).sub(smoothstep(B.z, B.z.add(F.mul(3)), d))).toVar();
-      const kv = k.mul(nv).add(v).toVar();
+      const kv = int(c0.z).toVar(), d0 = vec4(bx, hh, bz, c0.w).toVar();
       const put = (l, fl) => If(fl.greaterThan(0.001), () => {
         const id = kv.mul(3).add(l);
         const n = atomicAdd(this.cnt.element(id), uint(1)).toVar();
         If(n.lessThan(uint(CAPS[l])), () => {
-          const o = kv.mul(PER_KV).add(OFF[l]).add(int(n)).mul(2);
-          this.inst.element(o).assign(vec4(bx, hh, bz, rot));
-          this.inst.element(o.add(1)).assign(vec4(sxz, sy, vari, fl));
+          const oi = kv.mul(PER_KV).add(OFF[l]).add(int(n)).mul(2);
+          this.inst.element(oi).assign(d0);
+          this.inst.element(oi.add(1)).assign(vec4(c1.x, c1.y, c1.z, fl));
         });
       });
       put(0, f0); put(1, f1); put(2, f2);
-    })().compute(MAX_CELLS, [64]);
+    })().compute(POOL * SLOTS, [64]);
     this.kFinish = Fn(() => {
       const id = int(instanceIndex), l = id.mod(3);
       const cap = select(l.equal(0), uint(CAPS[0]), select(l.equal(1), uint(CAPS[1]), uint(CAPS[2])));
@@ -201,21 +230,56 @@ export class GpuForest {
     })().compute(this.lists, [64]);
   }
 
-  // once a frame, before the draw: the view's planes, the grid round the eye, the cull, the counts
+  // which tiles are wanted: those within the reach (and a tile's slack), nearest first, those in view before the
+  // rest; new ones placed up to JOBS a frame, far ones given back to the pool
+  _tiles(camera) {
+    const T = TILE, R = this.R + T, ex = camera.position.x, ez = camera.position.z, ci = Math.floor(ex / T), cj = Math.floor(ez / T), rt = Math.ceil(R / T);
+    const key = ci + ',' + cj + ',' + this.R.toFixed(0);
+    if (this._key !== key) {
+      this._key = key; this._want = [];
+      for (const [k, t] of this.tiles) if (Math.hypot((t.i + 0.5) * T - ex, (t.j + 0.5) * T - ez) > R + 2 * T) { this.free.push(t.pool); this.tiles.delete(k); this._activeDirty = true; }
+      for (let j = cj - rt; j <= cj + rt; j++) for (let i = ci - rt; i <= ci + rt; i++) {
+        const d = Math.hypot((i + 0.5) * T - ex, (j + 0.5) * T - ez);
+        if (d < R && !this.tiles.has(i + ',' + j)) this._want.push([d, i, j]);
+      }
+      this._sorted = false;
+    }
+    if (!this._want.length) return 0;
+    if (!this._sorted || this._turned) { // in view first (a tile's box against the frame), nearest first
+      for (const w of this._want) { _b.min.set(w[1] * T, camera.position.y - 400, w[2] * T); _b.max.set((w[1] + 1) * T, camera.position.y + 200, (w[2] + 1) * T); w[3] = w[0] * (_fr.intersectsBox(_b) ? 1 : 4); }
+      this._want.sort((a, b) => a[3] - b[3]); this._sorted = true;
+    }
+    let n = 0;
+    while (n < JOBS && this._want.length && this.free.length) {
+      const [, i, j] = this._want.shift(), pool = this.free.pop();
+      this.tiles.set(i + ',' + j, { i, j, pool }); this.uJobs.array[n].set(i, j, pool, 0); n++;
+    }
+    if (n) { this.renderer.compute(this.kPlace, n * SLOTS); this._activeDirty = true; this.stats.placed += n; }
+    return n;
+  }
+
+  // once a frame, before the draw: the view's planes, new tiles placed, the cached trees culled, the counts
   update(camera, dt, wind) {
-    const G = this.cfg.grid, R = this.R, n = Math.min(440, Math.ceil(2 * R / G) + 2);
-    this.uN.value = n; this.uOrg.value.set(Math.floor(camera.position.x / G) - (n >> 1), Math.floor(camera.position.z / G) - (n >> 1));
     this.uEye.value.copy(camera.position);
     camera.updateMatrixWorld();
     _m.copy(camera.projectionMatrix); _m.elements[0] /= 1.05; _m.elements[5] /= 1.05; _m.multiply(camera.matrixWorldInverse);
     _fr.setFromProjectionMatrix(_m, camera.coordinateSystem);
     _fr.planes.forEach((pl, i) => this.uPlanes.array[i].set(pl.normal.x, pl.normal.y, pl.normal.z, pl.constant));
+    camera.getWorldDirection(_v); this._turned = _v.dot(this._dir || _v) < Math.cos(0.1); this._dir = (this._dir || new THREE.Vector3()).copy(_v);
+    this._tiles(camera);
+    if (this._activeDirty) {
+      const a = this.activeAttr.array; let n = 0; for (const t of this.tiles.values()) a[n++] = t.pool;
+      this.activeAttr.needsUpdate = true; this._activeDirty = false; this.nActive = n;
+    }
     this.uTime.value += dt; if (wind) this.uWind.value.set(wind[0], wind[1]);
-    this.renderer.compute(this.kCull, Math.min(n * n, MAX_CELLS));
+    const cells = (this.nActive || 0) * SLOTS; this.uN.value = cells;
+    if (cells) this.renderer.compute(this.kCull, cells);
     this.renderer.compute(this.kFinish);
-    this.stats.cells = n * n;
+    this.stats.cells = cells; this.stats.tiles = this.tiles.size;
   }
   // the counts drawn last frame (a readback, for the overlay and the tests; async)
   async counts() { const a = new Uint32Array(await this.renderer.getArrayBufferAsync(this.args)); const out = []; for (let i = 0; i < this.lists; i++) out.push(a[i * 5 + 1]); return out; }
 }
-const _m = new THREE.Matrix4(), _fr = new THREE.Frustum();
+// the wild source's parameters as the WGSL twin takes them
+function wildUniformsOf(src) { const P = src.params || {}; return { seed: P.seed | 0, sea: P.sea ?? src.sea ?? 0, relief: P.relief ?? 1, blocky: P.blocky ?? 0, rivers: P.rivers ?? 1, forests: P.forests ?? 1, trails: P.trails ?? 1 }; }
+const _m = new THREE.Matrix4(), _fr = new THREE.Frustum(), _b = new THREE.Box3(), _v = new THREE.Vector3();
