@@ -2483,6 +2483,29 @@ On a jump the CPU path no longer blurs a level out to its parent: the window it 
 
 The game now asks for a square at least 16 m across (`causticsMin`), pushed 30% of its size ahead along the view (`causticsAhead`), on a 512 texture with a 384 grid. That is about the old detail (3 cm texels, 7 cm cells, against 2.3 and 5 cm) over 2.7 times the width. Water seen at a slant still clouds with distance: that is the water, not the caustics.
 
+### 18.108 How many colonies a player holds, and the abstract tier (T3-5)
+
+**The setting.** `colonies` (settings, both twins) is how many colonies a player may hold, the one in hand counted. The line founds no more past it, in spring or by a swarm: `_lineMax` is now the smaller of the line's own max (5, plus the tree's Line: found) and the setting less one.
+- The default, 9, never binds: one in hand, the line's five, and up to three more from the tree.
+- A world set below 9 carries it in its rules hash (left out of the hash at 9, so existing worlds keep theirs) and in its tag ("3 colonies a player").
+- The new-world menu offers 9 ("As many as the line founds"), 6, 3 or 1.
+
+**The abstract tier** (11.12; `T.line.far`, tuning file `[line.far]`). A colony of the line whose nest is more than `range` (250 m) from the player's insect steps its economy once every `every` (10) colony ticks. Each step covers the time owed, and the time owed is kept with the colony (`owed`, saved; C# save version 39). The step covers:
+- the founding queen's foraging;
+- the colony step;
+- the hive XP at the gauge;
+- swarming;
+- the exterminator's call.
+
+When the player's insect comes back in range, the next colony tick steps all the time owed at once, and the colony steps every tick from then on. No time is lost or counted twice. A far colony has no workers out anyway, since they only fly in the active chunks. Its 1 Hz bookkeeping now costs a tenth.
+
+**Tests.** Block 74 in sim.test.mjs, and its C# twin in Behaviour.cs:
+- The cap with and without the tree, and the rules hash and tag.
+- A colony 400 m off holds still for nine colony ticks and steps on the tenth, while one beside the nest steps every tick.
+- The far colony comes back in step when the player flies to it.
+- Over 1.5 game days the abstract colony ends within 1% of the same colony stepped every tick (adults 39.7 against 39.8, cells 190.7 against 191.4).
+- The time owed and the setting survive a save.
+
 ### 18.107 The player's own colonies across species (T3-4)
 
 **The rule** (6.8, "They can meet"). The player's colonies of different species are not friends by default. The player's hornets hunt the player's yellowjackets, and the player's honeybees ball them, as they would another colony's. Colonies of the same species never fight, as the line's colonies never have. A colony the player marks **kin** is at peace with the player's colonies of other species, both ways: its hornets leave them alone, and its bees do not ball them. The mark is one per colony (kin to the player's other species), not one per pair: one mark covers the case that comes up, a bee colony beside the wasp line it came from.
@@ -3028,7 +3051,7 @@ Set 2026-11-03, after T2-14: graphics now belong to the world-building thread (2
 | T3-2 | **Built (18.98).** **Places of interest and field notes** (the sim half of 20.3 G6). <br>• A place list kept by the sim (C# twin): the nest, colonies of the line, rival nests, hives, swarms, water, town squares and beer gardens, porch lights, the exterminator, nest sites found. <br>• Every kind carries a true field note from Appendix C. <br>• Notes unlock into a field guide the first time the place is reached, kept in the save. <br>• The map and area cards show them. The drawn map tiles are the world thread's. | 10, App. C | M | the list matches in JS and C#; the guide unlocks, saves and restores |
 | T3-3 | **Built (18.100).** **The growth tree's branches** (T2-13 in full, with T2-7). <br>• Nest (cell building, brood speed, insulation, guard strength), Flight (the Reflex cue, swoop recovery, lock-on range, assisted reach) and Line (gyne output, winter survival by site, how many lineage colonies found). <br>• Points come from experience, a few a season. <br>• Every node that changes an outcome is a colony parameter in ranges the plausibility checks know (11.8). | 6.8, 7.8 | L | nodes act in the sim, ranges are audited across peers, the colony view spends points |
 | T3-4 | **Built (18.107).** **The player's own colonies meeting across species.** <br>• A player's hornets hunt the same player's yellowjackets and bees ball them, unless the player marks the colonies kin. <br>• Kin is colony state every peer reads. | 6.8 | S | a kin mark stops the hunting and balling; unmarked, they fight |
-| T3-5 | **How many colonies a player holds,** as a world setting, with colonies far from the player run at the abstract tier. | 6.8, 11.12 | M | the setting caps the held colonies; a far colony steps abstractly and comes back in step |
+| T3-5 | **Built (18.108).** **How many colonies a player holds,** as a world setting, with colonies far from the player run at the abstract tier. | 6.8, 11.12 | M | the setting caps the held colonies; a far colony steps abstractly and comes back in step |
 
 **Waiting on decisions.** The genus progression beyond hornets and bees (6.9, T4: ants, termites, cockroaches) waits on Q-22 (what a removed tree means in a persistent world) and Q-23 (how alliances are formed and audited). Offshoot modes need their own design passes.
 

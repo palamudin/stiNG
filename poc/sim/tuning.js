@@ -338,7 +338,10 @@ export const T = {
   // queen woke). They are run by the AI: stepped like yours, a founding queen bringing in queenForage a day alone, and
   // up to `physical` of their workers out near the player. Their mated queens winter by their nests and join the
   // next spring's choice. Lose your own colony mid-season and you take over the strongest of them.
-  line: { max: 5, treeRange: 40, minGap: 8, physical: 3, queenForage: { sugar: 1.5, protein: 2, pulp: 2 } },
+  // far: the abstract tier (T3-5, GDD 11.12): a colony of the line whose nest is more than range m from the player's
+  // insect steps its economy once every `every` colony ticks, the time owed in one step, and catches up at once when
+  // the player comes back in range
+  line: { max: 5, treeRange: 40, minGap: 8, physical: 3, queenForage: { sugar: 1.5, protein: 2, pulp: 2 }, far: { range: 250, every: 10 } },
   // Males and mating flights (GDD 6.5, 6.7, T2-3). bio: Vespula males have no sting, feed on nectar, and patrol
   // landmarks near nests (often prominent trees) where young queens come to mate; a male mates once and dies. A gyne's
   // chance to mate depends on the males about: her own colony's and the neighbourhood's (area males at full breeding
@@ -423,6 +426,9 @@ export const DEFAULT_SETTINGS = {
   skills: 'earned',
   // the species the player's line starts as (a player's choice within the world's progression, not a world rule)
   species: 'wasp',
+  // how many colonies a player may hold, the one in hand counted (T3-5, GDD 6.8): the line founds no more past it; 9
+  // never binds (one in hand, the line's five, three more from the tree's Line: found)
+  colonies: 9,
 };
 export const SPECIES = ['wasp', 'hornet', 'bee'];
 // The skills (GDD 6.8), in the order the learn command numbers them: unlocks and ranked unit skills, then hive skills
@@ -467,7 +473,7 @@ const RULE_KEYS = ['dayMinutes', 'humanDensity', 'beeAggression', 'seasonDays', 
 export function rulesHash(settings) {
   const s = { ...DEFAULT_SETTINGS, ...settings };
   let h = 0x811c9dc5;
-  const str = 'gen' + GEN_VERSION + '|' + RULE_KEYS.map((k) => k + '=' + s[k]).join('|') + (s.settled ? '|settled=' + s.settled : '') + '|tune=' + TUNE.hash; // peers must share the tuning file too (T1-22)
+  const str = 'gen' + GEN_VERSION + '|' + RULE_KEYS.map((k) => k + '=' + s[k]).join('|') + (s.settled ? '|settled=' + s.settled : '') + (s.colonies !== DEFAULT_SETTINGS.colonies ? '|colonies=' + s.colonies : '') + '|tune=' + TUNE.hash; // peers must share the tuning file too (T1-22)
   for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
   return (h >>> 0).toString(16).padStart(8, '0');
 }
@@ -492,6 +498,7 @@ export function worldTag(settings) {
   if (s.hives !== d.hives) t.push(s.hives ? `hives ${x(s.hives)}` : 'no hives');
   if (s.terrain !== d.terrain) t.push(s.terrain > 1 ? 'hilly' : 'rolling');
   if (s.settled) t.push(`wild beyond ${s.settled} m`);
+  if (s.colonies !== d.colonies) t.push(`${s.colonies} colonies a player`);
   if (s.skills !== d.skills) t.push(s.skills === 'all' ? 'all skills' : s.skills);
   if (s.progression !== d.progression) t.push(s.progression === 'earned' ? 'species earned' : s.progression.startsWith('fixed:') ? s.progression.slice(6) + 's only' : s.progression);
   return t.join(' · ');

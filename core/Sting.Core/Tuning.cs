@@ -317,6 +317,8 @@ namespace Sting.Core
         {
             public static int max = 5, physical = 3; public static Num treeRange = 40, minGap = 8;
             public static class queenForage { public static Num sugar = 1.5, protein = 2, pulp = 2; }
+            /// the abstract tier (T3-5, GDD 11.12): a colony farther than range m from the player's insect steps once every `every` colony ticks
+            public static class far { public static Num range = 250; public static int every = 10; }
         }
         /// Males and mating flights (GDD 6.5, 6.7, T2-3); see tuning.js
         public static class males
@@ -376,6 +378,8 @@ namespace Sting.Core
         public string skills = "earned";
         /// the species the player's line starts as: a player's choice within the world's progression, not a rule
         public string species = "wasp";
+        /// how many colonies a player may hold, the one in hand counted (T3-5, GDD 6.8); 9 never binds
+        public int colonies = 9;
         public static readonly string[] SPECIES = { "wasp", "hornet", "bee" };
         /// the species a world lets a new line start as
         public string[] SpeciesAllowed() => progression == "open" ? (string[])SPECIES.Clone() : progression.StartsWith("fixed:") ? new[] { progression.Substring(6) } : new[] { "wasp" };
@@ -396,7 +400,7 @@ namespace Sting.Core
                 + "|seasonDays=" + N(seasonDays) + "|reaction=" + N(reaction) + "|escalation=" + N(escalation)
                 + "|exterminator=" + B(exterminator) + "|birds=" + B(birds) + "|rivals=" + B(rivals)  + "|pestControl=" + B(pestControl)
                 + "|woods=" + woods + "|towns=" + towns + "|water=" + N(water) + "|hives=" + N(hives) + "|terrain=" + terrain + "|progression=" + progression + "|skills=" + skills
-                + (settled != 0 ? "|settled=" + settled : "") + "|tune=" + Tune.Hash; // peers must share the tuning file too (T1-22)
+                + (settled != 0 ? "|settled=" + settled : "") + (colonies != 9 ? "|colonies=" + colonies : "") + "|tune=" + Tune.Hash; // peers must share the tuning file too (T1-22)
             return R.Fnv32(str).ToString("x8");
         }
 
@@ -421,6 +425,7 @@ namespace Sting.Core
             if (hives != d.hives) t.Add(hives != 0 ? $"hives {X(hives)}" : "no hives");
             if (terrain != d.terrain) t.Add(terrain > 1 ? "hilly" : "rolling");
             if (settled != 0) t.Add("wild beyond " + settled + " m");
+            if (colonies != d.colonies) t.Add(colonies + " colonies a player");
             if (skills != d.skills) t.Add(skills == "all" ? "all skills" : skills);
             if (progression != d.progression) t.Add(progression == "earned" ? "species earned" : progression.StartsWith("fixed:") ? progression.Substring(6) + "s only" : progression);
             return string.Join(" · ", t);

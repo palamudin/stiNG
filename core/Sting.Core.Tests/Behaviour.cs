@@ -1863,6 +1863,40 @@ namespace Sting.Core.Tests
                 Ok(D(I.site.h) >= 10 && D(I.site.h) <= 90 && inside && beyond && step < 3 && wild > 400 && settledChunks > 30 && built == 0 && trees > 300 && wet == 0 && s.wasp.y >= 0 && st.RulesHash() != t1.RulesHash() && st.WorldTag().Contains("wild beyond 400 m"),
                     $"the settled area sits on the wild land {D(I.site.h):0.0} m above the sea at ({D(I.site.x):0}, {D(I.site.z):0}); {settledChunks} settled chunks, {wild} wild ones with nothing built and {trees} trees, none in the water; no step over 3 m across the band ({step:0.00} per 2 m); a sim runs over it");
             }
+            // 74. how many colonies a player holds (T3-5; sim.test.mjs): the world's cap on colonies held is a rule; a far colony
+            // of the line steps at the abstract tier and comes back in step, close to one stepped every tick
+            {
+                Sim Mk(Settings st = null) { var s = new Sim(st ?? new Settings { seed = 1234, birds = false }, new SimOpts { noAI = true }); RunS(s, 1); return s; }
+                LineColony AddLine(Sim s, string sp, Num dx)
+                {
+                    var c = Colony.New(false, sp); c.sited = true; c.maxCells = s.MaxCells("trunk", sp);
+                    var nn = World.MakeNest(s.nest.treeX + dx, s.nest.treeZ, s.nest.x + dx, s.nest.y, s.nest.z, 0.14, "trunk");
+                    var sc = new LineColony { id = ++s.lineSeq, nest = nn, colony = c, season = s.season.n }; s.line.Add(sc); return sc;
+                }
+                var d = Mk(); var three = Mk(new Settings { seed = 1234, birds = false, colonies = 3 }); var one = Mk(new Settings { seed = 1234, birds = false, colonies = 1 });
+                d.prog.tree = new int[Growth.NODES.Length]; d.prog.tree[Growth.Index("found")] = 2; three.prog.tree = (int[])d.prog.tree.Clone();
+                Ok(d.LineMax() == T.line.max + 2 && three.LineMax() == 2 && one.LineMax() == 0 && new Settings { colonies = 3 }.RulesHash() != new Settings().RulesHash() && new Settings { colonies = 9 }.RulesHash() == new Settings().RulesHash()
+                    && new Settings { colonies = 3 }.WorldTag().Contains("3 colonies a player") && new Settings().WorldTag() == "",
+                    $"the line founds up to {d.LineMax()} colonies with the tree, 2 in a world of 3 colonies a player, none in a world of one; the cap is a rule");
+                var s = Mk(); var far = AddLine(s, "wasp", 400); var near = AddLine(s, "wasp", 8); int every = T.line.far.every;
+                Cmd Hold(Sim sim, int i) { if (sim.wasp != null) Place(sim.wasp, P(sim.nest.entrance.x + 1, 1.5, sim.nest.entrance.z)); return Idle(); }
+                Num a0 = far.colony.adults, n0 = near.colony.adults;
+                RunS(s, 60 * (every - 1), Hold); bool still = far.colony.adults == a0 && far.owed == every - 1 && near.colony.adults != n0 && near.owed == 0;
+                RunS(s, 60, Hold); bool stepped = far.colony.adults != a0 && far.owed == 0;
+                RunS(s, 60 * 4, Hold); int owed = far.owed;
+                RunS(s, 60, (sim, i) => { if (sim.wasp != null) Place(sim.wasp, P(far.nest.entrance.x + 1, 1.5, far.nest.entrance.z)); return Idle(); });
+                bool back = far.owed == 0;
+                ColonyState Twin(bool @abstract)
+                {
+                    var t = Mk(); var c = AddLine(t, "wasp", 400); Num r0 = T.line.far.range; if (!@abstract) T.line.far.range = 1e9;
+                    try { RunS(t, 60 * 60 * 3, Hold); } finally { T.line.far.range = r0; }
+                    return c.colony;
+                }
+                var A = Twin(true); var B = Twin(false); double Rel(Num x, Num y) => System.Math.Abs(D(x - y)) / System.Math.Max(1e-9, System.Math.Abs(D(y)));
+                var r = Persist.Restore(Persist.Snapshot(s));
+                Ok(still && stepped && owed == 4 && back && Rel(A.adults, B.adults) < 0.02 && Rel(A.cells, B.cells) < 0.02 && Rel(A.sugar + A.protein, B.sugar + B.protein) < 0.05 && r.line.First(q => q.id == far.id).owed == far.owed && r.settings.colonies == s.settings.colonies,
+                    $"a colony 400 m off steps once every {every} colony ticks and comes back in step; adults {D(A.adults):0.0} against {D(B.adults):0.0} stepped every tick; the time owed survives a save");
+            }
             // 73. the player's own colonies across species (T3-4; sim.test.mjs): the hornets hunt and the bees ball the player's
             // yellowjackets unless a colony is marked kin; the same species never fight; the mark is a pick, an event, colony state and saved
             {

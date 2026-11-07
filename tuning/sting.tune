@@ -820,6 +820,11 @@ sugar = 1.5
 protein = 2
 pulp = 2
 
+# the abstract tier (T3-5): a colony of the line farther than range m from the player's insect steps once every `every` colony ticks
+[line.far]
+range = 250
+every = 10
+
 [males]
 area = 30
 need = 20

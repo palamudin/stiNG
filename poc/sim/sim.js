@@ -2671,7 +2671,7 @@ export class Sim {
   // lock-on ranges: the landing reach skill and the tree's lock node
   _lockMul(w) { return this._mul(w, 'landR') * (w && w.colony === 'own' ? 1 + T.tree.lock * this.treeRank('lock') : 1); }
   // how many colonies of the line there can be (Line: found)
-  _lineMax() { return T.line.max + Math.floor(T.tree.found * this.treeRank('found')); }
+  _lineMax() { return Math.min(T.line.max + Math.floor(T.tree.found * this.treeRank('found')), Math.max(0, (this.settings.colonies ?? DEFAULT_SETTINGS.colonies) - 1)); } // and the world's cap on colonies held, the one in hand counted (T3-5)
   // a rank on the growth tree (T3-3): a point, the node open; told to the peers, who audit it against the tree's ranges
   _grow(i) {
     const P = this.prog;
@@ -4699,8 +4699,14 @@ export class Sim {
   // Each sister colony lives through the season like yours, run by the AI; a founding queen forages alone
   _lineTick(daylight, frac) {
     if (!this.line.length) return;
-    const L = T.line, dt = 60 / this.dayTicks, av = this.ecoAvail(), g = this.gauge();
+    const L = T.line, dt1 = 60 / this.dayTicks, av = this.ecoAvail(), g = this.gauge();
+    const F = L.far, p = this._driven() || this.nest.entrance;
     for (const sc of this.line.slice()) {
+      // the abstract tier (T3-5): far from the player's insect a colony steps once every F.every ticks, the time owed
+      // in one step; back in range it catches up at once and steps every tick again
+      sc.owed = (sc.owed | 0) + 1;
+      if (sq(sc.nest.x - p.x) + sq(sc.nest.z - p.z) > F.range * F.range && sc.owed < F.every) continue;
+      const dt = dt1 * sc.owed; sc.owed = 0;
       const c = sc.colony, out = this.wasps.filter((w) => w.colony === 'line:' + sc.id).length;
       if (c.adults < 1 && c.queenAlive && daylight) {
         const q = L.queenForage; c.sugar += q.sugar * dt * av.sugar; c.protein += q.protein * dt * av.protein; c.pulp += q.pulp * dt;

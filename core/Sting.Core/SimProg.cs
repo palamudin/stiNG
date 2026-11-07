@@ -21,7 +21,7 @@ namespace Sting.Core
         /// lock-on ranges: the landing reach skill and the tree's lock node
         public Num LockMul(WaspBase wb) => Mul(wb, "landR") * (wb is Wasp w && w.colony == "own" ? 1 + T.tree.@lock * TreeRank("lock") : 1);
         /// how many colonies of the line there can be (Line: found)
-        internal int LineMax() => T.line.max + (int)Floor(T.tree.found * TreeRank("found"));
+        internal int LineMax() => System.Math.Min(T.line.max + (int)Floor(T.tree.found * TreeRank("found")), System.Math.Max(0, settings.colonies - 1)); // and the world's cap on colonies held (T3-5)
         /// a rank on the growth tree (T3-3): a point, the node open; told to the peers, who audit it against the tree's ranges
         void Grow(int i)
         {

@@ -187,6 +187,7 @@ Run the tests from this folder with `node test/sim.test.mjs`, `node test/net.tes
 | 157 | The mirror built in only where a shader may read 32 textures: on a 16-texture card (Chrome on Direct3D) the post chain's composite, at exactly 16, failed to build with it and World v3 drew nothing | 18.105 |
 | 158 | Near things drawn after the reflections: World v3 keeps the wasps out of the scene every reflection and refraction reads (they still cast shadows) and draws them over the composite against a copy of its depth; the mirror's mask dropped (one texture); a pond's floor read where the screen's depth confirms it (no box under the eye) | 18.106 |
 | 159 | The player's own colonies across species (T3-4): hornets hunt and bees ball the player's yellowjackets; the same species never fight; a colony marked kin is at peace with the player's other species (colony state, saved, told to peers with the nest; a toggle in the colony view) | 18.107 |
+| 160 | How many colonies a player holds (T3-5): a world setting caps the colonies held (a rule, in the world's tag; 9, 6, 3 or 1 in the new-world menu); a colony of the line far from the player steps at the abstract tier, once every 10 colony ticks with the time owed, and comes back in step when the player comes near | 18.108 |
 
 ## Verified
 

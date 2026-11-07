@@ -304,7 +304,7 @@ namespace Sting.Core
     public sealed class Virgin { public long at; }
     /// a honeybee swarm on its way (T2-11): out of the hive, hanging on a branch, flying to its new home
     public sealed class SwarmOut { public Num n; public V3 from, biv, to; public long t0, @out, leave, arrive; public Nest nest; public ColonyState colony; public bool own; }
-    public sealed class LineColony { public int id, season; public Nest nest; public ColonyState colony; /** when the exterminator comes for it (0: not called) */ public long ext; }
+    public sealed class LineColony { public int id, season; public Nest nest; public ColonyState colony; /** when the exterminator comes for it (0: not called) */ public long ext; /** colony ticks owed at the abstract tier (T3-5) */ public int owed; }
     public sealed class HiberSite { public string kind; public Num x, y, z, q; public int n; public bool scouted; }
     public sealed class Winter { public string why; public List<HiberSite> sites = new List<HiberSite>(); public Num survivors, lineage; public int until; /** the year's turn (GDD 6.8): "hornet", "bee" or null */ public string offer; /** the line's hives, wintering as clusters */ public List<LineColony> keep; /** the player's own nest wintered in (GDD 6.8) */ public bool home; /** a honeybee hive's winter with a wasp offer (Q-19), and its length in days */ public bool bee; public Num days; }
     /// a line's XP, stabs, skills and role levels (GDD 6.8); a line is the player's colonies of one species

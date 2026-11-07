@@ -305,9 +305,15 @@ namespace Sting.Core
         void LineTick(bool daylight, Num frac)
         {
             if (line.Count == 0) return;
-            Num dt = (Num)60 / dayTicks; var av = EcoAvail(); Num g = Gauge();
+            Num dt1 = (Num)60 / dayTicks; var av = EcoAvail(); Num g = Gauge();
+            var dw = Driven(); V3 p = dw != null ? dw.P : nest.entrance;
             foreach (var sc in new List<LineColony>(line))
             {
+                // the abstract tier (T3-5; sim.js): far from the player's insect a colony steps once every far.every ticks, the
+                // time owed in one step; back in range it catches up at once
+                sc.owed++;
+                if (Sq(sc.nest.x - p.x) + Sq(sc.nest.z - p.z) > T.line.far.range * T.line.far.range && sc.owed < T.line.far.every) continue;
+                Num dt = dt1 * sc.owed; sc.owed = 0;
                 var c = sc.colony; string key = "line:" + sc.id; int outN = 0; foreach (var w in wasps) if (w.colony == key) outN++;
                 if (c.adults < 1 && c.queenAlive && daylight)
                 {

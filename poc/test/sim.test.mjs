@@ -2473,6 +2473,38 @@ function seated(sim, pred) {
   ok(porchLevel === houses && doors === houses, `every front door has a level stoop and a step before it, the door at the stoop's height (${porchLevel} of ${houses})`);
 }
 
+// 74. How many colonies a player holds (T3-5, GDD 6.8, 11.12): a world setting caps the colonies held, the one in hand
+// counted (the line founds no more past it), and it is a rule (in the rules hash and the world's tag); a colony of the
+// line far from the player's insect steps at the abstract tier, once every far.every colony ticks with the time owed, and
+// catches up at once when the player comes near; over a stretch it ends close to one stepped every tick
+{
+  const mk = (o = {}) => { const s = new Sim({ seed: 1234, birds: false, ...o }, { noAI: true }); run(s, 1); return s; };
+  const addLine = (s, sp, dx) => {
+    const c = newColony(false, sp); c.sited = true; c.maxCells = s._maxCells('trunk', sp);
+    const nest = makeNest(s.nest.treeX + dx, s.nest.treeZ, s.nest.x + dx, s.nest.y, s.nest.z, 0.14, 'trunk');
+    const sc = { id: ++s.lineSeq, nest, colony: c, season: s.season.n, ext: 0 }; s.line.push(sc); return sc;
+  };
+  const d = mk(), three = mk({ colonies: 3 }), one = mk({ colonies: 1 });
+  d.prog.tree = TREE_NODES.map((id) => (id === 'found' ? 2 : 0)); three.prog.tree = d.prog.tree.slice();
+  ok(d._lineMax() === T.line.max + 2 && three._lineMax() === 2 && one._lineMax() === 0 && rulesHash({ colonies: 3 }) !== rulesHash({}) && rulesHash({ colonies: 9 }) === rulesHash({}) && worldTag({ colonies: 3 }).includes('3 colonies a player') && worldTag({}) === '',
+    `the line founds up to ${d._lineMax()} colonies with the tree (${T.line.max} + 2), 2 in a world of 3 colonies a player, none in a world of one; the cap is a rule`);
+  // the abstract tier: one colony 400 m off, one beside the nest, the player's insect held by the nest
+  const s = mk(), far = addLine(s, 'wasp', 400), near = addLine(s, 'wasp', 8), F = T.line.far;
+  const hold = (sim) => { if (sim.wasp) place(sim.wasp, { x: sim.nest.entrance.x + 1, y: 1.5, z: sim.nest.entrance.z }); return idle(); };
+  const a0 = far.colony.adults, n0 = near.colony.adults;
+  run(s, 60 * (F.every - 1), hold); const still = far.colony.adults === a0 && far.owed === F.every - 1 && near.colony.adults !== n0 && (near.owed | 0) === 0;
+  run(s, 60, hold); const stepped = far.colony.adults !== a0 && far.owed === 0;
+  run(s, 60 * 4, hold); const owed = far.owed;
+  run(s, 60, (sim) => { if (sim.wasp) place(sim.wasp, { x: far.nest.entrance.x + 1, y: 1.5, z: far.nest.entrance.z }); return idle(); });
+  const back = far.owed === 0;
+  // over three minutes of play the abstract colony ends close to the same colony stepped every tick
+  const twin = (abstract) => { const t = mk(), c = addLine(t, 'wasp', 400), r0 = F.range; if (!abstract) F.range = 1e9; try { run(t, 60 * 60 * 3, hold); } finally { F.range = r0; } return c.colony; };
+  const A = twin(true), B = twin(false), rel = (x, y) => Math.abs(x - y) / Math.max(1e-9, Math.abs(y));
+  const r = restore(snapshot(s));
+  ok(still && stepped && owed === 4 && back && rel(A.adults, B.adults) < 0.02 && rel(A.cells, B.cells) < 0.02 && rel(A.sugar + A.protein, B.sugar + B.protein) < 0.05 && r.line.find((q) => q.id === far.id).owed === far.owed,
+    `a colony ${400} m off steps once every ${F.every} colony ticks (the one beside the nest every tick) and comes back in step when the player flies to it; after ${(60 * 60 * 3 / s.dayTicks).toFixed(1)} game days its adults ${A.adults.toFixed(1)} against ${B.adults.toFixed(1)} stepped every tick, cells ${A.cells.toFixed(1)} against ${B.cells.toFixed(1)}; the time owed survives a save`);
+}
+
 // 73. The player's own colonies across species (T3-4, GDD 6.8): the player's hornets hunt the player's yellowjackets and
 // the bees ball them, as another colony's; a colony of the same species never fights; a colony marked kin is at peace
 // with the player's other species (both ways); the mark is colony state, toggled by a pick, and saved
