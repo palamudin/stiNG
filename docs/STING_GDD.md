@@ -2483,6 +2483,26 @@ On a jump the CPU path no longer blurs a level out to its parent: the window it 
 
 The game now asks for a square at least 16 m across (`causticsMin`), pushed 30% of its size ahead along the view (`causticsAhead`), on a 512 texture with a 384 grid. That is about the old detail (3 cm texels, 7 cm cells, against 2.3 and 5 cm) over 2.7 times the width. Water seen at a slant still clouds with distance: that is the water, not the caustics.
 
+### 18.106 Near things drawn after the reflections
+
+**What was still wrong.** The wasp is drawn into the scene, and every reflection and refraction of the water reads that scene from the screen:
+- the surface's and the bodies' screen-space marches;
+- the surface's refraction;
+- the bodies' floor.
+
+A wing is transparent and writes no depth, so a march that rightly hit the far bank behind a wing's pixels took the wing's colour with it. The result was a large, banded copy of the wings and body stretched down the water, worse the nearer the water. The mirror's mask only covered cards with 32 textures.
+
+**Drawn after** (post.js `near`, game.js `NEAR`). The game hands World v3 its near things: the wasps drawn whole, on layer 5, and the materials they draw with this frame.
+- In the scene pass their materials write neither colour nor depth. They still cast shadows, because the shadow pass draws them with its own materials.
+- After the composite, the scene's depth is copied into the composite's target, which now has a depth of its own. Sharing the scene's depth would loop, since the composite reads it.
+- The camera then draws layer 5 only, over the composite's result and against that depth. The depth of field reads the new depth, so the wasp keeps its focus.
+- So nothing that reads the scene sees the wasps, on any card. Their reflection is the mirror's alone, where the card can carry it.
+- The mirror's mask is gone. The mirror now costs one texture: 19 in the surface, 17 in the composite.
+
+**A pond's floor.** The bodies read a bowl's floor where the bent ray's floor point projects at the water's level less 6 mm, and gave up (read straight down) where the screen's depth disagreed. A pond's bed is carved ground, so the line where the read gave up showed as a box under the eye, worse the nearer. The floor is now read at the bent ray's own floor point, or at the basin's top, whichever the screen's depth confirms, and straight down only when neither does.
+
+**Checked headless** (world.html): the frame is the same as before without near things. A test sphere on the near layer is drawn over the frame, behind the grass in front of it, sharp, and not in the water. The shaders build at 32 and at 16 textures.
+
 ### 18.105 The water's mirror, birds by presence, and the CPU by part
 
 **What was wrong.** The wasp showed in the water as if it were under the surface, and larger the higher it flew. That was the refraction, not a reflection. The water reads the scene under it where the bent ray lands on screen, and the scene there includes the wasp, drawn in front of the water. The bend grows with the depth and the angle, so the wasp's own picture was pulled into the water.

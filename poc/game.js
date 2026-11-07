@@ -1841,6 +1841,9 @@ waspDots.count = 0; waspDots.frustumCulled = false; waspDots.castShadow = false;
 waspDots.setColorAt(0, new THREE.Color()); scene.add(waspDots);
 const PRES = { F: new THREE.Frustum(), M: new THREE.Matrix4(), S: new THREE.Sphere(), ready: false, dotCol: new Map(), m: new THREE.Matrix4(), q: new THREE.Quaternion(), e: new THREE.Euler(0, 0, 0, 'YXZ'), sc: new THREE.Vector3() };
 function inView(x, y, z, r) { if (!PRES.ready) return true; PRES.S.center.set(x - RO.x, y, z - RO.z); PRES.S.radius = r; return PRES.F.intersectsSphere(PRES.S); }
+// World v3 draws the near things (the wasps drawn whole) after its reflections and refractions have read the scene
+// (post.js near): their layer, and the materials they draw with this frame
+const NEAR = { layer: 5, materials: new Set() };
 function presence() {
   camera.updateMatrixWorld(); PRES.M.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse); PRES.F.setFromProjectionMatrix(PRES.M); PRES.ready = true;
   const c = camera.position; let n = 0;
@@ -1858,6 +1861,11 @@ function presence() {
     waspDots.setColorAt(n++, col);
   }
   waspDots.count = n; waspDots.instanceMatrix.needsUpdate = true; if (waspDots.instanceColor) waspDots.instanceColor.needsUpdate = true;
+  if (world2) {
+    NEAR.materials.clear();
+    for (const g of waspViews.values()) if (g.visible) g.traverseVisible((o) => { if (o.material) for (const m of Array.isArray(o.material) ? o.material : [o.material]) NEAR.materials.add(m); });
+    NEAR.layer = MIRROR_LAYER; world2.near = NEAR;
+  }
 }
 // a person is posed and drawn only in view (from last frame's camera, with room), or near enough to cast a shadow
 // into it, and never past HUMAN_LOD.far m; on hills people are never culled by their bounds (they are lifted in the
